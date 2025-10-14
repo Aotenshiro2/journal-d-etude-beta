@@ -24,6 +24,7 @@ export default function NoteEditor({ note, onUpdate, onClose }: NoteEditorProps)
 
   const handleSave = () => {
     if (note) {
+      console.log('Saving note:', { title, content, backgroundColor }) // Debug
       onUpdate({
         title,
         content,
@@ -32,6 +33,24 @@ export default function NoteEditor({ note, onUpdate, onClose }: NoteEditorProps)
     }
     onClose()
   }
+
+  // Auto-save when typing stops for 1 second
+  useEffect(() => {
+    if (!note) return
+    
+    const timeout = setTimeout(() => {
+      if (note && (title !== note.title || content !== note.content || backgroundColor !== note.backgroundColor)) {
+        console.log('Auto-saving note...') // Debug
+        onUpdate({
+          title,
+          content,
+          backgroundColor,
+        })
+      }
+    }, 1000)
+
+    return () => clearTimeout(timeout)
+  }, [title, content, backgroundColor, note, onUpdate])
 
   if (!note) return null
 

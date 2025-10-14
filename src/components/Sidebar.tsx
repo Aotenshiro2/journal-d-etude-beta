@@ -1,11 +1,11 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 
 interface SidebarProps {
   onElementDrop: (elementType: string, position: { x: number; y: number }) => void
-  isCollapsed?: boolean
-  onToggleCollapse?: () => void
+  isConnecting?: boolean
+  onToggleConnectionMode?: () => void
 }
 
 const SIDEBAR_ITEMS = [
@@ -13,62 +13,49 @@ const SIDEBAR_ITEMS = [
     id: 'note',
     name: 'Note',
     icon: '📝',
-    description: 'Note de cours classique',
-    color: '#ffffff'
-  },
-  {
-    id: 'text',
-    name: 'Texte libre',
-    icon: '📄',
-    description: 'Texte sans cadre',
-    color: 'transparent'
-  },
-  {
-    id: 'image',
-    name: 'Image',
-    icon: '🖼️',
-    description: 'Uploader une image',
-    color: '#f3f4f6'
+    description: 'Créer une note',
+    color: '#fef3c7'
   },
   {
     id: 'concept',
     name: 'Concept',
     icon: '💡',
-    description: 'Bloc concept ICT',
-    color: '#fef3c7'
+    description: 'Concept ICT',
+    color: '#dbeafe'
   },
   {
     id: 'arrow',
     name: 'Flèche',
     icon: '↗️',
-    description: 'Connexion entre éléments',
+    description: 'Connexion directionnelle',
     color: 'transparent'
   },
   {
     id: 'shape-rect',
     name: 'Rectangle',
     icon: '⬜',
-    description: 'Forme géométrique',
-    color: '#dbeafe'
+    description: 'Forme rectangle',
+    color: '#e0e7ff'
   },
   {
     id: 'shape-circle',
     name: 'Cercle',
     icon: '⭕',
-    description: 'Forme géométrique',
+    description: 'Forme cercle',
     color: '#d1fae5'
-  },
-  {
-    id: 'sticky',
-    name: 'Post-it',
-    icon: '🟡',
-    description: 'Note rapide',
-    color: '#fef3c7'
   }
 ]
 
-export default function Sidebar({ onElementDrop, isCollapsed = false, onToggleCollapse }: SidebarProps) {
+export default function Sidebar({ 
+  onElementDrop, 
+  isConnecting = false, 
+  onToggleConnectionMode 
+}: SidebarProps) {
   const [draggedItem, setDraggedItem] = useState<string | null>(null)
+  const [position, setPosition] = useState({ x: 20, y: 100 })
+  const [isDragging, setIsDragging] = useState(false)
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
+  const sidebarRef = useRef<HTMLDivElement>(null)
 
   const handleDragStart = (e: React.DragEvent, itemId: string) => {
     setDraggedItem(itemId)
@@ -96,70 +83,125 @@ export default function Sidebar({ onElementDrop, isCollapsed = false, onToggleCo
     setDraggedItem(null)
   }
 
+  // Gestion du déplacement de la sidebar
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (sidebarRef.current) {
+      const rect = sidebarRef.current.getBoundingClientRect()
+      setDragOffset({
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top
+      })
+      setIsDragging(true)
+    }
+  }
+
+  const handleMouseMove = (e: MouseEvent) => {
+    if (isDragging) {
+      setPosition({
+        x: e.clientX - dragOffset.x,
+        y: e.clientY - dragOffset.y
+      })
+    }
+  }
+
+  const handleMouseUp = () => {
+    setIsDragging(false)
+  }
+
+  useEffect(() => {
+    if (isDragging) {
+      document.addEventListener('mousemove', handleMouseMove)
+      document.addEventListener('mouseup', handleMouseUp)
+    }
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [isDragging, dragOffset])
+
   return (
-    <div className={`fixed left-0 top-16 h-[calc(100vh-64px)] bg-white border-r border-gray-200 z-30 transition-all duration-300 ${
-      isCollapsed ? 'w-16' : 'w-64'
-    }`}>
-      {/* Header avec bouton collapse */}
-      <div className="p-4 border-b border-gray-100 flex items-center justify-between">
-        {!isCollapsed && (
-          <h2 className="text-sm font-semibold text-gray-800">Éléments</h2>
-        )}
+    <div 
+      ref={sidebarRef}
+      className={`
+        fixed bg-white rounded-2xl shadow-2xl border border-gray-200 z-30 
+        transition-all duration-300 select-none w-20 h-auto
+        ${isDragging ? 'shadow-3xl scale-105' : 'hover:shadow-xl'}
+      `}
+      style={{
+        left: position.x,
+        top: position.y
+      }}
+    >
+      {/* Header avec zone de drag dédiée */}
+      <div 
+        className="p-3 border-b border-gray-100 flex items-center justify-center cursor-grab active:cursor-grabbing"
+        onMouseDown={handleMouseDown}
+        style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
+      >
+        <div className="flex space-x-1">
+          <div className="w-1 h-4 bg-gray-400 rounded-full"></div>
+          <div className="w-1 h-4 bg-gray-400 rounded-full"></div>
+          <div className="w-1 h-4 bg-gray-400 rounded-full"></div>
+        </div>
+      </div>
+
+      {/* Outil de connexion */}
+      <div className="px-3 pb-3">
         <button
-          onClick={onToggleCollapse}
-          className="p-1 rounded hover:bg-gray-100 transition-colors"
-          title={isCollapsed ? 'Développer' : 'Réduire'}
+          onClick={(e) => {
+            e.stopPropagation()
+            onToggleConnectionMode?.()
+          }}
+          className={`
+            w-full flex items-center justify-center p-3 rounded-xl border-2 border-dashed transition-all duration-200
+            ${isConnecting 
+              ? 'border-blue-400 bg-blue-50 text-blue-700 shadow-md' 
+              : 'border-gray-300 hover:border-blue-400 hover:bg-blue-25'
+            }
+          `}
+          title="Mode connexion"
         >
-          <span className="text-gray-500">
-            {isCollapsed ? '→' : '←'}
+          <span className={`text-lg transition-transform ${isConnecting ? 'scale-110' : ''}`}>
+            🔗
           </span>
         </button>
       </div>
 
       {/* Liste des éléments */}
-      <div className="p-2 space-y-2 overflow-y-auto h-full">
+      <div className="px-3 pb-3 space-y-2 overflow-y-auto">
         {SIDEBAR_ITEMS.map((item) => (
           <div
             key={item.id}
             draggable
-            onDragStart={(e) => handleDragStart(e, item.id)}
+            onDragStart={(e) => {
+              e.stopPropagation()
+              handleDragStart(e, item.id)
+            }}
             onDragEnd={handleDragEnd}
             className={`
-              flex items-center p-3 rounded-lg border-2 border-dashed border-gray-200 
-              hover:border-blue-300 hover:bg-blue-50 cursor-grab active:cursor-grabbing
-              transition-all duration-200 group
-              ${draggedItem === item.id ? 'opacity-50' : ''}
-              ${isCollapsed ? 'justify-center' : ''}
+              flex items-center justify-center p-3 rounded-xl border-2 border-dashed border-gray-300
+              hover:border-gray-400 hover:shadow-md cursor-grab active:cursor-grabbing
+              transition-all duration-200 group bg-white
+              ${draggedItem === item.id ? 'opacity-50 scale-95' : 'hover:scale-105'}
             `}
-            style={{ backgroundColor: item.color }}
-            title={isCollapsed ? `${item.name}: ${item.description}` : undefined}
+            title={`${item.name}: ${item.description}`}
           >
-            <span className="text-lg mr-3 group-hover:scale-110 transition-transform">
+            <span 
+              className="text-lg group-hover:scale-110 transition-transform"
+              style={{ 
+                backgroundColor: item.color !== 'transparent' ? item.color : 'transparent',
+                padding: item.color !== 'transparent' ? '6px' : '0',
+                borderRadius: item.color !== 'transparent' ? '6px' : '0'
+              }}
+            >
               {item.icon}
             </span>
             
-            {!isCollapsed && (
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium text-gray-900 truncate">
-                  {item.name}
-                </div>
-                <div className="text-xs text-gray-500 truncate">
-                  {item.description}
-                </div>
-              </div>
-            )}
           </div>
         ))}
       </div>
 
-      {/* Instructions en bas */}
-      {!isCollapsed && (
-        <div className="absolute bottom-4 left-4 right-4 p-3 bg-gray-50 rounded-lg border">
-          <div className="text-xs text-gray-600">
-            💡 <strong>Astuce :</strong> Glissez-déposez les éléments sur le canvas pour les créer
-          </div>
-        </div>
-      )}
     </div>
   )
 }

@@ -1,9 +1,10 @@
 'use client'
 
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { NoteData } from '@/types'
+import { NoteData, ConnectionData } from '@/types'
 import GridBackground from './GridBackground'
 import ZoomControls from './ZoomControls'
+import ConnectionManager from './ConnectionManager'
 import { useDebounce } from '@/hooks/useDebounce'
 
 // Import dynamique pour éviter les problèmes SSR
@@ -17,6 +18,8 @@ const cleanupEventListeners = (canvas: any) => {
   if (!canvas) return
   
   canvas.off('mouse:up')
+  canvas.off('mouse:down')
+  canvas.off('mouse:move')
   canvas.off('mouse:dblclick')
   canvas.off('object:moving')
   canvas.off('object:scaling')
@@ -25,18 +28,26 @@ const cleanupEventListeners = (canvas: any) => {
 
 interface CanvasProps {
   notes: NoteData[]
+  connections?: ConnectionData[]
   onNoteUpdate: (note: Partial<NoteData> & { id: string }) => void
   onNoteCreate: (position: { x: number; y: number }, elementType?: string) => void
   onNoteSelect: (noteId: string | null) => void
+  onNoteConnectionClick?: (noteId: string) => void
   selectedNoteId?: string
+  isConnecting?: boolean
+  connectingFromId?: string
 }
 
 export default function Canvas({ 
   notes, 
+  connections = [],
   onNoteUpdate, 
   onNoteCreate, 
   onNoteSelect, 
-  selectedNoteId 
+  onNoteConnectionClick,
+  selectedNoteId,
+  isConnecting = false,
+  connectingFromId
 }: CanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const fabricCanvasRef = useRef<fabric.Canvas | null>(null)
@@ -44,6 +55,9 @@ export default function Canvas({
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 })
   const [zoom, setZoom] = useState(1)
   const [isDragOver, setIsDragOver] = useState(false)
+  const [pan, setPan] = useState({ x: 0, y: 0 })
+  const [isPanning, setIsPanning] = useState(false)
+  const [lastPanPoint, setLastPanPoint] = useState({ x: 0, y: 0 })
   const wheelListenerRef = useRef<((e: WheelEvent) => void) | null>(null)
   const resizeListenerRef = useRef<(() => void) | null>(null)
 
@@ -60,7 +74,7 @@ export default function Canvas({
     if (!canvasRef.current || fabricCanvasRef.current || !fabric) return
 
     const width = window.innerWidth
-    const height = window.innerHeight - 64 // Soustraire la hauteur de la toolbar
+    const height = window.innerHeight // Canvas plein écran
     
     setCanvasSize({ width, height })
     
@@ -70,13 +84,14 @@ export default function Canvas({
       backgroundColor: 'transparent',
       selection: true,
       preserveObjectStacking: true,
+      allowTouchScrolling: true,
     })
 
     fabricCanvasRef.current = canvas
 
     const handleResize = () => {
       const newWidth = window.innerWidth
-      const newHeight = window.innerHeight - 64
+      const newHeight = window.innerHeight
       
       setCanvasSize({ width: newWidth, height: newHeight })
       canvas.setDimensions({
@@ -96,6 +111,44 @@ export default function Canvas({
         canvas.renderAll()
       }
     }
+
+    // Gestion du pan (déplacement du canvas)
+    const handleMouseDown = (opt: any) => {
+      const evt = opt.e
+      if (evt.altKey || evt.button === 1) { // Alt key ou molette central
+        setIsPanning(true)
+        setLastPanPoint({ x: evt.clientX, y: evt.clientY })
+        canvas.isDragging = true
+        canvas.selection = false
+        canvas.getElement().style.cursor = 'grab'
+      }
+    }
+
+    const handleMouseMove = (opt: any) => {
+      if (canvas.isDragging) {
+        const evt = opt.e
+        const vpt = canvas.viewportTransform
+        if (vpt) {
+          vpt[4] += evt.clientX - lastPanPoint.x
+          vpt[5] += evt.clientY - lastPanPoint.y
+          canvas.requestRenderAll()
+          setLastPanPoint({ x: evt.clientX, y: evt.clientY })
+          setPan({ x: vpt[4], y: vpt[5] })
+        }
+      }
+    }
+
+    const handleMouseUp = () => {
+      canvas.isDragging = false
+      canvas.selection = true
+      setIsPanning(false)
+      canvas.getElement().style.cursor = 'default'
+    }
+
+    // Ajouter les événements de pan
+    canvas.on('mouse:down', handleMouseDown)
+    canvas.on('mouse:move', handleMouseMove)
+    canvas.on('mouse:up', handleMouseUp)
 
     // Stocker les références pour le cleanup
     wheelListenerRef.current = handleWheel
@@ -142,7 +195,16 @@ export default function Canvas({
       try {
         if (e.target) {
           const noteId = e.target.get('noteId') as string
-          onNoteSelect(noteId || null)
+          if (noteId) {
+            if (isConnecting && onNoteConnectionClick) {
+              onNoteConnectionClick(noteId)
+            } else {
+              console.log('Selecting note:', noteId) // Debug
+              onNoteSelect(noteId)
+            }
+          } else {
+            onNoteSelect(null)
+          }
         } else {
           onNoteSelect(null)
         }
@@ -223,19 +285,34 @@ export default function Canvas({
     canvas.clear()
 
     notes.forEach((note) => {
+      // Déterminer la couleur de bordure selon l'état
+      let strokeColor = '#e5e7eb'
+      let strokeWidth = 1
+      
+      if (selectedNoteId === note.id) {
+        strokeColor = '#3b82f6'
+        strokeWidth = 2
+      } else if (isConnecting && connectingFromId === note.id) {
+        strokeColor = '#10b981'
+        strokeWidth = 3
+      } else if (isConnecting) {
+        strokeColor = '#f59e0b'
+        strokeWidth = 2
+      }
+
       const rect = new fabric.Rect({
         left: note.x,
         top: note.y,
         width: note.width,
         height: note.height,
         fill: note.backgroundColor,
-        stroke: selectedNoteId === note.id ? '#3b82f6' : '#e5e7eb',
-        strokeWidth: selectedNoteId === note.id ? 2 : 1,
+        stroke: strokeColor,
+        strokeWidth: strokeWidth,
         cornerSize: 8,
         cornerStyle: 'circle',
         transparentCorners: false,
         cornerColor: '#3b82f6',
-        rx: 8, // Coins arrondis
+        rx: 8,
         ry: 8,
         shadow: new fabric.Shadow({
           color: 'rgba(0, 0, 0, 0.1)',
@@ -258,34 +335,39 @@ export default function Canvas({
         selectable: false,
         evented: false,
       })
+      text.set('noteId', note.id)
 
-      const contentText = new fabric.Text(
-        note.content.slice(0, 120) + (note.content.length > 120 ? '...' : ''), 
-        {
-          left: note.x + 16,
-          top: note.y + 42,
-          width: note.width - 32,
-          fontSize: 12,
-          fontFamily: 'Inter, system-ui, sans-serif',
-          fill: '#6b7280',
-          selectable: false,
-          evented: false,
-          lineHeight: 1.4,
-        }
-      )
+      // S'assurer que le contenu n'est pas vide ou juste des espaces
+      const displayContent = note.content?.trim() || 'Cliquez pour éditer...'
+      const truncatedContent = displayContent.slice(0, 100) + (displayContent.length > 100 ? '...' : '')
+      
+      const contentText = new fabric.Text(truncatedContent, {
+        left: note.x + 16,
+        top: note.y + 44,
+        width: note.width - 32,
+        fontSize: 12,
+        fontFamily: 'Inter, system-ui, sans-serif',
+        fill: '#4b5563',
+        selectable: false,
+        evented: false,
+        lineHeight: 1.4,
+        splitByGrapheme: true,
+      })
+      contentText.set('noteId', note.id)
 
       canvas.add(rect, text, contentText)
     })
 
     canvas.renderAll()
-  }, [notes, selectedNoteId, isReady])
+  }, [notes, selectedNoteId, isReady, isConnecting, connectingFromId])
 
   const handleZoomIn = () => {
     const newZoom = Math.min(3, zoom + 0.2)
     setZoom(newZoom)
     if (fabricCanvasRef.current) {
-      fabricCanvasRef.current.setZoom(newZoom)
-      fabricCanvasRef.current.renderAll()
+      const canvas = fabricCanvasRef.current
+      const center = canvas.getCenter()
+      canvas.zoomToPoint(new fabric.Point(center.left, center.top), newZoom)
     }
   }
 
@@ -293,13 +375,15 @@ export default function Canvas({
     const newZoom = Math.max(0.1, zoom - 0.2)
     setZoom(newZoom)
     if (fabricCanvasRef.current) {
-      fabricCanvasRef.current.setZoom(newZoom)
-      fabricCanvasRef.current.renderAll()
+      const canvas = fabricCanvasRef.current
+      const center = canvas.getCenter()
+      canvas.zoomToPoint(new fabric.Point(center.left, center.top), newZoom)
     }
   }
 
   const handleResetZoom = () => {
     setZoom(1)
+    setPan({ x: 0, y: 0 })
     if (fabricCanvasRef.current) {
       fabricCanvasRef.current.setZoom(1)
       fabricCanvasRef.current.setViewportTransform([1, 0, 0, 1, 0, 0])
@@ -360,6 +444,40 @@ export default function Canvas({
           </div>
         </div>
       )}
+
+      {/* Indicateur de mode connexion */}
+      {isConnecting && (
+        <div className="absolute top-4 left-4 z-20 pointer-events-none">
+          <div className="bg-orange-500 text-white px-4 py-2 rounded-lg shadow-lg flex items-center space-x-2">
+            <span>🔗</span>
+            <span className="text-sm">
+              {connectingFromId 
+                ? 'Cliquez sur une note pour la connecter' 
+                : 'Cliquez sur la première note à connecter'
+              }
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Indicateur de navigation */}
+      {!isConnecting && (
+        <div className="absolute bottom-4 left-4 z-20 pointer-events-none">
+          <div className="bg-gray-800 text-white px-3 py-2 rounded-lg shadow-lg text-xs">
+            <div>🖱️ <strong>Alt + drag</strong> : déplacer</div>
+            <div>⚪ <strong>Ctrl + molette</strong> : zoomer</div>
+          </div>
+        </div>
+      )}
+      
+      <ConnectionManager
+        connections={connections}
+        notes={notes}
+        fabricCanvas={fabricCanvasRef.current}
+        isConnecting={isConnecting}
+        connectingFromId={connectingFromId}
+        onConnectionCreate={() => {}} // TODO: Implémenter
+      />
       
       <ZoomControls
         zoom={zoom}

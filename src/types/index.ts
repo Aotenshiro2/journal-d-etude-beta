@@ -46,12 +46,24 @@ export interface ConnectionData {
   fromId: string
   toId: string
   label?: string
+  fromPoint?: { x: number; y: number }
+  toPoint?: { x: number; y: number }
+  color?: string
+  style?: 'straight' | 'curved' | 'elbow'
+  strokeWidth?: number
 }
 
 export interface CanvasState {
   zoom: number
   pan: Position
   selectedNoteId?: string
+  isConnecting?: boolean
+  connectingFromId?: string
+  tempConnection?: {
+    fromId: string
+    startPoint: Position
+    endPoint: Position
+  }
 }
 
 export interface ICTConcepts {

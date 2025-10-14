@@ -1,11 +1,11 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import Canvas from '@/components/Canvas'
+import ReactFlowCanvas from '@/components/ReactFlowCanvas'
 import NoteEditor from '@/components/NoteEditor'
-import Toolbar from '@/components/Toolbar'
 import Sidebar from '@/components/Sidebar'
-import { NoteData, CourseData } from '@/types'
+import { NoteData, CourseData, ConnectionData } from '@/types'
+import { useKeepAlive } from '@/hooks/useKeepAlive'
 import { v4 as uuidv4 } from 'uuid'
 
 export default function Home() {
@@ -15,6 +15,13 @@ export default function Home() {
   const [selectedCourse, setSelectedCourse] = useState<string>('')
   const [isLoading, setIsLoading] = useState(true)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [connections, setConnections] = useState<ConnectionData[]>([])
+  const [isConnecting, setIsConnecting] = useState(false)
+  const [connectingFromId, setConnectingFromId] = useState<string | null>(null)
+  const [appError, setAppError] = useState<string | null>(null)
+
+  // Keep-alive pour maintenir l'app active
+  useKeepAlive({ interval: 300000 }) // Ping toutes les 5 minutes
 
   const selectedNote = selectedNoteId ? notes.find(n => n.id === selectedNoteId) || null : null
 
@@ -24,6 +31,7 @@ export default function Home() {
 
   const loadData = async () => {
     try {
+      setAppError(null)
       const [notesRes, coursesRes] = await Promise.all([
         fetch('/api/notes'),
         fetch('/api/courses')
@@ -32,14 +40,19 @@ export default function Home() {
       if (notesRes.ok) {
         const notesData = await notesRes.json()
         setNotes(notesData)
+      } else {
+        throw new Error(`Failed to load notes: ${notesRes.status}`)
       }
       
       if (coursesRes.ok) {
         const coursesData = await coursesRes.json()
         setCourses(coursesData)
+      } else {
+        throw new Error(`Failed to load courses: ${coursesRes.status}`)
       }
     } catch (error) {
       console.error('Error loading data:', error)
+      setAppError(`Erreur de chargement: ${error instanceof Error ? error.message : 'Erreur inconnue'}`)
     } finally {
       setIsLoading(false)
     }
@@ -48,50 +61,42 @@ export default function Home() {
   const createNote = async (position: { x: number; y: number }, elementType: string = 'note') => {
     const elementConfigs = {
       note: {
-        title: 'Nouvelle note',
-        content: '',
-        width: 300,
-        height: 200,
-        backgroundColor: '#ffffff',
-        textColor: '#000000'
-      },
-      text: {
-        title: 'Texte libre',
-        content: 'Votre texte ici...',
+        title: 'Note',
+        content: 'Cliquez pour éditer...',
         width: 200,
-        height: 100,
-        backgroundColor: 'transparent',
+        height: 140,
+        backgroundColor: '#fef3c7',
         textColor: '#000000'
       },
       concept: {
-        title: 'Concept ICT',
-        content: 'Décrivez le concept...',
-        width: 250,
-        height: 150,
-        backgroundColor: '#fef3c7',
+        title: 'Concept',
+        content: 'Concept ICT...',
+        width: 220,
+        height: 120,
+        backgroundColor: '#dbeafe',
         textColor: '#000000'
       },
-      sticky: {
-        title: 'Post-it',
-        content: 'Note rapide',
-        width: 180,
-        height: 120,
-        backgroundColor: '#fef3c7',
+      arrow: {
+        title: 'Flèche',
+        content: '',
+        width: 100,
+        height: 40,
+        backgroundColor: 'transparent',
         textColor: '#000000'
       },
       'shape-rect': {
         title: 'Rectangle',
         content: '',
-        width: 200,
-        height: 100,
-        backgroundColor: '#dbeafe',
+        width: 160,
+        height: 80,
+        backgroundColor: '#e0e7ff',
         textColor: '#000000'
       },
       'shape-circle': {
         title: 'Cercle',
         content: '',
-        width: 150,
-        height: 150,
+        width: 120,
+        height: 120,
         backgroundColor: '#d1fae5',
         textColor: '#000000'
       }
@@ -213,33 +218,97 @@ export default function Home() {
     )
   }
 
+  if (appError) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen space-y-4">
+        <div className="text-red-600 text-center">
+          <div className="text-lg font-semibold">🚨 Erreur de l'application</div>
+          <div className="text-sm mt-2">{appError}</div>
+        </div>
+        <button
+          onClick={() => {
+            setIsLoading(true)
+            loadData()
+          }}
+          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+        >
+          🔄 Réessayer
+        </button>
+      </div>
+    )
+  }
+
   const handleElementDrop = (elementType: string, position: { x: number; y: number }) => {
     createNote(position, elementType)
   }
 
+  const handleToggleConnectionMode = () => {
+    setIsConnecting(!isConnecting)
+    setConnectingFromId(null)
+  }
+
+  const handleNoteConnectionClick = (noteId: string) => {
+    if (!isConnecting) return
+
+    if (!connectingFromId) {
+      // Premier clic : sélectionner la note source
+      setConnectingFromId(noteId)
+    } else if (connectingFromId !== noteId) {
+      // Deuxième clic : créer la connexion
+      const newConnection: ConnectionData = {
+        id: uuidv4(),
+        fromId: connectingFromId,
+        toId: noteId,
+        color: '#6b7280',
+        style: 'straight',
+        strokeWidth: 2
+      }
+      
+      setConnections(prev => [...prev, newConnection])
+      setConnectingFromId(null)
+      setIsConnecting(false)
+      
+      // TODO: Sauvegarder en base de données
+    } else {
+      // Clic sur la même note : annuler
+      setConnectingFromId(null)
+    }
+  }
+
+  const handleConnectionCreate = (connection: { source: string; target: string }) => {
+    const newConnection: ConnectionData = {
+      id: uuidv4(),
+      fromId: connection.source,
+      toId: connection.target,
+      color: '#6b7280',
+      style: 'straight',
+      strokeWidth: 2
+    }
+    
+    setConnections(prev => [...prev, newConnection])
+    // TODO: Sauvegarder en base de données
+  }
+
   return (
     <div className="h-screen w-screen overflow-hidden">
-      <Toolbar
-        courses={courses}
-        selectedCourse={selectedCourse}
-        onCourseSelect={setSelectedCourse}
-        onNewCourse={createCourse}
-        onExport={exportToPDF}
-      />
-      
       <Sidebar 
         onElementDrop={handleElementDrop}
-        isCollapsed={sidebarCollapsed}
-        onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
+        isConnecting={isConnecting}
+        onToggleConnectionMode={handleToggleConnectionMode}
       />
       
-      <div className={`pt-16 h-full transition-all duration-300 ${sidebarCollapsed ? 'pl-16' : 'pl-64'}`}>
-        <Canvas
+      <div className="h-full">
+        <ReactFlowCanvas
           notes={filteredNotes}
+          connections={connections}
           onNoteUpdate={updateNote}
           onNoteCreate={createNote}
           onNoteSelect={setSelectedNoteId}
+          onNoteConnectionClick={handleNoteConnectionClick}
+          onConnectionCreate={handleConnectionCreate}
           selectedNoteId={selectedNoteId}
+          isConnecting={isConnecting}
+          connectingFromId={connectingFromId}
         />
       </div>
 
