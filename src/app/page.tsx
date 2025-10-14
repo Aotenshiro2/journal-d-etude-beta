@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import Canvas from '@/components/Canvas'
 import NoteEditor from '@/components/NoteEditor'
 import Toolbar from '@/components/Toolbar'
+import Sidebar from '@/components/Sidebar'
 import { NoteData, CourseData } from '@/types'
 import { v4 as uuidv4 } from 'uuid'
 
@@ -13,6 +14,7 @@ export default function Home() {
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null)
   const [selectedCourse, setSelectedCourse] = useState<string>('')
   const [isLoading, setIsLoading] = useState(true)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
 
   const selectedNote = selectedNoteId ? notes.find(n => n.id === selectedNoteId) || null : null
 
@@ -43,17 +45,70 @@ export default function Home() {
     }
   }
 
-  const createNote = async (position: { x: number; y: number }) => {
+  const createNote = async (position: { x: number; y: number }, elementType: string = 'note') => {
+    const elementConfigs = {
+      note: {
+        title: 'Nouvelle note',
+        content: '',
+        width: 300,
+        height: 200,
+        backgroundColor: '#ffffff',
+        textColor: '#000000'
+      },
+      text: {
+        title: 'Texte libre',
+        content: 'Votre texte ici...',
+        width: 200,
+        height: 100,
+        backgroundColor: 'transparent',
+        textColor: '#000000'
+      },
+      concept: {
+        title: 'Concept ICT',
+        content: 'Décrivez le concept...',
+        width: 250,
+        height: 150,
+        backgroundColor: '#fef3c7',
+        textColor: '#000000'
+      },
+      sticky: {
+        title: 'Post-it',
+        content: 'Note rapide',
+        width: 180,
+        height: 120,
+        backgroundColor: '#fef3c7',
+        textColor: '#000000'
+      },
+      'shape-rect': {
+        title: 'Rectangle',
+        content: '',
+        width: 200,
+        height: 100,
+        backgroundColor: '#dbeafe',
+        textColor: '#000000'
+      },
+      'shape-circle': {
+        title: 'Cercle',
+        content: '',
+        width: 150,
+        height: 150,
+        backgroundColor: '#d1fae5',
+        textColor: '#000000'
+      }
+    }
+
+    const config = elementConfigs[elementType as keyof typeof elementConfigs] || elementConfigs.note
+
     const newNote: NoteData = {
       id: uuidv4(),
-      title: 'Nouvelle note',
-      content: '',
+      title: config.title,
+      content: config.content,
       x: position.x,
       y: position.y,
-      width: 300,
-      height: 200,
-      backgroundColor: '#ffffff',
-      textColor: '#000000',
+      width: config.width,
+      height: config.height,
+      backgroundColor: config.backgroundColor,
+      textColor: config.textColor,
       courseId: selectedCourse || undefined,
       createdAt: new Date(),
       updatedAt: new Date()
@@ -158,6 +213,10 @@ export default function Home() {
     )
   }
 
+  const handleElementDrop = (elementType: string, position: { x: number; y: number }) => {
+    createNote(position, elementType)
+  }
+
   return (
     <div className="h-screen w-screen overflow-hidden">
       <Toolbar
@@ -168,7 +227,13 @@ export default function Home() {
         onExport={exportToPDF}
       />
       
-      <div className="pt-16 h-full">
+      <Sidebar 
+        onElementDrop={handleElementDrop}
+        isCollapsed={sidebarCollapsed}
+        onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
+      />
+      
+      <div className={`pt-16 h-full transition-all duration-300 ${sidebarCollapsed ? 'pl-16' : 'pl-64'}`}>
         <Canvas
           notes={filteredNotes}
           onNoteUpdate={updateNote}

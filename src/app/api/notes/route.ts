@@ -20,6 +20,30 @@ export async function GET() {
     return NextResponse.json(notes)
   } catch (error) {
     console.error('Error fetching notes:', error)
+    
+    // Retry logic for database connection issues
+    if (error instanceof Error && error.message.includes('connection')) {
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      try {
+        const notes = await prisma.note.findMany({
+          include: {
+            course: true,
+            concepts: {
+              include: {
+                concept: true
+              }
+            }
+          },
+          orderBy: {
+            createdAt: 'desc'
+          }
+        })
+        return NextResponse.json(notes)
+      } catch (retryError) {
+        console.error('Retry failed:', retryError)
+      }
+    }
+    
     return NextResponse.json({ error: 'Failed to fetch notes' }, { status: 500 })
   }
 }

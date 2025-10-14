@@ -1,9 +1,10 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { NoteData } from '@/types'
 import GridBackground from './GridBackground'
 import ZoomControls from './ZoomControls'
+import { useDebounce } from '@/hooks/useDebounce'
 
 // Import dynamique pour éviter les problèmes SSR
 let fabric: any = null
@@ -11,10 +12,21 @@ if (typeof window !== 'undefined') {
   fabric = require('fabric').fabric
 }
 
+// Utilitaire pour nettoyer les event listeners
+const cleanupEventListeners = (canvas: any) => {
+  if (!canvas) return
+  
+  canvas.off('mouse:up')
+  canvas.off('mouse:dblclick')
+  canvas.off('object:moving')
+  canvas.off('object:scaling')
+  canvas.off('object:modified')
+}
+
 interface CanvasProps {
   notes: NoteData[]
   onNoteUpdate: (note: Partial<NoteData> & { id: string }) => void
-  onNoteCreate: (position: { x: number; y: number }) => void
+  onNoteCreate: (position: { x: number; y: number }, elementType?: string) => void
   onNoteSelect: (noteId: string | null) => void
   selectedNoteId?: string
 }
@@ -31,6 +43,18 @@ export default function Canvas({
   const [isReady, setIsReady] = useState(false)
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 })
   const [zoom, setZoom] = useState(1)
+  const [isDragOver, setIsDragOver] = useState(false)
+  const wheelListenerRef = useRef<((e: WheelEvent) => void) | null>(null)
+  const resizeListenerRef = useRef<(() => void) | null>(null)
+
+  // Debounced update functions pour optimiser les performances
+  const debouncedNoteUpdate = useDebounce(onNoteUpdate, 150)
+  
+  const debouncedCanvasRender = useDebounce(() => {
+    if (fabricCanvasRef.current) {
+      fabricCanvasRef.current.renderAll()
+    }
+  }, 50)
 
   useEffect(() => {
     if (!canvasRef.current || fabricCanvasRef.current || !fabric) return
@@ -73,15 +97,39 @@ export default function Canvas({
       }
     }
 
+    // Stocker les références pour le cleanup
+    wheelListenerRef.current = handleWheel
+    resizeListenerRef.current = handleResize
+
     canvasRef.current?.addEventListener('wheel', handleWheel, { passive: false })
     window.addEventListener('resize', handleResize)
     setIsReady(true)
 
     return () => {
-      canvasRef.current?.removeEventListener('wheel', handleWheel)
-      window.removeEventListener('resize', handleResize)
-      canvas.dispose()
+      // Cleanup robuste
+      const canvasElement = canvasRef.current
+      const wheelListener = wheelListenerRef.current
+      const resizeListener = resizeListenerRef.current
+
+      if (canvasElement && wheelListener) {
+        canvasElement.removeEventListener('wheel', wheelListener)
+      }
+      if (resizeListener) {
+        window.removeEventListener('resize', resizeListener)
+      }
+      
+      cleanupEventListeners(canvas)
+      
+      // Dispose du canvas de manière sûre
+      try {
+        canvas.dispose()
+      } catch (error) {
+        console.warn('Error disposing canvas:', error)
+      }
+      
       fabricCanvasRef.current = null
+      wheelListenerRef.current = null
+      resizeListenerRef.current = null
     }
   }, [])
 
@@ -91,55 +139,80 @@ export default function Canvas({
     const canvas = fabricCanvasRef.current
 
     const handleCanvasClick = (e: any) => {
-      if (e.target) {
-        const noteId = e.target.get('noteId') as string
-        onNoteSelect(noteId || null)
-      } else {
-        onNoteSelect(null)
+      try {
+        if (e.target) {
+          const noteId = e.target.get('noteId') as string
+          onNoteSelect(noteId || null)
+        } else {
+          onNoteSelect(null)
+        }
+      } catch (error) {
+        console.warn('Error in canvas click handler:', error)
       }
     }
 
     const handleDoubleClick = (e: any) => {
-      if (!e.target) {
-        const pointer = canvas.getPointer(e.e)
-        onNoteCreate({ x: pointer.x, y: pointer.y })
+      try {
+        if (!e.target) {
+          const pointer = canvas.getPointer(e.e)
+          onNoteCreate({ x: pointer.x, y: pointer.y })
+        }
+      } catch (error) {
+        console.warn('Error in double click handler:', error)
       }
     }
 
     const handleObjectMoving = (e: any) => {
-      const target = e.target
-      if (target && target.get('noteId')) {
-        const noteId = target.get('noteId') as string
-        onNoteUpdate({
-          id: noteId,
-          x: target.left || 0,
-          y: target.top || 0,
-        })
+      try {
+        const target = e.target
+        if (target && target.get('noteId')) {
+          const noteId = target.get('noteId') as string
+          debouncedNoteUpdate({
+            id: noteId,
+            x: target.left || 0,
+            y: target.top || 0,
+          })
+        }
+      } catch (error) {
+        console.warn('Error in object moving handler:', error)
       }
     }
 
     const handleObjectScaling = (e: any) => {
-      const target = e.target
-      if (target && target.get('noteId')) {
-        const noteId = target.get('noteId') as string
-        onNoteUpdate({
-          id: noteId,
-          width: (target.width || 0) * (target.scaleX || 1),
-          height: (target.height || 0) * (target.scaleY || 1),
-        })
+      try {
+        const target = e.target
+        if (target && target.get('noteId')) {
+          const noteId = target.get('noteId') as string
+          debouncedNoteUpdate({
+            id: noteId,
+            width: (target.width || 0) * (target.scaleX || 1),
+            height: (target.height || 0) * (target.scaleY || 1),
+          })
+        }
+      } catch (error) {
+        console.warn('Error in object scaling handler:', error)
       }
     }
 
-    canvas.on('mouse:up', handleCanvasClick)
-    canvas.on('mouse:dblclick', handleDoubleClick)
-    canvas.on('object:moving', handleObjectMoving)
-    canvas.on('object:scaling', handleObjectScaling)
+    // Ajouter les event listeners avec gestion d'erreur
+    try {
+      canvas.on('mouse:up', handleCanvasClick)
+      canvas.on('mouse:dblclick', handleDoubleClick)
+      canvas.on('object:moving', handleObjectMoving)
+      canvas.on('object:scaling', handleObjectScaling)
+    } catch (error) {
+      console.warn('Error adding canvas event listeners:', error)
+    }
 
     return () => {
-      canvas.off('mouse:up', handleCanvasClick)
-      canvas.off('mouse:dblclick', handleDoubleClick)
-      canvas.off('object:moving', handleObjectMoving)
-      canvas.off('object:scaling', handleObjectScaling)
+      try {
+        canvas.off('mouse:up', handleCanvasClick)
+        canvas.off('mouse:dblclick', handleDoubleClick)
+        canvas.off('object:moving', handleObjectMoving)
+        canvas.off('object:scaling', handleObjectScaling)
+      } catch (error) {
+        console.warn('Error removing canvas event listeners:', error)
+      }
     }
   }, [isReady, onNoteUpdate, onNoteCreate, onNoteSelect])
 
@@ -234,8 +307,41 @@ export default function Canvas({
     }
   }
 
+  // Gestion du drag & drop depuis la sidebar
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
+    setIsDragOver(true)
+  }
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragOver(false)
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragOver(false)
+    
+    const elementType = e.dataTransfer.getData('text/plain')
+    if (elementType) {
+      const rect = e.currentTarget.getBoundingClientRect()
+      const x = e.clientX - rect.left
+      const y = e.clientY - rect.top
+      
+      onNoteCreate({ x, y }, elementType)
+    }
+  }
+
   return (
-    <div className="relative w-full h-full overflow-hidden bg-gray-50">
+    <div 
+      className={`relative w-full h-full overflow-hidden bg-gray-50 ${
+        isDragOver ? 'bg-blue-50 border-2 border-dashed border-blue-300' : ''
+      }`}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
       <GridBackground 
         width={canvasSize.width} 
         height={canvasSize.height} 
@@ -245,6 +351,16 @@ export default function Canvas({
         ref={canvasRef} 
         className="absolute top-0 left-0 z-10" 
       />
+      
+      {/* Indicateur de drop zone */}
+      {isDragOver && (
+        <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none">
+          <div className="bg-blue-600 text-white px-6 py-3 rounded-lg shadow-lg">
+            📌 Relâchez pour créer l'élément
+          </div>
+        </div>
+      )}
+      
       <ZoomControls
         zoom={zoom}
         onZoomIn={handleZoomIn}
