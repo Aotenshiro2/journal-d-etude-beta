@@ -29,14 +29,27 @@ model Note {
   concepts    NoteConcept[]
 }
 
-model Course {
+model Instructor {
   id          String   @id @default(uuid())
   name        String
-  description String?
-  color       String   @default("#3b82f6")
+  email       String?
+  avatar      String?
+  color       String   @default("#6366f1")
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
-  notes       Note[]
+  courses     Course[]
+}
+
+model Course {
+  id           String      @id @default(uuid())
+  name         String
+  description  String?
+  color        String      @default("#3b82f6")
+  instructorId String?
+  instructor   Instructor? @relation(fields: [instructorId], references: [id], onDelete: SetNull)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  notes        Note[]
 }
 
 model Concept {

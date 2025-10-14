@@ -23,11 +23,23 @@ export interface NoteData {
   updatedAt: Date
 }
 
+export interface InstructorData {
+  id: string
+  name: string
+  email?: string
+  avatar?: string
+  color: string
+  createdAt: Date
+  updatedAt: Date
+}
+
 export interface CourseData {
   id: string
   name: string
   description?: string
   color: string
+  instructorId?: string
+  instructor?: InstructorData
   createdAt: Date
   updatedAt: Date
 }
@@ -59,6 +71,12 @@ export interface CanvasState {
   selectedNoteId?: string
   isConnecting?: boolean
   connectingFromId?: string
+  isGroupSelecting?: boolean
+  groupSelection?: {
+    startPoint: Position
+    endPoint: Position
+    selectedItems: string[]
+  }
   tempConnection?: {
     fromId: string
     startPoint: Position

@@ -34,9 +34,16 @@ interface ReactFlowCanvasProps {
   onNoteSelect: (noteId: string | null) => void
   onNoteConnectionClick?: (noteId: string) => void
   onConnectionCreate?: (connection: { source: string; target: string }) => void
+  onNoteDelete?: (noteId: string) => void
+  onNoteDoubleClick?: (noteId: string) => void
+  onNoteGroupSelect?: (noteId: string) => void
+  onNoteTagClick?: (noteId: string) => void
   selectedNoteId?: string
+  selectedNotes?: string[]
   isConnecting?: boolean
   connectingFromId?: string
+  isGroupSelecting?: boolean
+  isTagging?: boolean
 }
 
 // Types de nœuds personnalisés
@@ -52,9 +59,16 @@ export default function ReactFlowCanvas({
   onNoteSelect,
   onNoteConnectionClick,
   onConnectionCreate,
+  onNoteDelete,
+  onNoteDoubleClick,
+  onNoteGroupSelect,
+  onNoteTagClick,
   selectedNoteId,
+  selectedNotes = [],
   isConnecting = false,
-  connectingFromId
+  connectingFromId,
+  isGroupSelecting = false,
+  isTagging = false
 }: ReactFlowCanvasProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
@@ -69,17 +83,22 @@ export default function ReactFlowCanvas({
       data: {
         ...note,
         isSelected: selectedNoteId === note.id,
+        isGroupSelected: selectedNotes.includes(note.id),
         isConnecting: isConnecting,
         isConnectingFrom: connectingFromId === note.id,
+        isGroupSelecting: isGroupSelecting,
+        isTagging: isTagging,
         onEdit: (noteId: string) => onNoteSelect(noteId),
-        onDelete: (noteId: string) => {
-          // TODO: Implémenter la suppression
+        onDelete: onNoteDelete || ((noteId: string) => {
           console.log('Delete note:', noteId)
-        },
+        }),
+        onDoubleClick: onNoteDoubleClick,
+        onGroupSelect: onNoteGroupSelect,
+        onTagClick: onNoteTagClick,
       },
       dragHandle: '.drag-handle',
     }))
-  }, [selectedNoteId, isConnecting, connectingFromId, onNoteSelect])
+  }, [selectedNoteId, selectedNotes, isConnecting, connectingFromId, isGroupSelecting, isTagging, onNoteSelect, onNoteDelete, onNoteDoubleClick, onNoteGroupSelect, onNoteTagClick])
 
   // Convertir les connexions en edges React Flow
   const convertConnectionsToEdges = useCallback((connectionsList: ConnectionData[]): Edge[] => {
@@ -139,10 +158,14 @@ export default function ReactFlowCanvas({
     event.stopPropagation()
     if (isConnecting && onNoteConnectionClick) {
       onNoteConnectionClick(node.id)
+    } else if (isGroupSelecting && onNoteGroupSelect) {
+      onNoteGroupSelect(node.id)
+    } else if (isTagging && onNoteTagClick) {
+      onNoteTagClick(node.id)
     } else {
       onNoteSelect(node.id)
     }
-  }, [isConnecting, onNoteConnectionClick, onNoteSelect])
+  }, [isConnecting, isGroupSelecting, isTagging, onNoteConnectionClick, onNoteGroupSelect, onNoteTagClick, onNoteSelect])
 
   // Gérer la création de connexions
   const onConnect = useCallback((params: Connection) => {

@@ -6,10 +6,16 @@ import { Edit, Trash2, Clock } from 'lucide-react'
 
 interface NoteNodeData extends NoteData {
   isSelected?: boolean
+  isGroupSelected?: boolean
   isConnecting?: boolean
   isConnectingFrom?: boolean
+  isGroupSelecting?: boolean
+  isTagging?: boolean
   onEdit?: (noteId: string) => void
   onDelete?: (noteId: string) => void
+  onDoubleClick?: (noteId: string) => void
+  onGroupSelect?: (noteId: string) => void
+  onTagClick?: (noteId: string) => void
 }
 
 // Sous-composants modulaires inspirés d'AI Elements
@@ -100,6 +106,21 @@ function NodeToolbar({ onEdit, onDelete }: { onEdit: (e: React.MouseEvent) => vo
 export default function NoteNode({ data, selected }: NodeProps<NoteNodeData>) {
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation()
+    // Si on est en mode groupement, gérer la sélection
+    if (data.isGroupSelecting && data.onGroupSelect) {
+      data.onGroupSelect(data.id)
+    }
+    // Si on est en mode tagging, gérer l'ajout de tags
+    else if (data.isTagging && data.onTagClick) {
+      data.onTagClick(data.id)
+    }
+  }
+
+  const handleDoubleClick = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (data.onDoubleClick) {
+      data.onDoubleClick(data.id)
+    }
   }
 
   const handleEdit = (e: React.MouseEvent) => {
@@ -125,6 +146,10 @@ export default function NoteNode({ data, selected }: NodeProps<NoteNodeData>) {
     borderColor = '#3b82f6'
     borderWidth = '2px'
     shadowClass = 'shadow-lg shadow-blue-200'
+  } else if (data.isGroupSelected) {
+    borderColor = '#f59e0b'
+    borderWidth = '3px'
+    shadowClass = 'shadow-lg shadow-orange-200'
   } else if (data.isConnectingFrom) {
     borderColor = '#10b981'
     borderWidth = '3px'
@@ -133,6 +158,16 @@ export default function NoteNode({ data, selected }: NodeProps<NoteNodeData>) {
     borderColor = '#f59e0b'
     borderWidth = '2px'
     shadowClass = 'shadow-lg shadow-orange-200'
+  } else if (data.isGroupSelecting) {
+    // Effet visuel quand on est en mode sélection de groupe
+    borderColor = '#fbbf24'
+    borderWidth = '1px'
+    shadowClass = 'shadow-md hover:shadow-lg hover:shadow-orange-100'
+  } else if (data.isTagging) {
+    // Effet visuel quand on est en mode tagging
+    borderColor = '#a855f7'
+    borderWidth = '1px'
+    shadowClass = 'shadow-md hover:shadow-lg hover:shadow-purple-100'
   }
 
   return (
@@ -196,6 +231,7 @@ export default function NoteNode({ data, selected }: NodeProps<NoteNodeData>) {
           borderWidth: borderWidth,
           borderStyle: 'solid',
         }}
+        onDoubleClick={handleDoubleClick}
       >
         <NodeHeader 
           title={data.title} 

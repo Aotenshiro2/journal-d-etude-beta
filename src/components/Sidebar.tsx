@@ -6,6 +6,10 @@ interface SidebarProps {
   onElementDrop: (elementType: string, position: { x: number; y: number }) => void
   isConnecting?: boolean
   onToggleConnectionMode?: () => void
+  isGroupSelecting?: boolean
+  onToggleGroupSelection?: () => void
+  isTagging?: boolean
+  onToggleTaggingMode?: () => void
 }
 
 const SIDEBAR_ITEMS = [
@@ -15,13 +19,6 @@ const SIDEBAR_ITEMS = [
     icon: '📝',
     description: 'Créer une note',
     color: '#fef3c7'
-  },
-  {
-    id: 'concept',
-    name: 'Concept',
-    icon: '💡',
-    description: 'Concept ICT',
-    color: '#dbeafe'
   },
   {
     id: 'arrow',
@@ -49,7 +46,11 @@ const SIDEBAR_ITEMS = [
 export default function Sidebar({ 
   onElementDrop, 
   isConnecting = false, 
-  onToggleConnectionMode 
+  onToggleConnectionMode,
+  isGroupSelecting = false,
+  onToggleGroupSelection,
+  isTagging = false,
+  onToggleTaggingMode
 }: SidebarProps) {
   const [draggedItem, setDraggedItem] = useState<string | null>(null)
   const [position, setPosition] = useState({ x: 20, y: 100 })
@@ -78,6 +79,7 @@ export default function Sidebar({
     
     setTimeout(() => document.body.removeChild(dragImage), 0)
   }
+
 
   const handleDragEnd = () => {
     setDraggedItem(null)
@@ -146,8 +148,9 @@ export default function Sidebar({
         </div>
       </div>
 
-      {/* Outil de connexion */}
-      <div className="px-3 pb-3">
+      {/* Outils spéciaux */}
+      <div className="px-3 pb-3 space-y-2">
+        {/* Outil de connexion */}
         <button
           onClick={(e) => {
             e.stopPropagation()
@@ -164,6 +167,46 @@ export default function Sidebar({
         >
           <span className={`text-lg transition-transform ${isConnecting ? 'scale-110' : ''}`}>
             🔗
+          </span>
+        </button>
+
+        {/* Outil de groupement */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            onToggleGroupSelection?.()
+          }}
+          className={`
+            w-full flex items-center justify-center p-3 rounded-xl border-2 border-dashed transition-all duration-200
+            ${isGroupSelecting 
+              ? 'border-orange-400 bg-orange-50 text-orange-700 shadow-md' 
+              : 'border-gray-300 hover:border-orange-400 hover:bg-orange-25'
+            }
+          `}
+          title="Mode groupement - Sélectionner des notes pour les grouper"
+        >
+          <span className={`text-lg transition-transform ${isGroupSelecting ? 'scale-110' : ''}`}>
+            🎯
+          </span>
+        </button>
+
+        {/* Outil de tagging */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            onToggleTaggingMode?.()
+          }}
+          className={`
+            w-full flex items-center justify-center p-3 rounded-xl border-2 border-dashed transition-all duration-200
+            ${isTagging 
+              ? 'border-purple-400 bg-purple-50 text-purple-700 shadow-md' 
+              : 'border-gray-300 hover:border-purple-400 hover:bg-purple-25'
+            }
+          `}
+          title="Mode tagging - Ajouter des concepts/tags aux notes"
+        >
+          <span className={`text-lg transition-transform ${isTagging ? 'scale-110' : ''}`}>
+            💡
           </span>
         </button>
       </div>

@@ -3,22 +3,34 @@
 import { useState, useEffect } from 'react'
 import ReactFlowCanvas from '@/components/ReactFlowCanvas'
 import NoteEditor from '@/components/NoteEditor'
+import FullScreenEditor from '@/components/FullScreenEditor'
 import Sidebar from '@/components/Sidebar'
-import { NoteData, CourseData, ConnectionData } from '@/types'
+import GroupingModal from '@/components/GroupingModal'
+import TaggingModal from '@/components/TaggingModal'
+import { NoteData, CourseData, ConnectionData, InstructorData } from '@/types'
 import { useKeepAlive } from '@/hooks/useKeepAlive'
 import { v4 as uuidv4 } from 'uuid'
 
 export default function Home() {
   const [notes, setNotes] = useState<NoteData[]>([])
   const [courses, setCourses] = useState<CourseData[]>([])
+  const [instructors, setInstructors] = useState<InstructorData[]>([])
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null)
   const [selectedCourse, setSelectedCourse] = useState<string>('')
+  const [selectedInstructor, setSelectedInstructor] = useState<string>('')
   const [isLoading, setIsLoading] = useState(true)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [connections, setConnections] = useState<ConnectionData[]>([])
   const [isConnecting, setIsConnecting] = useState(false)
   const [connectingFromId, setConnectingFromId] = useState<string | null>(null)
+  const [isGroupSelecting, setIsGroupSelecting] = useState(false)
+  const [selectedNotes, setSelectedNotes] = useState<string[]>([])
+  const [isTagging, setIsTagging] = useState(false)
+  const [selectedNoteForTagging, setSelectedNoteForTagging] = useState<string | null>(null)
+  const [showTaggingModal, setShowTaggingModal] = useState(false)
   const [appError, setAppError] = useState<string | null>(null)
+  const [fullScreenEditorNote, setFullScreenEditorNote] = useState<NoteData | null>(null)
+  const [showGroupingModal, setShowGroupingModal] = useState(false)
 
   // Keep-alive pour maintenir l'app active
   useKeepAlive({ interval: 300000 }) // Ping toutes les 5 minutes
@@ -32,27 +44,50 @@ export default function Home() {
   const loadData = async () => {
     try {
       setAppError(null)
+      
+      // Charger les données essentielles d'abord
       const [notesRes, coursesRes] = await Promise.all([
-        fetch('/api/notes'),
-        fetch('/api/courses')
+        fetch('/api/notes').catch(() => ({ ok: false, status: 'network error' })),
+        fetch('/api/courses').catch(() => ({ ok: false, status: 'network error' }))
       ])
       
       if (notesRes.ok) {
         const notesData = await notesRes.json()
         setNotes(notesData)
       } else {
-        throw new Error(`Failed to load notes: ${notesRes.status}`)
+        console.warn('Failed to load notes:', notesRes.status)
+        setNotes([])
       }
       
       if (coursesRes.ok) {
         const coursesData = await coursesRes.json()
         setCourses(coursesData)
       } else {
-        throw new Error(`Failed to load courses: ${coursesRes.status}`)
+        console.warn('Failed to load courses:', coursesRes.status)
+        setCourses([])
       }
+
+      // Charger les instructeurs de manière optionnelle
+      try {
+        const instructorsRes = await fetch('/api/instructors')
+        if (instructorsRes.ok) {
+          const instructorsData = await instructorsRes.json()
+          setInstructors(instructorsData)
+        } else {
+          console.warn('Failed to load instructors:', instructorsRes.status)
+          setInstructors([])
+        }
+      } catch (instructorError) {
+        console.warn('Instructors API not available:', instructorError)
+        setInstructors([])
+      }
+
     } catch (error) {
       console.error('Error loading data:', error)
-      setAppError(`Erreur de chargement: ${error instanceof Error ? error.message : 'Erreur inconnue'}`)
+      // Ne pas bloquer l'app, juste logger l'erreur
+      setNotes([])
+      setCourses([])
+      setInstructors([])
     } finally {
       setIsLoading(false)
     }
@@ -66,14 +101,6 @@ export default function Home() {
         width: 200,
         height: 140,
         backgroundColor: '#fef3c7',
-        textColor: '#000000'
-      },
-      concept: {
-        title: 'Concept',
-        content: 'Concept ICT...',
-        width: 220,
-        height: 120,
-        backgroundColor: '#dbeafe',
         textColor: '#000000'
       },
       arrow: {
@@ -245,6 +272,61 @@ export default function Home() {
   const handleToggleConnectionMode = () => {
     setIsConnecting(!isConnecting)
     setConnectingFromId(null)
+    // Désactiver les autres modes si activés
+    if (isGroupSelecting) {
+      setIsGroupSelecting(false)
+      setSelectedNotes([])
+    }
+    if (isTagging) {
+      setIsTagging(false)
+    }
+  }
+
+  const handleToggleGroupSelection = () => {
+    setIsGroupSelecting(!isGroupSelecting)
+    setSelectedNotes([])
+    // Désactiver les autres modes si activés
+    if (isConnecting) {
+      setIsConnecting(false)
+      setConnectingFromId(null)
+    }
+    if (isTagging) {
+      setIsTagging(false)
+    }
+  }
+
+  const handleToggleTaggingMode = () => {
+    setIsTagging(!isTagging)
+    // Désactiver les autres modes si activés
+    if (isConnecting) {
+      setIsConnecting(false)
+      setConnectingFromId(null)
+    }
+    if (isGroupSelecting) {
+      setIsGroupSelecting(false)
+      setSelectedNotes([])
+    }
+  }
+
+  const handleNoteGroupSelect = (noteId: string) => {
+    if (!isGroupSelecting) return
+    
+    setSelectedNotes(prev => {
+      if (prev.includes(noteId)) {
+        // Désélectionner la note
+        return prev.filter(id => id !== noteId)
+      } else {
+        // Sélectionner la note
+        return [...prev, noteId]
+      }
+    })
+  }
+
+  const handleNoteTagClick = (noteId: string) => {
+    if (!isTagging) return
+    
+    setSelectedNoteForTagging(noteId)
+    setShowTaggingModal(true)
   }
 
   const handleNoteConnectionClick = (noteId: string) => {
@@ -289,12 +371,165 @@ export default function Home() {
     // TODO: Sauvegarder en base de données
   }
 
+  const deleteNote = async (noteId: string) => {
+    // Confirmation avant suppression
+    const confirmDelete = window.confirm(
+      'Êtes-vous sûr de vouloir supprimer cette note ? Cette action est irréversible.'
+    )
+    
+    if (!confirmDelete) return
+
+    try {
+      const response = await fetch(`/api/notes/${noteId}`, {
+        method: 'DELETE',
+      })
+
+      if (response.ok) {
+        // Supprimer de l'état local
+        setNotes(prev => prev.filter(note => note.id !== noteId))
+        
+        // Fermer l'éditeur si cette note était sélectionnée
+        if (selectedNoteId === noteId) {
+          setSelectedNoteId(null)
+        }
+        
+        // Supprimer les connexions liées à cette note
+        setConnections(prev => 
+          prev.filter(conn => conn.fromId !== noteId && conn.toId !== noteId)
+        )
+      } else {
+        throw new Error('Failed to delete note')
+      }
+    } catch (error) {
+      console.error('Error deleting note:', error)
+      alert('Erreur lors de la suppression de la note')
+    }
+  }
+
+  const openFullScreenEditor = (noteId: string) => {
+    const note = notes.find(n => n.id === noteId)
+    if (note) {
+      setFullScreenEditorNote(note)
+    }
+  }
+
+  const closeFullScreenEditor = () => {
+    setFullScreenEditorNote(null)
+  }
+
+  const handleGroupToCourse = async (courseId: string) => {
+    if (selectedNotes.length === 0) return
+
+    try {
+      // Mettre à jour toutes les notes sélectionnées avec le nouveau courseId
+      const updatePromises = selectedNotes.map(noteId => 
+        updateNote({ id: noteId, courseId })
+      )
+      
+      await Promise.all(updatePromises)
+      
+      // Réinitialiser la sélection et sortir du mode groupement
+      setSelectedNotes([])
+      setIsGroupSelecting(false)
+      
+      console.log(`${selectedNotes.length} notes groupées dans la formation`)
+    } catch (error) {
+      console.error('Erreur lors du groupement des notes:', error)
+      alert('Erreur lors du groupement des notes')
+    }
+  }
+
+  const handleCreateCourse = async (courseName: string, instructorId?: string) => {
+    const newCourse: CourseData = {
+      id: uuidv4(),
+      name: courseName,
+      color: '#3b82f6',
+      instructorId,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    }
+
+    try {
+      const response = await fetch('/api/courses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newCourse)
+      })
+
+      if (response.ok) {
+        const savedCourse = await response.json()
+        setCourses(prev => [...prev, savedCourse])
+        
+        // Grouper les notes sélectionnées dans cette nouvelle formation
+        await handleGroupToCourse(savedCourse.id)
+      }
+    } catch (error) {
+      console.error('Erreur lors de la création de la formation:', error)
+      alert('Erreur lors de la création de la formation')
+    }
+  }
+
+  const handleCreateInstructor = async (instructorName: string) => {
+    const newInstructor: InstructorData = {
+      id: uuidv4(),
+      name: instructorName,
+      color: '#6366f1',
+      createdAt: new Date(),
+      updatedAt: new Date()
+    }
+
+    try {
+      const response = await fetch('/api/instructors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newInstructor)
+      })
+
+      if (response.ok) {
+        const savedInstructor = await response.json()
+        setInstructors(prev => [...prev, savedInstructor])
+      }
+    } catch (error) {
+      console.error('Erreur lors de la création du formateur:', error)
+      alert('Erreur lors de la création du formateur')
+    }
+  }
+
+  const handleAddConcept = async (noteId: string, conceptName: string, category?: string) => {
+    try {
+      // TODO: Implémenter l'API pour ajouter un concept à une note
+      console.log('Ajouter concept:', { noteId, conceptName, category })
+      
+      // Pour l'instant, on peut simuler l'ajout
+      // Plus tard, on fera un appel API vers /api/notes/{noteId}/concepts
+    } catch (error) {
+      console.error('Erreur lors de l\'ajout du concept:', error)
+      alert('Erreur lors de l\'ajout du concept')
+    }
+  }
+
+  const handleRemoveConcept = async (noteId: string, conceptId: string) => {
+    try {
+      // TODO: Implémenter l'API pour supprimer un concept d'une note
+      console.log('Supprimer concept:', { noteId, conceptId })
+      
+      // Plus tard, on fera un appel API vers /api/notes/{noteId}/concepts/{conceptId}
+    } catch (error) {
+      console.error('Erreur lors de la suppression du concept:', error)
+      alert('Erreur lors de la suppression du concept')
+    }
+  }
+
   return (
     <div className="h-screen w-screen overflow-hidden">
       <Sidebar 
         onElementDrop={handleElementDrop}
         isConnecting={isConnecting}
         onToggleConnectionMode={handleToggleConnectionMode}
+        isGroupSelecting={isGroupSelecting}
+        onToggleGroupSelection={handleToggleGroupSelection}
+        isTagging={isTagging}
+        onToggleTaggingMode={handleToggleTaggingMode}
       />
       
       <div className="h-full">
@@ -306,19 +541,90 @@ export default function Home() {
           onNoteSelect={setSelectedNoteId}
           onNoteConnectionClick={handleNoteConnectionClick}
           onConnectionCreate={handleConnectionCreate}
+          onNoteDelete={deleteNote}
+          onNoteDoubleClick={openFullScreenEditor}
+          onNoteGroupSelect={handleNoteGroupSelect}
+          onNoteTagClick={handleNoteTagClick}
           selectedNoteId={selectedNoteId}
+          selectedNotes={selectedNotes}
           isConnecting={isConnecting}
           connectingFromId={connectingFromId}
+          isGroupSelecting={isGroupSelecting}
+          isTagging={isTagging}
         />
       </div>
 
-      {selectedNote && (
+      {selectedNote && !fullScreenEditorNote && (
         <NoteEditor
           note={selectedNote}
           onUpdate={(updates) => updateNote({ ...updates, id: selectedNote.id })}
           onClose={() => setSelectedNoteId(null)}
         />
       )}
+
+      {fullScreenEditorNote && (
+        <FullScreenEditor
+          note={fullScreenEditorNote}
+          onUpdate={(updates) => updateNote({ ...updates, id: fullScreenEditorNote.id })}
+          onClose={closeFullScreenEditor}
+        />
+      )}
+
+      {/* Indicateur de mode groupement */}
+      {isGroupSelecting && (
+        <div className="absolute top-4 right-4 z-50">
+          <div className="bg-orange-500 text-white px-4 py-2 rounded-lg shadow-lg flex items-center space-x-2">
+            <span>🎯</span>
+            <span className="text-sm">
+              Mode groupement - {selectedNotes.length} note{selectedNotes.length > 1 ? 's' : ''} sélectionnée{selectedNotes.length > 1 ? 's' : ''}
+            </span>
+            {selectedNotes.length > 0 && (
+              <button
+                onClick={() => setShowGroupingModal(true)}
+                className="ml-2 px-2 py-1 bg-white text-orange-600 rounded text-xs hover:bg-gray-100 transition-colors pointer-events-auto"
+              >
+                Grouper
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Indicateur de mode tagging */}
+      {isTagging && (
+        <div className="absolute top-4 left-4 z-50 pointer-events-none">
+          <div className="bg-purple-500 text-white px-4 py-2 rounded-lg shadow-lg flex items-center space-x-2">
+            <span>💡</span>
+            <span className="text-sm">
+              Mode tagging - Cliquez sur une note pour ajouter des concepts
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de groupement */}
+      <GroupingModal
+        isOpen={showGroupingModal}
+        selectedNotes={selectedNotes}
+        courses={courses}
+        instructors={instructors}
+        onClose={() => setShowGroupingModal(false)}
+        onGroupToCourse={handleGroupToCourse}
+        onCreateCourse={handleCreateCourse}
+        onCreateInstructor={handleCreateInstructor}
+      />
+
+      {/* Modal de tagging */}
+      <TaggingModal
+        isOpen={showTaggingModal}
+        note={selectedNoteForTagging ? notes.find(n => n.id === selectedNoteForTagging) || null : null}
+        onClose={() => {
+          setShowTaggingModal(false)
+          setSelectedNoteForTagging(null)
+        }}
+        onAddConcept={handleAddConcept}
+        onRemoveConcept={handleRemoveConcept}
+      />
     </div>
   )
 }
