@@ -1,0 +1,78 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Note {
+  id          String   @id @default(uuid())
+  title       String   @default("Nouvelle note")
+  content     String   @default("")
+  x           Float    @default(0)
+  y           Float    @default(0)
+  width       Float    @default(300)
+  height      Float    @default(200)
+  backgroundColor String @default("#ffffff")
+  textColor   String   @default("#000000")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  courseId    String?
+  course      Course?  @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  connections NoteConnection[] @relation("FromNote")
+  connectedFrom NoteConnection[] @relation("ToNote")
+  concepts    NoteConcept[]
+}
+
+model Course {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  color       String   @default("#3b82f6")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  notes       Note[]
+}
+
+model Concept {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  category    String?  // ICT, Smart Money, etc.
+  frequency   Int      @default(1)
+  createdAt   DateTime @default(now())
+  notes       NoteConcept[]
+}
+
+model NoteConcept {
+  noteId    String
+  conceptId String
+  note      Note    @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  concept   Concept @relation(fields: [conceptId], references: [id], onDelete: Cascade)
+  
+  @@id([noteId, conceptId])
+}
+
+model NoteConnection {
+  id       String @id @default(uuid())
+  fromId   String
+  toId     String
+  label    String?
+  fromNote Note   @relation("FromNote", fields: [fromId], references: [id], onDelete: Cascade)
+  toNote   Note   @relation("ToNote", fields: [toId], references: [id], onDelete: Cascade)
+  
+  @@unique([fromId, toId])
+}
+
+model Image {
+  id        String   @id @default(uuid())
+  filename  String
+  path      String
+  noteId    String?
+  createdAt DateTime @default(now())
+}
