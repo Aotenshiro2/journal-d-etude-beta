@@ -29,6 +29,8 @@ import { Download, FileText, Zap } from 'lucide-react'
 interface ReactFlowCanvasProps {
   notes: NoteData[]
   connections?: ConnectionData[]
+  courses?: Array<{id: string, name: string}>
+  instructors?: Array<{id: string, name: string}>
   onNoteUpdate: (note: Partial<NoteData> & { id: string }) => void
   onNoteCreate: (position: { x: number; y: number }, elementType?: string) => void
   onNoteSelect: (noteId: string | null) => void
@@ -54,6 +56,8 @@ const nodeTypes: NodeTypes = {
 export default function ReactFlowCanvas({
   notes,
   connections = [],
+  courses = [],
+  instructors = [],
   onNoteUpdate,
   onNoteCreate,
   onNoteSelect,
@@ -76,29 +80,43 @@ export default function ReactFlowCanvas({
 
   // Convertir les notes en nodes React Flow
   const convertNotesToNodes = useCallback((notesList: NoteData[]): Node[] => {
-    return notesList.map((note) => ({
-      id: note.id,
-      type: 'noteNode',
-      position: { x: note.x, y: note.y },
-      data: {
-        ...note,
-        isSelected: selectedNoteId === note.id,
-        isGroupSelected: selectedNotes.includes(note.id),
-        isConnecting: isConnecting,
-        isConnectingFrom: connectingFromId === note.id,
-        isGroupSelecting: isGroupSelecting,
-        isTagging: isTagging,
-        onEdit: (noteId: string) => onNoteSelect(noteId),
-        onDelete: onNoteDelete || ((noteId: string) => {
-          console.log('Delete note:', noteId)
-        }),
-        onDoubleClick: onNoteDoubleClick,
-        onGroupSelect: onNoteGroupSelect,
-        onTagClick: onNoteTagClick,
-      },
-      dragHandle: '.drag-handle',
-    }))
-  }, [selectedNoteId, selectedNotes, isConnecting, connectingFromId, isGroupSelecting, isTagging, onNoteSelect, onNoteDelete, onNoteDoubleClick, onNoteGroupSelect, onNoteTagClick])
+    return notesList.map((note) => {
+      // Enrichir avec les données de course et instructor
+      const course = courses.find(c => c.id === note.courseId)
+      const instructor = instructors.find(i => i.id === note.instructorId)
+      
+      // TODO: Récupérer les concepts de la note depuis l'API ou state
+      const noteConcepts = ['Fair Value Gap', 'Order Block'] // Simulation pour l'instant
+      
+      return {
+        id: note.id,
+        type: 'noteNode',
+        position: { x: note.x, y: note.y },
+        data: {
+          ...note,
+          // Données enrichies
+          courseName: course?.name,
+          instructorName: instructor?.name,
+          concepts: noteConcepts,
+          // États et handlers
+          isSelected: selectedNoteId === note.id,
+          isGroupSelected: selectedNotes.includes(note.id),
+          isConnecting: isConnecting,
+          isConnectingFrom: connectingFromId === note.id,
+          isGroupSelecting: isGroupSelecting,
+          isTagging: isTagging,
+          onEdit: (noteId: string) => onNoteSelect(noteId),
+          onDelete: onNoteDelete || ((noteId: string) => {
+            console.log('Delete note:', noteId)
+          }),
+          onDoubleClick: onNoteDoubleClick,
+          onGroupSelect: onNoteGroupSelect,
+          onTagClick: onNoteTagClick,
+        },
+        dragHandle: '.drag-handle',
+      }
+    })
+  }, [selectedNoteId, selectedNotes, isConnecting, connectingFromId, isGroupSelecting, isTagging, onNoteSelect, onNoteDelete, onNoteDoubleClick, onNoteGroupSelect, onNoteTagClick, courses, instructors])
 
   // Convertir les connexions en edges React Flow
   const convertConnectionsToEdges = useCallback((connectionsList: ConnectionData[]): Edge[] => {

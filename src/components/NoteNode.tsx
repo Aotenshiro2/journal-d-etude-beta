@@ -2,7 +2,8 @@
 
 import { Handle, Position, NodeProps } from '@xyflow/react'
 import { NoteData } from '@/types'
-import { Edit, Trash2, Clock } from 'lucide-react'
+import { Edit, Trash2, Clock, Tag, GraduationCap, User } from 'lucide-react'
+import { stripHtml, formatRelativeTime } from '@/lib/utils'
 
 interface NoteNodeData extends NoteData {
   isSelected?: boolean
@@ -13,9 +14,13 @@ interface NoteNodeData extends NoteData {
   isTagging?: boolean
   onEdit?: (noteId: string) => void
   onDelete?: (noteId: string) => void
-  onDoubleClick?: (noteId: string) => void
+  onDoubleClick?: (nodeId: string) => void
   onGroupSelect?: (noteId: string) => void
   onTagClick?: (noteId: string) => void
+  // Données enrichies
+  courseName?: string
+  instructorName?: string
+  concepts?: string[]
 }
 
 // Sous-composants modulaires inspirés d'AI Elements
@@ -38,34 +43,75 @@ function NodeHeader({ title, description, textColor }: { title: string; descript
 }
 
 function NodeContent({ content }: { content: string }) {
+  const cleanContent = stripHtml(content)
+  
   return (
     <div className="flex-1 overflow-hidden">
       <div
         className="text-xs leading-relaxed text-gray-600"
         style={{ 
           display: '-webkit-box',
-          WebkitLineClamp: 3,
+          WebkitLineClamp: 2,
           WebkitBoxOrient: 'vertical',
           textOverflow: 'ellipsis',
           overflow: 'hidden'
         }}
       >
-        {content?.trim() || 'Cliquez pour éditer...'}
+        {cleanContent?.trim() || 'Cliquez pour éditer...'}
       </div>
     </div>
   )
 }
 
-function NodeFooter({ updatedAt }: { updatedAt: Date }) {
-  const timeAgo = new Date().getTime() - new Date(updatedAt).getTime()
-  const minutes = Math.floor(timeAgo / 60000)
-  const hours = Math.floor(minutes / 60)
-  const days = Math.floor(hours / 24)
+function NodeMetadata({ courseName, instructorName }: { courseName?: string; instructorName?: string }) {
+  if (!courseName && !instructorName) return null
   
-  let timeText = 'À l\'instant'
-  if (days > 0) timeText = `${days}j`
-  else if (hours > 0) timeText = `${hours}h`
-  else if (minutes > 0) timeText = `${minutes}m`
+  return (
+    <div className="flex items-center justify-between text-xs text-gray-500 mb-2">
+      {courseName && (
+        <div className="flex items-center space-x-1 truncate">
+          <GraduationCap className="w-3 h-3 flex-shrink-0" />
+          <span className="truncate">{courseName}</span>
+        </div>
+      )}
+      {instructorName && (
+        <div className="flex items-center space-x-1 truncate">
+          <User className="w-3 h-3 flex-shrink-0" />
+          <span className="truncate">{instructorName}</span>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function NodeConcepts({ concepts }: { concepts?: string[] }) {
+  if (!concepts || concepts.length === 0) return null
+  
+  const displayedConcepts = concepts.slice(0, 2)
+  const remainingCount = concepts.length - 2
+  
+  return (
+    <div className="flex flex-wrap gap-1 mb-2">
+      {displayedConcepts.map((concept, index) => (
+        <span
+          key={index}
+          className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700"
+        >
+          <Tag className="w-2.5 h-2.5 mr-1" />
+          {concept}
+        </span>
+      ))}
+      {remainingCount > 0 && (
+        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">
+          +{remainingCount}
+        </span>
+      )}
+    </div>
+  )
+}
+
+function NodeFooter({ updatedAt }: { updatedAt: Date }) {
+  const timeText = formatRelativeTime(updatedAt)
 
   return (
     <div className="border-t border-gray-100 pt-2 mt-2">
@@ -238,6 +284,13 @@ export default function NoteNode({ data, selected }: NodeProps<NoteNodeData>) {
           description="Note d'étude"
           textColor={data.textColor} 
         />
+        
+        <NodeMetadata 
+          courseName={data.courseName}
+          instructorName={data.instructorName}
+        />
+        
+        <NodeConcepts concepts={data.concepts} />
         
         <NodeContent content={data.content} />
         

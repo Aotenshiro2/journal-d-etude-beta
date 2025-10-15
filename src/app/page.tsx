@@ -98,8 +98,8 @@ export default function Home() {
       note: {
         title: 'Note',
         content: 'Cliquez pour éditer...',
-        width: 200,
-        height: 140,
+        width: 220,
+        height: 180,
         backgroundColor: '#fef3c7',
         textColor: '#000000'
       }
@@ -512,6 +512,8 @@ export default function Home() {
         <ReactFlowCanvas
           notes={filteredNotes}
           connections={connections}
+          courses={courses}
+          instructors={instructors}
           onNoteUpdate={updateNote}
           onNoteCreate={createNote}
           onNoteSelect={setSelectedNoteId}
