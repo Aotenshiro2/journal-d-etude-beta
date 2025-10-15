@@ -249,7 +249,7 @@ export default function Home() {
     return (
       <div className="flex flex-col items-center justify-center h-screen space-y-4">
         <div className="text-red-600 text-center">
-          <div className="text-lg font-semibold">🚨 Erreur de l'application</div>
+          <div className="text-lg font-semibold">🚨 Erreur de l&apos;application</div>
           <div className="text-sm mt-2">{appError}</div>
         </div>
         <button
