@@ -1,34 +1,36 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { NoteData } from '@/types'
+import { NoteData, CourseData } from '@/types'
 
-interface NoteEditorProps {
+interface NotePropertiesPanelProps {
   note: NoteData | null
   onUpdate: (updates: Partial<NoteData>) => void
   onClose: () => void
+  onOpenContentEditor?: () => void
+  courses?: CourseData[]
 }
 
-export default function NoteEditor({ note, onUpdate, onClose }: NoteEditorProps) {
+export default function NotePropertiesPanel({ note, onUpdate, onClose, onOpenContentEditor, courses = [] }: NotePropertiesPanelProps) {
   const [title, setTitle] = useState('')
-  const [content, setContent] = useState('')
   const [backgroundColor, setBackgroundColor] = useState('#ffffff')
+  const [selectedCourseId, setSelectedCourseId] = useState('')
 
   useEffect(() => {
     if (note) {
       setTitle(note.title)
-      setContent(note.content)
       setBackgroundColor(note.backgroundColor)
+      setSelectedCourseId(note.courseId || '')
     }
   }, [note])
 
   const handleSave = () => {
     if (note) {
-      console.log('Saving note:', { title, content, backgroundColor }) // Debug
+      console.log('Saving note:', { title, backgroundColor, courseId: selectedCourseId }) // Debug
       onUpdate({
         title,
-        content,
         backgroundColor,
+        courseId: selectedCourseId || undefined,
       })
     }
     onClose()
@@ -39,25 +41,25 @@ export default function NoteEditor({ note, onUpdate, onClose }: NoteEditorProps)
     if (!note) return
     
     const timeout = setTimeout(() => {
-      if (note && (title !== note.title || content !== note.content || backgroundColor !== note.backgroundColor)) {
-        console.log('Auto-saving note...') // Debug
+      if (note && (title !== note.title || backgroundColor !== note.backgroundColor || selectedCourseId !== (note.courseId || ''))) {
+        console.log('Auto-saving note properties...') // Debug
         onUpdate({
           title,
-          content,
           backgroundColor,
+          courseId: selectedCourseId || undefined,
         })
       }
     }, 1000)
 
     return () => clearTimeout(timeout)
-  }, [title, content, backgroundColor, note, onUpdate])
+  }, [title, backgroundColor, selectedCourseId, note, onUpdate])
 
   if (!note) return null
 
   return (
     <div className="fixed right-0 top-0 h-full w-96 bg-white shadow-xl border-l border-gray-500 z-50 flex flex-col">
       <div className="p-6 border-b border-gray-400 flex justify-between items-center">
-        <h2 className="text-lg font-semibold text-gray-900">Éditer la note</h2>
+        <h2 className="text-lg font-semibold text-gray-900">Propriétés de la note</h2>
         <button
           onClick={onClose}
           className="text-red-600 hover:text-red-700 text-xl w-8 h-8 flex items-center justify-center rounded-full hover:bg-red-50 transition-colors font-semibold"
@@ -81,6 +83,24 @@ export default function NoteEditor({ note, onUpdate, onClose }: NoteEditorProps)
         </div>
 
         <div>
+          <label className="block text-sm font-semibold text-gray-900 mb-2">
+            Formation
+          </label>
+          <select
+            value={selectedCourseId}
+            onChange={(e) => setSelectedCourseId(e.target.value)}
+            className="w-full p-3 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 text-gray-900 bg-gray-50"
+          >
+            <option value="">Aucune formation</option>
+            {courses.map((course) => (
+              <option key={course.id} value={course.id}>
+                {course.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
           <label className="block text-sm font-semibold text-gray-900 mb-3">
             Couleur de fond
           </label>
@@ -99,15 +119,16 @@ export default function NoteEditor({ note, onUpdate, onClose }: NoteEditorProps)
         </div>
 
         <div>
-          <label className="block text-sm font-semibold text-gray-900 mb-2">
-            Contenu
+          <label className="block text-sm font-semibold text-gray-900 mb-3">
+            Actions
           </label>
-          <textarea
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            className="w-full h-64 p-4 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none transition-all duration-200 text-gray-900 leading-relaxed placeholder:text-gray-500 bg-gray-50"
-            placeholder="Contenu de votre note..."
-          />
+          <button
+            onClick={onOpenContentEditor}
+            className="w-full bg-green-600 text-white py-3 px-4 rounded-lg hover:bg-green-700 transition-all duration-200 font-medium flex items-center justify-center space-x-2"
+          >
+            <span>✏️</span>
+            <span>Éditer le contenu</span>
+          </button>
         </div>
       </div>
 

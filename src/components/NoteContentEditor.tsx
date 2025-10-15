@@ -6,7 +6,7 @@ import Image from '@tiptap/extension-image'
 import Link from '@tiptap/extension-link'
 import Youtube from '@tiptap/extension-youtube'
 import Color from '@tiptap/extension-color'
-import TextStyle from '@tiptap/extension-text-style'
+import { TextStyle } from '@tiptap/extension-text-style'
 import BulletList from '@tiptap/extension-bullet-list'
 import OrderedList from '@tiptap/extension-ordered-list'
 import ListItem from '@tiptap/extension-list-item'
@@ -18,13 +18,13 @@ import {
   Undo, Redo, Type, AlignLeft, AlignCenter, AlignRight
 } from 'lucide-react'
 
-interface FullScreenEditorProps {
+interface NoteContentEditorProps {
   note: NoteData
   onUpdate: (updates: Partial<NoteData>) => void
   onClose: () => void
 }
 
-export default function FullScreenEditor({ note, onUpdate, onClose }: FullScreenEditorProps) {
+export default function NoteContentEditor({ note, onUpdate, onClose }: NoteContentEditorProps) {
   const [title, setTitle] = useState(note.title)
   const [isSaving, setIsSaving] = useState(false)
   const [hasChanges, setHasChanges] = useState(false)
@@ -61,7 +61,7 @@ export default function FullScreenEditor({ note, onUpdate, onClose }: FullScreen
     immediatelyRender: false,
     editorProps: {
       attributes: {
-        class: 'prose prose-lg max-w-none focus:outline-none min-h-[400px] p-6 text-gray-800',
+        class: 'prose prose-lg max-w-none focus:outline-none min-h-[400px] p-6 text-gray-900',
       },
     },
     onUpdate: () => {
@@ -155,7 +155,7 @@ export default function FullScreenEditor({ note, onUpdate, onClose }: FullScreen
     <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
       <div className="bg-white rounded-lg shadow-2xl w-[95vw] h-[95vh] flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-gray-50">
+        <div className="flex items-center justify-between p-4 border-b border-gray-500 bg-gray-50">
           <div className="flex items-center space-x-4 flex-1">
             <input
               type="text"
@@ -164,7 +164,7 @@ export default function FullScreenEditor({ note, onUpdate, onClose }: FullScreen
                 setTitle(e.target.value)
                 setHasChanges(true)
               }}
-              className="text-xl font-semibold bg-transparent border-none outline-none flex-1"
+              className="text-xl font-semibold bg-gray-50 border border-gray-600 rounded-lg px-3 py-2 outline-none flex-1 text-gray-900 placeholder:text-gray-600"
               placeholder="Titre de la note..."
             />
             {isSaving && (
@@ -178,14 +178,14 @@ export default function FullScreenEditor({ note, onUpdate, onClose }: FullScreen
             <button
               onClick={handleSave}
               disabled={!hasChanges || isSaving}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center space-x-2"
+              className="px-4 py-2 bg-blue-800 text-white rounded-lg hover:bg-blue-900 disabled:opacity-50 flex items-center space-x-2"
             >
               <Save className="w-4 h-4" />
               <span>Sauvegarder</span>
             </button>
             <button
               onClick={onClose}
-              className="p-2 hover:bg-gray-200 rounded-lg transition-colors"
+              className="p-2 hover:bg-red-50 rounded-lg transition-colors text-red-600 hover:text-red-700"
             >
               <X className="w-6 h-6" />
             </button>
@@ -193,80 +193,80 @@ export default function FullScreenEditor({ note, onUpdate, onClose }: FullScreen
         </div>
 
         {/* Toolbar */}
-        <div className="flex items-center space-x-1 p-3 border-b border-gray-200 bg-gray-50 overflow-x-auto">
+        <div className="flex items-center space-x-1 p-3 border-b border-gray-400 bg-gray-50 overflow-x-auto">
           <button
             onClick={() => editor.chain().focus().toggleBold().run()}
-            className={`p-2 rounded hover:bg-gray-200 ${editor.isActive('bold') ? 'bg-gray-300' : ''}`}
+            className={`p-2 rounded hover:bg-gray-300 ${editor.isActive('bold') ? 'bg-gray-400' : ''}`}
           >
-            <Bold className="w-4 h-4" />
+            <Bold className="w-4 h-4 text-gray-700" />
           </button>
           <button
             onClick={() => editor.chain().focus().toggleItalic().run()}
-            className={`p-2 rounded hover:bg-gray-200 ${editor.isActive('italic') ? 'bg-gray-300' : ''}`}
+            className={`p-2 rounded hover:bg-gray-300 ${editor.isActive('italic') ? 'bg-gray-400' : ''}`}
           >
-            <Italic className="w-4 h-4" />
+            <Italic className="w-4 h-4 text-gray-700" />
           </button>
           <button
             onClick={() => editor.chain().focus().toggleStrike().run()}
-            className={`p-2 rounded hover:bg-gray-200 ${editor.isActive('strike') ? 'bg-gray-300' : ''}`}
+            className={`p-2 rounded hover:bg-gray-300 ${editor.isActive('strike') ? 'bg-gray-400' : ''}`}
           >
-            <Underline className="w-4 h-4" />
+            <Underline className="w-4 h-4 text-gray-700" />
           </button>
           
-          <div className="w-px h-6 bg-gray-300 mx-2" />
+          <div className="w-px h-6 bg-gray-500 mx-2" />
           
           <button
             onClick={() => editor.chain().focus().toggleBulletList().run()}
-            className={`p-2 rounded hover:bg-gray-200 ${editor.isActive('bulletList') ? 'bg-gray-300' : ''}`}
+            className={`p-2 rounded hover:bg-gray-300 ${editor.isActive('bulletList') ? 'bg-gray-400' : ''}`}
           >
-            <List className="w-4 h-4" />
+            <List className="w-4 h-4 text-gray-700" />
           </button>
           <button
             onClick={() => editor.chain().focus().toggleOrderedList().run()}
-            className={`p-2 rounded hover:bg-gray-200 ${editor.isActive('orderedList') ? 'bg-gray-300' : ''}`}
+            className={`p-2 rounded hover:bg-gray-300 ${editor.isActive('orderedList') ? 'bg-gray-400' : ''}`}
           >
-            <ListOrdered className="w-4 h-4" />
+            <ListOrdered className="w-4 h-4 text-gray-700" />
           </button>
           
-          <div className="w-px h-6 bg-gray-300 mx-2" />
+          <div className="w-px h-6 bg-gray-500 mx-2" />
           
           <button
             onClick={addLink}
-            className="p-2 rounded hover:bg-gray-200"
+            className="p-2 rounded hover:bg-gray-300"
             title="Ajouter un lien"
           >
-            <LinkIcon className="w-4 h-4" />
+            <LinkIcon className="w-4 h-4 text-gray-700" />
           </button>
           <button
             onClick={handlePasteImage}
-            className="p-2 rounded hover:bg-gray-200"
+            className="p-2 rounded hover:bg-gray-300"
             title="Coller une image du presse-papier"
           >
-            <ImageIcon className="w-4 h-4" />
+            <ImageIcon className="w-4 h-4 text-gray-700" />
           </button>
           <button
             onClick={addYouTube}
-            className="p-2 rounded hover:bg-gray-200"
+            className="p-2 rounded hover:bg-gray-300"
             title="Ajouter une vidéo YouTube"
           >
-            <YoutubeIcon className="w-4 h-4" />
+            <YoutubeIcon className="w-4 h-4 text-gray-700" />
           </button>
           
-          <div className="w-px h-6 bg-gray-300 mx-2" />
+          <div className="w-px h-6 bg-gray-500 mx-2" />
           
           <button
             onClick={() => editor.chain().focus().undo().run()}
             disabled={!editor.can().undo()}
-            className="p-2 rounded hover:bg-gray-200 disabled:opacity-50"
+            className="p-2 rounded hover:bg-gray-300 disabled:opacity-50"
           >
-            <Undo className="w-4 h-4" />
+            <Undo className="w-4 h-4 text-gray-700" />
           </button>
           <button
             onClick={() => editor.chain().focus().redo().run()}
             disabled={!editor.can().redo()}
-            className="p-2 rounded hover:bg-gray-200 disabled:opacity-50"
+            className="p-2 rounded hover:bg-gray-300 disabled:opacity-50"
           >
-            <Redo className="w-4 h-4" />
+            <Redo className="w-4 h-4 text-gray-700" />
           </button>
         </div>
 
@@ -290,9 +290,9 @@ export default function FullScreenEditor({ note, onUpdate, onClose }: FullScreen
               padding-left: 1.5rem;
             }
             :global(.ProseMirror blockquote) {
-              border-left: 4px solid #d1d5db;
+              border-left: 4px solid #6b7280;
               padding-left: 1rem;
-              color: #6b7280 !important;
+              color: #374151 !important;
               font-style: italic;
             }
           `}</style>
@@ -300,7 +300,7 @@ export default function FullScreenEditor({ note, onUpdate, onClose }: FullScreen
         </div>
 
         {/* Footer */}
-        <div className="p-3 border-t border-gray-200 bg-gray-50 text-sm text-gray-600">
+        <div className="p-3 border-t border-gray-400 bg-gray-50 text-sm text-gray-700">
           <div className="flex items-center justify-between">
             <div>
               💡 <strong>Conseils :</strong> Ctrl+S pour sauvegarder, Échap pour fermer, Ctrl+V pour coller des images

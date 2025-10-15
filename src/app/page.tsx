@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from 'react'
 import ReactFlowCanvas from '@/components/ReactFlowCanvas'
-import NoteEditor from '@/components/NoteEditor'
-import FullScreenEditor from '@/components/FullScreenEditor'
+import NotePropertiesPanel from '@/components/NotePropertiesPanel'
+import NoteContentEditor from '@/components/NoteContentEditor'
 import Sidebar from '@/components/Sidebar'
 import GroupingModal from '@/components/GroupingModal'
 import TaggingModal from '@/components/TaggingModal'
@@ -29,7 +29,7 @@ export default function Home() {
   const [selectedNoteForTagging, setSelectedNoteForTagging] = useState<string | null>(null)
   const [showTaggingModal, setShowTaggingModal] = useState(false)
   const [appError, setAppError] = useState<string | null>(null)
-  const [fullScreenEditorNote, setFullScreenEditorNote] = useState<NoteData | null>(null)
+  const [contentEditorNote, setContentEditorNote] = useState<NoteData | null>(null)
   const [showGroupingModal, setShowGroupingModal] = useState(false)
 
   // Keep-alive pour maintenir l'app active
@@ -406,15 +406,15 @@ export default function Home() {
     }
   }
 
-  const openFullScreenEditor = (noteId: string) => {
+  const openContentEditor = (noteId: string) => {
     const note = notes.find(n => n.id === noteId)
     if (note) {
-      setFullScreenEditorNote(note)
+      setContentEditorNote(note)
     }
   }
 
-  const closeFullScreenEditor = () => {
-    setFullScreenEditorNote(null)
+  const closeContentEditor = () => {
+    setContentEditorNote(null)
   }
 
   const handleGroupToCourse = async (courseId: string) => {
@@ -542,7 +542,7 @@ export default function Home() {
           onNoteConnectionClick={handleNoteConnectionClick}
           onConnectionCreate={handleConnectionCreate}
           onNoteDelete={deleteNote}
-          onNoteDoubleClick={openFullScreenEditor}
+          onNoteDoubleClick={openContentEditor}
           onNoteGroupSelect={handleNoteGroupSelect}
           onNoteTagClick={handleNoteTagClick}
           selectedNoteId={selectedNoteId}
@@ -554,19 +554,21 @@ export default function Home() {
         />
       </div>
 
-      {selectedNote && !fullScreenEditorNote && (
-        <NoteEditor
+      {selectedNote && !contentEditorNote && (
+        <NotePropertiesPanel
           note={selectedNote}
           onUpdate={(updates) => updateNote({ ...updates, id: selectedNote.id })}
           onClose={() => setSelectedNoteId(null)}
+          onOpenContentEditor={() => openContentEditor(selectedNote.id)}
+          courses={courses}
         />
       )}
 
-      {fullScreenEditorNote && (
-        <FullScreenEditor
-          note={fullScreenEditorNote}
-          onUpdate={(updates) => updateNote({ ...updates, id: fullScreenEditorNote.id })}
-          onClose={closeFullScreenEditor}
+      {contentEditorNote && (
+        <NoteContentEditor
+          note={contentEditorNote}
+          onUpdate={(updates) => updateNote({ ...updates, id: contentEditorNote.id })}
+          onClose={closeContentEditor}
         />
       )}
 
