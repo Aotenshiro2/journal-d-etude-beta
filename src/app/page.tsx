@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import ReactFlowCanvas from '@/components/ReactFlowCanvas'
-import NotePropertiesPanel from '@/components/NotePropertiesPanel'
+import NotePropertiesModal from '@/components/NotePropertiesModal'
 import NoteContentEditor from '@/components/NoteContentEditor'
 import Sidebar from '@/components/Sidebar'
 import GroupingModal from '@/components/GroupingModal'
@@ -533,7 +533,7 @@ export default function Home() {
       </div>
 
       {selectedNote && !contentEditorNote && (
-        <NotePropertiesPanel
+        <NotePropertiesModal
           note={selectedNote}
           onUpdate={(updates) => updateNote({ ...updates, id: selectedNote.id })}
           onClose={() => setSelectedNoteId(null)}
