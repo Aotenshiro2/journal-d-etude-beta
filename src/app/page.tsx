@@ -102,30 +102,6 @@ export default function Home() {
         height: 140,
         backgroundColor: '#fef3c7',
         textColor: '#000000'
-      },
-      arrow: {
-        title: 'Flèche',
-        content: '',
-        width: 100,
-        height: 40,
-        backgroundColor: 'transparent',
-        textColor: '#000000'
-      },
-      'shape-rect': {
-        title: 'Rectangle',
-        content: '',
-        width: 160,
-        height: 80,
-        backgroundColor: '#e0e7ff',
-        textColor: '#000000'
-      },
-      'shape-circle': {
-        title: 'Cercle',
-        content: '',
-        width: 120,
-        height: 120,
-        backgroundColor: '#d1fae5',
-        textColor: '#000000'
       }
     }
 

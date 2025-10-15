@@ -87,6 +87,7 @@ export interface CanvasState {
 export interface ICTConcepts {
   [key: string]: {
     category: string
+    definition: string
     keywords: string[]
     weight: number
   }

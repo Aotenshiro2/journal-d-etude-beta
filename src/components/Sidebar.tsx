@@ -19,27 +19,6 @@ const SIDEBAR_ITEMS = [
     icon: '📝',
     description: 'Créer une note',
     color: '#fef3c7'
-  },
-  {
-    id: 'arrow',
-    name: 'Flèche',
-    icon: '↗️',
-    description: 'Connexion directionnelle',
-    color: 'transparent'
-  },
-  {
-    id: 'shape-rect',
-    name: 'Rectangle',
-    icon: '⬜',
-    description: 'Forme rectangle',
-    color: '#e0e7ff'
-  },
-  {
-    id: 'shape-circle',
-    name: 'Cercle',
-    icon: '⭕',
-    description: 'Forme cercle',
-    color: '#d1fae5'
   }
 ]
 

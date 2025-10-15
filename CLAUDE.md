@@ -54,8 +54,10 @@
 - **Railway :** ✅ Configuré, testé, validé
 - **Schema Prisma :** ✅ Migré SQLite → PostgreSQL  
 - **APIs :** ✅ Toutes testées et fonctionnelles
-- **Restructuration :** 🔄 En cours (vers aoknowledge/apps/journal-d-etude/)
-- **Git + Vercel :** ⏳ À faire après restructuration
+- **Restructuration :** ✅ Terminée (vers aoknowledge/apps/journal-d-etude/)
+- **Git + Vercel :** ✅ Déployé en production
+- **URL Production :** https://journal-d-etude-beta.vercel.app
+- **GitHub Repository :** https://github.com/Aotenshiro2/journal-d-etude-beta
 
 ## Commande de test Railway
 ```bash
