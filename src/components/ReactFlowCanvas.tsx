@@ -112,6 +112,9 @@ export default function ReactFlowCanvas({
           onDoubleClick: onNoteDoubleClick,
           onGroupSelect: onNoteGroupSelect,
           onTagClick: onNoteTagClick,
+          onResize: (noteId: string, width: number, height: number) => {
+            onNoteUpdate({ id: noteId, width, height })
+          },
         },
         dragHandle: '.drag-handle',
       }

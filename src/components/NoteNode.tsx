@@ -4,6 +4,7 @@ import { Handle, Position, NodeProps } from '@xyflow/react'
 import { NoteData } from '@/types'
 import { Edit, Trash2, Clock, Tag, GraduationCap, User } from 'lucide-react'
 import { stripHtml, formatRelativeTime } from '@/lib/utils'
+import { useState, useRef, useCallback } from 'react'
 
 interface NoteNodeData extends NoteData {
   isSelected?: boolean
@@ -17,6 +18,7 @@ interface NoteNodeData extends NoteData {
   onDoubleClick?: (nodeId: string) => void
   onGroupSelect?: (noteId: string) => void
   onTagClick?: (noteId: string) => void
+  onResize?: (noteId: string, width: number, height: number) => void
   // Données enrichies
   courseName?: string
   instructorName?: string
@@ -146,6 +148,110 @@ function NodeToolbar({ onEdit, onDelete }: { onEdit: (e: React.MouseEvent) => vo
         <Trash2 className="w-3 h-3 text-red-600" />
       </button>
     </div>
+  )
+}
+
+function ResizeHandles({ 
+  nodeId, 
+  onResize, 
+  isVisible 
+}: { 
+  nodeId: string; 
+  onResize?: (nodeId: string, width: number, height: number) => void;
+  isVisible: boolean;
+}) {
+  const [isResizing, setIsResizing] = useState(false)
+  
+  const handleMouseDown = useCallback((e: React.MouseEvent, corner: string) => {
+    if (!onResize) return
+    
+    e.preventDefault()
+    e.stopPropagation()
+    setIsResizing(true)
+    
+    const startX = e.clientX
+    const startY = e.clientY
+    
+    // Obtenir les dimensions actuelles du nœud
+    const nodeElement = (e.currentTarget as HTMLElement).closest('.react-flow__node') as HTMLElement
+    if (!nodeElement) return
+    
+    const currentRect = nodeElement.getBoundingClientRect()
+    const startWidth = currentRect.width
+    const startHeight = currentRect.height
+    
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const deltaX = moveEvent.clientX - startX
+      const deltaY = moveEvent.clientY - startY
+      
+      let newWidth = startWidth
+      let newHeight = startHeight
+      
+      // Calcul selon le coin sélectionné
+      if (corner.includes('e')) {
+        newWidth = startWidth + deltaX
+      }
+      if (corner.includes('w')) {
+        newWidth = startWidth - deltaX
+      }
+      if (corner.includes('s')) {
+        newHeight = startHeight + deltaY
+      }
+      if (corner.includes('n')) {
+        newHeight = startHeight - deltaY
+      }
+      
+      // Contraintes minimales
+      newWidth = Math.max(200, newWidth)
+      newHeight = Math.max(150, newHeight)
+      
+      // Maintenir le ratio d'aspect si Shift est pressé
+      if (moveEvent.shiftKey) {
+        const aspectRatio = startWidth / startHeight
+        if (Math.abs(deltaX) > Math.abs(deltaY)) {
+          newHeight = newWidth / aspectRatio
+        } else {
+          newWidth = newHeight * aspectRatio
+        }
+      }
+      
+      onResize(nodeId, Math.round(newWidth), Math.round(newHeight))
+    }
+    
+    const handleMouseUp = () => {
+      setIsResizing(false)
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+    
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+  }, [nodeId, onResize])
+  
+  if (!isVisible && !isResizing) return null
+  
+  const handleStyle = "absolute w-3 h-3 bg-blue-500 border-2 border-white rounded-full cursor-pointer hover:bg-blue-600 transition-colors"
+  
+  return (
+    <>
+      {/* Coins de redimensionnement */}
+      <div
+        className={`${handleStyle} -top-1.5 -left-1.5 cursor-nw-resize`}
+        onMouseDown={(e) => handleMouseDown(e, 'nw')}
+      />
+      <div
+        className={`${handleStyle} -top-1.5 -right-1.5 cursor-ne-resize`}
+        onMouseDown={(e) => handleMouseDown(e, 'ne')}
+      />
+      <div
+        className={`${handleStyle} -bottom-1.5 -left-1.5 cursor-sw-resize`}
+        onMouseDown={(e) => handleMouseDown(e, 'sw')}
+      />
+      <div
+        className={`${handleStyle} -bottom-1.5 -right-1.5 cursor-se-resize`}
+        onMouseDown={(e) => handleMouseDown(e, 'se')}
+      />
+    </>
   )
 }
 
@@ -299,6 +405,13 @@ export default function NoteNode({ data, selected }: NodeProps<NoteNodeData>) {
 
       {/* Toolbar flottante */}
       <NodeToolbar onEdit={handleEdit} onDelete={handleDelete} />
+      
+      {/* Handles de redimensionnement */}
+      <ResizeHandles 
+        nodeId={data.id}
+        onResize={data.onResize}
+        isVisible={selected}
+      />
     </div>
   )
 }
