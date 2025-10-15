@@ -1,0 +1,8 @@
+{
+  "buildCommand": "npm run build",
+  "framework": "nextjs",
+  "regions": ["fra1"],
+  "env": {
+    "DATABASE_URL": "@database_url"
+  }
+}
