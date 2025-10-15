@@ -2,7 +2,8 @@
 
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
-import Image from '@tiptap/extension-image'
+import { ResizableImage } from '@/lib/ResizableImage'
+import { ImageResize } from '@/lib/ImageResize'
 import Link from '@tiptap/extension-link'
 import Youtube from '@tiptap/extension-youtube'
 import Color from '@tiptap/extension-color'
@@ -15,7 +16,7 @@ import { NoteData } from '@/types'
 import { 
   X, Save, Bold, Italic, Underline, List, ListOrdered, 
   Link as LinkIcon, Image as ImageIcon, Youtube as YoutubeIcon, Palette,
-  Undo, Redo, Type, AlignLeft, AlignCenter, AlignRight
+  Undo, Redo, Maximize, Minimize, RotateCcw
 } from 'lucide-react'
 
 interface NoteContentEditorProps {
@@ -32,12 +33,13 @@ export default function NoteContentEditor({ note, onUpdate, onClose }: NoteConte
   const editor = useEditor({
     extensions: [
       StarterKit,
-      Image.configure({
+      ResizableImage.configure({
         allowBase64: true,
         HTMLAttributes: {
-          class: 'max-w-full h-auto rounded-lg',
+          class: 'max-w-full h-auto rounded-lg cursor-pointer',
         },
       }),
+      ImageResize,
       Link.configure({
         openOnClick: false,
         HTMLAttributes: {
@@ -130,6 +132,73 @@ export default function NoteContentEditor({ note, onUpdate, onClose }: NoteConte
       editor?.commands.setYoutubeVideo({ src: url })
     }
   }, [editor])
+
+  // Fonctions de redimensionnement d'images
+  const resizeImage = useCallback((size: 'small' | 'medium' | 'large' | 'original') => {
+    if (!editor) return
+
+    const { selection } = editor.state
+    const selectedNode = editor.state.doc.nodeAt(selection.from)
+    
+    if (selectedNode && selectedNode.type.name === 'resizableImage') {
+      let width: number | undefined
+      let height: number | undefined
+
+      switch (size) {
+        case 'small':
+          width = 200
+          height = undefined // Maintenir le ratio
+          break
+        case 'medium':
+          width = 400
+          height = undefined
+          break
+        case 'large':
+          width = 600
+          height = undefined
+          break
+        case 'original':
+          width = undefined
+          height = undefined
+          break
+      }
+
+      editor.commands.updateAttributes('resizableImage', {
+        width,
+        height,
+      })
+    }
+  }, [editor])
+
+  const getSelectedImageInfo = useCallback(() => {
+    if (!editor) return null
+
+    const { selection } = editor.state
+    const selectedNode = editor.state.doc.nodeAt(selection.from)
+    
+    if (selectedNode && selectedNode.type.name === 'resizableImage') {
+      return {
+        width: selectedNode.attrs.width,
+        height: selectedNode.attrs.height,
+        src: selectedNode.attrs.src,
+      }
+    }
+    return null
+  }, [editor])
+
+  const [selectedImageInfo, setSelectedImageInfo] = useState<any>(null)
+
+  // Écouter les changements de sélection pour détecter les images sélectionnées
+  useEffect(() => {
+    if (!editor) return
+
+    const updateSelection = () => {
+      setSelectedImageInfo(getSelectedImageInfo())
+    }
+
+    editor.on('selectionUpdate', updateSelection)
+    return () => editor.off('selectionUpdate', updateSelection)
+  }, [editor, getSelectedImageInfo])
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if (e.key === 'Escape') {
@@ -268,6 +337,50 @@ export default function NoteContentEditor({ note, onUpdate, onClose }: NoteConte
           >
             <Redo className="w-4 h-4 text-gray-700" />
           </button>
+
+          {/* Boutons de redimensionnement d'images (visible seulement si une image est sélectionnée) */}
+          {selectedImageInfo && (
+            <>
+              <div className="w-px h-6 bg-gray-500 mx-2" />
+              
+              <div className="flex items-center space-x-1 bg-blue-50 px-2 py-1 rounded-lg">
+                <span className="text-xs text-blue-800 font-medium">Image:</span>
+                <button
+                  onClick={() => resizeImage('small')}
+                  className="px-2 py-1 text-xs bg-blue-100 hover:bg-blue-200 rounded text-blue-800"
+                  title="Petite (200px)"
+                >
+                  <Minimize className="w-3 h-3" />
+                </button>
+                <button
+                  onClick={() => resizeImage('medium')}
+                  className="px-2 py-1 text-xs bg-blue-100 hover:bg-blue-200 rounded text-blue-800"
+                  title="Moyenne (400px)"
+                >
+                  M
+                </button>
+                <button
+                  onClick={() => resizeImage('large')}
+                  className="px-2 py-1 text-xs bg-blue-100 hover:bg-blue-200 rounded text-blue-800"
+                  title="Grande (600px)"
+                >
+                  <Maximize className="w-3 h-3" />
+                </button>
+                <button
+                  onClick={() => resizeImage('original')}
+                  className="px-2 py-1 text-xs bg-blue-100 hover:bg-blue-200 rounded text-blue-800"
+                  title="Taille originale"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                </button>
+                {selectedImageInfo.width && (
+                  <span className="text-xs text-blue-600 ml-1">
+                    {selectedImageInfo.width}px
+                  </span>
+                )}
+              </div>
+            </>
+          )}
         </div>
 
         {/* Editor Content */}
@@ -276,6 +389,13 @@ export default function NoteContentEditor({ note, onUpdate, onClose }: NoteConte
             :global(.ProseMirror) {
               color: #1f2937 !important;
               line-height: 1.6;
+            }
+            :global(.image-resize-container) {
+              position: relative;
+            }
+            :global(.ProseMirror img.ProseMirror-selectednode) {
+              outline: 2px solid #3b82f6;
+              outline-offset: 2px;
             }
             :global(.ProseMirror p) {
               color: #374151 !important;
@@ -303,7 +423,7 @@ export default function NoteContentEditor({ note, onUpdate, onClose }: NoteConte
         <div className="p-3 border-t border-gray-400 bg-gray-50 text-sm text-gray-700">
           <div className="flex items-center justify-between">
             <div>
-              💡 <strong>Conseils :</strong> Ctrl+S pour sauvegarder, Échap pour fermer, Ctrl+V pour coller des images
+              💡 <strong>Conseils :</strong> Ctrl+S pour sauvegarder, Échap pour fermer, Ctrl+V pour coller des images. Cliquez sur une image pour la redimensionner.
             </div>
             <div>
               Dernière modification : {new Date(note.updatedAt).toLocaleString('fr-FR')}
