@@ -7,7 +7,36 @@ export async function GET(
 ) {
   try {
     const canvasId = params.canvasId
+    console.error('Debug: GET /api/canvas/' + canvasId + '/notes')
 
+    // Test 1: Simple count first
+    console.error('Debug: Testing simple count...')
+    const totalCount = await prisma.note.count()
+    console.error('Debug: Total notes in DB:', totalCount)
+
+    // Test 2: Count for this canvas
+    const canvasCount = await prisma.note.count({
+      where: { canvasId: canvasId }
+    })
+    console.error('Debug: Notes for canvas', canvasId + ':', canvasCount)
+
+    // Test 3: Simple query without includes
+    console.error('Debug: Testing simple query without includes...')
+    const simpleNotes = await prisma.note.findMany({
+      where: { canvasId: canvasId },
+      select: {
+        id: true,
+        title: true,
+        x: true,
+        y: true,
+        createdAt: true
+      },
+      take: 5
+    })
+    console.error('Debug: Simple notes found:', simpleNotes.length)
+
+    // Test 4: Full query with includes
+    console.error('Debug: Testing full query with includes...')
     const notes = await prisma.note.findMany({
       where: {
         canvasId: canvasId
@@ -25,38 +54,21 @@ export async function GET(
       }
     })
     
+    console.error('Debug: Full notes found:', notes.length)
     return NextResponse.json(notes)
   } catch (error) {
-    console.error('Error fetching canvas notes:', error)
+    console.error('DETAILED ERROR fetching canvas notes:', {
+      message: error instanceof Error ? error.message : 'Unknown error',
+      stack: error instanceof Error ? error.stack : undefined,
+      canvasId: params.canvasId
+    })
     
-    // Retry logic for database connection issues
-    if (error instanceof Error && error.message.includes('connection')) {
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      try {
-        const canvasId = params.canvasId
-        const notes = await prisma.note.findMany({
-          where: {
-            canvasId: canvasId
-          },
-          include: {
-            course: true,
-            concepts: {
-              include: {
-                concept: true
-              }
-            }
-          },
-          orderBy: {
-            createdAt: 'desc'
-          }
-        })
-        return NextResponse.json(notes)
-      } catch (retryError) {
-        console.error('Retry failed:', retryError)
-      }
-    }
-    
-    return NextResponse.json({ error: 'Failed to fetch notes' }, { status: 500 })
+    return NextResponse.json({ 
+      error: 'Failed to fetch notes',
+      details: error instanceof Error ? error.message : 'Unknown error',
+      canvasId: params.canvasId,
+      timestamp: new Date().toISOString()
+    }, { status: 500 })
   }
 }
 
