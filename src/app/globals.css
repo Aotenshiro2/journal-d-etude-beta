@@ -1,196 +1,305 @@
 @import "tailwindcss";
 
 /* ===============================================
-   SYSTÈME DE THÈME AOKnowledge - Variables CSS
+   DESIGN SYSTEM MODERNE - Inspiré ShadCN UI
    =============================================== */
 
-/* THÈME LIGHT (défaut) */
-:root {
-  /* Couleurs de base */
-  --background: #ffffff;
-  --foreground: #1f2937;
-  
-  /* Canvas et workspace */
-  --canvas-bg: #f8fafc;
-  --canvas-grid: #e2e8f0;
-  
-  /* Surfaces et composants */
-  --surface: #ffffff;
-  --surface-elevated: #ffffff;
-  --border: #e5e7eb;
-  --border-strong: #d1d5db;
-  
-  /* États interactifs */
-  --hover: #f3f4f6;
-  --active: #e5e7eb;
-  --focus: #3b82f6;
-  
-  /* Texte et typographie */
-  --text-primary: #1f2937;
-  --text-secondary: #6b7280;
-  --text-muted: #9ca3af;
-  --text-inverse: #ffffff;
-  
-  /* Éditeur et contenu */
-  --editor-bg: #ffffff;
-  --editor-text: #1f2937;
-  --editor-placeholder: #9ca3af;
-  --editor-selection: #3b82f630;
-  --editor-border: #e5e7eb;
-  
-  /* Notes et nodes */
-  --note-bg: #ffffff;
-  --note-border: #e5e7eb;
-  --note-shadow: rgba(0, 0, 0, 0.1);
-  --note-text: #1f2937;
-  
-  /* Modals et overlays */
-  --modal-bg: #ffffff;
-  --modal-overlay: rgba(0, 0, 0, 0.5);
-  --modal-border: #e5e7eb;
-  
-  /* Sidebar et navigation */
-  --sidebar-bg: #f9fafb;
-  --sidebar-border: #e5e7eb;
-  --sidebar-text: #374151;
-  
-  /* Couleurs Ao Knowledge */
-  --ao-blue: #3b82f6;
-  --ao-blue-hover: #2563eb;
-  --ao-blue-light: #dbeafe;
-  --ao-purple: #8b5cf6;
-  --ao-red: #ef4444;
-  --ao-green: #10b981;
-  
-  /* Variables pour Espace de Pensée Visuelle */
-  --silence-zone: #f8fafc;
-  --composition-zone: #ffffff;
-  --block-default-bg: #fafbfc;          /* Background visible permanent */
-  --block-default-border: #e1e5e9;     /* Bordure discrète mais présente */
-  --block-hover-bg: #f4f6f8;           /* Hover subtil */
-  --block-active-bg: #f0f4f8;          /* Focus plus marqué */
-  --block-shadow: rgba(0, 0, 0, 0.04);
-  --block-border: #e1e5e9;             /* Uniformisé avec default-border */
-  --heading-bg: #f5f7fa;               /* Plus subtil */
-  --quote-bg: #f8fafc;
-  --accent-secondary: #8b5cf6;
-  --image-shadow: rgba(0, 0, 0, 0.08);
-  --fragment-spacing: 1.5rem;          /* Espacement réduit selon modèle */
-  --cognitive-padding: 4rem;           /* Padding plus équilibré */
+@layer base {
+  :root {
+    /* Base colors */
+    --background: 0 0% 100%;
+    --foreground: 240 10% 3.9%;
+    
+    /* Card colors */
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+    
+    /* Popover colors */
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 3.9%;
+    
+    /* Primary colors */
+    --primary: 240 5.9% 10%;
+    --primary-foreground: 0 0% 98%;
+    
+    /* Secondary colors */
+    --secondary: 240 4.8% 95.9%;
+    --secondary-foreground: 240 5.9% 10%;
+    
+    /* Muted colors */
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+    
+    /* Accent colors */
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
+    
+    /* Destructive colors */
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    
+    /* Border colors */
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --ring: 240 5.9% 10%;
+    
+    /* Canvas specific */
+    --canvas-bg: 240 4.8% 98%;
+    --canvas-grid: 240 5.9% 90%;
+    
+    /* Border radius */
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    /* Base colors */
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+    
+    /* Card colors */
+    --card: 240 10% 3.9%;
+    --card-foreground: 0 0% 98%;
+    
+    /* Popover colors */
+    --popover: 240 10% 3.9%;
+    --popover-foreground: 0 0% 98%;
+    
+    /* Primary colors */
+    --primary: 0 0% 98%;
+    --primary-foreground: 240 5.9% 10%;
+    
+    /* Secondary colors */
+    --secondary: 240 3.7% 15.9%;
+    --secondary-foreground: 0 0% 98%;
+    
+    /* Muted colors */
+    --muted: 240 3.7% 15.9%;
+    --muted-foreground: 240 5% 64.9%;
+    
+    /* Accent colors */
+    --accent: 240 3.7% 15.9%;
+    --accent-foreground: 0 0% 98%;
+    
+    /* Destructive colors */
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    
+    /* Border colors */
+    --border: 240 3.7% 15.9%;
+    --input: 240 3.7% 15.9%;
+    --ring: 240 4.9% 83.9%;
+    
+    /* Canvas specific */
+    --canvas-bg: 240 10% 6%;
+    --canvas-grid: 240 3.7% 15.9%;
+  }
 }
 
-/* THÈME DARK */
-[data-theme="dark"] {
-  /* Couleurs de base */
-  --background: #0f172a;
-  --foreground: #f1f5f9;
+@layer base {
+  * {
+    @apply border-border;
+  }
   
-  /* Canvas et workspace */
-  --canvas-bg: #1e293b;
-  --canvas-grid: #334155;
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
   
-  /* Surfaces et composants */
-  --surface: #1e293b;
-  --surface-elevated: #334155;
-  --border: #475569;
-  --border-strong: #64748b;
+  /* Typography base */
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-semibold tracking-tight;
+  }
   
-  /* États interactifs */
-  --hover: #334155;
-  --active: #475569;
-  --focus: #60a5fa;
+  h1 {
+    @apply text-3xl;
+  }
   
-  /* Texte et typographie */
-  --text-primary: #f1f5f9;
-  --text-secondary: #cbd5e1;
-  --text-muted: #94a3b8;
-  --text-inverse: #1e293b;
+  h2 {
+    @apply text-2xl;
+  }
   
-  /* Éditeur et contenu */
-  --editor-bg: #1e293b;
-  --editor-text: #f1f5f9;
-  --editor-placeholder: #94a3b8;
-  --editor-selection: #60a5fa30;
-  --editor-border: #475569;
+  h3 {
+    @apply text-xl;
+  }
   
-  /* Notes et nodes */
-  --note-bg: #334155;
-  --note-border: #475569;
-  --note-shadow: rgba(0, 0, 0, 0.3);
-  --note-text: #f1f5f9;
+  h4 {
+    @apply text-lg;
+  }
   
-  /* Modals et overlays */
-  --modal-bg: #1e293b;
-  --modal-overlay: rgba(0, 0, 0, 0.7);
-  --modal-border: #475569;
+  /* Focus visible pour accessibilité */
+  *:focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
   
-  /* Sidebar et navigation */
-  --sidebar-bg: #0f172a;
-  --sidebar-border: #334155;
-  --sidebar-text: #cbd5e1;
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    @apply w-2;
+  }
   
-  /* Couleurs Ao Knowledge (ajustées pour dark) */
-  --ao-blue: #60a5fa;
-  --ao-blue-hover: #3b82f6;
-  --ao-blue-light: #1e3a8a30;
-  --ao-purple: #a78bfa;
-  --ao-red: #f87171;
-  --ao-green: #34d399;
+  ::-webkit-scrollbar-track {
+    @apply bg-secondary;
+  }
   
-  /* Variables pour Espace de Pensée Visuelle (Dark) */
-  --silence-zone: #0f172a;
-  --composition-zone: #1e293b;
-  --block-default-bg: #1a1f2e;         /* Background sombre visible permanent */
-  --block-default-border: #2d3748;     /* Bordure sombre subtile */
-  --block-hover-bg: #2a2f3e;           /* Hover sombre subtil */
-  --block-active-bg: #1e40af20;        /* Focus bleu transparent */
-  --block-shadow: rgba(0, 0, 0, 0.3);
-  --block-border: #2d3748;             /* Uniformisé avec default-border */
-  --heading-bg: #242936;               /* Plus subtil */
-  --quote-bg: #1a1f2e;
-  --accent-secondary: #a78bfa;
-  --image-shadow: rgba(0, 0, 0, 0.4);
-  --fragment-spacing: 1.5rem;          /* Espacement réduit selon modèle */
-  --cognitive-padding: 4rem;           /* Padding plus équilibré */
+  ::-webkit-scrollbar-thumb {
+    @apply bg-muted-foreground/20 rounded-md;
+  }
+  
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted-foreground/30;
+  }
 }
 
 /* ===============================================
-   STYLES GLOBAUX
+   COMPOSANTS SPÉCIFIQUES À L'APPLICATION
    =============================================== */
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
-  transition: background-color 0.2s ease, color 0.2s ease;
+@layer components {
+  /* Canvas styles */
+  .canvas-background {
+    background-color: hsl(var(--canvas-bg));
+    background-image: 
+      radial-gradient(circle at 1px 1px, hsl(var(--canvas-grid)) 1px, transparent 0);
+    background-size: 20px 20px;
+  }
+  
+  /* Note styles */
+  .note-card {
+    @apply bg-card border border-border rounded-lg shadow-sm hover:shadow-md transition-all duration-200;
+  }
+  
+  .note-card.selected {
+    @apply ring-2 ring-ring border-transparent;
+  }
+  
+  .note-card.group-selected {
+    @apply ring-2 ring-orange-500 border-transparent;
+  }
+  
+  /* Sidebar styles */
+  .sidebar-card {
+    @apply bg-card border border-border rounded-xl shadow-lg backdrop-blur-sm;
+  }
+  
+  .sidebar-tab {
+    @apply px-3 py-2 text-sm font-medium rounded-md transition-all duration-200;
+  }
+  
+  .sidebar-tab.active {
+    @apply bg-primary text-primary-foreground shadow-sm;
+  }
+  
+  .sidebar-tab.inactive {
+    @apply text-muted-foreground hover:text-foreground hover:bg-muted;
+  }
+  
+  /* Modal styles */
+  .modal-overlay {
+    @apply fixed inset-0 bg-black/50 backdrop-blur-sm;
+  }
+  
+  .modal-content {
+    @apply bg-card border border-border rounded-lg shadow-2xl;
+  }
+  
+  /* Button variants inspirés ShadCN */
+  .btn {
+    @apply inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none ring-offset-background;
+  }
+  
+  .btn-default {
+    @apply bg-primary text-primary-foreground hover:bg-primary/90 h-10 py-2 px-4;
+  }
+  
+  .btn-secondary {
+    @apply bg-secondary text-secondary-foreground hover:bg-secondary/80 h-10 py-2 px-4;
+  }
+  
+  .btn-ghost {
+    @apply hover:bg-accent hover:text-accent-foreground h-10 py-2 px-4;
+  }
+  
+  .btn-outline {
+    @apply border border-input hover:bg-accent hover:text-accent-foreground h-10 py-2 px-4;
+  }
+  
+  .btn-sm {
+    @apply h-9 rounded-md px-3;
+  }
+  
+  .btn-lg {
+    @apply h-11 rounded-md px-8;
+  }
+  
+  /* Input styles */
+  .input {
+    @apply flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50;
+  }
 }
 
-/* Scrollbars personnalisées */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+/* ===============================================
+   ANIMATIONS PERSONNALISÉES
+   =============================================== */
+
+@layer utilities {
+  /* Smooth transitions pour thème */
+  .theme-transition {
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+  }
+  
+  /* Animations d'entrée */
+  .animate-in {
+    animation: fade-in 0.2s ease-out;
+  }
+  
+  .animate-out {
+    animation: fade-out 0.2s ease-out;
+  }
+  
+  /* Glass effect */
+  .glass {
+    backdrop-filter: blur(16px) saturate(180%);
+    background-color: rgba(255, 255, 255, 0.7);
+  }
+  
+  .dark .glass {
+    background-color: rgba(17, 25, 40, 0.75);
+  }
 }
 
-::-webkit-scrollbar-track {
-  background: var(--surface);
+/* ===============================================
+   REACT FLOW CUSTOMISATION
+   =============================================== */
+
+.react-flow__background {
+  background-color: hsl(var(--canvas-bg)) !important;
 }
 
-::-webkit-scrollbar-thumb {
-  background: var(--border-strong);
-  border-radius: 4px;
+.react-flow__controls {
+  @apply bg-card border border-border rounded-lg shadow-md;
 }
 
-::-webkit-scrollbar-thumb:hover {
-  background: var(--text-muted);
+.react-flow__controls button {
+  @apply bg-transparent border-none text-foreground hover:bg-muted transition-colors;
 }
 
-/* Focus ring uniforme */
-.focus-ring {
-  outline: 2px solid var(--focus);
-  outline-offset: 2px;
+.react-flow__minimap {
+  @apply bg-card border border-border rounded-lg shadow-md;
 }
 
-/* Transitions communes */
-.theme-transition {
-  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+.react-flow__handle {
+  @apply bg-primary border-2 border-background transition-all duration-200;
+}
+
+.react-flow__handle:hover {
+  @apply scale-125;
+}
+
+.react-flow__edge-path {
+  stroke: hsl(var(--muted-foreground));
+  stroke-width: 2;
+}
+
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: hsl(var(--primary));
+  stroke-width: 3;
 }

@@ -152,76 +152,68 @@ export default function Sidebar({
     <div 
       ref={sidebarRef}
       className={`
-        fixed rounded-2xl shadow-2xl z-30 
-        transition-all duration-300 select-none theme-transition
-        ${isDragging ? 'shadow-3xl scale-105' : 'hover:shadow-xl'}
+        fixed sidebar-card z-30 overflow-hidden
+        transition-all duration-300 select-none
+        ${isDragging ? 'scale-105 shadow-2xl' : 'hover:shadow-xl'}
       `}
       style={{
-        backgroundColor: 'var(--sidebar-bg)',
-        border: '1px solid var(--sidebar-border)',
         left: position.x,
         top: position.y,
         width: activeTab === 'concepts' ? '320px' : '80px',
         maxHeight: '85vh'
       }}
     >
-      {/* Header avec zone de drag et onglets */}
-      <div className="border-b border-gray-200 bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-t-2xl">
+      {/* Header moderne sans gradient */}
+      <div className="border-b border-border bg-muted/30">
         <div 
-          className="p-3 flex items-center justify-center cursor-grab active:cursor-grabbing"
+          className="p-3 flex items-center justify-center cursor-grab active:cursor-grabbing group"
           onMouseDown={handleMouseDown}
           style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
         >
           <div className="flex space-x-1">
-            <div className="w-1 h-4 bg-white/60 rounded-full"></div>
-            <div className="w-1 h-4 bg-white/60 rounded-full"></div>
-            <div className="w-1 h-4 bg-white/60 rounded-full"></div>
+            <div className="w-1 h-4 bg-muted-foreground/40 rounded-full group-hover:bg-muted-foreground/60 transition-colors"></div>
+            <div className="w-1 h-4 bg-muted-foreground/40 rounded-full group-hover:bg-muted-foreground/60 transition-colors"></div>
+            <div className="w-1 h-4 bg-muted-foreground/40 rounded-full group-hover:bg-muted-foreground/60 transition-colors"></div>
           </div>
         </div>
         
-        {/* Onglets */}
-        <div className="flex">
+        {/* Onglets modernes */}
+        <div className="flex p-1 bg-muted/50 mx-2 mb-2 rounded-lg">
           <button
             onClick={() => setActiveTab('elements')}
-            className={`flex-1 py-2 px-2 text-xs font-medium transition-colors ${
-              activeTab === 'elements' 
-                ? 'bg-white text-gray-700' 
-                : 'text-white/80 hover:text-white'
+            className={`sidebar-tab flex-1 flex flex-col items-center gap-1 ${
+              activeTab === 'elements' ? 'active' : 'inactive'
             }`}
           >
-            <BookOpen className="w-3 h-3 mx-auto" />
-            {activeTab === 'elements' && <div className="text-xs mt-1">Outils</div>}
+            <BookOpen className="w-4 h-4" />
+            {activeTab === 'elements' && <span className="text-xs">Outils</span>}
           </button>
           <button
             onClick={() => setActiveTab('concepts')}
-            className={`flex-1 py-2 px-2 text-xs font-medium transition-colors ${
-              activeTab === 'concepts' 
-                ? 'bg-white text-gray-700' 
-                : 'text-white/80 hover:text-white'
+            className={`sidebar-tab flex-1 flex flex-col items-center gap-1 ${
+              activeTab === 'concepts' ? 'active' : 'inactive'
             }`}
           >
-            <Tag className="w-3 h-3 mx-auto" />
-            {activeTab === 'concepts' && <div className="text-xs mt-1">ICT</div>}
+            <Tag className="w-4 h-4" />
+            {activeTab === 'concepts' && <span className="text-xs">ICT</span>}
           </button>
         </div>
       </div>
 
       {/* Contenu selon l'onglet actif */}
       {activeTab === 'elements' && (
-        <div className="px-3 pb-3 space-y-2">
+        <div className="p-3 space-y-3">
           {/* Outil de connexion */}
           <button
             onClick={(e) => {
               e.stopPropagation()
               onToggleConnectionMode?.()
             }}
-            className={`
-              w-full flex items-center justify-center p-3 rounded-xl border-2 border-dashed transition-all duration-200
-              ${isConnecting 
-                ? 'border-blue-400 bg-blue-50 text-blue-700 shadow-md' 
-                : 'border-gray-300 hover:border-blue-400 hover:bg-blue-25'
-              }
-            `}
+            className={`btn w-full h-12 rounded-lg transition-all duration-200 ${
+              isConnecting 
+                ? 'bg-blue-50 border-blue-200 text-blue-700 shadow-md ring-2 ring-blue-200' 
+                : 'btn-outline hover:bg-blue-50 hover:border-blue-200'
+            }`}
             title="Mode connexion"
           >
             <span className={`text-lg transition-transform ${isConnecting ? 'scale-110' : ''}`}>
@@ -235,13 +227,11 @@ export default function Sidebar({
               e.stopPropagation()
               onToggleGroupSelection?.()
             }}
-            className={`
-              w-full flex items-center justify-center p-3 rounded-xl border-2 border-dashed transition-all duration-200
-              ${isGroupSelecting 
-                ? 'border-orange-400 bg-orange-50 text-orange-700 shadow-md' 
-                : 'border-gray-300 hover:border-orange-400 hover:bg-orange-25'
-              }
-            `}
+            className={`btn w-full h-12 rounded-lg transition-all duration-200 ${
+              isGroupSelecting 
+                ? 'bg-orange-50 border-orange-200 text-orange-700 shadow-md ring-2 ring-orange-200' 
+                : 'btn-outline hover:bg-orange-50 hover:border-orange-200'
+            }`}
             title="Mode groupement - Sélectionner des notes pour les grouper"
           >
             <span className={`text-lg transition-transform ${isGroupSelecting ? 'scale-110' : ''}`}>
@@ -255,13 +245,11 @@ export default function Sidebar({
               e.stopPropagation()
               onToggleTaggingMode?.()
             }}
-            className={`
-              w-full flex items-center justify-center p-3 rounded-xl border-2 border-dashed transition-all duration-200
-              ${isTagging 
-                ? 'border-purple-400 bg-purple-50 text-purple-700 shadow-md' 
-                : 'border-gray-300 hover:border-purple-400 hover:bg-purple-25'
-              }
-            `}
+            className={`btn w-full h-12 rounded-lg transition-all duration-200 ${
+              isTagging 
+                ? 'bg-purple-50 border-purple-200 text-purple-700 shadow-md ring-2 ring-purple-200' 
+                : 'btn-outline hover:bg-purple-50 hover:border-purple-200'
+            }`}
             title="Mode tagging - Ajouter des concepts/tags aux notes"
           >
             <span className={`text-lg transition-transform ${isTagging ? 'scale-110' : ''}`}>
@@ -280,19 +268,16 @@ export default function Sidebar({
               }}
               onDragEnd={handleDragEnd}
               className={`
-                flex items-center justify-center p-3 rounded-xl border-2 border-dashed border-gray-300
-                hover:border-gray-400 hover:shadow-md cursor-grab active:cursor-grabbing
-                transition-all duration-200 group bg-white
+                note-card flex items-center justify-center h-12 cursor-grab active:cursor-grabbing
+                group hover:shadow-lg transition-all duration-200
                 ${draggedItem === item.id ? 'opacity-50 scale-95' : 'hover:scale-105'}
               `}
               title={`${item.name}: ${item.description}`}
             >
               <span 
-                className="text-lg group-hover:scale-110 transition-transform"
+                className="text-lg group-hover:scale-110 transition-transform p-2 rounded-md"
                 style={{ 
                   backgroundColor: item.color !== 'transparent' ? item.color : 'transparent',
-                  padding: item.color !== 'transparent' ? '6px' : '0',
-                  borderRadius: item.color !== 'transparent' ? '6px' : '0'
                 }}
               >
                 {item.icon}
@@ -305,29 +290,25 @@ export default function Sidebar({
       {activeTab === 'concepts' && (
         <div className="flex-1 overflow-hidden flex flex-col">
           {/* Mode selector pour concepts */}
-          <div className="p-3 border-b border-gray-200 bg-gray-50">
-            <div className="flex space-x-1 bg-gray-200 rounded-lg p-1">
+          <div className="p-3 border-b border-border bg-muted/30">
+            <div className="flex p-1 bg-muted rounded-lg">
               <button
                 onClick={() => setConceptsMode('overview')}
-                className={`flex-1 py-2 px-3 text-xs font-medium rounded-md transition-colors ${
-                  conceptsMode === 'overview' 
-                    ? 'bg-white text-gray-700 shadow-sm' 
-                    : 'text-gray-600 hover:text-gray-800'
+                className={`sidebar-tab flex-1 flex items-center justify-center gap-2 text-xs font-medium ${
+                  conceptsMode === 'overview' ? 'active' : 'inactive'
                 }`}
               >
-                <Eye className="w-3 h-3 inline mr-1" />
-                Vue d'ensemble
+                <Eye className="w-3 h-3" />
+                <span>Vue</span>
               </button>
               <button
                 onClick={() => setConceptsMode('edit')}
-                className={`flex-1 py-2 px-3 text-xs font-medium rounded-md transition-colors ${
-                  conceptsMode === 'edit' 
-                    ? 'bg-white text-gray-700 shadow-sm' 
-                    : 'text-gray-600 hover:text-gray-800'
+                className={`sidebar-tab flex-1 flex items-center justify-center gap-2 text-xs font-medium ${
+                  conceptsMode === 'edit' ? 'active' : 'inactive'
                 }`}
               >
-                <Edit className="w-3 h-3 inline mr-1" />
-                Édition
+                <Edit className="w-3 h-3" />
+                <span>Édition</span>
               </button>
             </div>
           </div>
