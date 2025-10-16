@@ -35,6 +35,23 @@
 - Accessible interactions
 - Motion design cohérent
 
+### 🤖 **AI SDK Elements** - Workflow et Architecture
+**URL:** https://ai-sdk.dev/elements/overview
+
+**Utilisation:**
+- Architecture workflow interactive inspirée de notre canvas
+- Patterns de drag-and-drop sophistiqués
+- Gestion d'état pour éléments connectés
+- Interactions multi-modales (souris + tactile)
+- Flow de données entre composants
+
+**Concepts appliqués dans notre app:**
+- Canvas interactif avec React Flow
+- Sidebar d'éléments draggables
+- Connexions visuelles entre notes
+- États de sélection et groupement
+- Workflow de création/édition fluide
+
 ## Guidelines d'Implémentation
 
 ### Palette de Couleurs
@@ -76,25 +93,30 @@ text-xl: 1.25rem;    /* 20px */
 ## Composants de l'App à Moderniser
 
 ### Priorité 1 - Core UI
-- [ ] **Sidebar**: Design ShadCN Card + Hero UI animations
-- [ ] **NoteNode**: Card style avec shadows subtiles
-- [ ] **Canvas**: Background et contrôles modernisés
+- [x] **Sidebar**: Design ShadCN Card + Hero UI animations
+- [x] **NoteNode**: Card style avec shadows subtiles
+- [x] **Canvas**: Background et contrôles modernisés
 
 ### Priorité 2 - Interactions
-- [ ] **Modals**: Animations Hero UI (scale, fade)
-- [ ] **Forms**: Input states ShadCN style
+- [x] **Modals**: Animations Hero UI (scale, fade)
+- [x] **Forms**: Input states ShadCN style
 - [ ] **Notifications**: Toast system moderne
 
 ### Priorité 3 - Polish
-- [ ] **Dark Mode**: Transitions fluides
-- [ ] **Micro-interactions**: Hover states partout
+- [x] **Dark Mode**: Transitions fluides
+- [x] **Micro-interactions**: Hover states partout
 - [ ] **Loading States**: Skeletons cohérents
 
 ## Notes de Mise à Jour
 
-**Date:** 16 octobre 2025
-**Version:** v1.0 - Setup initial des références
-**Prochaines étapes:** Configuration Tailwind avec tokens ShadCN
+**Date:** 17 octobre 2025
+**Version:** v2.0 - Refonte interface complète + ajout AI SDK Elements
+**Dernières réalisations:** 
+- ✅ Canvas nettoyé et Panel top-right avec toggle dark/light
+- ✅ Sidebar réorganisée (Notes → Concepts → Groupement)
+- ✅ Icônes Lucide modernes + export PDF déplacé
+- ✅ Design system ShadCN UI pleinement intégré
+**Prochaines étapes:** Workflow AI Elements + animations avancées
 
 ---
 
