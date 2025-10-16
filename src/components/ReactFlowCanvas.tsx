@@ -90,7 +90,9 @@ export default function ReactFlowCanvas({
 
   // Convertir les notes en nodes React Flow
   const convertNotesToNodes = useCallback((notesList: NoteData[]): Node[] => {
-    return notesList.map((note) => {
+    console.log('🔄 convertNotesToNodes called with:', notesList.length, 'notes')
+    
+    const nodes = notesList.map((note) => {
       // Enrichir avec les données de course et instructor
       const course = courses.find(c => c.id === note.courseId)
       const instructor = instructors.find(i => i.id === note.instructorId)
@@ -98,7 +100,7 @@ export default function ReactFlowCanvas({
       // Récupérer les concepts réels de la note
       const noteConcepts = note.concepts ? note.concepts.map(nc => nc.concept.name) : []
       
-      return {
+      const nodeData = {
         id: note.id,
         type: 'noteNode',
         position: { x: note.x, y: note.y },
@@ -128,7 +130,18 @@ export default function ReactFlowCanvas({
         },
         dragHandle: '.drag-handle',
       }
+      
+      console.log('🎯 Converting note to node:', { 
+        noteId: note.id, 
+        position: { x: note.x, y: note.y },
+        title: note.title 
+      })
+      
+      return nodeData
     })
+    
+    console.log('✅ Converted', nodes.length, 'nodes for React Flow')
+    return nodes
   }, [selectedNoteId, selectedNotes, isConnecting, connectingFromId, isGroupSelecting, isTagging, onNoteSelect, onNoteDelete, onNoteDoubleClick, onNoteGroupSelect, onNoteTagClick, courses, instructors])
 
   // Convertir les connexions en edges React Flow
@@ -157,7 +170,9 @@ export default function ReactFlowCanvas({
 
   // Mettre à jour les nodes quand les notes changent
   useEffect(() => {
+    console.log('📲 useEffect for nodes update triggered, notes length:', notes.length)
     const newNodes = convertNotesToNodes(notes)
+    console.log('🔄 Setting new nodes in React Flow, count:', newNodes.length)
     setNodes(newNodes)
   }, [notes, convertNotesToNodes, setNodes])
 
@@ -244,16 +259,25 @@ export default function ReactFlowCanvas({
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault()
-    if (!reactFlowInstance) return
+    if (!reactFlowInstance) {
+      console.warn('⚠️ handleDrop: reactFlowInstance not available')
+      return
+    }
 
     const elementType = e.dataTransfer.getData('text/plain')
+    console.log('🎯 handleDrop triggered, elementType:', elementType)
+    
     if (elementType) {
       const bounds = (e.target as HTMLElement).getBoundingClientRect()
       const position = reactFlowInstance.screenToFlowPosition({
         x: e.clientX - bounds.left,
         y: e.clientY - bounds.top,
       })
+      console.log('📍 Drop position calculated:', position)
+      console.log('🚀 Calling onNoteCreate with:', { position, elementType })
       onNoteCreate(position, elementType)
+    } else {
+      console.warn('⚠️ No elementType found in drag data')
     }
   }, [reactFlowInstance, onNoteCreate])
 

@@ -1,6 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -11,39 +8,39 @@ datasource db {
 }
 
 model Note {
-  id          String   @id @default(uuid())
-  title       String   @default("Nouvelle note")
-  content     String   @default("")
-  mainTakeaway String? // Enseignement principal de la note
-  canvasId    String   @default("default-canvas") // Canvas auquel appartient cette note
-  x           Float    @default(0)
-  y           Float    @default(0)
-  width       Float    @default(300)
-  height      Float    @default(200)
-  backgroundColor String @default("#ffffff")
-  textColor   String   @default("#000000")
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  courseId    String?
-  course      Course?  @relation(fields: [courseId], references: [id], onDelete: SetNull)
-  connections NoteConnection[] @relation("FromNote")
-  connectedFrom NoteConnection[] @relation("ToNote")
-  concepts    NoteConcept[]
-  
+  id              String           @id @default(uuid())
+  title           String           @default("Nouvelle note")
+  content         String           @default("")
+  x               Float            @default(0)
+  y               Float            @default(0)
+  width           Float            @default(300)
+  height          Float            @default(200)
+  backgroundColor String           @default("#ffffff")
+  textColor       String           @default("#000000")
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  courseId        String?
+  mainTakeaway    String?
+  canvasId        String           @default("default-canvas")
+  course          Course?          @relation(fields: [courseId], references: [id])
+  concepts        NoteConcept[]
+  connections     NoteConnection[] @relation("FromNote")
+  connectedFrom   NoteConnection[] @relation("ToNote")
+
   @@index([canvasId])
 }
 
 model Instructor {
-  id          String   @id @default(uuid())
-  name        String
-  email       String?
-  avatar      String?
-  color       String   @default("#6366f1")
-  canvasId    String   @default("default-canvas") // Canvas auquel appartient cet instructeur
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  courses     Course[]
-  
+  id        String   @id @default(uuid())
+  name      String
+  email     String?
+  avatar    String?
+  color     String   @default("#6366f1")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  canvasId  String   @default("default-canvas")
+  courses   Course[]
+
   @@index([canvasId])
 }
 
@@ -52,43 +49,43 @@ model Course {
   name         String
   description  String?
   color        String      @default("#3b82f6")
-  canvasId     String      @default("default-canvas") // Canvas auquel appartient ce cours
   instructorId String?
-  instructor   Instructor? @relation(fields: [instructorId], references: [id], onDelete: SetNull)
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
+  canvasId     String      @default("default-canvas")
+  instructor   Instructor? @relation(fields: [instructorId], references: [id])
   notes        Note[]
-  
+
   @@index([canvasId])
 }
 
 model Concept {
-  id          String   @id @default(uuid())
-  name        String   @unique
+  id          String        @id @default(uuid())
+  name        String        @unique
   description String?
-  category    String?  // ICT, Smart Money, etc.
-  frequency   Int      @default(1)
-  createdAt   DateTime @default(now())
+  category    String?
+  frequency   Int           @default(1)
+  createdAt   DateTime      @default(now())
   notes       NoteConcept[]
 }
 
 model NoteConcept {
   noteId    String
   conceptId String
-  note      Note    @relation(fields: [noteId], references: [id], onDelete: Cascade)
   concept   Concept @relation(fields: [conceptId], references: [id], onDelete: Cascade)
-  
+  note      Note    @relation(fields: [noteId], references: [id], onDelete: Cascade)
+
   @@id([noteId, conceptId])
 }
 
 model NoteConnection {
-  id       String @id @default(uuid())
+  id       String  @id @default(uuid())
   fromId   String
   toId     String
   label    String?
-  fromNote Note   @relation("FromNote", fields: [fromId], references: [id], onDelete: Cascade)
-  toNote   Note   @relation("ToNote", fields: [toId], references: [id], onDelete: Cascade)
-  
+  fromNote Note    @relation("FromNote", fields: [fromId], references: [id], onDelete: Cascade)
+  toNote   Note    @relation("ToNote", fields: [toId], references: [id], onDelete: Cascade)
+
   @@unique([fromId, toId])
 }
 

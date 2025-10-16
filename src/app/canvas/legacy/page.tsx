@@ -100,6 +100,8 @@ export default function LegacyCanvasPage() {
   }
 
   const createNote = async (position: { x: number; y: number }, elementType: string = 'note') => {
+    console.log('🔧 [LEGACY] createNote called:', { position, elementType, canvasId })
+    
     const elementConfigs = {
       note: {
         title: 'Note',
@@ -128,22 +130,47 @@ export default function LegacyCanvasPage() {
       updatedAt: new Date()
     }
 
+    console.log('📝 [LEGACY] New note created locally:', newNote)
+    console.log('📊 [LEGACY] Current notes count before:', notes.length)
+
     try {
+      console.log('🚀 [LEGACY] Sending API request to:', `/api/canvas/${canvasId}/notes`)
+      
       const response = await fetch(`/api/canvas/${canvasId}/notes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newNote)
       })
 
+      console.log('📡 [LEGACY] API response status:', response.status)
+
       if (response.ok) {
         const savedNote = await response.json()
-        setNotes(prev => [...prev, savedNote])
+        console.log('✅ [LEGACY] Note saved successfully:', savedNote)
+        
+        setNotes(prev => {
+          const newNotes = [...prev, savedNote]
+          console.log('📊 [LEGACY] Updating notes state, new count:', newNotes.length)
+          return newNotes
+        })
         setSelectedNoteId(savedNote.id)
+        console.log('🎯 [LEGACY] Note selected:', savedNote.id)
+      } else {
+        const errorData = await response.text()
+        console.error('❌ [LEGACY] API error response:', errorData)
+        throw new Error(`API Error: ${response.status}`)
       }
     } catch (error) {
-      console.error('Error creating note:', error)
-      setNotes(prev => [...prev, newNote])
+      console.error('🚨 [LEGACY] Error creating note via API:', error)
+      console.log('💾 [LEGACY] Falling back to local note creation')
+      
+      setNotes(prev => {
+        const newNotes = [...prev, newNote]
+        console.log('📊 [LEGACY] Fallback: updating notes state, new count:', newNotes.length)
+        return newNotes
+      })
       setSelectedNoteId(newNote.id)
+      console.log('🎯 [LEGACY] Fallback: note selected:', newNote.id)
     }
   }
 
