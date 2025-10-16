@@ -64,7 +64,7 @@ export default function NoteContentEditor({ note, onUpdate, onClose }: NoteConte
     editorProps: {
       attributes: {
         class: 'prose prose-lg max-w-none focus:outline-none min-h-[400px] p-6',
-        style: 'color: var(--editor-text); background-color: var(--editor-bg);',
+        style: 'color: hsl(var(--editor-text)); background-color: hsl(var(--editor-bg));',
       },
     },
     onUpdate: () => {
@@ -163,16 +163,16 @@ export default function NoteContentEditor({ note, onUpdate, onClose }: NoteConte
       <div 
         className="rounded-lg shadow-2xl w-[95vw] h-[95vh] flex flex-col overflow-hidden theme-transition"
         style={{ 
-          backgroundColor: 'var(--modal-bg)',
-          border: '1px solid var(--modal-border)'
+          backgroundColor: 'hsl(var(--modal-bg))',
+          border: '1px solid hsl(var(--modal-border))'
         }}
       >
         {/* Header */}
         <div 
           className="flex items-center justify-between p-4 theme-transition"
           style={{ 
-            borderBottom: '1px solid var(--border)',
-            backgroundColor: 'var(--surface-elevated)'
+            borderBottom: '1px solid hsl(var(--border))',
+            backgroundColor: 'hsl(var(--surface-elevated))'
           }}
         >
           <div className="flex items-center space-x-4 flex-1">
@@ -185,9 +185,9 @@ export default function NoteContentEditor({ note, onUpdate, onClose }: NoteConte
               }}
               className="text-xl font-semibold rounded-lg px-3 py-2 outline-none flex-1 theme-transition focus-ring"
               style={{
-                backgroundColor: 'var(--surface)',
-                border: '1px solid var(--border)',
-                color: 'var(--text-primary)'
+                backgroundColor: 'hsl(var(--surface))',
+                border: '1px solid hsl(var(--border))',
+                color: 'hsl(var(--text-primary))'
               }}
               placeholder="Titre de la note..."
             />
@@ -204,8 +204,8 @@ export default function NoteContentEditor({ note, onUpdate, onClose }: NoteConte
               disabled={!hasChanges || isSaving}
               className="px-4 py-2 rounded-lg disabled:opacity-50 flex items-center space-x-2 transition-colors"
               style={{
-                backgroundColor: 'var(--ao-blue)',
-                color: 'var(--text-inverse)'
+                backgroundColor: 'hsl(var(--ao-blue))',
+                color: 'hsl(var(--text-inverse))'
               }}
               onMouseOver={(e) => !e.currentTarget.disabled && (e.currentTarget.style.opacity = '0.9')}
               onMouseOut={(e) => !e.currentTarget.disabled && (e.currentTarget.style.opacity = '1')}
@@ -217,11 +217,11 @@ export default function NoteContentEditor({ note, onUpdate, onClose }: NoteConte
               onClick={onClose}
               className="p-2 rounded-lg transition-colors"
               style={{
-                backgroundColor: 'var(--hover)',
-                color: 'var(--ao-red)'
+                backgroundColor: 'hsl(var(--hover))',
+                color: 'hsl(var(--ao-red))'
               }}
-              onMouseOver={(e) => e.currentTarget.style.backgroundColor = 'var(--active)'}
-              onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'var(--hover)'}
+              onMouseOver={(e) => e.currentTarget.style.backgroundColor = 'hsl(var(--active))'}
+              onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'hsl(var(--hover))'}
             >
               <X className="w-6 h-6" />
             </button>
@@ -232,8 +232,8 @@ export default function NoteContentEditor({ note, onUpdate, onClose }: NoteConte
         <div 
           className="flex items-center space-x-1 p-3 overflow-x-auto theme-transition"
           style={{
-            borderBottom: '1px solid var(--border)',
-            backgroundColor: 'var(--surface-elevated)'
+            borderBottom: '1px solid hsl(var(--border))',
+            backgroundColor: 'hsl(var(--surface-elevated))'
           }}
         >
           <button
@@ -316,11 +316,11 @@ export default function NoteContentEditor({ note, onUpdate, onClose }: NoteConte
         {/* Editor Content */}
         <div 
           className="flex-1 overflow-y-auto theme-transition"
-          style={{ backgroundColor: 'var(--editor-bg)' }}
+          style={{ backgroundColor: 'hsl(var(--editor-bg))' }}
         >
           <style jsx>{`
             :global(.ProseMirror) {
-              color: var(--editor-text) !important;
+              color: hsl(var(--editor-text)) !important;
               line-height: 1.6;
             }
             :global(.image-resize-container) {
@@ -346,21 +346,21 @@ export default function NoteContentEditor({ note, onUpdate, onClose }: NoteConte
               opacity: 0.9;
             }
             :global(.ProseMirror p) {
-              color: var(--editor-text) !important;
+              color: hsl(var(--editor-text)) !important;
               margin: 0.75rem 0;
             }
             :global(.ProseMirror h1, .ProseMirror h2, .ProseMirror h3) {
-              color: var(--text-primary) !important;
+              color: hsl(var(--text-primary)) !important;
               font-weight: 600;
             }
             :global(.ProseMirror ul, .ProseMirror ol) {
-              color: var(--editor-text) !important;
+              color: hsl(var(--editor-text)) !important;
               padding-left: 1.5rem;
             }
             :global(.ProseMirror blockquote) {
-              border-left: 4px solid var(--border-strong);
+              border-left: 4px solid hsl(var(--border-strong));
               padding-left: 1rem;
-              color: var(--text-secondary) !important;
+              color: hsl(var(--text-secondary)) !important;
               font-style: italic;
             }
           `}</style>
@@ -371,9 +371,9 @@ export default function NoteContentEditor({ note, onUpdate, onClose }: NoteConte
         <div 
           className="p-3 text-sm theme-transition"
           style={{
-            borderTop: '1px solid var(--border)',
-            backgroundColor: 'var(--surface-elevated)',
-            color: 'var(--text-secondary)'
+            borderTop: '1px solid hsl(var(--border))',
+            backgroundColor: 'hsl(var(--surface-elevated))',
+            color: 'hsl(var(--text-secondary))'
           }}
         >
           <div className="flex items-center justify-between">

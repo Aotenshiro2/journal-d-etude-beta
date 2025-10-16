@@ -46,6 +46,24 @@
   --canvas-bg: 240 4.8% 98%;
   --canvas-grid: 240 5.9% 90%;
   
+  /* Modal and Editor - Compatibility with old system */
+  --modal-overlay: rgba(0, 0, 0, 0.5);
+  --modal-bg: 0 0% 100%;
+  --modal-border: 240 5.9% 90%;
+  --editor-bg: 0 0% 100%;
+  --editor-text: 240 10% 3.9%;
+  --surface: 240 4.8% 95.9%;
+  --surface-elevated: 240 4.8% 97%;
+  --text-primary: 240 10% 3.9%;
+  --text-secondary: 240 3.8% 46.1%;
+  --text-inverse: 0 0% 98%;
+  --border-strong: 240 5.9% 80%;
+  --hover: 240 4.8% 92%;
+  --active: 240 4.8% 88%;
+  --ao-blue: 217 91% 60%;
+  --ao-blue-hover: 217 91% 55%;
+  --ao-red: 0 84.2% 60.2%;
+  
   /* Border radius */
   --radius: 0.5rem;
 }
@@ -91,6 +109,24 @@
   /* Canvas specific */
   --canvas-bg: 240 10% 6%;
   --canvas-grid: 240 3.7% 15.9%;
+  
+  /* Modal and Editor - Dark mode */
+  --modal-overlay: rgba(0, 0, 0, 0.7);
+  --modal-bg: 240 10% 3.9%;
+  --modal-border: 240 3.7% 15.9%;
+  --editor-bg: 240 10% 3.9%;
+  --editor-text: 0 0% 98%;
+  --surface: 240 3.7% 15.9%;
+  --surface-elevated: 240 3.7% 18%;
+  --text-primary: 0 0% 98%;
+  --text-secondary: 240 5% 64.9%;
+  --text-inverse: 240 5.9% 10%;
+  --border-strong: 240 3.7% 25%;
+  --hover: 240 3.7% 20%;
+  --active: 240 3.7% 25%;
+  --ao-blue: 217 91% 65%;
+  --ao-blue-hover: 217 91% 70%;
+  --ao-red: 0 62.8% 30.6%;
 }
 
 @layer base {
