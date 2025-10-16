@@ -6,7 +6,7 @@
     "dev": "next dev",
     "dev:stable": "nodemon --exec \"npm run dev\" --watch src --ext ts,tsx,js,jsx --delay 2500",
     "dev:watch": "nodemon --exec \"next dev\" --watch src --watch prisma --ext ts,tsx,js,jsx,prisma --delay 2500 --verbose",
-    "build": "next build",
+    "build": "prisma generate && next build",
     "start": "next start",
     "lint": "eslint",
     "db:push": "prisma db push",
