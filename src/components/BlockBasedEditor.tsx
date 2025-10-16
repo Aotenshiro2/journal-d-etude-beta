@@ -346,42 +346,43 @@ export default function BlockBasedEditor({ note, onUpdate, onClose }: BlockBased
               display: none !important;
             }
             
-            /* ZONE DE COMPOSITION CENTRÉE */
+            /* ZONE DE COMPOSITION CENTRÉE selon modèle */
             .bn-editor {
-              max-width: 800px !important;
+              max-width: 700px !important;
               margin: 0 auto !important;
-              padding: var(--cognitive-padding) 3rem !important;
+              padding: var(--cognitive-padding) 2.5rem !important;
               min-height: calc(100vh - 160px) !important;
               background-color: transparent !important;
               color: var(--editor-text) !important;
-              line-height: 2.0 !important;
+              line-height: 1.8 !important;
               font-size: 16px !important;
             }
             
-            /* FRAGMENTS DE PENSÉE - Chaque bloc comme entité visuelle */
+            /* FRAGMENTS DE PENSÉE - Blocs constamment visibles selon modèle */
             .bn-block-outer {
               margin: var(--fragment-spacing) 0 !important;
-              padding: 1.5rem !important;
-              border-radius: 8px !important;
+              padding: 1rem 1.5rem !important;
+              border-radius: 6px !important;
               transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
               position: relative !important;
-              border: 1px solid transparent !important;
-              background: transparent !important;
+              /* VISIBILITÉ PERMANENTE inspirée du modèle */
+              border: 1px solid var(--block-default-border) !important;
+              background: var(--block-default-bg) !important;
             }
             
-            /* États de composition des fragments */
+            /* États subtils inspirés du modèle */
             .bn-block-outer:hover {
               background: var(--block-hover-bg) !important;
-              box-shadow: 0 4px 12px var(--block-shadow) !important;
-              transform: translateY(-2px) !important;
-              border-color: var(--block-border) !important;
+              box-shadow: 0 2px 8px var(--block-shadow) !important;
+              transform: translateY(-1px) !important;
+              border-color: var(--ao-blue) !important;
             }
             
             .bn-block-outer:focus-within {
               background: var(--block-active-bg) !important;
-              border-left: 3px solid var(--ao-blue) !important;
-              padding-left: 1.375rem !important;
-              box-shadow: 0 8px 24px var(--block-shadow) !important;
+              border-color: var(--ao-blue) !important;
+              box-shadow: 0 4px 16px var(--block-shadow) !important;
+              /* Plus de décalage padding pour effet moins dramatique */
             }
             
             /* TYPOGRAPHIE COGNITIVE */
@@ -432,9 +433,9 @@ export default function BlockBasedEditor({ note, onUpdate, onClose }: BlockBased
               border-left: 2px solid var(--accent-secondary) !important;
             }
             
-            /* Paragraphes - espacement respirant */
+            /* Paragraphes - espacement équilibré selon modèle */
             .bn-block-content p {
-              margin: 1.5rem 0 !important;
+              margin: 1rem 0 !important;
               color: var(--editor-text) !important;
               font-size: 16px !important;
             }
@@ -595,23 +596,23 @@ export default function BlockBasedEditor({ note, onUpdate, onClose }: BlockBased
               opacity: 0.4 !important;
             }
             
-            /* ESPACEMENT COGNITIF RESPONSIVE */
+            /* ESPACEMENT COGNITIF RESPONSIVE selon modèle */
             @media (max-width: 1200px) {
               .bn-editor {
                 max-width: 90% !important;
-                padding: 4rem 2rem !important;
+                padding: 3rem 2rem !important;
               }
             }
             
             @media (max-width: 768px) {
               .bn-editor {
                 max-width: 95% !important;
-                padding: 3rem 1.5rem !important;
+                padding: 2rem 1.5rem !important;
               }
               
               .bn-block-outer {
-                margin: 2rem 0 !important;
-                padding: 1rem !important;
+                margin: 1rem 0 !important;
+                padding: 0.75rem 1rem !important;
               }
             }
           `}</style>

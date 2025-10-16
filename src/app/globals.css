@@ -65,16 +65,18 @@
   /* Variables pour Espace de Pensée Visuelle */
   --silence-zone: #f8fafc;
   --composition-zone: #ffffff;
-  --block-hover-bg: #f8fafc;
-  --block-active-bg: #f0f9ff;
+  --block-default-bg: #fafbfc;          /* Background visible permanent */
+  --block-default-border: #e1e5e9;     /* Bordure discrète mais présente */
+  --block-hover-bg: #f4f6f8;           /* Hover subtil */
+  --block-active-bg: #f0f4f8;          /* Focus plus marqué */
   --block-shadow: rgba(0, 0, 0, 0.04);
-  --block-border: rgba(59, 130, 246, 0.1);
-  --heading-bg: #fafafa;
+  --block-border: #e1e5e9;             /* Uniformisé avec default-border */
+  --heading-bg: #f5f7fa;               /* Plus subtil */
   --quote-bg: #f8fafc;
   --accent-secondary: #8b5cf6;
   --image-shadow: rgba(0, 0, 0, 0.08);
-  --fragment-spacing: 3rem;
-  --cognitive-padding: 6rem;
+  --fragment-spacing: 1.5rem;          /* Espacement réduit selon modèle */
+  --cognitive-padding: 4rem;           /* Padding plus équilibré */
 }
 
 /* THÈME DARK */
@@ -138,16 +140,18 @@
   /* Variables pour Espace de Pensée Visuelle (Dark) */
   --silence-zone: #0f172a;
   --composition-zone: #1e293b;
-  --block-hover-bg: #334155;
-  --block-active-bg: #1e40af20;
-  --block-shadow: rgba(0, 0, 0, 0.2);
-  --block-border: rgba(96, 165, 250, 0.15);
-  --heading-bg: #334155;
-  --quote-bg: #1e293b;
+  --block-default-bg: #1a1f2e;         /* Background sombre visible permanent */
+  --block-default-border: #2d3748;     /* Bordure sombre subtile */
+  --block-hover-bg: #2a2f3e;           /* Hover sombre subtil */
+  --block-active-bg: #1e40af20;        /* Focus bleu transparent */
+  --block-shadow: rgba(0, 0, 0, 0.3);
+  --block-border: #2d3748;             /* Uniformisé avec default-border */
+  --heading-bg: #242936;               /* Plus subtil */
+  --quote-bg: #1a1f2e;
   --accent-secondary: #a78bfa;
   --image-shadow: rgba(0, 0, 0, 0.4);
-  --fragment-spacing: 3rem;
-  --cognitive-padding: 6rem;
+  --fragment-spacing: 1.5rem;          /* Espacement réduit selon modèle */
+  --cognitive-padding: 4rem;           /* Padding plus équilibré */
 }
 
 /* ===============================================

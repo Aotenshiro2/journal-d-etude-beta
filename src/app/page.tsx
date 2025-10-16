@@ -3,7 +3,6 @@
 import { useState, useEffect } from 'react'
 import ReactFlowCanvas from '@/components/ReactFlowCanvas'
 import NotePropertiesModal from '@/components/NotePropertiesModal'
-import NoteContentEditor from '@/components/NoteContentEditor'
 import BlockBasedEditor from '@/components/BlockBasedEditor'
 import Sidebar from '@/components/Sidebar'
 import GroupingModal from '@/components/GroupingModal'
@@ -32,7 +31,6 @@ export default function Home() {
   const [appError, setAppError] = useState<string | null>(null)
   const [contentEditorNote, setContentEditorNote] = useState<NoteData | null>(null)
   const [showGroupingModal, setShowGroupingModal] = useState(false)
-  const [useBlockEditor, setUseBlockEditor] = useState(true) // Par défaut, utiliser le nouvel éditeur
 
   // Keep-alive pour maintenir l'app active
   useKeepAlive({ interval: 300000 }) // Ping toutes les 5 minutes
@@ -562,19 +560,6 @@ export default function Home() {
         onToggleTaggingMode={handleToggleTaggingMode}
       />
       
-      {/* Bouton temporaire pour tester le switch d'éditeur */}
-      <div className="fixed top-4 right-4 z-30">
-        <button
-          onClick={() => setUseBlockEditor(!useBlockEditor)}
-          className="px-3 py-2 rounded-lg text-sm font-medium transition-colors shadow-lg"
-          style={{
-            backgroundColor: useBlockEditor ? 'var(--ao-green)' : 'var(--ao-blue)',
-            color: 'var(--text-inverse)'
-          }}
-        >
-          {useBlockEditor ? '🧩 Blocs' : '📝 Classic'}
-        </button>
-      </div>
       
       <div className="h-full">
         <ReactFlowCanvas
@@ -611,19 +596,11 @@ export default function Home() {
       )}
 
       {contentEditorNote && (
-        useBlockEditor ? (
-          <BlockBasedEditor
-            note={contentEditorNote}
-            onUpdate={(updates) => updateNote({ ...updates, id: contentEditorNote.id })}
-            onClose={closeContentEditor}
-          />
-        ) : (
-          <NoteContentEditor
-            note={contentEditorNote}
-            onUpdate={(updates) => updateNote({ ...updates, id: contentEditorNote.id })}
-            onClose={closeContentEditor}
-          />
-        )
+        <BlockBasedEditor
+          note={contentEditorNote}
+          onUpdate={(updates) => updateNote({ ...updates, id: contentEditorNote.id })}
+          onClose={closeContentEditor}
+        />
       )}
 
       {/* Indicateur de mode groupement */}
