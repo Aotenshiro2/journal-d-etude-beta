@@ -546,7 +546,10 @@ export default function Home() {
   }
 
   return (
-    <div className="h-screen w-screen overflow-hidden">
+    <div 
+      className="h-screen w-screen overflow-hidden theme-transition"
+      style={{ backgroundColor: 'var(--background)' }}
+    >
       <Sidebar 
         onElementDrop={handleElementDrop}
         isConnecting={isConnecting}

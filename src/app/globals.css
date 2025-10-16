@@ -1,26 +1,164 @@
 @import "tailwindcss";
 
+/* ===============================================
+   SYSTÈME DE THÈME AOKnowledge - Variables CSS
+   =============================================== */
+
+/* THÈME LIGHT (défaut) */
 :root {
+  /* Couleurs de base */
   --background: #ffffff;
-  --foreground: #171717;
+  --foreground: #1f2937;
+  
+  /* Canvas et workspace */
+  --canvas-bg: #f8fafc;
+  --canvas-grid: #e2e8f0;
+  
+  /* Surfaces et composants */
+  --surface: #ffffff;
+  --surface-elevated: #ffffff;
+  --border: #e5e7eb;
+  --border-strong: #d1d5db;
+  
+  /* États interactifs */
+  --hover: #f3f4f6;
+  --active: #e5e7eb;
+  --focus: #3b82f6;
+  
+  /* Texte et typographie */
+  --text-primary: #1f2937;
+  --text-secondary: #6b7280;
+  --text-muted: #9ca3af;
+  --text-inverse: #ffffff;
+  
+  /* Éditeur et contenu */
+  --editor-bg: #ffffff;
+  --editor-text: #1f2937;
+  --editor-placeholder: #9ca3af;
+  --editor-selection: #3b82f630;
+  --editor-border: #e5e7eb;
+  
+  /* Notes et nodes */
+  --note-bg: #ffffff;
+  --note-border: #e5e7eb;
+  --note-shadow: rgba(0, 0, 0, 0.1);
+  --note-text: #1f2937;
+  
+  /* Modals et overlays */
+  --modal-bg: #ffffff;
+  --modal-overlay: rgba(0, 0, 0, 0.5);
+  --modal-border: #e5e7eb;
+  
+  /* Sidebar et navigation */
+  --sidebar-bg: #f9fafb;
+  --sidebar-border: #e5e7eb;
+  --sidebar-text: #374151;
+  
+  /* Couleurs Ao Knowledge */
+  --ao-blue: #3b82f6;
+  --ao-blue-hover: #2563eb;
+  --ao-blue-light: #dbeafe;
+  --ao-purple: #8b5cf6;
+  --ao-red: #ef4444;
+  --ao-green: #10b981;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+/* THÈME DARK */
+[data-theme="dark"] {
+  /* Couleurs de base */
+  --background: #0f172a;
+  --foreground: #f1f5f9;
+  
+  /* Canvas et workspace */
+  --canvas-bg: #1e293b;
+  --canvas-grid: #334155;
+  
+  /* Surfaces et composants */
+  --surface: #1e293b;
+  --surface-elevated: #334155;
+  --border: #475569;
+  --border-strong: #64748b;
+  
+  /* États interactifs */
+  --hover: #334155;
+  --active: #475569;
+  --focus: #60a5fa;
+  
+  /* Texte et typographie */
+  --text-primary: #f1f5f9;
+  --text-secondary: #cbd5e1;
+  --text-muted: #94a3b8;
+  --text-inverse: #1e293b;
+  
+  /* Éditeur et contenu */
+  --editor-bg: #1e293b;
+  --editor-text: #f1f5f9;
+  --editor-placeholder: #94a3b8;
+  --editor-selection: #60a5fa30;
+  --editor-border: #475569;
+  
+  /* Notes et nodes */
+  --note-bg: #334155;
+  --note-border: #475569;
+  --note-shadow: rgba(0, 0, 0, 0.3);
+  --note-text: #f1f5f9;
+  
+  /* Modals et overlays */
+  --modal-bg: #1e293b;
+  --modal-overlay: rgba(0, 0, 0, 0.7);
+  --modal-border: #475569;
+  
+  /* Sidebar et navigation */
+  --sidebar-bg: #0f172a;
+  --sidebar-border: #334155;
+  --sidebar-text: #cbd5e1;
+  
+  /* Couleurs Ao Knowledge (ajustées pour dark) */
+  --ao-blue: #60a5fa;
+  --ao-blue-hover: #3b82f6;
+  --ao-blue-light: #1e3a8a30;
+  --ao-purple: #a78bfa;
+  --ao-red: #f87171;
+  --ao-green: #34d399;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
+/* ===============================================
+   STYLES GLOBAUX
+   =============================================== */
 
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* Scrollbars personnalisées */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--surface);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* Focus ring uniforme */
+.focus-ring {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* Transitions communes */
+.theme-transition {
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
 }

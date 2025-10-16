@@ -97,22 +97,46 @@ export default function TaggingModal({
   }
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
-      <div className="bg-white rounded-lg shadow-2xl w-[800px] max-h-[85vh] flex flex-col">
+    <div 
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ backgroundColor: 'var(--modal-overlay)' }}
+    >
+      <div 
+        className="rounded-lg shadow-2xl w-[800px] max-h-[85vh] flex flex-col theme-transition"
+        style={{ 
+          backgroundColor: 'var(--modal-bg)',
+          border: '1px solid var(--modal-border)'
+        }}
+      >
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-gray-200">
+        <div 
+          className="flex items-center justify-between p-6 theme-transition"
+          style={{ borderBottom: '1px solid var(--border)' }}
+        >
           <div>
-            <h2 className="text-xl font-semibold text-gray-800 flex items-center">
-              <Tag className="w-5 h-5 mr-2 text-purple-600" />
+            <h2 
+              className="text-xl font-semibold flex items-center"
+              style={{ color: 'var(--text-primary)' }}
+            >
+              <Tag className="w-5 h-5 mr-2" style={{ color: 'var(--ao-purple)' }} />
               Concepts ICT / Smart Money
             </h2>
-            <p className="text-sm text-gray-600 mt-1">
+            <p 
+              className="text-sm mt-1"
+              style={{ color: 'var(--text-secondary)' }}
+            >
               Note : {note.title}
             </p>
           </div>
           <button
             onClick={onClose}
-            className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+            className="p-2 rounded-lg transition-colors"
+            style={{
+              backgroundColor: 'var(--hover)',
+              color: 'var(--text-primary)'
+            }}
+            onMouseOver={(e) => e.currentTarget.style.backgroundColor = 'var(--active)'}
+            onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'var(--hover)'}
           >
             <X className="w-5 h-5" />
           </button>

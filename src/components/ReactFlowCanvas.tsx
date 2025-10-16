@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState, useMemo } from 'react'
+import { useTheme } from '@/contexts/ThemeContext'
 import {
   ReactFlow,
   Background,
@@ -77,6 +78,15 @@ export default function ReactFlowCanvas({
   const [nodes, setNodes, onNodesChange] = useNodesState([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
   const [reactFlowInstance, setReactFlowInstance] = useState<any>(null)
+  
+  // Gestion du thème pour React Flow
+  const { theme } = useTheme()
+  const [backgroundGridColor, setBackgroundGridColor] = useState('#e2e8f0')
+  
+  // Mettre à jour la couleur de la grille selon le thème
+  useEffect(() => {
+    setBackgroundGridColor(theme === 'dark' ? '#334155' : '#e2e8f0')
+  }, [theme])
 
   // Convertir les notes en nodes React Flow
   const convertNotesToNodes = useCallback((notesList: NoteData[]): Node[] => {
@@ -241,11 +251,17 @@ export default function ReactFlowCanvas({
 
   const minimapStyle = {
     height: 120,
-    backgroundColor: '#f8fafc',
+    backgroundColor: 'var(--canvas-bg)',
+    border: '1px solid var(--border)'
   }
 
   return (
-    <div className="w-full h-full" onDragOver={handleDragOver} onDrop={handleDrop}>
+    <div 
+      className="w-full h-full theme-transition" 
+      style={{ backgroundColor: 'var(--canvas-bg)' }}
+      onDragOver={handleDragOver} 
+      onDrop={handleDrop}
+    >
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -264,7 +280,7 @@ export default function ReactFlowCanvas({
           variant={BackgroundVariant.Dots} 
           gap={20} 
           size={1}
-          color="#e2e8f0"
+          color={backgroundGridColor}
         />
         <Controls 
           position="bottom-right"

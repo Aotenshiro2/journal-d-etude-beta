@@ -152,11 +152,13 @@ export default function Sidebar({
     <div 
       ref={sidebarRef}
       className={`
-        fixed bg-white rounded-2xl shadow-2xl border border-gray-200 z-30 
-        transition-all duration-300 select-none 
+        fixed rounded-2xl shadow-2xl z-30 
+        transition-all duration-300 select-none theme-transition
         ${isDragging ? 'shadow-3xl scale-105' : 'hover:shadow-xl'}
       `}
       style={{
+        backgroundColor: 'var(--sidebar-bg)',
+        border: '1px solid var(--sidebar-border)',
         left: position.x,
         top: position.y,
         width: activeTab === 'concepts' ? '320px' : '80px',

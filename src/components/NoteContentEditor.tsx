@@ -12,6 +12,7 @@ import OrderedList from '@tiptap/extension-ordered-list'
 import ListItem from '@tiptap/extension-list-item'
 import { useCallback, useEffect, useState } from 'react'
 import { NoteData } from '@/types'
+import { useTheme } from '@/contexts/ThemeContext'
 import { 
   X, Save, Bold, Italic, Underline, List, ListOrdered, 
   Link as LinkIcon, Image as ImageIcon, Youtube as YoutubeIcon, Palette,
@@ -28,6 +29,7 @@ export default function NoteContentEditor({ note, onUpdate, onClose }: NoteConte
   const [title, setTitle] = useState(note.title)
   const [isSaving, setIsSaving] = useState(false)
   const [hasChanges, setHasChanges] = useState(false)
+  const { theme } = useTheme()
 
   const editor = useEditor({
     extensions: [
@@ -61,7 +63,8 @@ export default function NoteContentEditor({ note, onUpdate, onClose }: NoteConte
     immediatelyRender: false,
     editorProps: {
       attributes: {
-        class: 'prose prose-lg max-w-none focus:outline-none min-h-[400px] p-6 text-gray-900',
+        class: 'prose prose-lg max-w-none focus:outline-none min-h-[400px] p-6',
+        style: 'color: var(--editor-text); background-color: var(--editor-bg);',
       },
     },
     onUpdate: () => {
@@ -153,10 +156,25 @@ export default function NoteContentEditor({ note, onUpdate, onClose }: NoteConte
   }
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
-      <div className="bg-white rounded-lg shadow-2xl w-[95vw] h-[95vh] flex flex-col overflow-hidden">
+    <div 
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ backgroundColor: 'var(--modal-overlay)' }}
+    >
+      <div 
+        className="rounded-lg shadow-2xl w-[95vw] h-[95vh] flex flex-col overflow-hidden theme-transition"
+        style={{ 
+          backgroundColor: 'var(--modal-bg)',
+          border: '1px solid var(--modal-border)'
+        }}
+      >
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-gray-500 bg-gray-50">
+        <div 
+          className="flex items-center justify-between p-4 theme-transition"
+          style={{ 
+            borderBottom: '1px solid var(--border)',
+            backgroundColor: 'var(--surface-elevated)'
+          }}
+        >
           <div className="flex items-center space-x-4 flex-1">
             <input
               type="text"
@@ -165,28 +183,45 @@ export default function NoteContentEditor({ note, onUpdate, onClose }: NoteConte
                 setTitle(e.target.value)
                 setHasChanges(true)
               }}
-              className="text-xl font-semibold bg-gray-50 border border-gray-600 rounded-lg px-3 py-2 outline-none flex-1 text-gray-900 placeholder:text-gray-600"
+              className="text-xl font-semibold rounded-lg px-3 py-2 outline-none flex-1 theme-transition focus-ring"
+              style={{
+                backgroundColor: 'var(--surface)',
+                border: '1px solid var(--border)',
+                color: 'var(--text-primary)'
+              }}
               placeholder="Titre de la note..."
             />
             {isSaving && (
-              <span className="text-sm text-blue-600">Sauvegarde...</span>
+              <span className="text-sm" style={{ color: 'var(--ao-blue)' }}>Sauvegarde...</span>
             )}
             {hasChanges && !isSaving && (
-              <span className="text-sm text-orange-600">Non sauvegardé</span>
+              <span className="text-sm" style={{ color: 'var(--ao-red)' }}>Non sauvegardé</span>
             )}
           </div>
           <div className="flex items-center space-x-2">
             <button
               onClick={handleSave}
               disabled={!hasChanges || isSaving}
-              className="px-4 py-2 bg-blue-800 text-white rounded-lg hover:bg-blue-900 disabled:opacity-50 flex items-center space-x-2"
+              className="px-4 py-2 rounded-lg disabled:opacity-50 flex items-center space-x-2 transition-colors"
+              style={{
+                backgroundColor: 'var(--ao-blue)',
+                color: 'var(--text-inverse)'
+              }}
+              onMouseOver={(e) => !e.currentTarget.disabled && (e.currentTarget.style.opacity = '0.9')}
+              onMouseOut={(e) => !e.currentTarget.disabled && (e.currentTarget.style.opacity = '1')}
             >
               <Save className="w-4 h-4" />
               <span>Sauvegarder</span>
             </button>
             <button
               onClick={onClose}
-              className="p-2 hover:bg-red-50 rounded-lg transition-colors text-red-600 hover:text-red-700"
+              className="p-2 rounded-lg transition-colors"
+              style={{
+                backgroundColor: 'var(--hover)',
+                color: 'var(--ao-red)'
+              }}
+              onMouseOver={(e) => e.currentTarget.style.backgroundColor = 'var(--active)'}
+              onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'var(--hover)'}
             >
               <X className="w-6 h-6" />
             </button>
@@ -194,7 +229,13 @@ export default function NoteContentEditor({ note, onUpdate, onClose }: NoteConte
         </div>
 
         {/* Toolbar */}
-        <div className="flex items-center space-x-1 p-3 border-b border-gray-400 bg-gray-50 overflow-x-auto">
+        <div 
+          className="flex items-center space-x-1 p-3 overflow-x-auto theme-transition"
+          style={{
+            borderBottom: '1px solid var(--border)',
+            backgroundColor: 'var(--surface-elevated)'
+          }}
+        >
           <button
             onClick={() => editor.chain().focus().toggleBold().run()}
             className={`p-2 rounded hover:bg-gray-300 ${editor.isActive('bold') ? 'bg-gray-400' : ''}`}
@@ -273,10 +314,13 @@ export default function NoteContentEditor({ note, onUpdate, onClose }: NoteConte
         </div>
 
         {/* Editor Content */}
-        <div className="flex-1 overflow-y-auto bg-white">
+        <div 
+          className="flex-1 overflow-y-auto theme-transition"
+          style={{ backgroundColor: 'var(--editor-bg)' }}
+        >
           <style jsx>{`
             :global(.ProseMirror) {
-              color: #1f2937 !important;
+              color: var(--editor-text) !important;
               line-height: 1.6;
             }
             :global(.image-resize-container) {
@@ -287,11 +331,11 @@ export default function NoteContentEditor({ note, onUpdate, onClose }: NoteConte
               transition: all 0.2s ease;
             }
             :global(.image-resize-handle:hover) {
-              background: #1d4ed8 !important;
+              background: var(--ao-blue-hover) !important;
               transform: scale(1.1);
             }
             :global(.ProseMirror img.ProseMirror-selectednode) {
-              outline: 2px solid #3b82f6;
+              outline: 2px solid var(--ao-blue);
               outline-offset: 2px;
             }
             :global(.ProseMirror img) {
@@ -302,21 +346,21 @@ export default function NoteContentEditor({ note, onUpdate, onClose }: NoteConte
               opacity: 0.9;
             }
             :global(.ProseMirror p) {
-              color: #374151 !important;
+              color: var(--editor-text) !important;
               margin: 0.75rem 0;
             }
             :global(.ProseMirror h1, .ProseMirror h2, .ProseMirror h3) {
-              color: #111827 !important;
+              color: var(--text-primary) !important;
               font-weight: 600;
             }
             :global(.ProseMirror ul, .ProseMirror ol) {
-              color: #374151 !important;
+              color: var(--editor-text) !important;
               padding-left: 1.5rem;
             }
             :global(.ProseMirror blockquote) {
-              border-left: 4px solid #6b7280;
+              border-left: 4px solid var(--border-strong);
               padding-left: 1rem;
-              color: #374151 !important;
+              color: var(--text-secondary) !important;
               font-style: italic;
             }
           `}</style>
@@ -324,7 +368,14 @@ export default function NoteContentEditor({ note, onUpdate, onClose }: NoteConte
         </div>
 
         {/* Footer */}
-        <div className="p-3 border-t border-gray-400 bg-gray-50 text-sm text-gray-700">
+        <div 
+          className="p-3 text-sm theme-transition"
+          style={{
+            borderTop: '1px solid var(--border)',
+            backgroundColor: 'var(--surface-elevated)',
+            color: 'var(--text-secondary)'
+          }}
+        >
           <div className="flex items-center justify-between">
             <div>
               💡 <strong>Conseils :</strong> Ctrl+S pour sauvegarder, Échap pour fermer, Ctrl+V pour coller des images. Sélectionnez une image et tirez ses bords pour la redimensionner.

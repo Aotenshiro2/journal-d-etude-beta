@@ -77,6 +77,45 @@ Prêt pour tests utilisateurs avec vraie valeur ajoutée.
 
 ---
 
+### ✅ COMMIT : Système dark mode cohérent complet
+
+**Contexte :**
+- Problème critique UX : Mix incohérent canvas dark + éditeurs light
+- Cahier des charges spécifiait dark mode comme feature requise
+- Nécessité d'un système de thème uniforme pour toute l'interface
+
+**Décision technique :**
+```
+Architecture thème:
+- ThemeProvider React Context + variables CSS
+- Toggle persistant localStorage + détection système
+- Variables AOKnowledge: --editor-bg, --text-primary, --modal-bg, etc.
+
+Composants thémés:
+- Toolbar: Toggle soleil/lune + boutons adaptés
+- Canvas: Background + grille + minimap responsive
+- NoteContentEditor: Modal + toolbar + TipTap styles complets
+- TaggingModal: Overlay + interface concepts
+- Sidebar: Background + bordures + éléments
+
+TipTap integration:
+- Styles JSX dynamiques avec variables CSS
+- Couleurs texte/background/selection adaptatives
+- Handles resize images + outline selon thème
+```
+
+**Impact :**
+- ✅ Cohérence visuelle totale dark/light
+- ✅ UX sans rupture entre canvas et éditeurs  
+- ✅ Persistance préférence utilisateur
+- ✅ Palette AOKnowledge respectée
+
+**Réflexions :**
+Feature critique résolue. Interface professionnelle cohérente.
+Priorité utilisateur satisfaite : plus de mix thème incohérent.
+
+---
+
 ### ✅ COMMIT PRÉVU : Mise à jour ROADMAP - État Réel Post-Audit
 
 **Contexte :**
