@@ -4,148 +4,155 @@
    DESIGN SYSTEM MODERNE - Inspiré ShadCN UI
    =============================================== */
 
-@layer base {
-  :root {
-    /* Base colors */
-    --background: 0 0% 100%;
-    --foreground: 240 10% 3.9%;
-    
-    /* Card colors */
-    --card: 0 0% 100%;
-    --card-foreground: 240 10% 3.9%;
-    
-    /* Popover colors */
-    --popover: 0 0% 100%;
-    --popover-foreground: 240 10% 3.9%;
-    
-    /* Primary colors */
-    --primary: 240 5.9% 10%;
-    --primary-foreground: 0 0% 98%;
-    
-    /* Secondary colors */
-    --secondary: 240 4.8% 95.9%;
-    --secondary-foreground: 240 5.9% 10%;
-    
-    /* Muted colors */
-    --muted: 240 4.8% 95.9%;
-    --muted-foreground: 240 3.8% 46.1%;
-    
-    /* Accent colors */
-    --accent: 240 4.8% 95.9%;
-    --accent-foreground: 240 5.9% 10%;
-    
-    /* Destructive colors */
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 0 0% 98%;
-    
-    /* Border colors */
-    --border: 240 5.9% 90%;
-    --input: 240 5.9% 90%;
-    --ring: 240 5.9% 10%;
-    
-    /* Canvas specific */
-    --canvas-bg: 240 4.8% 98%;
-    --canvas-grid: 240 5.9% 90%;
-    
-    /* Border radius */
-    --radius: 0.5rem;
-  }
+:root {
+  /* Base colors */
+  --background: 0 0% 100%;
+  --foreground: 240 10% 3.9%;
+  
+  /* Card colors */
+  --card: 0 0% 100%;
+  --card-foreground: 240 10% 3.9%;
+  
+  /* Popover colors */
+  --popover: 0 0% 100%;
+  --popover-foreground: 240 10% 3.9%;
+  
+  /* Primary colors */
+  --primary: 240 5.9% 10%;
+  --primary-foreground: 0 0% 98%;
+  
+  /* Secondary colors */
+  --secondary: 240 4.8% 95.9%;
+  --secondary-foreground: 240 5.9% 10%;
+  
+  /* Muted colors */
+  --muted: 240 4.8% 95.9%;
+  --muted-foreground: 240 3.8% 46.1%;
+  
+  /* Accent colors */
+  --accent: 240 4.8% 95.9%;
+  --accent-foreground: 240 5.9% 10%;
+  
+  /* Destructive colors */
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 0 0% 98%;
+  
+  /* Border colors */
+  --border: 240 5.9% 90%;
+  --input: 240 5.9% 90%;
+  --ring: 240 5.9% 10%;
+  
+  /* Canvas specific */
+  --canvas-bg: 240 4.8% 98%;
+  --canvas-grid: 240 5.9% 90%;
+  
+  /* Border radius */
+  --radius: 0.5rem;
+}
 
-  .dark {
-    /* Base colors */
-    --background: 240 10% 3.9%;
-    --foreground: 0 0% 98%;
-    
-    /* Card colors */
-    --card: 240 10% 3.9%;
-    --card-foreground: 0 0% 98%;
-    
-    /* Popover colors */
-    --popover: 240 10% 3.9%;
-    --popover-foreground: 0 0% 98%;
-    
-    /* Primary colors */
-    --primary: 0 0% 98%;
-    --primary-foreground: 240 5.9% 10%;
-    
-    /* Secondary colors */
-    --secondary: 240 3.7% 15.9%;
-    --secondary-foreground: 0 0% 98%;
-    
-    /* Muted colors */
-    --muted: 240 3.7% 15.9%;
-    --muted-foreground: 240 5% 64.9%;
-    
-    /* Accent colors */
-    --accent: 240 3.7% 15.9%;
-    --accent-foreground: 0 0% 98%;
-    
-    /* Destructive colors */
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
-    
-    /* Border colors */
-    --border: 240 3.7% 15.9%;
-    --input: 240 3.7% 15.9%;
-    --ring: 240 4.9% 83.9%;
-    
-    /* Canvas specific */
-    --canvas-bg: 240 10% 6%;
-    --canvas-grid: 240 3.7% 15.9%;
-  }
+.dark {
+  /* Base colors */
+  --background: 240 10% 3.9%;
+  --foreground: 0 0% 98%;
+  
+  /* Card colors */
+  --card: 240 10% 3.9%;
+  --card-foreground: 0 0% 98%;
+  
+  /* Popover colors */
+  --popover: 240 10% 3.9%;
+  --popover-foreground: 0 0% 98%;
+  
+  /* Primary colors */
+  --primary: 0 0% 98%;
+  --primary-foreground: 240 5.9% 10%;
+  
+  /* Secondary colors */
+  --secondary: 240 3.7% 15.9%;
+  --secondary-foreground: 0 0% 98%;
+  
+  /* Muted colors */
+  --muted: 240 3.7% 15.9%;
+  --muted-foreground: 240 5% 64.9%;
+  
+  /* Accent colors */
+  --accent: 240 3.7% 15.9%;
+  --accent-foreground: 0 0% 98%;
+  
+  /* Destructive colors */
+  --destructive: 0 62.8% 30.6%;
+  --destructive-foreground: 0 0% 98%;
+  
+  /* Border colors */
+  --border: 240 3.7% 15.9%;
+  --input: 240 3.7% 15.9%;
+  --ring: 240 4.9% 83.9%;
+  
+  /* Canvas specific */
+  --canvas-bg: 240 10% 6%;
+  --canvas-grid: 240 3.7% 15.9%;
 }
 
 @layer base {
   * {
-    @apply border-border;
+    border-color: hsl(var(--border));
   }
   
   body {
-    @apply bg-background text-foreground;
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
     font-feature-settings: "rlig" 1, "calt" 1;
   }
   
   /* Typography base */
   h1, h2, h3, h4, h5, h6 {
-    @apply font-semibold tracking-tight;
+    font-weight: 600;
+    letter-spacing: -0.025em;
   }
   
   h1 {
-    @apply text-3xl;
+    font-size: 1.875rem;
+    line-height: 2.25rem;
   }
   
   h2 {
-    @apply text-2xl;
+    font-size: 1.5rem;
+    line-height: 2rem;
   }
   
   h3 {
-    @apply text-xl;
+    font-size: 1.25rem;
+    line-height: 1.75rem;
   }
   
   h4 {
-    @apply text-lg;
+    font-size: 1.125rem;
+    line-height: 1.75rem;
   }
   
   /* Focus visible pour accessibilité */
   *:focus-visible {
-    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+    outline: 2px solid transparent;
+    outline-offset: 2px;
+    box-shadow: 0 0 0 2px hsl(var(--ring)), 0 0 0 4px hsl(var(--background));
   }
   
   /* Scrollbar styling */
   ::-webkit-scrollbar {
-    @apply w-2;
+    width: 0.5rem;
   }
   
   ::-webkit-scrollbar-track {
-    @apply bg-secondary;
+    background-color: hsl(var(--secondary));
   }
   
   ::-webkit-scrollbar-thumb {
-    @apply bg-muted-foreground/20 rounded-md;
+    background-color: hsl(var(--muted-foreground) / 0.2);
+    border-radius: 0.375rem;
   }
   
   ::-webkit-scrollbar-thumb:hover {
-    @apply bg-muted-foreground/30;
+    background-color: hsl(var(--muted-foreground) / 0.3);
   }
 }
 
@@ -164,75 +171,184 @@
   
   /* Note styles */
   .note-card {
-    @apply bg-card border border-border rounded-lg shadow-sm hover:shadow-md transition-all duration-200;
+    background-color: hsl(var(--card));
+    border: 1px solid hsl(var(--border));
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    transition: all 0.2s;
+  }
+  
+  .note-card:hover {
+    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
   }
   
   .note-card.selected {
-    @apply ring-2 ring-ring border-transparent;
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+    border-color: transparent;
   }
   
   .note-card.group-selected {
-    @apply ring-2 ring-orange-500 border-transparent;
+    outline: 2px solid #f97316;
+    outline-offset: 2px;
+    border-color: transparent;
   }
   
   /* Sidebar styles */
   .sidebar-card {
-    @apply bg-card border border-border rounded-xl shadow-lg backdrop-blur-sm;
+    background-color: hsl(var(--card));
+    border: 1px solid hsl(var(--border));
+    border-radius: 0.75rem;
+    box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+    backdrop-filter: blur(16px);
   }
   
   .sidebar-tab {
-    @apply px-3 py-2 text-sm font-medium rounded-md transition-all duration-200;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    border-radius: 0.375rem;
+    transition: all 0.2s;
   }
   
   .sidebar-tab.active {
-    @apply bg-primary text-primary-foreground shadow-sm;
+    background-color: hsl(var(--primary));
+    color: hsl(var(--primary-foreground));
+    box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
   }
   
   .sidebar-tab.inactive {
-    @apply text-muted-foreground hover:text-foreground hover:bg-muted;
+    color: hsl(var(--muted-foreground));
+  }
+  
+  .sidebar-tab.inactive:hover {
+    color: hsl(var(--foreground));
+    background-color: hsl(var(--muted));
   }
   
   /* Modal styles */
   .modal-overlay {
-    @apply fixed inset-0 bg-black/50 backdrop-blur-sm;
+    position: fixed;
+    inset: 0;
+    background-color: rgb(0 0 0 / 0.5);
+    backdrop-filter: blur(4px);
   }
   
   .modal-content {
-    @apply bg-card border border-border rounded-lg shadow-2xl;
+    background-color: hsl(var(--card));
+    border: 1px solid hsl(var(--border));
+    border-radius: 0.5rem;
+    box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25);
   }
   
   /* Button variants inspirés ShadCN */
   .btn {
-    @apply inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none ring-offset-background;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: colors 0.2s;
+    outline: 2px solid transparent;
+    outline-offset: 2px;
+    border: none;
+    cursor: pointer;
+  }
+  
+  .btn:focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
+  
+  .btn:disabled {
+    opacity: 0.5;
+    pointer-events: none;
   }
   
   .btn-default {
-    @apply bg-primary text-primary-foreground hover:bg-primary/90 h-10 py-2 px-4;
+    background-color: hsl(var(--primary));
+    color: hsl(var(--primary-foreground));
+    height: 2.5rem;
+    padding: 0.5rem 1rem;
+  }
+  
+  .btn-default:hover {
+    background-color: hsl(var(--primary) / 0.9);
   }
   
   .btn-secondary {
-    @apply bg-secondary text-secondary-foreground hover:bg-secondary/80 h-10 py-2 px-4;
+    background-color: hsl(var(--secondary));
+    color: hsl(var(--secondary-foreground));
+    height: 2.5rem;
+    padding: 0.5rem 1rem;
+  }
+  
+  .btn-secondary:hover {
+    background-color: hsl(var(--secondary) / 0.8);
   }
   
   .btn-ghost {
-    @apply hover:bg-accent hover:text-accent-foreground h-10 py-2 px-4;
+    height: 2.5rem;
+    padding: 0.5rem 1rem;
+    background-color: transparent;
+  }
+  
+  .btn-ghost:hover {
+    background-color: hsl(var(--accent));
+    color: hsl(var(--accent-foreground));
   }
   
   .btn-outline {
-    @apply border border-input hover:bg-accent hover:text-accent-foreground h-10 py-2 px-4;
+    border: 1px solid hsl(var(--input));
+    height: 2.5rem;
+    padding: 0.5rem 1rem;
+    background-color: transparent;
+  }
+  
+  .btn-outline:hover {
+    background-color: hsl(var(--accent));
+    color: hsl(var(--accent-foreground));
   }
   
   .btn-sm {
-    @apply h-9 rounded-md px-3;
+    height: 2.25rem;
+    border-radius: 0.375rem;
+    padding: 0 0.75rem;
   }
   
   .btn-lg {
-    @apply h-11 rounded-md px-8;
+    height: 2.75rem;
+    border-radius: 0.375rem;
+    padding: 0 2rem;
   }
   
   /* Input styles */
   .input {
-    @apply flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50;
+    display: flex;
+    height: 2.5rem;
+    width: 100%;
+    border-radius: 0.375rem;
+    border: 1px solid hsl(var(--input));
+    background-color: hsl(var(--background));
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+    transition: box-shadow 0.2s;
+  }
+  
+  .input:focus-visible {
+    outline: 2px solid transparent;
+    outline-offset: 2px;
+    box-shadow: 0 0 0 2px hsl(var(--ring));
+  }
+  
+  .input::placeholder {
+    color: hsl(var(--muted-foreground));
+  }
+  
+  .input:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
   }
 }
 
@@ -275,23 +391,38 @@
 }
 
 .react-flow__controls {
-  @apply bg-card border border-border rounded-lg shadow-md;
+  background-color: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
 }
 
 .react-flow__controls button {
-  @apply bg-transparent border-none text-foreground hover:bg-muted transition-colors;
+  background-color: transparent;
+  border: none;
+  color: hsl(var(--foreground));
+  transition: background-color 0.2s;
+}
+
+.react-flow__controls button:hover {
+  background-color: hsl(var(--muted));
 }
 
 .react-flow__minimap {
-  @apply bg-card border border-border rounded-lg shadow-md;
+  background-color: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
 }
 
 .react-flow__handle {
-  @apply bg-primary border-2 border-background transition-all duration-200;
+  background-color: hsl(var(--primary));
+  border: 2px solid hsl(var(--background));
+  transition: all 0.2s;
 }
 
 .react-flow__handle:hover {
-  @apply scale-125;
+  transform: scale(1.25);
 }
 
 .react-flow__edge-path {

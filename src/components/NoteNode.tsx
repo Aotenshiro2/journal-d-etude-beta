@@ -229,21 +229,21 @@ export default function NoteNode({ data, selected }: NodeProps<NoteNodeData>) {
         height: data.height,
       }}
     >
-      {/* Handles de connexion - Configuration optimisée */}
+      {/* Handles de connexion - Design moderne */}
       {/* Handles Target (entrée) - Côtés gauche et haut */}
       <Handle
         id="target-top"
         type="target"
         position={Position.Top}
-        className="w-4 h-4 !bg-blue-500 !border-2 !border-white !opacity-0 group-hover:!opacity-100 transition-all duration-300 hover:!scale-125 hover:!bg-blue-600 shadow-lg"
-        style={{ top: '-8px', left: '50%', transform: 'translateX(-50%)', zIndex: 10 }}
+        className="react-flow__handle w-3 h-3 !opacity-0 group-hover:!opacity-100 transition-all duration-200 hover:!scale-125"
+        style={{ top: '-6px', left: '50%', transform: 'translateX(-50%)', zIndex: 10 }}
       />
       <Handle
         id="target-left"
         type="target"
         position={Position.Left}
-        className="w-4 h-4 !bg-blue-500 !border-2 !border-white !opacity-0 group-hover:!opacity-100 transition-all duration-300 hover:!scale-125 hover:!bg-blue-600 shadow-lg"
-        style={{ left: '-8px', top: '50%', transform: 'translateY(-50%)', zIndex: 10 }}
+        className="react-flow__handle w-3 h-3 !opacity-0 group-hover:!opacity-100 transition-all duration-200 hover:!scale-125"
+        style={{ left: '-6px', top: '50%', transform: 'translateY(-50%)', zIndex: 10 }}
       />
       
       {/* Handles Source (sortie) - Côtés droite et bas */}
@@ -251,15 +251,15 @@ export default function NoteNode({ data, selected }: NodeProps<NoteNodeData>) {
         id="source-right"
         type="source"
         position={Position.Right}
-        className="w-4 h-4 !bg-green-500 !border-2 !border-white !opacity-0 group-hover:!opacity-100 transition-all duration-300 hover:!scale-125 hover:!bg-green-600 shadow-lg"
-        style={{ right: '-8px', top: '50%', transform: 'translateY(-50%)', zIndex: 10 }}
+        className="react-flow__handle w-3 h-3 !opacity-0 group-hover:!opacity-100 transition-all duration-200 hover:!scale-125"
+        style={{ right: '-6px', top: '50%', transform: 'translateY(-50%)', zIndex: 10 }}
       />
       <Handle
         id="source-bottom"
         type="source"
         position={Position.Bottom}
-        className="w-4 h-4 !bg-green-500 !border-2 !border-white !opacity-0 group-hover:!opacity-100 transition-all duration-300 hover:!scale-125 hover:!bg-green-600 shadow-lg"
-        style={{ bottom: '-8px', left: '50%', transform: 'translateX(-50%)', zIndex: 10 }}
+        className="react-flow__handle w-3 h-3 !opacity-0 group-hover:!opacity-100 transition-all duration-200 hover:!scale-125"
+        style={{ bottom: '-6px', left: '50%', transform: 'translateX(-50%)', zIndex: 10 }}
       />
 
       {/* Contenu de la note avec structure modulaire */}
