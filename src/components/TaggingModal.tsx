@@ -58,8 +58,11 @@ export default function TaggingModal({
   const [hoveredConcept, setHoveredConcept] = useState<string | null>(null)
 
   useEffect(() => {
-    if (note) {
-      // TODO: Charger les concepts existants de la note depuis l'API
+    if (note && note.concepts) {
+      // Charger les concepts existants de la note
+      const existingConcepts = note.concepts.map(nc => nc.concept.name)
+      setSelectedConcepts(existingConcepts)
+    } else {
       setSelectedConcepts([])
     }
   }, [note])

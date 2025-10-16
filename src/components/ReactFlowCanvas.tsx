@@ -85,8 +85,8 @@ export default function ReactFlowCanvas({
       const course = courses.find(c => c.id === note.courseId)
       const instructor = instructors.find(i => i.id === note.instructorId)
       
-      // TODO: Récupérer les concepts de la note depuis l'API ou state
-      const noteConcepts = ['Fair Value Gap', 'Order Block'] // Simulation pour l'instant
+      // Récupérer les concepts réels de la note
+      const noteConcepts = note.concepts ? note.concepts.map(nc => nc.concept.name) : []
       
       return {
         id: note.id,

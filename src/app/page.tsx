@@ -473,23 +473,72 @@ export default function Home() {
 
   const handleAddConcept = async (noteId: string, conceptName: string, category?: string) => {
     try {
-      // TODO: Implémenter l'API pour ajouter un concept à une note
-      console.log('Ajouter concept:', { noteId, conceptName, category })
+      const response = await fetch(`/api/notes/${noteId}/concepts`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          conceptName,
+          category,
+          description: `Concept ${category || 'personnalisé'} ajouté depuis le tagging`
+        })
+      })
       
-      // Pour l'instant, on peut simuler l'ajout
-      // Plus tard, on fera un appel API vers /api/notes/{noteId}/concepts
+      if (!response.ok) {
+        const errorData = await response.json()
+        if (response.status === 409) {
+          console.log('Concept déjà lié:', errorData.message)
+          return // Le concept est déjà lié, pas d'erreur
+        }
+        throw new Error(errorData.error || 'Erreur lors de l\'ajout du concept')
+      }
+      
+      const result = await response.json()
+      console.log('Concept ajouté avec succès:', result)
+      
+      // Rafraîchir les notes pour mettre à jour l'interface
+      await fetchNotes()
     } catch (error) {
       console.error('Erreur lors de l\'ajout du concept:', error)
       alert('Erreur lors de l\'ajout du concept')
     }
   }
 
-  const handleRemoveConcept = async (noteId: string, conceptId: string) => {
+  const handleRemoveConcept = async (noteId: string, conceptNameOrId: string) => {
     try {
-      // TODO: Implémenter l'API pour supprimer un concept d'une note
-      console.log('Supprimer concept:', { noteId, conceptId })
+      // Si conceptNameOrId ressemble à un UUID, c'est un ID, sinon c'est un nom
+      let conceptId = conceptNameOrId
       
-      // Plus tard, on fera un appel API vers /api/notes/{noteId}/concepts/{conceptId}
+      if (!conceptNameOrId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
+        // C'est un nom de concept, on doit récupérer l'ID
+        const conceptsResponse = await fetch('/api/concepts')
+        if (!conceptsResponse.ok) {
+          throw new Error('Impossible de récupérer les concepts')
+        }
+        const concepts = await conceptsResponse.json()
+        const concept = concepts.find((c: any) => c.name === conceptNameOrId)
+        
+        if (!concept) {
+          throw new Error(`Concept "${conceptNameOrId}" introuvable`)
+        }
+        conceptId = concept.id
+      }
+      
+      const response = await fetch(`/api/notes/${noteId}/concepts?conceptId=${conceptId}`, {
+        method: 'DELETE'
+      })
+      
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Erreur lors de la suppression du concept')
+      }
+      
+      const result = await response.json()
+      console.log('Concept supprimé avec succès:', result)
+      
+      // Rafraîchir les notes pour mettre à jour l'interface
+      await fetchNotes()
     } catch (error) {
       console.error('Erreur lors de la suppression du concept:', error)
       alert('Erreur lors de la suppression du concept')

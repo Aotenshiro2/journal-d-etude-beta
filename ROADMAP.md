@@ -13,11 +13,11 @@
 
 ## 📱 Applications Prévues
 
-### 1. Journal d'Études (✅ Beta Opérationnelle - Cette app)
-**Status :** 🎉 Version Beta Stable - Fonctionnalités principales terminées
+### 1. Journal d'Études (🔄 Beta Avancée - Cette app)
+**Status :** 🎯 Version Beta Avancée - Core fonctionnel, APIs concepts en finalisation
 - **Description :** Application de prise de notes interactive avec workflow React Flow
 - **URL Production :** https://journal-d-etude-beta.vercel.app/
-- **Fonctionnalités Complétées :**
+- **Fonctionnalités Core Complétées :**
   - ✅ Notes visuelles avec canvas interactif React Flow
   - ✅ Système de connexions entre notes (modes visuels)
   - ✅ Organisation par cours et formateurs (PostgreSQL)
@@ -26,8 +26,14 @@
   - ✅ Sidebar concepts ICT double-mode (30 concepts)
   - ✅ Preview notes enrichi avec métadonnées
   - ✅ Modal propriétés flottant moderne
-  - ✅ Export et système de concepts organisé
-  - ✅ Tagging et groupement de notes avancé
+  - ✅ **Intégration YouTube + timestamps** (TipTap extension)
+  - ✅ **Export PDF des notes** (fonction exportToPDF)
+  - ✅ **Éditeur fullscreen enrichi** (images drag-resize, liens, listes)
+- **Interface Concepts (partiellement complétée) :**
+  - ✅ TaggingModal sophistiqué avec 30 concepts ICT organisés
+  - ❌ APIs concepts manquantes (/api/concepts, /api/notes/[id]/concepts)
+  - ❌ Liaison concepts ↔ notes non fonctionnelle (handlers en TODO)
+  - ❌ Badges concepts sur notes dans le canvas
 
 ### 2. Applications Futures
 - **App Flashcards** : Système d'apprentissage par répétition espacée
@@ -37,14 +43,15 @@
 
 ## 🛣️ Stratégie de Développement
 
-### Phase Actuelle : Journal d'Études Beta (✅ Terminée)
-**Objectif :** ✅ Version beta stable et sécurisée créée avec succès
+### Phase Actuelle : Journal d'Études V1 (🎯 En finalisation)
+**Objectif :** 🔄 Finaliser liaison concepts-notes + stabilisation V1
 
-#### Étapes techniques accomplies
+#### Priorités restantes V1
 1. ✅ **Infrastructure dédiée** (Railway PostgreSQL + Vercel)
-2. ✅ **Développement isolé** sans contraintes legacy
-3. 🔄 **Tests utilisateurs** sur version beta (en cours)
-4. 🔄 **Optimisation et stabilisation** (finalisation)
+2. ✅ **Core features** (notes, canvas, éditeur, YouTube, PDF)
+3. 🔄 **Liaison concepts-notes** (APIs manquantes)
+4. 📋 **Dark mode** (spécifié cahier des charges)
+5. 📋 **Auth & isolation utilisateurs** (post-V1)
 
 #### Déploiement actuel
 - ✅ **URL Production :** https://journal-d-etude-beta.vercel.app/
@@ -140,14 +147,18 @@ aoknowledge.com/
 - ✅ **Éditeur :** TipTap avec extensions custom
 - ✅ **Canvas :** React Flow optimisé
 
-### Prochaines Étapes Majeures
-1. ✅ ~~Finaliser beta Journal d'Études~~ → TERMINÉ
-2. 🔄 Tests utilisateurs et feedback collection
-3. 🔄 Liaison concepts-notes fonctionnelle (API)
-4. 📋 Planifier architecture multi-apps
-5. 📋 Développer système d'authentification centralisé
-6. 📋 Créer page d'accueil unifiée
-7. 📋 Migrer vers infrastructure commune
+### Prochaines Étapes V1 (ordre priorité)
+1. 🔄 **Liaison concepts-notes fonctionnelle** (APIs manquantes - CRITIQUE)
+2. 🔄 **Dark mode implémentation** (cahier des charges)
+3. 📋 **Tests utilisateurs et feedback collection**
+4. 📋 **Polish général et stabilisation**
+
+### Étapes Post-V1 (écosystème)
+5. 📋 **Authentification & isolation utilisateurs**
+6. 📋 **Planifier architecture multi-apps**
+7. 📋 **Développer système d'authentification centralisé**  
+8. 📋 **Créer page d'accueil unifiée**
+9. 📋 **Migrer vers infrastructure commune**
 
 ### Accomplissements Session 15 Oct 2025
 - ✅ **Drag-resize images** dans éditeur TipTap avec handles ProseMirror
@@ -158,8 +169,14 @@ aoknowledge.com/
 - ✅ **Statistiques simulées** avec tendances et métriques d'usage
 - ✅ **Build stable** et déploiement production fonctionnel
 
+### Accomplissements Session 16 Oct 2025
+- ✅ **Audit complet des features** (correction erreurs d'analyse)
+- ✅ **Mise à jour ROADMAP** avec état réel post-audit
+- ✅ **Identification lacunes critiques** : APIs concepts manquantes
+- 🔄 **Priorisation V1** : Focus liaison concepts-notes + dark mode
+
 ---
 
-**Dernière mise à jour :** 15 octobre 2025
-**Version :** 1.0 Beta Opérationnelle
+**Dernière mise à jour :** 16 octobre 2025
+**Version :** 1.0 Beta Avancée - Finalisation en cours
 **Maintenu par :** Claude + Équipe AOKnowledge
