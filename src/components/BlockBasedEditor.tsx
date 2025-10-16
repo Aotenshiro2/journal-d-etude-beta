@@ -144,16 +144,34 @@ export default function BlockBasedEditor({ note, onUpdate, onClose }: BlockBased
     const handleUpdate = () => {
       setHasChanges(true)
       
-      // Auto-détection des URLs YouTube pour conversion en embed
+      // Auto-détection améliorée des URLs YouTube pour conversion en embed
       const currentBlock = editor.getTextCursorPosition().block
       if (currentBlock.type === 'paragraph') {
         const content = currentBlock.content
         if (Array.isArray(content) && content.length === 1 && content[0].type === 'text') {
-          const text = content[0].text
-          const youtubeRegex = /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/
-          if (youtubeRegex.test(text)) {
-            // Laisser BlockNote gérer la conversion automatique
-            // Les règles de paste intégrées devraient déjà faire cela
+          const text = content[0].text.trim()
+          
+          // Regex robuste pour tous les formats YouTube
+          const youtubeRegex = /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:watch\?v=|embed\/|v\/)|youtu\.be\/|m\.youtube\.com\/watch\?v=)([a-zA-Z0-9_-]{11})/
+          const match = text.match(youtubeRegex)
+          
+          if (match && text === match[0]) {
+            // URL YouTube seule dans le bloc, conversion automatique
+            setTimeout(() => {
+              try {
+                editor.updateBlock(currentBlock.id, {
+                  type: "video",
+                  props: {
+                    url: text,
+                    caption: "",
+                    showPreview: true,
+                    previewWidth: 512
+                  }
+                })
+              } catch (error) {
+                console.log('Conversion YouTube en cours via BlockNote...')
+              }
+            }, 500) // Délai pour éviter les conflits
           }
         }
       }
@@ -196,12 +214,17 @@ export default function BlockBasedEditor({ note, onUpdate, onClose }: BlockBased
           border: '1px solid var(--modal-border)'
         }}
       >
-        {/* Header minimaliste */}
+        {/* Header intégré dans l'espace de pensée */}
         <div 
-          className="flex items-center justify-between p-4 theme-transition"
+          className="flex items-center justify-between p-6 theme-transition"
           style={{ 
-            borderBottom: '1px solid var(--border)',
-            backgroundColor: 'var(--surface-elevated)'
+            borderBottom: '1px solid var(--block-border)',
+            backgroundColor: 'var(--composition-zone)',
+            background: `linear-gradient(90deg, 
+              var(--silence-zone) 0%, 
+              var(--composition-zone) 15%, 
+              var(--composition-zone) 85%, 
+              var(--silence-zone) 100%)`
           }}
         >
           <div className="flex items-center space-x-4 flex-1">
@@ -212,13 +235,18 @@ export default function BlockBasedEditor({ note, onUpdate, onClose }: BlockBased
                 setTitle(e.target.value)
                 setHasChanges(true)
               }}
-              className="text-xl font-semibold rounded-lg px-3 py-2 outline-none flex-1 theme-transition focus-ring"
+              className="text-2xl font-light rounded-lg px-4 py-3 outline-none flex-1 theme-transition"
               style={{
-                backgroundColor: 'var(--surface)',
-                border: '1px solid var(--border)',
-                color: 'var(--text-primary)'
+                backgroundColor: 'transparent',
+                border: '2px solid transparent',
+                borderBottom: '2px solid var(--block-border)',
+                color: 'var(--text-primary)',
+                fontFamily: 'Georgia, serif',
+                letterSpacing: '0.02em'
               }}
-              placeholder="Titre de la note..."
+              placeholder="Donnez un titre à votre réflexion..."
+              onFocus={(e) => e.target.style.borderBottomColor = 'var(--ao-blue)'}
+              onBlur={(e) => e.target.style.borderBottomColor = 'var(--block-border)'}
             />
             {isSaving && (
               <span className="text-sm" style={{ color: 'var(--ao-blue)' }}>Sauvegarde...</span>
@@ -227,43 +255,79 @@ export default function BlockBasedEditor({ note, onUpdate, onClose }: BlockBased
               <span className="text-sm" style={{ color: 'var(--ao-red)' }}>Non sauvegardé</span>
             )}
           </div>
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center space-x-3">
             <button
               onClick={handleSave}
               disabled={!hasChanges || isSaving}
-              className="px-4 py-2 rounded-lg disabled:opacity-50 flex items-center space-x-2 transition-colors"
+              className="px-3 py-2 rounded-full disabled:opacity-50 flex items-center space-x-2 transition-all duration-300"
               style={{
-                backgroundColor: 'var(--ao-blue)',
-                color: 'var(--text-inverse)'
+                backgroundColor: hasChanges ? 'var(--ao-blue)' : 'transparent',
+                color: hasChanges ? 'var(--text-inverse)' : 'var(--text-secondary)',
+                border: `1px solid ${hasChanges ? 'var(--ao-blue)' : 'var(--block-border)'}`,
+                fontSize: '0.875rem'
               }}
-              onMouseOver={(e) => !e.currentTarget.disabled && (e.currentTarget.style.opacity = '0.9')}
-              onMouseOut={(e) => !e.currentTarget.disabled && (e.currentTarget.style.opacity = '1')}
+              onMouseOver={(e) => {
+                if (!e.currentTarget.disabled) {
+                  e.currentTarget.style.transform = 'scale(1.05)'
+                  e.currentTarget.style.backgroundColor = 'var(--ao-blue)'
+                  e.currentTarget.style.color = 'var(--text-inverse)'
+                }
+              }}
+              onMouseOut={(e) => {
+                if (!e.currentTarget.disabled) {
+                  e.currentTarget.style.transform = 'scale(1)'
+                  e.currentTarget.style.backgroundColor = hasChanges ? 'var(--ao-blue)' : 'transparent'
+                  e.currentTarget.style.color = hasChanges ? 'var(--text-inverse)' : 'var(--text-secondary)'
+                }
+              }}
             >
-              <Save className="w-4 h-4" />
-              <span>Sauvegarder</span>
+              <Save className="w-3 h-3" />
+              <span>{isSaving ? 'Enregistrement...' : 'Sauver'}</span>
             </button>
             <button
               onClick={onClose}
-              className="p-2 rounded-lg transition-colors"
+              className="p-2 rounded-full transition-all duration-300"
               style={{
-                backgroundColor: 'var(--hover)',
-                color: 'var(--ao-red)'
+                backgroundColor: 'transparent',
+                color: 'var(--text-secondary)',
+                border: '1px solid var(--block-border)'
               }}
-              onMouseOver={(e) => e.currentTarget.style.backgroundColor = 'var(--active)'}
-              onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'var(--hover)'}
+              onMouseOver={(e) => {
+                e.currentTarget.style.transform = 'scale(1.1)'
+                e.currentTarget.style.backgroundColor = 'var(--ao-red)'
+                e.currentTarget.style.color = 'var(--text-inverse)'
+                e.currentTarget.style.borderColor = 'var(--ao-red)'
+              }}
+              onMouseOut={(e) => {
+                e.currentTarget.style.transform = 'scale(1)'
+                e.currentTarget.style.backgroundColor = 'transparent'
+                e.currentTarget.style.color = 'var(--text-secondary)'
+                e.currentTarget.style.borderColor = 'var(--block-border)'
+              }}
             >
-              <X className="w-6 h-6" />
+              <X className="w-4 h-4" />
             </button>
           </div>
         </div>
 
-        {/* Zone d'édition par blocs - interface épurée */}
+        {/* Espace de pensée visuelle - composition centrée */}
         <div 
           className="flex-1 overflow-y-auto theme-transition"
-          style={{ backgroundColor: 'var(--editor-bg)' }}
+          style={{ 
+            backgroundColor: 'var(--composition-zone)',
+            background: `linear-gradient(90deg, 
+              var(--silence-zone) 0%, 
+              var(--composition-zone) 15%, 
+              var(--composition-zone) 85%, 
+              var(--silence-zone) 100%)`
+          }}
         >
           <style jsx global>{`
-            /* MASQUER COMPLÈTEMENT tous les éléments intrusifs */
+            /* ===========================================
+               ESPACE DE PENSÉE VISUELLE - COMPOSITION COGNITIVE
+               =========================================== */
+            
+            /* MASQUER ÉLÉMENTS INTRUSIFS */
             .bn-toolbar,
             .bn-formatting-toolbar,
             .bn-slash-menu,
@@ -271,7 +335,7 @@ export default function BlockBasedEditor({ note, onUpdate, onClose }: BlockBased
               display: none !important;
             }
             
-            /* Side menu - seulement pour drag handle */
+            /* Side menu épuré - seulement drag handle */
             .bn-side-menu {
               background: transparent !important;
               border: none !important;
@@ -282,102 +346,273 @@ export default function BlockBasedEditor({ note, onUpdate, onClose }: BlockBased
               display: none !important;
             }
             
-            /* Personnaliser les couleurs selon le thème */
+            /* ZONE DE COMPOSITION CENTRÉE */
             .bn-editor {
-              background-color: var(--editor-bg) !important;
+              max-width: 800px !important;
+              margin: 0 auto !important;
+              padding: var(--cognitive-padding) 3rem !important;
+              min-height: calc(100vh - 160px) !important;
+              background-color: transparent !important;
               color: var(--editor-text) !important;
-              padding: 2rem !important;
-              line-height: 1.8 !important;
+              line-height: 2.0 !important;
               font-size: 16px !important;
             }
             
+            /* FRAGMENTS DE PENSÉE - Chaque bloc comme entité visuelle */
+            .bn-block-outer {
+              margin: var(--fragment-spacing) 0 !important;
+              padding: 1.5rem !important;
+              border-radius: 8px !important;
+              transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+              position: relative !important;
+              border: 1px solid transparent !important;
+              background: transparent !important;
+            }
+            
+            /* États de composition des fragments */
+            .bn-block-outer:hover {
+              background: var(--block-hover-bg) !important;
+              box-shadow: 0 4px 12px var(--block-shadow) !important;
+              transform: translateY(-2px) !important;
+              border-color: var(--block-border) !important;
+            }
+            
+            .bn-block-outer:focus-within {
+              background: var(--block-active-bg) !important;
+              border-left: 3px solid var(--ao-blue) !important;
+              padding-left: 1.375rem !important;
+              box-shadow: 0 8px 24px var(--block-shadow) !important;
+            }
+            
+            /* TYPOGRAPHIE COGNITIVE */
             .bn-block-content {
               color: var(--editor-text) !important;
-              line-height: 1.8 !important;
+              line-height: 2.0 !important;
             }
             
-            /* Style minimaliste pour les blocs */
-            .bn-block-outer {
-              margin: 1rem 0 !important;
-              padding: 0.5rem 0 !important;
+            /* DIFFÉRENTIATION VISUELLE DES TYPES DE BLOCS */
+            
+            /* Paragraphes standards - fragments de pensée */
+            .bn-block-content[data-content-type="paragraph"] {
+              border-left: 2px solid transparent !important;
+              padding-left: 1rem !important;
+            }
+            
+            /* Titres - présence marquée */
+            .bn-block-content h1 {
+              font-size: 2.25rem !important;
+              font-weight: 700 !important;
+              margin: 2rem 0 1.5rem 0 !important;
+              color: var(--text-primary) !important;
+              background: var(--heading-bg) !important;
+              padding: 1.5rem 2rem !important;
+              border-radius: 8px !important;
+              border-left: 4px solid var(--ao-blue) !important;
+            }
+            
+            .bn-block-content h2 {
+              font-size: 1.875rem !important;
+              font-weight: 600 !important;
+              margin: 1.75rem 0 1rem 0 !important;
+              color: var(--text-primary) !important;
+              background: var(--heading-bg) !important;
+              padding: 1rem 1.5rem !important;
               border-radius: 6px !important;
-              transition: all 0.2s ease !important;
+              border-left: 3px solid var(--ao-purple) !important;
             }
             
-            .bn-block-outer:hover {
-              background-color: var(--hover) !important;
+            .bn-block-content h3 {
+              font-size: 1.5rem !important;
+              font-weight: 600 !important;
+              margin: 1.5rem 0 0.75rem 0 !important;
+              color: var(--text-primary) !important;
+              background: var(--heading-bg) !important;
+              padding: 0.75rem 1rem !important;
+              border-radius: 4px !important;
+              border-left: 2px solid var(--accent-secondary) !important;
             }
             
-            /* Focus states épurés */
+            /* Paragraphes - espacement respirant */
+            .bn-block-content p {
+              margin: 1.5rem 0 !important;
+              color: var(--editor-text) !important;
+              font-size: 16px !important;
+            }
+            
+            /* Citations - zone distincte de réflexion */
+            .bn-block-content blockquote {
+              background: var(--quote-bg) !important;
+              border-left: 4px solid var(--accent-secondary) !important;
+              padding: 2rem 2.5rem !important;
+              margin: 2.5rem 0 !important;
+              border-radius: 0 8px 8px 0 !important;
+              font-style: italic !important;
+              color: var(--text-secondary) !important;
+              font-size: 1.1rem !important;
+              box-shadow: 0 2px 8px var(--block-shadow) !important;
+            }
+            
+            /* Images - cadre de composition visuelle */
+            .bn-block-content img {
+              border-radius: 12px !important;
+              box-shadow: 0 8px 32px var(--image-shadow) !important;
+              margin: 3rem auto !important;
+              display: block !important;
+              transition: transform 0.3s ease !important;
+            }
+            
+            .bn-block-content img:hover {
+              transform: scale(1.02) !important;
+            }
+            
+            /* DRAG HANDLES COMME POIGNÉES DE COMPOSITION */
+            .bn-drag-handle {
+              opacity: 0 !important;
+              transition: all 0.3s ease !important;
+              background: linear-gradient(135deg, var(--ao-blue), var(--ao-purple)) !important;
+              border-radius: 6px !important;
+              width: 6px !important;
+              height: 20px !important;
+              margin-right: 12px !important;
+              cursor: grab !important;
+            }
+            
+            .bn-block-outer:hover .bn-drag-handle {
+              opacity: 0.6 !important;
+            }
+            
+            .bn-drag-handle:hover {
+              opacity: 1 !important;
+              transform: scale(1.1) !important;
+              cursor: grabbing !important;
+            }
+            
+            /* ÉTATS DE FOCUS COGNITIFS */
             .bn-block-content[contenteditable="true"]:focus {
               outline: none !important;
               background-color: transparent !important;
             }
             
-            /* Drag handles ultra-discrets */
-            .bn-drag-handle {
-              opacity: 0 !important;
-              transition: opacity 0.3s ease !important;
-              background-color: var(--text-secondary) !important;
-              border-radius: 4px !important;
-              width: 4px !important;
-              margin-right: 8px !important;
-            }
-            
-            .bn-block-outer:hover .bn-drag-handle {
-              opacity: 0.4 !important;
-            }
-            
-            .bn-drag-handle:hover {
-              opacity: 0.8 !important;
-            }
-            
-            /* Style des différents types de blocs */
-            .bn-block-content h1 {
-              font-size: 2rem !important;
-              font-weight: 700 !important;
-              margin: 1.5rem 0 1rem 0 !important;
-              color: var(--text-primary) !important;
-            }
-            
-            .bn-block-content h2 {
-              font-size: 1.5rem !important;
-              font-weight: 600 !important;
-              margin: 1.25rem 0 0.75rem 0 !important;
-              color: var(--text-primary) !important;
-            }
-            
-            .bn-block-content h3 {
-              font-size: 1.25rem !important;
-              font-weight: 600 !important;
-              margin: 1rem 0 0.5rem 0 !important;
-              color: var(--text-primary) !important;
-            }
-            
-            .bn-block-content p {
-              margin: 0.75rem 0 !important;
-              color: var(--editor-text) !important;
-            }
-            
-            .bn-block-content blockquote {
-              border-left: 4px solid var(--ao-blue) !important;
-              padding-left: 1rem !important;
-              margin: 1rem 0 !important;
-              font-style: italic !important;
-              color: var(--text-secondary) !important;
-            }
-            
-            /* Placeholder discret */
+            /* PLACEHOLDERS CONTEXTUELS */
             .bn-block-content[data-placeholder]:before {
               color: var(--text-secondary) !important;
-              opacity: 0.6 !important;
+              opacity: 0.7 !important;
               font-style: italic !important;
+              content: "Exprimez votre idée..." !important;
             }
             
-            /* Sélection visuelle */
+            /* SÉLECTION HARMONIEUSE */
             .bn-block-content::selection {
               background-color: var(--ao-blue) !important;
               color: var(--text-inverse) !important;
+            }
+            
+            /* MICRO-ANIMATIONS DE COMPOSITION */
+            .bn-block-outer {
+              animation: fadeInUp 0.5s ease-out !important;
+            }
+            
+            @keyframes fadeInUp {
+              from {
+                opacity: 0;
+                transform: translateY(20px);
+              }
+              to {
+                opacity: 1;
+                transform: translateY(0);
+              }
+            }
+            
+            /* GUIDAGE VISUEL POUR LA PENSÉE STRUCTURÉE */
+            
+            /* Numérotation discrète des fragments */
+            .bn-block-outer::before {
+              content: counter(block-counter) !important;
+              counter-increment: block-counter !important;
+              position: absolute !important;
+              left: -2rem !important;
+              top: 1.5rem !important;
+              width: 1.5rem !important;
+              height: 1.5rem !important;
+              background: var(--block-border) !important;
+              color: var(--text-secondary) !important;
+              border-radius: 50% !important;
+              display: flex !important;
+              align-items: center !important;
+              justify-content: center !important;
+              font-size: 0.75rem !important;
+              font-weight: 600 !important;
+              opacity: 0 !important;
+              transition: opacity 0.3s ease !important;
+            }
+            
+            .bn-editor {
+              counter-reset: block-counter !important;
+            }
+            
+            .bn-block-outer:hover::before {
+              opacity: 0.6 !important;
+            }
+            
+            /* Indicateurs de type de contenu */
+            .bn-block-outer[data-content-type]::after {
+              content: attr(data-content-type) !important;
+              position: absolute !important;
+              right: -1rem !important;
+              top: 0.5rem !important;
+              background: var(--accent-secondary) !important;
+              color: white !important;
+              padding: 0.25rem 0.5rem !important;
+              border-radius: 4px !important;
+              font-size: 0.6rem !important;
+              font-weight: 500 !important;
+              text-transform: uppercase !important;
+              opacity: 0 !important;
+              transition: opacity 0.3s ease !important;
+              pointer-events: none !important;
+            }
+            
+            .bn-block-outer:hover[data-content-type]::after {
+              opacity: 0.8 !important;
+            }
+            
+            /* Lignes de connexion visuelles entre blocs liés */
+            .bn-block-outer + .bn-block-outer::before {
+              content: '' !important;
+              position: absolute !important;
+              left: 50% !important;
+              top: -1.5rem !important;
+              width: 2px !important;
+              height: 1rem !important;
+              background: linear-gradient(to bottom, transparent, var(--block-border)) !important;
+              transform: translateX(-50%) !important;
+              opacity: 0 !important;
+              transition: opacity 0.3s ease !important;
+            }
+            
+            .bn-block-outer:hover + .bn-block-outer::before,
+            .bn-block-outer + .bn-block-outer:hover::before {
+              opacity: 0.4 !important;
+            }
+            
+            /* ESPACEMENT COGNITIF RESPONSIVE */
+            @media (max-width: 1200px) {
+              .bn-editor {
+                max-width: 90% !important;
+                padding: 4rem 2rem !important;
+              }
+            }
+            
+            @media (max-width: 768px) {
+              .bn-editor {
+                max-width: 95% !important;
+                padding: 3rem 1.5rem !important;
+              }
+              
+              .bn-block-outer {
+                margin: 2rem 0 !important;
+                padding: 1rem !important;
+              }
             }
           `}</style>
           
@@ -391,21 +626,33 @@ export default function BlockBasedEditor({ note, onUpdate, onClose }: BlockBased
           </div>
         </div>
 
-        {/* Footer minimaliste */}
+        {/* Footer intégré dans l'espace de pensée */}
         <div 
-          className="p-3 text-sm theme-transition"
+          className="p-4 text-xs theme-transition"
           style={{
-            borderTop: '1px solid var(--border)',
-            backgroundColor: 'var(--surface-elevated)',
-            color: 'var(--text-secondary)'
+            borderTop: '1px solid var(--block-border)',
+            backgroundColor: 'var(--composition-zone)',
+            background: `linear-gradient(90deg, 
+              var(--silence-zone) 0%, 
+              var(--composition-zone) 15%, 
+              var(--composition-zone) 85%, 
+              var(--silence-zone) 100%)`,
+            color: 'var(--text-secondary)',
+            opacity: 0.8
           }}
         >
-          <div className="flex items-center justify-between">
-            <div>
-              💡 <strong>Écriture fluide :</strong> Double Entrée pour nouveau bloc, Ctrl+S pour sauvegarder, Échap pour fermer
+          <div className="flex items-center justify-center space-x-8 max-w-4xl mx-auto">
+            <div className="flex items-center space-x-1">
+              <span>🧠</span>
+              <span><strong>Espace de pensée :</strong> Chaque idée devient un bloc</span>
             </div>
-            <div>
-              Dernière modification : {new Date(note.updatedAt).toLocaleString('fr-FR')}
+            <div className="flex items-center space-x-1">
+              <span>⌨️</span>
+              <span><strong>Raccourcis :</strong> Double ↵ • Ctrl+S • Échap</span>
+            </div>
+            <div className="flex items-center space-x-1">
+              <span>📅</span>
+              <span>{new Date(note.updatedAt).toLocaleDateString('fr-FR')}</span>
             </div>
           </div>
         </div>
