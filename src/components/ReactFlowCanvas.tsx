@@ -25,7 +25,7 @@ import '@xyflow/react/dist/style.css'
 import { NoteData, ConnectionData } from '@/types'
 import NoteNode from './NoteNode'
 import { edgeTypes } from './CustomEdges'
-import { Download, FileText, Zap } from 'lucide-react'
+import { Copy, Share2, Sun, Moon } from 'lucide-react'
 
 interface ReactFlowCanvasProps {
   notes: NoteData[]
@@ -79,8 +79,8 @@ export default function ReactFlowCanvas({
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
   const [reactFlowInstance, setReactFlowInstance] = useState<any>(null)
   
-  // Gestion du thème pour React Flow
-  const { theme } = useTheme()
+  // Gestion du thème pour React Flow et toggle
+  const { theme, toggleTheme } = useTheme()
   const [backgroundGridColor, setBackgroundGridColor] = useState('#e2e8f0')
   
   // Mettre à jour la couleur de la grille selon le thème
@@ -315,38 +315,55 @@ export default function ReactFlowCanvas({
           position="bottom-left"
         />
         
-        {/* Panel avec contrôles inspiré d'AI Elements */}
-        <Panel position="top-left">
+        {/* Panel top-left supprimé - Interface nettoyée */}
+        
+        {/* Nouveau Panel top-right avec actions essentielles */}
+        <Panel position="top-right">
           <div className="flex space-x-2">
+            {/* Bouton Copier URL */}
             <button
-              className="p-2 bg-white rounded-lg shadow-md border border-gray-200 hover:bg-gray-50 transition-colors"
-              title="Exporter en PDF"
+              className="p-2 bg-card rounded-lg shadow-md border border-border hover:bg-muted transition-colors"
+              title="Copier l'URL du canvas"
               onClick={() => {
-                // TODO: Implémenter l'export
-                console.log('Export PDF')
+                navigator.clipboard.writeText(window.location.href)
+                // TODO: Ajouter notification de succès
+                console.log('URL copiée')
               }}
             >
-              <Download className="w-4 h-4 text-gray-600" />
+              <Copy className="w-4 h-4 text-foreground" />
             </button>
+            
+            {/* Bouton Partager */}
             <button
-              className="p-2 bg-white rounded-lg shadow-md border border-gray-200 hover:bg-gray-50 transition-colors"
-              title="Générer rapport"
+              className="p-2 bg-card rounded-lg shadow-md border border-border hover:bg-muted transition-colors"
+              title="Partager le canvas"
               onClick={() => {
-                // TODO: Implémenter le rapport
-                console.log('Generate report')
+                if (navigator.share) {
+                  navigator.share({
+                    title: 'Mon Canvas de Notes',
+                    url: window.location.href
+                  })
+                } else {
+                  // Fallback: copier l'URL
+                  navigator.clipboard.writeText(window.location.href)
+                  console.log('URL copiée pour partage')
+                }
               }}
             >
-              <FileText className="w-4 h-4 text-gray-600" />
+              <Share2 className="w-4 h-4 text-foreground" />
             </button>
+            
+            {/* Toggle Dark/Light Mode */}
             <button
-              className="p-2 bg-white rounded-lg shadow-md border border-gray-200 hover:bg-gray-50 transition-colors"
-              title="Mode focus"
-              onClick={() => {
-                // TODO: Implémenter le mode focus
-                console.log('Focus mode')
-              }}
+              onClick={toggleTheme}
+              className="p-2 bg-card rounded-lg shadow-md border border-border hover:bg-muted transition-colors"
+              title={theme === 'dark' ? 'Basculer en mode clair' : 'Basculer en mode sombre'}
             >
-              <Zap className="w-4 h-4 text-gray-600" />
+              {theme === 'dark' ? (
+                <Sun className="w-4 h-4 text-foreground" />
+              ) : (
+                <Moon className="w-4 h-4 text-foreground" />
+              )}
             </button>
           </div>
         </Panel>

@@ -35,6 +35,15 @@
   - ❌ Liaison concepts ↔ notes non fonctionnelle (handlers en TODO)
   - ❌ Badges concepts sur notes dans le canvas
 
+- **Interface Modernization (Octobre 2025) :**
+  - ✅ **Design System ShadCN UI** (variables CSS, composants modernes)
+  - ✅ **Refonte Canvas** (nettoyage boutons PDF/rapport/focus)
+  - ✅ **Réorganisation Sidebar** (ordre logique: Notes → Concepts → Groupement)
+  - ✅ **Panel Actions** (top-right avec partage + toggle dark/light)
+  - ✅ **Icônes Lucide** (remplacement emojis par icônes modernes)
+  - ✅ **Export PDF déplacé** (depuis canvas vers éditeur de notes)
+  - ✅ **Suppression bouton connexion** (drag-and-drop suffit)
+
 ### 2. Applications Futures
 - **App Flashcards** : Système d'apprentissage par répétition espacée
 - **App Planning** : Gestionnaire de planning et deadlines
@@ -49,9 +58,10 @@
 #### Priorités restantes V1
 1. ✅ **Infrastructure dédiée** (Railway PostgreSQL + Vercel)
 2. ✅ **Core features** (notes, canvas, éditeur, YouTube, PDF)
-3. 🔄 **Liaison concepts-notes** (APIs manquantes)
-4. 📋 **Dark mode** (spécifié cahier des charges)
-5. 📋 **Auth & isolation utilisateurs** (post-V1)
+3. ✅ **Design system moderne** (ShadCN UI + refonte interface)
+4. 🔄 **Liaison concepts-notes** (APIs manquantes)
+5. ✅ **Dark mode** (toggle intégré, thème complet)
+6. 📋 **Auth & isolation utilisateurs** (post-V1)
 
 #### Déploiement actuel
 - ✅ **URL Production :** https://journal-d-etude-beta.vercel.app/
@@ -62,6 +72,13 @@
 
 ### Phase Future : Intégration Écosystème
 **Objectif :** Intégrer dans l'infrastructure principale
+
+#### Interface UX (Session multiple - Octobre 2025)
+**Status :** 🔄 En cours - Refonte progressive sur plusieurs sessions
+- ✅ **Session 1** : Nettoyage canvas + réorganisation sidebar + toggle dark/light
+- 📋 **Session 2** : Amélioration drag-and-drop + animations fluides
+- 📋 **Session 3** : Modal concepts avancée + badges visuels
+- 📋 **Session 4** : Responsive design mobile + touch interactions
 
 #### Étapes d'intégration
 1. **Migration base de données** vers infrastructure commune

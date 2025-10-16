@@ -2,12 +2,11 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { ICT_TRADING_CONCEPTS } from '@/lib/ict-concepts'
-import { Eye, Edit, Search, Tag, BookOpen, Users, Activity } from 'lucide-react'
+import { Eye, Edit, Search, Tag, BookOpen, Users, Activity, StickyNote, Target } from 'lucide-react'
 
 interface SidebarProps {
   onElementDrop: (elementType: string, position: { x: number; y: number }) => void
-  isConnecting?: boolean
-  onToggleConnectionMode?: () => void
+  // Connexion supprimée - drag-and-drop suffit pour connecter les notes
   isGroupSelecting?: boolean
   onToggleGroupSelection?: () => void
   isTagging?: boolean
@@ -18,7 +17,7 @@ const SIDEBAR_ITEMS = [
   {
     id: 'note',
     name: 'Note',
-    icon: '📝',
+    icon: <StickyNote className="w-5 h-5" />,
     description: 'Créer une note',
     color: '#fef3c7'
   }
@@ -53,8 +52,7 @@ const TRADING_CONCEPTS_BY_CATEGORY = Object.entries(ICT_TRADING_CONCEPTS).reduce
 
 export default function Sidebar({ 
   onElementDrop, 
-  isConnecting = false, 
-  onToggleConnectionMode,
+  // isConnecting et onToggleConnectionMode supprimés
   isGroupSelecting = false,
   onToggleGroupSelection,
   isTagging = false,
@@ -203,61 +201,7 @@ export default function Sidebar({
       {/* Contenu selon l'onglet actif */}
       {activeTab === 'elements' && (
         <div className="p-3 space-y-3">
-          {/* Outil de connexion */}
-          <button
-            onClick={(e) => {
-              e.stopPropagation()
-              onToggleConnectionMode?.()
-            }}
-            className={`btn w-full h-12 rounded-lg transition-all duration-200 ${
-              isConnecting 
-                ? 'bg-blue-50 border-blue-200 text-blue-700 shadow-md ring-2 ring-blue-200' 
-                : 'btn-outline hover:bg-blue-50 hover:border-blue-200'
-            }`}
-            title="Mode connexion"
-          >
-            <span className={`text-lg transition-transform ${isConnecting ? 'scale-110' : ''}`}>
-              🔗
-            </span>
-          </button>
-
-          {/* Outil de groupement */}
-          <button
-            onClick={(e) => {
-              e.stopPropagation()
-              onToggleGroupSelection?.()
-            }}
-            className={`btn w-full h-12 rounded-lg transition-all duration-200 ${
-              isGroupSelecting 
-                ? 'bg-orange-50 border-orange-200 text-orange-700 shadow-md ring-2 ring-orange-200' 
-                : 'btn-outline hover:bg-orange-50 hover:border-orange-200'
-            }`}
-            title="Mode groupement - Sélectionner des notes pour les grouper"
-          >
-            <span className={`text-lg transition-transform ${isGroupSelecting ? 'scale-110' : ''}`}>
-              🎯
-            </span>
-          </button>
-
-          {/* Outil de tagging */}
-          <button
-            onClick={(e) => {
-              e.stopPropagation()
-              onToggleTaggingMode?.()
-            }}
-            className={`btn w-full h-12 rounded-lg transition-all duration-200 ${
-              isTagging 
-                ? 'bg-purple-50 border-purple-200 text-purple-700 shadow-md ring-2 ring-purple-200' 
-                : 'btn-outline hover:bg-purple-50 hover:border-purple-200'
-            }`}
-            title="Mode tagging - Ajouter des concepts/tags aux notes"
-          >
-            <span className={`text-lg transition-transform ${isTagging ? 'scale-110' : ''}`}>
-              💡
-            </span>
-          </button>
-
-          {/* Élément note draggable */}
+          {/* 1. Élément note draggable - PREMIER */}
           {SIDEBAR_ITEMS.map((item) => (
             <div
               key={item.id}
@@ -274,16 +218,54 @@ export default function Sidebar({
               `}
               title={`${item.name}: ${item.description}`}
             >
-              <span 
-                className="text-lg group-hover:scale-110 transition-transform p-2 rounded-md"
+              <div 
+                className="group-hover:scale-110 transition-transform p-2 rounded-md"
                 style={{ 
                   backgroundColor: item.color !== 'transparent' ? item.color : 'transparent',
                 }}
               >
                 {item.icon}
-              </span>
+              </div>
             </div>
           ))}
+
+          {/* 2. Outil concepts/tagging - DEUXIÈME */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              onToggleTaggingMode?.()
+            }}
+            className={`btn w-full h-12 rounded-lg transition-all duration-200 ${
+              isTagging 
+                ? 'bg-purple-50 border-purple-200 text-purple-700 shadow-md ring-2 ring-purple-200' 
+                : 'btn-outline hover:bg-purple-50 hover:border-purple-200'
+            }`}
+            title="Parcourir les concepts - Voir les concepts déjà utilisés dans vos notes"
+          >
+            <div className={`transition-transform ${isTagging ? 'scale-110' : ''}`}>
+              <Tag className="w-5 h-5" />
+            </div>
+          </button>
+
+          {/* 3. Outil de groupement - TROISIÈME */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              onToggleGroupSelection?.()
+            }}
+            className={`btn w-full h-12 rounded-lg transition-all duration-200 ${
+              isGroupSelecting 
+                ? 'bg-orange-50 border-orange-200 text-orange-700 shadow-md ring-2 ring-orange-200' 
+                : 'btn-outline hover:bg-orange-50 hover:border-orange-200'
+            }`}
+            title="Mode groupement - Sélectionner des notes pour les grouper"
+          >
+            <div className={`transition-transform ${isGroupSelecting ? 'scale-110' : ''}`}>
+              <Target className="w-5 h-5" />
+            </div>
+          </button>
+
+          {/* Outil de connexion SUPPRIMÉ - drag-and-drop suffit */}
         </div>
       )}
 

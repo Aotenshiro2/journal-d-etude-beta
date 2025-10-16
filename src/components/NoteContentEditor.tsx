@@ -16,7 +16,7 @@ import { useTheme } from '@/contexts/ThemeContext'
 import { 
   X, Save, Bold, Italic, Underline, List, ListOrdered, 
   Link as LinkIcon, Image as ImageIcon, Youtube as YoutubeIcon, Palette,
-  Undo, Redo
+  Undo, Redo, Download
 } from 'lucide-react'
 
 interface NoteContentEditorProps {
@@ -213,6 +213,25 @@ export default function NoteContentEditor({ note, onUpdate, onClose }: NoteConte
               <Save className="w-4 h-4" />
               <span>Sauvegarder</span>
             </button>
+            
+            {/* Export PDF déplacé depuis le canvas */}
+            <button
+              onClick={() => {
+                // TODO: Implémenter export PDF de cette note
+                console.log('Export PDF de la note:', note.title)
+              }}
+              className="px-3 py-2 rounded-lg flex items-center space-x-2 transition-colors border"
+              style={{
+                backgroundColor: 'hsl(var(--secondary))',
+                color: 'hsl(var(--secondary-foreground))',
+                borderColor: 'hsl(var(--border))'
+              }}
+              title="Exporter cette note en PDF"
+            >
+              <Download className="w-4 h-4" />
+              <span className="hidden sm:inline">PDF</span>
+            </button>
+            
             <button
               onClick={onClose}
               className="p-2 rounded-lg transition-colors"

@@ -610,10 +610,9 @@ export default function CanvasPage() {
       className="h-screen w-screen overflow-hidden theme-transition"
       style={{ backgroundColor: 'var(--background)' }}
     >
+      {/* isConnecting et onToggleConnectionMode supprimés - drag-and-drop suffit */}
       <Sidebar 
         onElementDrop={handleElementDrop}
-        isConnecting={isConnecting}
-        onToggleConnectionMode={handleToggleConnectionMode}
         isGroupSelecting={isGroupSelecting}
         onToggleGroupSelection={handleToggleGroupSelection}
         isTagging={isTagging}
