@@ -1,9 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 
-export async function GET() {
+export async function GET(
+  request: NextRequest,
+  { params }: { params: { canvasId: string } }
+) {
   try {
+    const canvasId = params.canvasId
+
     const notes = await prisma.note.findMany({
+      where: {
+        canvasId: canvasId
+      },
       include: {
         course: true,
         concepts: {
@@ -19,13 +27,17 @@ export async function GET() {
     
     return NextResponse.json(notes)
   } catch (error) {
-    console.error('Error fetching notes:', error)
+    console.error('Error fetching canvas notes:', error)
     
     // Retry logic for database connection issues
     if (error instanceof Error && error.message.includes('connection')) {
       await new Promise(resolve => setTimeout(resolve, 1000))
       try {
+        const canvasId = params.canvasId
         const notes = await prisma.note.findMany({
+          where: {
+            canvasId: canvasId
+          },
           include: {
             course: true,
             concepts: {
@@ -48,14 +60,19 @@ export async function GET() {
   }
 }
 
-export async function POST(request: NextRequest) {
+export async function POST(
+  request: NextRequest,
+  { params }: { params: { canvasId: string } }
+) {
   try {
+    const canvasId = params.canvasId
     const data = await request.json()
     
     const note = await prisma.note.create({
       data: {
         title: data.title,
         content: data.content,
+        canvasId: canvasId, // Associer au canvas
         x: data.x,
         y: data.y,
         width: data.width,
@@ -76,7 +93,7 @@ export async function POST(request: NextRequest) {
     
     return NextResponse.json(note, { status: 201 })
   } catch (error) {
-    console.error('Error creating note:', error)
+    console.error('Error creating canvas note:', error)
     return NextResponse.json({ error: 'Failed to create note' }, { status: 500 })
   }
 }

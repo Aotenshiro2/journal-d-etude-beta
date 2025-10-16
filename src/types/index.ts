@@ -21,6 +21,7 @@ export interface NoteData {
   title: string
   content: string // Garde pour compatibilité, sera migré vers blocks
   blocks?: NoteBlock[] // Nouvelle structure par blocs
+  mainTakeaway?: string // Enseignement principal de la note
   x: number
   y: number
   width: number
@@ -28,6 +29,14 @@ export interface NoteData {
   backgroundColor: string
   textColor: string
   courseId?: string
+  concepts?: Array<{
+    id: string
+    concept: {
+      id: string
+      name: string
+      category?: string
+    }
+  }>
   createdAt: Date
   updatedAt: Date
 }

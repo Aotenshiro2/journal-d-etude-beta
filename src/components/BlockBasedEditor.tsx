@@ -9,51 +9,130 @@ import '@blocknote/mantine/style.css'
 
 import { NoteData, NoteBlock } from '@/types'
 import { useTheme } from '@/contexts/ThemeContext'
-import { X, Save } from 'lucide-react'
+import { X, Save, Tag, Brain } from 'lucide-react'
 
 interface BlockBasedEditorProps {
   note: NoteData
   onUpdate: (updates: Partial<NoteData>) => void
   onClose: () => void
+  onOpenConcepts?: () => void
+  onOpenTakeaway?: () => void
 }
 
-export default function BlockBasedEditor({ note, onUpdate, onClose }: BlockBasedEditorProps) {
+export default function BlockBasedEditor({ note, onUpdate, onClose, onOpenConcepts, onOpenTakeaway }: BlockBasedEditorProps) {
   const [title, setTitle] = useState(note.title)
   const [isSaving, setIsSaving] = useState(false)
   const [hasChanges, setHasChanges] = useState(false)
   const { theme } = useTheme()
 
-  // Convertir le contenu HTML existant en blocs BlockNote
-  const getInitialContent = useCallback(() => {
-    // Si la note a déjà des blocs, les utiliser
-    if (note.blocks && note.blocks.length > 0) {
-      return note.blocks.map(block => ({
-        id: block.id,
-        type: block.type,
-        content: block.content
-      }))
-    }
-    
-    // Sinon, créer un bloc initial à partir du contenu HTML
-    if (note.content && note.content.trim()) {
-      return [
-        {
-          id: 'initial-block',
-          type: 'paragraph',
-          content: [{ type: 'text', text: note.content.replace(/<[^>]*>/g, '') }]
-        }
-      ]
-    }
-    
-    // Note vide, commencer avec un paragraphe vide
-    return [
-      {
+  // Parser intelligent HTML vers blocs multiples
+  const parseHTMLToBlocks = useCallback((htmlContent: string) => {
+    if (!htmlContent || !htmlContent.trim()) {
+      return [{
         id: 'empty-block',
         type: 'paragraph',
         content: []
+      }]
+    }
+
+    const parser = new DOMParser()
+    const doc = parser.parseFromString(`<div>${htmlContent}</div>`, 'text/html')
+    const container = doc.querySelector('div')
+    
+    if (!container || !container.children.length) {
+      // Fallback: texte simple sans balises
+      const textContent = htmlContent.replace(/<[^>]*>/g, '').trim()
+      if (textContent) {
+        return [{
+          id: 'migrated-text',
+          type: 'paragraph',
+          content: [{ type: 'text', text: textContent }]
+        }]
       }
-    ]
-  }, [note.content, note.blocks])
+      return [{
+        id: 'empty-block',
+        type: 'paragraph',
+        content: []
+      }]
+    }
+    
+    const blocks = Array.from(container.children).map((el, index) => {
+      const textContent = el.textContent?.trim() || ''
+      
+      switch (el.tagName.toLowerCase()) {
+        case 'h1':
+          return {
+            id: `migrated-h1-${index}`,
+            type: 'heading',
+            content: textContent ? [{ type: 'text', text: textContent }] : [],
+            props: { level: 1 }
+          }
+        case 'h2':
+          return {
+            id: `migrated-h2-${index}`,
+            type: 'heading',
+            content: textContent ? [{ type: 'text', text: textContent }] : [],
+            props: { level: 2 }
+          }
+        case 'h3':
+          return {
+            id: `migrated-h3-${index}`,
+            type: 'heading',
+            content: textContent ? [{ type: 'text', text: textContent }] : [],
+            props: { level: 3 }
+          }
+        case 'blockquote':
+          return {
+            id: `migrated-quote-${index}`,
+            type: 'paragraph',
+            content: textContent ? [{ type: 'text', text: textContent }] : []
+          }
+        case 'p':
+        default:
+          return {
+            id: `migrated-p-${index}`,
+            type: 'paragraph',
+            content: textContent ? [{ type: 'text', text: textContent }] : []
+          }
+      }
+    }).filter(block => 
+      // Éliminer les blocs vides
+      block.content.length > 0 && 
+      (block.content[0] as any)?.text?.trim()
+    )
+    
+    return blocks.length > 0 ? blocks : [{
+      id: 'empty-block',
+      type: 'paragraph',
+      content: []
+    }]
+  }, [])
+
+  // Convertir le contenu HTML existant en blocs BlockNote
+  const getInitialContent = useCallback(() => {
+    // Priorité 1 : Blocs sauvegardés (structure préservée)
+    if (note.blocks && Array.isArray(note.blocks) && note.blocks.length > 0) {
+      return note.blocks.map(block => ({
+        id: block.id,
+        type: block.type,
+        content: block.content,
+        props: block.metadata || {}
+      }))
+    }
+    
+    // Priorité 2 : Migration HTML intelligente (conversion multi-blocs)
+    if (note.content && note.content.trim()) {
+      const parsedBlocks = parseHTMLToBlocks(note.content)
+      return parsedBlocks
+    }
+    
+    // Priorité 3 : Bloc vide par défaut
+    return [{
+      id: 'empty-block',
+      type: 'paragraph',
+      content: []
+    }]
+  }, [note.content, note.blocks, parseHTMLToBlocks])
 
   // Créer l'éditeur BlockNote avec détection automatique
   const editor = useCreateBlockNote({
@@ -136,11 +215,15 @@ export default function BlockBasedEditor({ note, onUpdate, onClose }: BlockBased
     }
   }, [onClose, handleSave])
 
-  // Gestion des interactions spéciales dans l'éditeur
+  // Gestion des interactions spéciales dans l'éditeur + zone d'écriture fixe
   useEffect(() => {
     if (!editor) return
 
-    // Écouter les changements pour détecter les patterns (URLs, etc.)
+    // Référence pour l'élément de scroll
+    const scrollContainer = document.querySelector('.bn-editor')?.parentElement
+    if (!scrollContainer) return
+
+    // Écouter les changements pour détecter les patterns (URLs, etc.) + auto-scroll
     const handleUpdate = () => {
       setHasChanges(true)
       
@@ -175,6 +258,34 @@ export default function BlockBasedEditor({ note, onUpdate, onClose }: BlockBased
           }
         }
       }
+
+      // Zone d'écriture fixe : maintenir le bloc actif visuellement au même endroit
+      setTimeout(() => {
+        try {
+          const activeBlock = document.querySelector('.bn-block-outer:focus-within')
+          if (activeBlock && scrollContainer) {
+            const containerRect = scrollContainer.getBoundingClientRect()
+            const blockRect = activeBlock.getBoundingClientRect()
+            
+            // Position idéale : 60% de la hauteur du container (zone d'écriture confortable)
+            const idealPosition = containerRect.height * 0.6
+            const currentRelativePosition = blockRect.top - containerRect.top
+            
+            // Si le bloc actif sort de la zone confortable, ajuster le scroll
+            if (currentRelativePosition > idealPosition || currentRelativePosition < idealPosition - 100) {
+              const targetScrollTop = scrollContainer.scrollTop + (currentRelativePosition - idealPosition)
+              
+              // Scroll fluide vers la position idéale
+              scrollContainer.scrollTo({
+                top: Math.max(0, targetScrollTop),
+                behavior: 'smooth'
+              })
+            }
+          }
+        } catch (error) {
+          console.log('Auto-scroll:', error)
+        }
+      }, 100) // Délai pour que le DOM soit mis à jour
     }
 
     // Attacher l'écouteur d'événements
@@ -256,6 +367,60 @@ export default function BlockBasedEditor({ note, onUpdate, onClose }: BlockBased
             )}
           </div>
           <div className="flex items-center space-x-3">
+            {/* Bouton Concepts */}
+            {onOpenConcepts && (
+              <button
+                onClick={onOpenConcepts}
+                className="px-3 py-2 rounded-full flex items-center space-x-2 transition-all duration-300"
+                style={{
+                  backgroundColor: 'transparent',
+                  color: 'var(--ao-purple)',
+                  border: '1px solid var(--ao-purple)',
+                  fontSize: '0.875rem'
+                }}
+                onMouseOver={(e) => {
+                  e.currentTarget.style.transform = 'scale(1.05)'
+                  e.currentTarget.style.backgroundColor = 'var(--ao-purple)'
+                  e.currentTarget.style.color = 'var(--text-inverse)'
+                }}
+                onMouseOut={(e) => {
+                  e.currentTarget.style.transform = 'scale(1)'
+                  e.currentTarget.style.backgroundColor = 'transparent'
+                  e.currentTarget.style.color = 'var(--ao-purple)'
+                }}
+              >
+                <Tag className="w-3 h-3" />
+                <span>Concepts</span>
+              </button>
+            )}
+
+            {/* Bouton Main Takeaway */}
+            {onOpenTakeaway && (
+              <button
+                onClick={onOpenTakeaway}
+                className="px-3 py-2 rounded-full flex items-center space-x-2 transition-all duration-300"
+                style={{
+                  backgroundColor: 'transparent',
+                  color: 'var(--ao-green)',
+                  border: '1px solid var(--ao-green)',
+                  fontSize: '0.875rem'
+                }}
+                onMouseOver={(e) => {
+                  e.currentTarget.style.transform = 'scale(1.05)'
+                  e.currentTarget.style.backgroundColor = 'var(--ao-green)'
+                  e.currentTarget.style.color = 'var(--text-inverse)'
+                }}
+                onMouseOut={(e) => {
+                  e.currentTarget.style.transform = 'scale(1)'
+                  e.currentTarget.style.backgroundColor = 'transparent'
+                  e.currentTarget.style.color = 'var(--ao-green)'
+                }}
+              >
+                <Brain className="w-3 h-3" />
+                <span>Takeaway</span>
+              </button>
+            )}
+
             <button
               onClick={handleSave}
               disabled={!hasChanges || isSaving}

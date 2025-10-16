@@ -1,6 +1,6 @@
 'use client'
 
-import { Handle, Position, NodeProps } from '@xyflow/react'
+import { Handle, Position, NodeProps, NodeResizer } from '@xyflow/react'
 import { NoteData } from '@/types'
 import { Edit, Trash2, Clock, Tag, GraduationCap, User } from 'lucide-react'
 import { stripHtml, formatRelativeTime } from '@/lib/utils'
@@ -132,17 +132,17 @@ function NodeFooter({ updatedAt }: { updatedAt: Date }) {
 
 function NodeToolbar({ onEdit, onDelete }: { onEdit: (e: React.MouseEvent) => void; onDelete: (e: React.MouseEvent) => void }) {
   return (
-    <div className="absolute -top-2 -right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-white rounded-lg shadow-lg border border-gray-200 flex">
+    <div className="absolute -top-2 -right-2 opacity-0 group-hover:opacity-100 transition-all duration-300 transform scale-95 group-hover:scale-100 bg-white rounded-lg shadow-lg border border-gray-200 flex">
       <button
         onClick={onEdit}
-        className="p-2 hover:bg-gray-50 rounded-l-lg transition-colors"
+        className="p-2 hover:bg-blue-50 hover:text-blue-600 rounded-l-lg transition-all duration-200 transform hover:scale-110"
         title="Éditer"
       >
         <Edit className="w-3 h-3 text-gray-600" />
       </button>
       <button
         onClick={onDelete}
-        className="p-2 hover:bg-red-50 rounded-r-lg transition-colors border-l border-gray-200"
+        className="p-2 hover:bg-red-50 hover:text-red-600 rounded-r-lg transition-all duration-200 transform hover:scale-110 border-l border-gray-200"
         title="Supprimer"
       >
         <Trash2 className="w-3 h-3 text-red-600" />
@@ -151,109 +151,7 @@ function NodeToolbar({ onEdit, onDelete }: { onEdit: (e: React.MouseEvent) => vo
   )
 }
 
-function ResizeHandles({ 
-  nodeId, 
-  onResize, 
-  isVisible 
-}: { 
-  nodeId: string; 
-  onResize?: (nodeId: string, width: number, height: number) => void;
-  isVisible: boolean;
-}) {
-  const [isResizing, setIsResizing] = useState(false)
-  
-  const handleMouseDown = useCallback((e: React.MouseEvent, corner: string) => {
-    if (!onResize) return
-    
-    e.preventDefault()
-    e.stopPropagation()
-    setIsResizing(true)
-    
-    const startX = e.clientX
-    const startY = e.clientY
-    
-    // Obtenir les dimensions actuelles du nœud
-    const nodeElement = (e.currentTarget as HTMLElement).closest('.react-flow__node') as HTMLElement
-    if (!nodeElement) return
-    
-    const currentRect = nodeElement.getBoundingClientRect()
-    const startWidth = currentRect.width
-    const startHeight = currentRect.height
-    
-    const handleMouseMove = (moveEvent: MouseEvent) => {
-      const deltaX = moveEvent.clientX - startX
-      const deltaY = moveEvent.clientY - startY
-      
-      let newWidth = startWidth
-      let newHeight = startHeight
-      
-      // Calcul selon le coin sélectionné
-      if (corner.includes('e')) {
-        newWidth = startWidth + deltaX
-      }
-      if (corner.includes('w')) {
-        newWidth = startWidth - deltaX
-      }
-      if (corner.includes('s')) {
-        newHeight = startHeight + deltaY
-      }
-      if (corner.includes('n')) {
-        newHeight = startHeight - deltaY
-      }
-      
-      // Contraintes minimales
-      newWidth = Math.max(200, newWidth)
-      newHeight = Math.max(150, newHeight)
-      
-      // Maintenir le ratio d'aspect si Shift est pressé
-      if (moveEvent.shiftKey) {
-        const aspectRatio = startWidth / startHeight
-        if (Math.abs(deltaX) > Math.abs(deltaY)) {
-          newHeight = newWidth / aspectRatio
-        } else {
-          newWidth = newHeight * aspectRatio
-        }
-      }
-      
-      onResize(nodeId, Math.round(newWidth), Math.round(newHeight))
-    }
-    
-    const handleMouseUp = () => {
-      setIsResizing(false)
-      document.removeEventListener('mousemove', handleMouseMove)
-      document.removeEventListener('mouseup', handleMouseUp)
-    }
-    
-    document.addEventListener('mousemove', handleMouseMove)
-    document.addEventListener('mouseup', handleMouseUp)
-  }, [nodeId, onResize])
-  
-  if (!isVisible && !isResizing) return null
-  
-  const handleStyle = "absolute w-3 h-3 bg-blue-500 border-2 border-white rounded-full cursor-pointer hover:bg-blue-600 transition-colors"
-  
-  return (
-    <>
-      {/* Coins de redimensionnement */}
-      <div
-        className={`${handleStyle} -top-1.5 -left-1.5 cursor-nw-resize`}
-        onMouseDown={(e) => handleMouseDown(e, 'nw')}
-      />
-      <div
-        className={`${handleStyle} -top-1.5 -right-1.5 cursor-ne-resize`}
-        onMouseDown={(e) => handleMouseDown(e, 'ne')}
-      />
-      <div
-        className={`${handleStyle} -bottom-1.5 -left-1.5 cursor-sw-resize`}
-        onMouseDown={(e) => handleMouseDown(e, 'sw')}
-      />
-      <div
-        className={`${handleStyle} -bottom-1.5 -right-1.5 cursor-se-resize`}
-        onMouseDown={(e) => handleMouseDown(e, 'se')}
-      />
-    </>
-  )
-}
+// Le NodeResizer natif remplace notre implémentation custom
 
 export default function NoteNode({ data, selected }: NodeProps<NoteNodeData>) {
   const handleClick = (e: React.MouseEvent) => {
@@ -331,52 +229,42 @@ export default function NoteNode({ data, selected }: NodeProps<NoteNodeData>) {
         height: data.height,
       }}
     >
-      {/* Handles de connexion */}
+      {/* Handles de connexion - Configuration optimisée */}
+      {/* Handles Target (entrée) - Côtés gauche et haut */}
       <Handle
+        id="target-top"
         type="target"
         position={Position.Top}
-        className="w-3 h-3 !bg-blue-500 !border-2 !border-white opacity-0 group-hover:opacity-100 transition-opacity"
+        className="w-4 h-4 !bg-blue-500 !border-2 !border-white !opacity-0 group-hover:!opacity-100 transition-all duration-300 hover:!scale-125 hover:!bg-blue-600 shadow-lg"
+        style={{ top: '-8px', left: '50%', transform: 'translateX(-50%)', zIndex: 10 }}
       />
       <Handle
+        id="target-left"
         type="target"
         position={Position.Left}
-        className="w-3 h-3 !bg-blue-500 !border-2 !border-white opacity-0 group-hover:opacity-100 transition-opacity"
-      />
-      <Handle
-        type="target"
-        position={Position.Right}
-        className="w-3 h-3 !bg-blue-500 !border-2 !border-white opacity-0 group-hover:opacity-100 transition-opacity"
-      />
-      <Handle
-        type="target"
-        position={Position.Bottom}
-        className="w-3 h-3 !bg-blue-500 !border-2 !border-white opacity-0 group-hover:opacity-100 transition-opacity"
+        className="w-4 h-4 !bg-blue-500 !border-2 !border-white !opacity-0 group-hover:!opacity-100 transition-all duration-300 hover:!scale-125 hover:!bg-blue-600 shadow-lg"
+        style={{ left: '-8px', top: '50%', transform: 'translateY(-50%)', zIndex: 10 }}
       />
       
+      {/* Handles Source (sortie) - Côtés droite et bas */}
       <Handle
-        type="source"
-        position={Position.Top}
-        className="w-3 h-3 !bg-green-500 !border-2 !border-white opacity-0 group-hover:opacity-100 transition-opacity"
-      />
-      <Handle
-        type="source"
-        position={Position.Left}
-        className="w-3 h-3 !bg-green-500 !border-2 !border-white opacity-0 group-hover:opacity-100 transition-opacity"
-      />
-      <Handle
+        id="source-right"
         type="source"
         position={Position.Right}
-        className="w-3 h-3 !bg-green-500 !border-2 !border-white opacity-0 group-hover:opacity-100 transition-opacity"
+        className="w-4 h-4 !bg-green-500 !border-2 !border-white !opacity-0 group-hover:!opacity-100 transition-all duration-300 hover:!scale-125 hover:!bg-green-600 shadow-lg"
+        style={{ right: '-8px', top: '50%', transform: 'translateY(-50%)', zIndex: 10 }}
       />
       <Handle
+        id="source-bottom"
         type="source"
         position={Position.Bottom}
-        className="w-3 h-3 !bg-green-500 !border-2 !border-white opacity-0 group-hover:opacity-100 transition-opacity"
+        className="w-4 h-4 !bg-green-500 !border-2 !border-white !opacity-0 group-hover:!opacity-100 transition-all duration-300 hover:!scale-125 hover:!bg-green-600 shadow-lg"
+        style={{ bottom: '-8px', left: '50%', transform: 'translateX(-50%)', zIndex: 10 }}
       />
 
       {/* Contenu de la note avec structure modulaire */}
       <div
-        className={`drag-handle w-full h-full rounded-lg ${shadowClass} transition-all duration-200 hover:shadow-xl p-3 bg-white flex flex-col`}
+        className={`drag-handle w-full h-full rounded-lg ${shadowClass} transition-all duration-300 hover:shadow-xl hover:scale-[1.02] p-3 bg-white flex flex-col cursor-move`}
         style={{
           backgroundColor: data.backgroundColor,
           borderColor: borderColor,
@@ -406,11 +294,18 @@ export default function NoteNode({ data, selected }: NodeProps<NoteNodeData>) {
       {/* Toolbar flottante */}
       <NodeToolbar onEdit={handleEdit} onDelete={handleDelete} />
       
-      {/* Handles de redimensionnement */}
-      <ResizeHandles 
-        nodeId={data.id}
-        onResize={data.onResize}
+      {/* NodeResizer natif React Flow */}
+      <NodeResizer
+        color="#3b82f6"
         isVisible={selected}
+        minWidth={200}
+        minHeight={150}
+        onResize={(event, params) => {
+          if (data.onResize) {
+            data.onResize(data.id, params.width, params.height)
+          }
+        }}
+        keepAspectRatio={false}
       />
     </div>
   )

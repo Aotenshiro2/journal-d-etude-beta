@@ -167,21 +167,29 @@ export default function ReactFlowCanvas({
     setEdges(newEdges)
   }, [connections, convertConnectionsToEdges, setEdges])
 
-  // Gérer les changements de position des nodes
+  // Gérer les changements de position des nodes - Optimisé pour performance
   const handleNodesChange = useCallback((changes: NodeChange[]) => {
-    changes.forEach((change) => {
-      if (change.type === 'position' && change.position && change.id) {
-        // Debounce les updates de position
-        setTimeout(() => {
+    // Appliquer les changements immédiatement à React Flow
+    onNodesChange(changes)
+    
+    // Batching des updates de position pour éviter les calls API excessifs
+    const positionChanges = changes.filter(
+      (change): change is NodeChange & { type: 'position'; position: { x: number; y: number } } => 
+        change.type === 'position' && change.position !== undefined && change.id !== undefined
+    )
+    
+    if (positionChanges.length > 0) {
+      // Utiliser requestAnimationFrame pour optimiser les updates
+      requestAnimationFrame(() => {
+        positionChanges.forEach((change) => {
           onNoteUpdate({
-            id: change.id,
+            id: change.id!,
             x: change.position!.x,
             y: change.position!.y,
           })
-        }, 100)
-      }
-    })
-    onNodesChange(changes)
+        })
+      })
+    }
   }, [onNodesChange, onNoteUpdate])
 
   // Gérer la sélection des nodes
@@ -275,6 +283,18 @@ export default function ReactFlowCanvas({
         edgeTypes={edgeTypes}
         connectionMode={ConnectionMode.Loose}
         fitView
+        defaultViewport={{ x: 0, y: 0, zoom: 1 }}
+        minZoom={0.1}
+        maxZoom={2}
+        snapToGrid={true}
+        snapGrid={[15, 15]}
+        attributionPosition="bottom-left"
+        proOptions={{
+          hideAttribution: true
+        }}
+        nodesDraggable={true}
+        nodesConnectable={true}
+        elementsSelectable={true}
       >
         <Background 
           variant={BackgroundVariant.Dots} 
@@ -332,17 +352,20 @@ export default function ReactFlowCanvas({
         </Panel>
       </ReactFlow>
 
-      {/* Indicateur de mode connexion */}
+      {/* Indicateur de mode connexion amélioré */}
       {isConnecting && (
         <div className="absolute top-4 left-4 z-50 pointer-events-none">
-          <div className="bg-orange-500 text-white px-4 py-2 rounded-lg shadow-lg flex items-center space-x-2">
-            <span>🔗</span>
-            <span className="text-sm">
+          <div className="bg-gradient-to-r from-orange-500 to-orange-600 text-white px-6 py-3 rounded-xl shadow-2xl flex items-center space-x-3 animate-pulse border border-orange-400">
+            <div className="w-3 h-3 bg-white rounded-full animate-ping"></div>
+            <span className="text-sm font-medium">
               {connectingFromId 
-                ? 'Cliquez sur une note pour la connecter' 
-                : 'Cliquez sur la première note à connecter'
+                ? '🎯 Cliquez sur une note pour créer la connexion' 
+                : '🔗 Sélectionnez la première note à connecter'
               }
             </span>
+            {connectingFromId && (
+              <div className="w-2 h-2 bg-green-400 rounded-full"></div>
+            )}
           </div>
         </div>
       )}
