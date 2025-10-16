@@ -8,10 +8,19 @@ export interface Size {
   height: number
 }
 
+export interface NoteBlock {
+  id: string
+  type: 'paragraph' | 'heading' | 'image' | 'video' | 'link' | 'quote' | 'code'
+  content: any
+  order: number
+  metadata?: Record<string, any>
+}
+
 export interface NoteData {
   id: string
   title: string
-  content: string
+  content: string // Garde pour compatibilité, sera migré vers blocks
+  blocks?: NoteBlock[] // Nouvelle structure par blocs
   x: number
   y: number
   width: number
