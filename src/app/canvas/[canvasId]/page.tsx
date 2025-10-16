@@ -104,8 +104,6 @@ export default function CanvasPage() {
   }
 
   const createNote = async (position: { x: number; y: number }, elementType: string = 'note') => {
-    console.log('🔧 createNote called:', { position, elementType, canvasId })
-    
     const elementConfigs = {
       note: {
         title: 'Note',
@@ -134,47 +132,27 @@ export default function CanvasPage() {
       updatedAt: new Date()
     }
 
-    console.log('📝 New note created locally:', newNote)
-    console.log('📊 Current notes count before:', notes.length)
-
     try {
-      console.log('🚀 Sending API request to:', `/api/canvas/${canvasId}/notes`)
-      
       const response = await fetch(`/api/canvas/${canvasId}/notes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newNote)
       })
 
-      console.log('📡 API response status:', response.status)
-
       if (response.ok) {
         const savedNote = await response.json()
-        console.log('✅ Note saved successfully:', savedNote)
-        
-        setNotes(prev => {
-          const newNotes = [...prev, savedNote]
-          console.log('📊 Updating notes state, new count:', newNotes.length)
-          return newNotes
-        })
+        setNotes(prev => [...prev, savedNote])
         setSelectedNoteId(savedNote.id)
-        console.log('🎯 Note selected:', savedNote.id)
       } else {
         const errorData = await response.text()
-        console.error('❌ API error response:', errorData)
+        console.error('API error response:', errorData)
         throw new Error(`API Error: ${response.status}`)
       }
     } catch (error) {
-      console.error('🚨 Error creating note via API:', error)
-      console.log('💾 Falling back to local note creation')
-      
-      setNotes(prev => {
-        const newNotes = [...prev, newNote]
-        console.log('📊 Fallback: updating notes state, new count:', newNotes.length)
-        return newNotes
-      })
+      console.error('Error creating note via API:', error)
+      // Fallback to local note creation
+      setNotes(prev => [...prev, newNote])
       setSelectedNoteId(newNote.id)
-      console.log('🎯 Fallback: note selected:', newNote.id)
     }
   }
 
