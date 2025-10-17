@@ -321,21 +321,16 @@ export default function BlockBasedEditor({ note, onUpdate, onClose, onOpenConcep
       <div 
         className="rounded-lg shadow-2xl w-[95vw] h-[95vh] flex flex-col overflow-hidden theme-transition"
         style={{ 
-          backgroundColor: 'var(--modal-bg)',
-          border: '1px solid var(--modal-border)'
+          backgroundColor: 'hsl(var(--modal-bg))',
+          border: '1px solid hsl(var(--modal-border))'
         }}
       >
         {/* Header intégré dans l'espace de pensée */}
         <div 
           className="flex items-center justify-between p-6 theme-transition"
           style={{ 
-            borderBottom: '1px solid var(--block-border)',
-            backgroundColor: 'var(--composition-zone)',
-            background: `linear-gradient(90deg, 
-              var(--silence-zone) 0%, 
-              var(--composition-zone) 15%, 
-              var(--composition-zone) 85%, 
-              var(--silence-zone) 100%)`
+            borderBottom: '1px solid hsl(var(--border))',
+            backgroundColor: 'hsl(var(--surface-elevated))'
           }}
         >
           <div className="flex items-center space-x-4 flex-1">
@@ -350,14 +345,14 @@ export default function BlockBasedEditor({ note, onUpdate, onClose, onOpenConcep
               style={{
                 backgroundColor: 'transparent',
                 border: '2px solid transparent',
-                borderBottom: '2px solid var(--block-border)',
-                color: 'var(--text-primary)',
+                borderBottom: '2px solid hsl(var(--border))',
+                color: 'hsl(var(--text-primary))',
                 fontFamily: 'Georgia, serif',
                 letterSpacing: '0.02em'
               }}
               placeholder="Donnez un titre à votre réflexion..."
-              onFocus={(e) => e.target.style.borderBottomColor = 'var(--ao-blue)'}
-              onBlur={(e) => e.target.style.borderBottomColor = 'var(--block-border)'}
+              onFocus={(e) => e.target.style.borderBottomColor = 'hsl(var(--ao-blue))'}
+              onBlur={(e) => e.target.style.borderBottomColor = 'hsl(var(--border))'}
             />
             {isSaving && (
               <span className="text-sm" style={{ color: 'var(--ao-blue)' }}>Sauvegarde...</span>
@@ -479,12 +474,7 @@ export default function BlockBasedEditor({ note, onUpdate, onClose, onOpenConcep
         <div 
           className="flex-1 overflow-y-auto theme-transition"
           style={{ 
-            backgroundColor: 'var(--composition-zone)',
-            background: `linear-gradient(90deg, 
-              var(--silence-zone) 0%, 
-              var(--composition-zone) 15%, 
-              var(--composition-zone) 85%, 
-              var(--silence-zone) 100%)`
+            backgroundColor: 'hsl(var(--background))'
           }}
         >
           <style jsx global>{`
@@ -515,44 +505,44 @@ export default function BlockBasedEditor({ note, onUpdate, onClose, onOpenConcep
             .bn-editor {
               max-width: 700px !important;
               margin: 0 auto !important;
-              padding: var(--cognitive-padding) 2.5rem !important;
+              padding: 2rem 2.5rem !important;
               min-height: calc(100vh - 160px) !important;
-              background-color: transparent !important;
-              color: var(--editor-text) !important;
+              background-color: hsl(var(--background)) !important;
+              color: hsl(var(--editor-text)) !important;
               line-height: 1.8 !important;
               font-size: 16px !important;
             }
             
             /* FRAGMENTS DE PENSÉE - Blocs constamment visibles selon modèle */
             .bn-block-outer {
-              margin: var(--fragment-spacing) 0 !important;
+              margin: 1rem 0 !important;
               padding: 1rem 1.5rem !important;
               border-radius: 6px !important;
               transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
               position: relative !important;
               /* VISIBILITÉ PERMANENTE inspirée du modèle */
-              border: 1px solid var(--block-default-border) !important;
-              background: var(--block-default-bg) !important;
+              border: 1px solid hsl(var(--border)) !important;
+              background: hsl(var(--card)) !important;
             }
             
             /* États subtils inspirés du modèle */
             .bn-block-outer:hover {
-              background: var(--block-hover-bg) !important;
-              box-shadow: 0 2px 8px var(--block-shadow) !important;
+              background: hsl(var(--accent)) !important;
+              box-shadow: 0 2px 8px hsl(var(--border) / 0.2) !important;
               transform: translateY(-1px) !important;
-              border-color: var(--ao-blue) !important;
+              border-color: hsl(var(--ao-blue)) !important;
             }
             
             .bn-block-outer:focus-within {
-              background: var(--block-active-bg) !important;
-              border-color: var(--ao-blue) !important;
-              box-shadow: 0 4px 16px var(--block-shadow) !important;
+              background: hsl(var(--accent)) !important;
+              border-color: hsl(var(--ao-blue)) !important;
+              box-shadow: 0 4px 16px hsl(var(--border) / 0.2) !important;
               /* Plus de décalage padding pour effet moins dramatique */
             }
             
             /* TYPOGRAPHIE COGNITIVE */
             .bn-block-content {
-              color: var(--editor-text) !important;
+              color: hsl(var(--editor-text)) !important;
               line-height: 2.0 !important;
             }
             
@@ -796,14 +786,9 @@ export default function BlockBasedEditor({ note, onUpdate, onClose, onOpenConcep
         <div 
           className="p-4 text-xs theme-transition"
           style={{
-            borderTop: '1px solid var(--block-border)',
-            backgroundColor: 'var(--composition-zone)',
-            background: `linear-gradient(90deg, 
-              var(--silence-zone) 0%, 
-              var(--composition-zone) 15%, 
-              var(--composition-zone) 85%, 
-              var(--silence-zone) 100%)`,
-            color: 'var(--text-secondary)',
+            borderTop: '1px solid hsl(var(--border))',
+            backgroundColor: 'hsl(var(--surface-elevated))',
+            color: 'hsl(var(--text-secondary))',
             opacity: 0.8
           }}
         >
