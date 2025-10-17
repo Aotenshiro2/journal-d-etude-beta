@@ -367,6 +367,51 @@ export default function BlockBasedEditor({ note, onUpdate, onClose, onOpenConcep
     const scrollContainer = document.querySelector('.bn-editor')?.parentElement
     if (!scrollContainer) return
 
+    // Gestionnaire de double-clic pour l'édition
+    const handleDoubleClick = (e: Event) => {
+      const target = e.target as HTMLElement
+      const blockOuter = target.closest('.bn-block-outer')
+      if (blockOuter) {
+        // Empêcher le comportement par défaut
+        e.preventDefault()
+        e.stopPropagation()
+        
+        // Forcer le focus sur le contenu éditable du bloc
+        const blockContent = blockOuter.querySelector('[contenteditable="true"]') as HTMLElement
+        if (blockContent) {
+          blockContent.focus()
+          // Placer le curseur à la fin du contenu
+          const range = document.createRange()
+          const selection = window.getSelection()
+          range.selectNodeContents(blockContent)
+          range.collapse(false)
+          selection?.removeAllRanges()
+          selection?.addRange(range)
+        }
+      }
+    }
+
+    // Gestionnaire de clic simple pour empêcher l'édition directe
+    const handleSingleClick = (e: Event) => {
+      const target = e.target as HTMLElement
+      const blockOuter = target.closest('.bn-block-outer')
+      const blockContent = target.closest('[contenteditable="true"]')
+      
+      // Si on clique sur un bloc mais pas déjà en mode édition
+      if (blockOuter && blockContent && !blockOuter.matches(':focus-within')) {
+        e.preventDefault()
+        e.stopPropagation()
+        // Le clic simple ne fait rien, seul le double-clic permet l'édition
+      }
+    }
+
+    // Attacher les gestionnaires d'événements
+    const editorElement = document.querySelector('.bn-editor')
+    if (editorElement) {
+      editorElement.addEventListener('dblclick', handleDoubleClick)
+      editorElement.addEventListener('click', handleSingleClick)
+    }
+
     // Écouter les changements pour détecter les patterns (URLs, etc.) + auto-scroll
     const handleUpdate = () => {
       setHasChanges(true)
@@ -434,6 +479,15 @@ export default function BlockBasedEditor({ note, onUpdate, onClose, onOpenConcep
 
     // Attacher l'écouteur d'événements
     editor.onChange(handleUpdate)
+
+    // Nettoyage des gestionnaires d'événements
+    return () => {
+      const editorElement = document.querySelector('.bn-editor')
+      if (editorElement) {
+        editorElement.removeEventListener('dblclick', handleDoubleClick)
+        editorElement.removeEventListener('click', handleSingleClick)
+      }
+    }
   }, [editor])
 
   // Améliorer l'expérience de saisie
@@ -675,7 +729,11 @@ export default function BlockBasedEditor({ note, onUpdate, onClose, onOpenConcep
               box-shadow: 0 2px 8px hsl(var(--border) / 0.2) !important;
               transform: translateY(-1px) !important;
               border-color: hsl(var(--ao-blue)) !important;
-              cursor: text !important;
+              cursor: grab !important;
+            }
+            
+            .bn-block-outer:active {
+              cursor: grabbing !important;
             }
             
             .bn-block-outer:focus-within {
@@ -683,11 +741,12 @@ export default function BlockBasedEditor({ note, onUpdate, onClose, onOpenConcep
               border-color: hsl(var(--ao-blue)) !important;
               box-shadow: 0 4px 16px hsl(var(--border) / 0.2) !important;
               transform: translateY(-2px) !important;
+              cursor: text !important;
             }
             
             /* Différenciation visuelle entre zone d'édition et zone de drag */
             .bn-block-outer:hover .bn-block-content {
-              cursor: text !important;
+              cursor: grab !important;
               border-left: 2px solid transparent !important;
               padding-left: 1rem !important;
               transition: all 0.2s ease !important;
@@ -696,6 +755,7 @@ export default function BlockBasedEditor({ note, onUpdate, onClose, onOpenConcep
             .bn-block-outer:focus-within .bn-block-content {
               border-left: 2px solid hsl(var(--ao-blue)) !important;
               padding-left: 1rem !important;
+              cursor: text !important;
             }
             
             /* TYPOGRAPHIE COGNITIVE */
