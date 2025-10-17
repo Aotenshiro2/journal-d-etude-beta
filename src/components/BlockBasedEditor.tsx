@@ -731,23 +731,7 @@ export default function BlockBasedEditor({ note, onUpdate, onClose, onOpenConcep
               content: "Exprimez votre idée..." !important;
             }
             
-            /* SÉLECTION PERSONNALISÉE - Jaune avec texte noir */
-            .bn-block-content::selection {
-              background-color: #fcdf3e !important;
-              color: #000000 !important;
-            }
-            
-            /* Sélection pour tous les éléments de contenu */
-            .bn-block-content *::selection {
-              background-color: #fcdf3e !important;
-              color: #000000 !important;
-            }
-            
-            /* Sélection dans la zone de saisie également */
-            textarea::selection {
-              background-color: #fcdf3e !important;
-              color: #000000 !important;
-            }
+            /* Sélection personnalisée déplacée vers globals.css pour meilleure portée */
             
             /* MICRO-ANIMATIONS DE COMPOSITION */
             .bn-block-outer {

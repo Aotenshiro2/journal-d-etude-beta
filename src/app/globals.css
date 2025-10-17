@@ -193,6 +193,66 @@
 }
 
 /* ===============================================
+   SÉLECTION DE TEXTE PERSONNALISÉE GLOBALE
+   =============================================== */
+
+/* Sélection personnalisée jaune avec texte noir - Spécificité maximale */
+*::selection {
+  background-color: #fcdf3e !important;
+  color: #000000 !important;
+}
+
+*::-moz-selection {
+  background-color: #fcdf3e !important;
+  color: #000000 !important;
+}
+
+/* Sélection spécifique pour l'éditeur BlockNote */
+.bn-editor *::selection,
+.bn-block-content::selection,
+.bn-block-content *::selection {
+  background-color: #fcdf3e !important;
+  color: #000000 !important;
+}
+
+.bn-editor *::-moz-selection,
+.bn-block-content::-moz-selection,
+.bn-block-content *::-moz-selection {
+  background-color: #fcdf3e !important;
+  color: #000000 !important;
+}
+
+/* Sélection pour les zones de saisie */
+textarea::selection,
+input[type="text"]::selection,
+input[type="search"]::selection {
+  background-color: #fcdf3e !important;
+  color: #000000 !important;
+}
+
+textarea::-moz-selection,
+input[type="text"]::-moz-selection,
+input[type="search"]::-moz-selection {
+  background-color: #fcdf3e !important;
+  color: #000000 !important;
+}
+
+/* Override spécifique pour BlockNote qui pourrait avoir ses propres styles */
+[data-content-type] *::selection,
+[contenteditable="true"]::selection,
+[contenteditable="true"] *::selection {
+  background-color: #fcdf3e !important;
+  color: #000000 !important;
+}
+
+[data-content-type] *::-moz-selection,
+[contenteditable="true"]::-moz-selection,
+[contenteditable="true"] *::-moz-selection {
+  background-color: #fcdf3e !important;
+  color: #000000 !important;
+}
+
+/* ===============================================
    COMPOSANTS SPÉCIFIQUES À L'APPLICATION
    =============================================== */
 
