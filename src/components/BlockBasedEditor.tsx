@@ -664,14 +664,14 @@ export default function BlockBasedEditor({ note, onUpdate, onClose, onOpenConcep
               border-radius: 6px !important;
               transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
               position: relative !important;
-              /* VISIBILITÉ PERMANENTE inspirée du modèle */
+              /* VISIBILITÉ PERMANENTE améliorée - fond distinct de la page */
               border: 1px solid hsl(var(--border)) !important;
-              background: hsl(var(--card)) !important;
+              background: hsl(var(--accent)) !important;
             }
             
-            /* États subtils inspirés du modèle - Améliorés pour interaction */
+            /* États subtils inspirés du modèle - Hiérarchie visuelle progressive */
             .bn-block-outer:hover {
-              background: hsl(var(--accent)) !important;
+              background: hsl(var(--hover)) !important;
               box-shadow: 0 2px 8px hsl(var(--border) / 0.2) !important;
               transform: translateY(-1px) !important;
               border-color: hsl(var(--ao-blue)) !important;
@@ -679,7 +679,7 @@ export default function BlockBasedEditor({ note, onUpdate, onClose, onOpenConcep
             }
             
             .bn-block-outer:focus-within {
-              background: hsl(var(--accent)) !important;
+              background: hsl(var(--active)) !important;
               border-color: hsl(var(--ao-blue)) !important;
               box-shadow: 0 4px 16px hsl(var(--border) / 0.2) !important;
               transform: translateY(-2px) !important;
