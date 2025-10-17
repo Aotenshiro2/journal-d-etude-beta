@@ -26,7 +26,7 @@ export default function BlockBasedEditor({ note, onUpdate, onClose, onOpenConcep
   const [inputText, setInputText] = useState('')
   const { theme } = useTheme()
 
-  // Parser intelligent HTML vers blocs multiples
+  // Parser intelligent HTML vers blocs multiples avec support des images
   const parseHTMLToBlocks = useCallback((htmlContent: string) => {
     if (!htmlContent || !htmlContent.trim()) {
       return [{
@@ -57,50 +57,110 @@ export default function BlockBasedEditor({ note, onUpdate, onClose, onOpenConcep
       }]
     }
     
-    const blocks = Array.from(container.children).map((el, index) => {
-      const textContent = el.textContent?.trim() || ''
-      
-      switch (el.tagName.toLowerCase()) {
-        case 'h1':
-          return {
-            id: `migrated-h1-${index}`,
-            type: 'heading',
-            content: textContent ? [{ type: 'text', text: textContent }] : [],
-            props: { level: 1 }
+    const blocks: any[] = []
+    
+    // Traiter tous les nœuds enfants (éléments ET nœuds de texte)
+    const processNode = (node: Node, index: number) => {
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        const el = node as Element
+        
+        // Cas spécial: Images
+        if (el.tagName.toLowerCase() === 'img') {
+          const imgSrc = el.getAttribute('src') || ''
+          const imgAlt = el.getAttribute('alt') || ''
+          const imgWidth = el.getAttribute('width') || '512'
+          const imgHeight = el.getAttribute('height') || 'auto'
+          
+          if (imgSrc) {
+            blocks.push({
+              id: `migrated-img-${index}`,
+              type: 'image',
+              props: {
+                url: imgSrc,
+                caption: imgAlt,
+                width: parseInt(imgWidth) || 512
+              }
+            })
           }
-        case 'h2':
-          return {
-            id: `migrated-h2-${index}`,
-            type: 'heading',
-            content: textContent ? [{ type: 'text', text: textContent }] : [],
-            props: { level: 2 }
+          return
+        }
+        
+        // Rechercher des images dans les enfants de cet élément
+        const images = el.querySelectorAll('img')
+        images.forEach((img, imgIndex) => {
+          const imgSrc = img.getAttribute('src') || ''
+          const imgAlt = img.getAttribute('alt') || ''
+          const imgWidth = img.getAttribute('width') || '512'
+          
+          if (imgSrc) {
+            blocks.push({
+              id: `migrated-img-${index}-${imgIndex}`,
+              type: 'image',
+              props: {
+                url: imgSrc,
+                caption: imgAlt,
+                width: parseInt(imgWidth) || 512
+              }
+            })
           }
-        case 'h3':
-          return {
-            id: `migrated-h3-${index}`,
-            type: 'heading',
-            content: textContent ? [{ type: 'text', text: textContent }] : [],
-            props: { level: 3 }
+        })
+        
+        // Traitement du texte après extraction des images
+        const textContent = el.textContent?.trim() || ''
+        
+        if (textContent) {
+          switch (el.tagName.toLowerCase()) {
+            case 'h1':
+              blocks.push({
+                id: `migrated-h1-${index}`,
+                type: 'heading',
+                content: [{ type: 'text', text: textContent }],
+                props: { level: 1 }
+              })
+              break
+            case 'h2':
+              blocks.push({
+                id: `migrated-h2-${index}`,
+                type: 'heading',
+                content: [{ type: 'text', text: textContent }],
+                props: { level: 2 }
+              })
+              break
+            case 'h3':
+              blocks.push({
+                id: `migrated-h3-${index}`,
+                type: 'heading',
+                content: [{ type: 'text', text: textContent }],
+                props: { level: 3 }
+              })
+              break
+            case 'blockquote':
+              blocks.push({
+                id: `migrated-quote-${index}`,
+                type: 'paragraph',
+                content: [{ type: 'text', text: textContent }]
+              })
+              break
+            case 'p':
+            default:
+              // Ne créer un paragraphe que si ce n'est pas juste une image wrapper
+              if (images.length === 0 || textContent.length > 0) {
+                blocks.push({
+                  id: `migrated-p-${index}`,
+                  type: 'paragraph',
+                  content: [{ type: 'text', text: textContent }]
+                })
+              }
+              break
           }
-        case 'blockquote':
-          return {
-            id: `migrated-quote-${index}`,
-            type: 'paragraph',
-            content: textContent ? [{ type: 'text', text: textContent }] : []
-          }
-        case 'p':
-        default:
-          return {
-            id: `migrated-p-${index}`,
-            type: 'paragraph',
-            content: textContent ? [{ type: 'text', text: textContent }] : []
-          }
+        }
       }
-    }).filter(block => 
-      // Éliminer les blocs vides
-      block.content.length > 0 && 
-      (block.content[0] as any)?.text?.trim()
-    )
+    }
+    
+    // Traiter tous les enfants directs
+    Array.from(container.childNodes).forEach((node, index) => {
+      processNode(node, index)
+    })
     
     return blocks.length > 0 ? blocks : [{
       id: 'empty-block',
