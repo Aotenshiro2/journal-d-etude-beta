@@ -64,32 +64,72 @@ export default function NotePropertiesModal({
   if (!note) return null
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md max-h-[90vh] flex flex-col">
+    <div 
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
+      style={{ backgroundColor: 'var(--modal-overlay)' }}
+    >
+      <div 
+        className="rounded-xl shadow-2xl w-full max-w-md max-h-[90vh] flex flex-col theme-transition"
+        style={{ 
+          backgroundColor: 'hsl(var(--modal-bg))',
+          border: '1px solid hsl(var(--modal-border))'
+        }}
+      >
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-gray-200">
+        <div 
+          className="flex items-center justify-between p-6 theme-transition"
+          style={{ 
+            borderBottom: '1px solid hsl(var(--border))',
+            backgroundColor: 'hsl(var(--surface-elevated))'
+          }}
+        >
           <div className="flex items-center space-x-3">
-            <div className="p-2 bg-blue-100 rounded-lg">
-              <Edit className="w-5 h-5 text-blue-600" />
+            <div 
+              className="p-2 rounded-lg"
+              style={{ backgroundColor: 'hsl(var(--ao-blue) / 0.1)' }}
+            >
+              <Edit className="w-5 h-5" style={{ color: 'hsl(var(--ao-blue))' }} />
             </div>
             <div>
-              <h2 className="text-xl font-semibold text-gray-900">Propriétés</h2>
-              <p className="text-sm text-gray-500">Configuration de la note</p>
+              <h2 
+                className="text-xl font-semibold"
+                style={{ color: 'hsl(var(--text-primary))' }}
+              >
+                Propriétés
+              </h2>
+              <p 
+                className="text-sm"
+                style={{ color: 'hsl(var(--text-secondary))' }}
+              >
+                Configuration de la note
+              </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+            className="p-2 rounded-lg transition-colors"
+            style={{
+              backgroundColor: 'hsl(var(--hover))',
+              color: 'hsl(var(--ao-red))'
+            }}
+            onMouseOver={(e) => e.currentTarget.style.backgroundColor = 'hsl(var(--active))'}
+            onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'hsl(var(--hover))'}
           >
-            <X className="w-5 h-5 text-gray-600" />
+            <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Content */}
-        <div className="flex-1 p-6 space-y-6 overflow-y-auto">
+        <div 
+          className="flex-1 p-6 space-y-6 overflow-y-auto"
+          style={{ backgroundColor: 'hsl(var(--surface))' }}
+        >
           {/* Titre */}
           <div>
-            <label className="flex items-center space-x-2 text-sm font-medium text-gray-700 mb-3">
+            <label 
+              className="flex items-center space-x-2 text-sm font-medium mb-3"
+              style={{ color: 'hsl(var(--text-primary))' }}
+            >
               <Edit className="w-4 h-4" />
               <span>Titre</span>
             </label>
@@ -97,21 +137,34 @@ export default function NotePropertiesModal({
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 text-gray-900 placeholder:text-gray-500"
+              className="w-full p-3 rounded-lg transition-all duration-200 outline-none focus-ring"
+              style={{
+                backgroundColor: 'hsl(var(--surface-elevated))',
+                border: '1px solid hsl(var(--border))',
+                color: 'hsl(var(--text-primary))'
+              }}
               placeholder="Titre de la note"
             />
           </div>
 
           {/* Formation */}
           <div>
-            <label className="flex items-center space-x-2 text-sm font-medium text-gray-700 mb-3">
+            <label 
+              className="flex items-center space-x-2 text-sm font-medium mb-3"
+              style={{ color: 'hsl(var(--text-primary))' }}
+            >
               <BookOpen className="w-4 h-4" />
               <span>Formation</span>
             </label>
             <select
               value={selectedCourseId}
               onChange={(e) => setSelectedCourseId(e.target.value)}
-              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 text-gray-900"
+              className="w-full p-3 rounded-lg transition-all duration-200 outline-none focus-ring"
+              style={{
+                backgroundColor: 'hsl(var(--surface-elevated))',
+                border: '1px solid hsl(var(--border))',
+                color: 'hsl(var(--text-primary))'
+              }}
             >
               <option value="">Aucune formation</option>
               {courses.map((course) => (
@@ -124,7 +177,10 @@ export default function NotePropertiesModal({
 
           {/* Couleur de fond */}
           <div>
-            <label className="flex items-center space-x-2 text-sm font-medium text-gray-700 mb-3">
+            <label 
+              className="flex items-center space-x-2 text-sm font-medium mb-3"
+              style={{ color: 'hsl(var(--text-primary))' }}
+            >
               <Palette className="w-4 h-4" />
               <span>Couleur de fond</span>
             </label>
@@ -143,9 +199,14 @@ export default function NotePropertiesModal({
                   title={name}
                   className={`w-12 h-12 rounded-lg border-2 transition-all duration-200 ${
                     backgroundColor === color 
-                      ? 'border-blue-500 scale-110 shadow-lg' 
-                      : 'border-gray-300 hover:border-gray-400 hover:scale-105'
+                      ? 'scale-110 shadow-lg' 
+                      : 'hover:scale-105'
                   }`}
+                  style={{
+                    borderColor: backgroundColor === color 
+                      ? 'hsl(var(--ao-blue))' 
+                      : 'hsl(var(--border))'
+                  }}
                   style={{ backgroundColor: color }}
                 />
               ))}
@@ -156,7 +217,13 @@ export default function NotePropertiesModal({
           <div>
             <button
               onClick={onOpenContentEditor}
-              className="w-full bg-green-600 text-white py-3 px-4 rounded-lg hover:bg-green-700 transition-all duration-200 font-medium flex items-center justify-center space-x-2"
+              className="w-full py-3 px-4 rounded-lg transition-all duration-200 font-medium flex items-center justify-center space-x-2"
+              style={{
+                backgroundColor: 'hsl(var(--ao-blue))',
+                color: 'hsl(var(--text-inverse))'
+              }}
+              onMouseOver={(e) => e.currentTarget.style.opacity = '0.9'}
+              onMouseOut={(e) => e.currentTarget.style.opacity = '1'}
             >
               <Edit className="w-4 h-4" />
               <span>Éditer le contenu</span>
@@ -165,16 +232,34 @@ export default function NotePropertiesModal({
         </div>
 
         {/* Footer */}
-        <div className="flex items-center space-x-3 p-6 border-t border-gray-200">
+        <div 
+          className="flex items-center space-x-3 p-6 theme-transition"
+          style={{
+            borderTop: '1px solid hsl(var(--border))',
+            backgroundColor: 'hsl(var(--surface-elevated))'
+          }}
+        >
           <button
             onClick={onClose}
-            className="flex-1 bg-gray-100 text-gray-700 py-3 px-4 rounded-lg hover:bg-gray-200 transition-all duration-200 font-medium"
+            className="flex-1 py-3 px-4 rounded-lg transition-all duration-200 font-medium"
+            style={{
+              backgroundColor: 'hsl(var(--secondary))',
+              color: 'hsl(var(--secondary-foreground))'
+            }}
+            onMouseOver={(e) => e.currentTarget.style.backgroundColor = 'hsl(var(--hover))'}
+            onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'hsl(var(--secondary))'}
           >
             Fermer
           </button>
           <button
             onClick={handleSave}
-            className="flex-1 bg-blue-600 text-white py-3 px-4 rounded-lg hover:bg-blue-700 transition-all duration-200 font-medium"
+            className="flex-1 py-3 px-4 rounded-lg transition-all duration-200 font-medium"
+            style={{
+              backgroundColor: 'hsl(var(--ao-blue))',
+              color: 'hsl(var(--text-inverse))'
+            }}
+            onMouseOver={(e) => e.currentTarget.style.opacity = '0.9'}
+            onMouseOut={(e) => e.currentTarget.style.opacity = '1'}
           >
             Sauvegarder
           </button>

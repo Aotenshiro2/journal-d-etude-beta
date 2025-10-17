@@ -64,7 +64,7 @@ export default function NoteContentEditor({ note, onUpdate, onClose }: NoteConte
     editorProps: {
       attributes: {
         class: 'prose prose-lg max-w-none focus:outline-none min-h-[400px] p-6',
-        style: 'color: hsl(var(--editor-text)); background-color: hsl(var(--editor-bg));',
+        style: 'color: hsl(var(--editor-text)) !important; background-color: hsl(var(--editor-bg)) !important;',
       },
     },
     onUpdate: () => {
@@ -340,7 +340,9 @@ export default function NoteContentEditor({ note, onUpdate, onClose }: NoteConte
           <style jsx>{`
             :global(.ProseMirror) {
               color: hsl(var(--editor-text)) !important;
+              background-color: hsl(var(--editor-bg)) !important;
               line-height: 1.6;
+              min-height: 400px;
             }
             :global(.image-resize-container) {
               position: absolute;
