@@ -23,6 +23,7 @@ export default function BlockBasedEditor({ note, onUpdate, onClose, onOpenConcep
   const [title, setTitle] = useState(note.title)
   const [isSaving, setIsSaving] = useState(false)
   const [hasChanges, setHasChanges] = useState(false)
+  const [inputText, setInputText] = useState('')
   const { theme } = useTheme()
 
   // Parser intelligent HTML vers blocs multiples
@@ -202,6 +203,39 @@ export default function BlockBasedEditor({ note, onUpdate, onClose, onOpenConcep
   const handleEditorChange = useCallback(() => {
     setHasChanges(true)
   }, [])
+
+  // Fonction pour créer un nouveau bloc à partir du texte saisi
+  const handleCreateBlock = useCallback(() => {
+    if (!editor || !inputText.trim()) return
+
+    try {
+      // Créer un nouveau bloc à la fin
+      const newBlock = {
+        id: `block-${Date.now()}`,
+        type: 'paragraph' as const,
+        content: [{ type: 'text', text: inputText.trim() }]
+      }
+
+      // Ajouter le bloc à la fin du document
+      editor.insertBlocks([newBlock], editor.document[editor.document.length - 1], 'after')
+      
+      // Vider la zone de saisie
+      setInputText('')
+      setHasChanges(true)
+    } catch (error) {
+      console.error('Erreur lors de la création du bloc:', error)
+    }
+  }, [editor, inputText])
+
+  // Gérer la touche Entrée dans la zone de saisie
+  const handleInputKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      // Ctrl+Entrée ou Cmd+Entrée = créer le bloc
+      e.preventDefault()
+      handleCreateBlock()
+    }
+    // Entrée simple = retour à la ligne normal (comportement par défaut)
+  }, [handleCreateBlock])
 
   // Gestion des raccourcis clavier et interactions avancées
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -782,28 +816,77 @@ export default function BlockBasedEditor({ note, onUpdate, onClose, onOpenConcep
           </div>
         </div>
 
-        {/* Footer intégré dans l'espace de pensée */}
+        {/* Zone de saisie fixe en bas */}
         <div 
-          className="p-4 text-xs theme-transition"
+          className="p-4 theme-transition"
           style={{
             borderTop: '1px solid hsl(var(--border))',
-            backgroundColor: 'hsl(var(--surface-elevated))',
-            color: 'hsl(var(--text-secondary))',
-            opacity: 0.8
+            backgroundColor: 'hsl(var(--surface-elevated))'
           }}
         >
-          <div className="flex items-center justify-center space-x-8 max-w-4xl mx-auto">
-            <div className="flex items-center space-x-1">
-              <span>🧠</span>
-              <span><strong>Espace de pensée :</strong> Chaque idée devient un bloc</span>
+          {/* Zone de saisie principale */}
+          <div className="max-w-4xl mx-auto">
+            <div className="flex items-end space-x-3">
+              <div className="flex-1">
+                <label 
+                  className="block text-xs font-medium mb-2"
+                  style={{ color: 'hsl(var(--text-secondary))' }}
+                >
+                  💭 Nouvelle idée
+                </label>
+                <textarea
+                  value={inputText}
+                  onChange={(e) => setInputText(e.target.value)}
+                  onKeyDown={handleInputKeyDown}
+                  placeholder="Écrivez votre pensée... (Ctrl+Entrée pour créer le bloc)"
+                  className="w-full rounded-lg transition-all duration-200 outline-none focus-ring resize-none"
+                  style={{
+                    backgroundColor: 'hsl(var(--background))',
+                    border: '1px solid hsl(var(--border))',
+                    color: 'hsl(var(--text-primary))',
+                    padding: '0.75rem 1rem',
+                    minHeight: '60px',
+                    maxHeight: '120px',
+                    lineHeight: '1.5'
+                  }}
+                  rows={2}
+                />
+              </div>
+              <button
+                onClick={handleCreateBlock}
+                disabled={!inputText.trim()}
+                className="px-4 py-3 rounded-lg transition-all duration-200 disabled:opacity-50 flex items-center space-x-2"
+                style={{
+                  backgroundColor: inputText.trim() ? 'hsl(var(--ao-blue))' : 'hsl(var(--muted))',
+                  color: inputText.trim() ? 'hsl(var(--primary-foreground))' : 'hsl(var(--muted-foreground))',
+                  marginBottom: '0'
+                }}
+                onMouseOver={(e) => {
+                  if (!e.currentTarget.disabled) {
+                    e.currentTarget.style.transform = 'scale(1.05)'
+                  }
+                }}
+                onMouseOut={(e) => {
+                  if (!e.currentTarget.disabled) {
+                    e.currentTarget.style.transform = 'scale(1)'
+                  }
+                }}
+                title="Créer un nouveau bloc (Ctrl+Entrée)"
+              >
+                <span className="text-lg">+</span>
+                <span className="hidden sm:inline text-sm">Ajouter</span>
+              </button>
             </div>
-            <div className="flex items-center space-x-1">
-              <span>⌨️</span>
-              <span><strong>Raccourcis :</strong> Double ↵ • Ctrl+S • Échap</span>
-            </div>
-            <div className="flex items-center space-x-1">
-              <span>📅</span>
-              <span>{new Date(note.updatedAt).toLocaleDateString('fr-FR')}</span>
+            
+            {/* Conseils discrets */}
+            <div 
+              className="flex items-center justify-center space-x-6 mt-3 text-xs"
+              style={{ color: 'hsl(var(--text-secondary))', opacity: 0.7 }}
+            >
+              <span>⌨️ <strong>Entrée</strong> = retour ligne</span>
+              <span>⌨️ <strong>Ctrl+Entrée</strong> = créer bloc</span>
+              <span>⌨️ <strong>Ctrl+S</strong> = sauvegarder</span>
+              <span>📅 {new Date(note.updatedAt).toLocaleDateString('fr-FR')}</span>
             </div>
           </div>
         </div>
