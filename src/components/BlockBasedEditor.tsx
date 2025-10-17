@@ -395,21 +395,33 @@ export default function BlockBasedEditor({ note, onUpdate, onClose, onOpenConcep
     const handleSingleClick = (e: Event) => {
       const target = e.target as HTMLElement
       const blockOuter = target.closest('.bn-block-outer')
-      const blockContent = target.closest('[contenteditable="true"]')
       
-      // Si on clique sur un bloc mais pas déjà en mode édition
-      if (blockOuter && blockContent && !blockOuter.matches(':focus-within')) {
-        e.preventDefault()
-        e.stopPropagation()
-        // Le clic simple ne fait rien, seul le double-clic permet l'édition
+      // Si on clique sur un bloc
+      if (blockOuter) {
+        // Vérifier si on clique directement sur le contenu éditable
+        const isContentEditable = target.matches('[contenteditable="true"]') || 
+                                 target.closest('[contenteditable="true"]')
+        
+        // Vérifier si le bloc est déjà en mode édition
+        const isAlreadyFocused = blockOuter.matches(':focus-within')
+        
+        // Si on clique sur le bloc mais pas en mode édition ET pas sur un drag handle
+        if (!isAlreadyFocused && !target.closest('.bn-drag-handle')) {
+          // Empêcher l'édition automatique - même sur le contenu éditable
+          e.preventDefault()
+          e.stopImmediatePropagation()
+          console.log('🚫 Clic simple bloqué - utilisez double-clic pour éditer')
+          return false
+        }
       }
     }
 
-    // Attacher les gestionnaires d'événements
+    // Attacher les gestionnaires d'événements avec phase de capture
     const editorElement = document.querySelector('.bn-editor')
     if (editorElement) {
-      editorElement.addEventListener('dblclick', handleDoubleClick)
-      editorElement.addEventListener('click', handleSingleClick)
+      // Phase de capture pour intercepter AVANT BlockNote
+      editorElement.addEventListener('click', handleSingleClick, { capture: true })
+      editorElement.addEventListener('dblclick', handleDoubleClick, { capture: true })
     }
 
     // Écouter les changements pour détecter les patterns (URLs, etc.) + auto-scroll
@@ -484,8 +496,8 @@ export default function BlockBasedEditor({ note, onUpdate, onClose, onOpenConcep
     return () => {
       const editorElement = document.querySelector('.bn-editor')
       if (editorElement) {
-        editorElement.removeEventListener('dblclick', handleDoubleClick)
-        editorElement.removeEventListener('click', handleSingleClick)
+        editorElement.removeEventListener('click', handleSingleClick, { capture: true })
+        editorElement.removeEventListener('dblclick', handleDoubleClick, { capture: true })
       }
     }
   }, [editor])
