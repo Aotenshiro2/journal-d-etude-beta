@@ -559,19 +559,33 @@ export default function BlockBasedEditor({ note, onUpdate, onClose, onOpenConcep
               background: hsl(var(--card)) !important;
             }
             
-            /* États subtils inspirés du modèle */
+            /* États subtils inspirés du modèle - Améliorés pour interaction */
             .bn-block-outer:hover {
               background: hsl(var(--accent)) !important;
               box-shadow: 0 2px 8px hsl(var(--border) / 0.2) !important;
               transform: translateY(-1px) !important;
               border-color: hsl(var(--ao-blue)) !important;
+              cursor: text !important;
             }
             
             .bn-block-outer:focus-within {
               background: hsl(var(--accent)) !important;
               border-color: hsl(var(--ao-blue)) !important;
               box-shadow: 0 4px 16px hsl(var(--border) / 0.2) !important;
-              /* Plus de décalage padding pour effet moins dramatique */
+              transform: translateY(-2px) !important;
+            }
+            
+            /* Différenciation visuelle entre zone d'édition et zone de drag */
+            .bn-block-outer:hover .bn-block-content {
+              cursor: text !important;
+              border-left: 2px solid transparent !important;
+              padding-left: 1rem !important;
+              transition: all 0.2s ease !important;
+            }
+            
+            .bn-block-outer:focus-within .bn-block-content {
+              border-left: 2px solid hsl(var(--ao-blue)) !important;
+              padding-left: 1rem !important;
             }
             
             /* TYPOGRAPHIE COGNITIVE */
@@ -655,26 +669,52 @@ export default function BlockBasedEditor({ note, onUpdate, onClose, onOpenConcep
               transform: scale(1.02) !important;
             }
             
-            /* DRAG HANDLES COMME POIGNÉES DE COMPOSITION */
+            /* DRAG HANDLES AMÉLIORÉS - Plus visibles et fonctionnels */
             .bn-drag-handle {
-              opacity: 0 !important;
+              opacity: 0.3 !important;
               transition: all 0.3s ease !important;
-              background: linear-gradient(135deg, var(--ao-blue), var(--ao-purple)) !important;
-              border-radius: 6px !important;
-              width: 6px !important;
-              height: 20px !important;
-              margin-right: 12px !important;
+              background: linear-gradient(135deg, hsl(var(--ao-blue)), hsl(var(--ao-purple))) !important;
+              border-radius: 8px !important;
+              width: 8px !important;
+              height: 24px !important;
+              margin-right: 16px !important;
               cursor: grab !important;
+              position: relative !important;
+            }
+            
+            /* Zone d'interaction élargie pour le drag */
+            .bn-drag-handle::before {
+              content: '' !important;
+              position: absolute !important;
+              top: -8px !important;
+              left: -8px !important;
+              right: -8px !important;
+              bottom: -8px !important;
+              border-radius: 12px !important;
+              background: transparent !important;
             }
             
             .bn-block-outer:hover .bn-drag-handle {
-              opacity: 0.6 !important;
+              opacity: 0.8 !important;
+              transform: translateX(2px) !important;
             }
             
             .bn-drag-handle:hover {
               opacity: 1 !important;
-              transform: scale(1.1) !important;
+              transform: scale(1.15) translateX(4px) !important;
               cursor: grabbing !important;
+              box-shadow: 0 2px 8px hsl(var(--ao-blue) / 0.3) !important;
+            }
+            
+            /* Amélioration de la zone de drag sur toute la marge */
+            .bn-side-menu {
+              width: 32px !important;
+              cursor: grab !important;
+            }
+            
+            .bn-side-menu:hover {
+              background: hsl(var(--muted) / 0.3) !important;
+              border-radius: 8px !important;
             }
             
             /* ÉTATS DE FOCUS COGNITIFS */
@@ -691,10 +731,22 @@ export default function BlockBasedEditor({ note, onUpdate, onClose, onOpenConcep
               content: "Exprimez votre idée..." !important;
             }
             
-            /* SÉLECTION HARMONIEUSE */
+            /* SÉLECTION PERSONNALISÉE - Jaune avec texte noir */
             .bn-block-content::selection {
-              background-color: var(--ao-blue) !important;
-              color: var(--text-inverse) !important;
+              background-color: #fcdf3e !important;
+              color: #000000 !important;
+            }
+            
+            /* Sélection pour tous les éléments de contenu */
+            .bn-block-content *::selection {
+              background-color: #fcdf3e !important;
+              color: #000000 !important;
+            }
+            
+            /* Sélection dans la zone de saisie également */
+            textarea::selection {
+              background-color: #fcdf3e !important;
+              color: #000000 !important;
             }
             
             /* MICRO-ANIMATIONS DE COMPOSITION */
