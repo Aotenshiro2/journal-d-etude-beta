@@ -28,6 +28,13 @@ export default function BlockBasedEditor({ note, onUpdate, onClose, onOpenConcep
 
   // Parser intelligent HTML vers blocs multiples avec support des images
   const parseHTMLToBlocks = useCallback((htmlContent: string) => {
+    console.log('🔄 PARSE HTML - Début:', {
+      htmlLength: htmlContent?.length || 0,
+      hasImages: htmlContent?.includes('<img') || false,
+      imageCount: (htmlContent?.match(/<img/g) || []).length,
+      htmlPreview: htmlContent?.substring(0, 200) + '...'
+    })
+    
     if (!htmlContent || !htmlContent.trim()) {
       return [{
         id: 'empty-block',
@@ -162,6 +169,16 @@ export default function BlockBasedEditor({ note, onUpdate, onClose, onOpenConcep
       processNode(node, index)
     })
     
+    console.log('🔄 PARSE HTML - Blocs créés:', {
+      blocksCount: blocks.length,
+      blocks: blocks.map(block => ({
+        id: block.id,
+        type: block.type,
+        hasProps: !!block.props,
+        propsKeys: block.props ? Object.keys(block.props) : []
+      }))
+    })
+    
     return blocks.length > 0 ? blocks : [{
       id: 'empty-block',
       type: 'paragraph',
@@ -203,9 +220,27 @@ export default function BlockBasedEditor({ note, onUpdate, onClose, onOpenConcep
     // Configuration pour la détection automatique de contenu
     uploadFile: async (file: File) => {
       // Gérer l'upload d'images (retourner une URL ou base64)
+      console.log('🖼️ UPLOAD FILE - Début:', {
+        fileName: file.name,
+        fileSize: file.size,
+        fileType: file.type
+      })
+      
       return new Promise((resolve) => {
         const reader = new FileReader()
-        reader.onload = () => resolve(reader.result as string)
+        reader.onload = () => {
+          const result = reader.result as string
+          console.log('🖼️ UPLOAD FILE - Terminé:', {
+            fileName: file.name,
+            base64Length: result.length,
+            base64Preview: result.substring(0, 100) + '...'
+          })
+          resolve(result)
+        }
+        reader.onerror = (error) => {
+          console.error('🖼️ UPLOAD FILE - Erreur:', error)
+          resolve('')
+        }
         reader.readAsDataURL(file)
       })
     },
@@ -223,7 +258,20 @@ export default function BlockBasedEditor({ note, onUpdate, onClose, onOpenConcep
     setIsSaving(true)
     try {
       const blocks = editor.document
+      console.log('💾 SAVE - Blocs bruts:', blocks.map(block => ({
+        id: block.id,
+        type: block.type,
+        content: block.content,
+        props: block.props
+      })))
+      
       const htmlContent = await editor.blocksToHTMLLossy(blocks)
+      console.log('💾 SAVE - HTML généré:', {
+        htmlLength: htmlContent.length,
+        htmlContent: htmlContent,
+        hasImages: htmlContent.includes('<img'),
+        imageCount: (htmlContent.match(/<img/g) || []).length
+      })
       
       // Convertir les blocs en format NoteBlock
       const noteBlocks: NoteBlock[] = blocks.map((block, index) => ({
@@ -233,6 +281,8 @@ export default function BlockBasedEditor({ note, onUpdate, onClose, onOpenConcep
         order: index,
         metadata: block.props
       }))
+
+      console.log('💾 SAVE - Note blocks finaux:', noteBlocks)
 
       await onUpdate({
         title,
