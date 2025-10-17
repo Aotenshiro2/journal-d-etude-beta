@@ -30,11 +30,12 @@
 ## Structure du projet
 - Projet Next.js 15.5.5 avec TypeScript
 - Utilise Turbopack pour les performances
-- Tailwind CSS pour le styling
+- Tailwind CSS pour le styling + ShadCN UI pour les thèmes
 - ESLint pour la qualité du code
 - Prisma ORM pour PostgreSQL
 - React Flow pour le canvas interactif
-- TipTap pour l'éditeur de texte riche
+- BlockNote pour l'éditeur de notes modulaire (remplace TipTap)
+- System de design moderne avec variables CSS et thèmes sombre/clair
 
 ## Roadmap et Documentation
 - **ROADMAP.md :** Vision complète multi-applications et stratégie
@@ -50,7 +51,7 @@
 - **APIs testées :** Notes, Courses, Instructors (100% fonctionnelles)
 - **Objectif final :** Intégration dans écosystème AOKnowledge principal
 
-## État de la session actuelle (15 oct 2025)
+## État de la session actuelle (17 oct 2025)
 - **Railway :** ✅ Configuré, testé, validé
 - **Schema Prisma :** ✅ Migré SQLite → PostgreSQL  
 - **APIs :** ✅ Toutes testées et fonctionnelles
@@ -58,6 +59,26 @@
 - **Git + Vercel :** ✅ Déployé en production
 - **URL Production :** https://journal-d-etude-beta.vercel.app
 - **GitHub Repository :** https://github.com/Aotenshiro2/journal-d-etude-beta
+
+### Améliorations interface récentes (17 oct 2025)
+- **✅ Interface Canvas :** Notification modernisée avec thèmes ShadCN UI
+- **✅ Interface Éditeur :** Transparent corrigé, fond modal amélioré  
+- **✅ Sélection texte :** Personnalisée jaune (#fcdf3e) avec texte noir global dans globals.css
+- **✅ Interface utilisateur :** Zone de saisie en bas + raccourci Ctrl+Entrée
+- **✅ Drag & Drop :** Handles améliorés, interactions fluides
+- **✅ Images persistantes :** Correction critique parseHTMLToBlocks pour base64
+- **✅ Visibilité blocs :** Hiérarchie normal/hover/focus avec backgrounds distincts
+- **✅ UX Interactions :** Hover=grab, double-clic=édition, phase capture événements
+
+### Détails techniques sélection jaune
+```css
+/* globals.css - Sélection personnalisée jaune */
+*::selection {
+  background-color: #fcdf3e !important;
+  color: #000000 !important;
+}
+/* + sélecteurs spécifiques pour BlockNote, textarea, contenteditable */
+```
 
 ## Commande de test Railway
 ```bash
