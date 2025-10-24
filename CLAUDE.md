@@ -51,7 +51,7 @@
 - **APIs testées :** Notes, Courses, Instructors (100% fonctionnelles)
 - **Objectif final :** Intégration dans écosystème AOKnowledge principal
 
-## État de la session actuelle (17 oct 2025)
+## État de la session actuelle (23 oct 2025)
 - **Railway :** ✅ Configuré, testé, validé
 - **Schema Prisma :** ✅ Migré SQLite → PostgreSQL  
 - **APIs :** ✅ Toutes testées et fonctionnelles
@@ -59,6 +59,17 @@
 - **Git + Vercel :** ✅ Déployé en production
 - **URL Production :** https://journal-d-etude-beta.vercel.app
 - **GitHub Repository :** https://github.com/Aotenshiro2/journal-d-etude-beta
+- **Sentry Monitoring :** ✅ SDK installé, configuré, et intégré
+- **MCP Sentry :** ✅ Configuration créée pour Claude Code
+
+### Intégration Sentry complète (23 oct 2025)
+- **✅ SDK @sentry/nextjs :** Installation et configuration complète
+- **✅ Error Boundaries :** Globaux et spécifiques aux composants
+- **✅ Monitoring Canvas :** Capture erreurs + breadcrumbs interactions
+- **✅ Performance Tracking :** Transactions et spans personnalisés
+- **✅ MCP Configuration :** Setup pour intégration Claude Code
+- **✅ Page de Test :** /test-sentry pour validation complète
+- **✅ Utilitaires personnalisés :** Contexte spécifique app Journal d'Études
 
 ### Améliorations interface récentes (17 oct 2025)
 - **✅ Interface Canvas :** Notification modernisée avec thèmes ShadCN UI

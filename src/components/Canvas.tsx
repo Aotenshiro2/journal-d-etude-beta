@@ -6,6 +6,12 @@ import GridBackground from './GridBackground'
 import ZoomControls from './ZoomControls'
 import ConnectionManager from './ConnectionManager'
 import { useDebounce } from '@/hooks/useDebounce'
+import { 
+  captureCanvasError, 
+  traceCanvasOperation, 
+  addCanvasBreadcrumb,
+  addUserActionBreadcrumb 
+} from '@/lib/sentry-utils'
 
 // Import dynamique pour éviter les problèmes SSR
 let fabric: any = null
@@ -193,33 +199,58 @@ export default function Canvas({
 
     const handleCanvasClick = (e: any) => {
       try {
+        addUserActionBreadcrumb('canvas_click');
+        
         if (e.target) {
           const noteId = e.target.get('noteId') as string
           if (noteId) {
             if (isConnecting && onNoteConnectionClick) {
+              addCanvasBreadcrumb('note_connection_click', { noteId });
               onNoteConnectionClick(noteId)
             } else {
               console.log('Selecting note:', noteId) // Debug
+              addCanvasBreadcrumb('note_select', { noteId });
               onNoteSelect(noteId)
             }
           } else {
+            addCanvasBreadcrumb('canvas_deselect');
             onNoteSelect(null)
           }
         } else {
+          addCanvasBreadcrumb('canvas_deselect');
           onNoteSelect(null)
         }
       } catch (error) {
+        captureCanvasError(error as Error, {
+          canvasId: 'main',
+          noteCount: notes.length,
+          connectionCount: connections.length,
+          userAction: 'canvas_click'
+        });
         console.warn('Error in canvas click handler:', error)
       }
     }
 
     const handleDoubleClick = (e: any) => {
       try {
+        addUserActionBreadcrumb('canvas_double_click');
+        
         if (!e.target) {
           const pointer = canvas.getPointer(e.e)
+          addCanvasBreadcrumb('note_create', { 
+            x: pointer.x, 
+            y: pointer.y,
+            noteCount: notes.length 
+          });
           onNoteCreate({ x: pointer.x, y: pointer.y })
         }
       } catch (error) {
+        captureCanvasError(error as Error, {
+          canvasId: 'main',
+          noteCount: notes.length,
+          connectionCount: connections.length,
+          userAction: 'double_click_create'
+        });
         console.warn('Error in double click handler:', error)
       }
     }
@@ -229,6 +260,7 @@ export default function Canvas({
         const target = e.target
         if (target && target.get('noteId')) {
           const noteId = target.get('noteId') as string
+          addCanvasBreadcrumb('note_move', { noteId });
           debouncedNoteUpdate({
             id: noteId,
             x: target.left || 0,
@@ -236,6 +268,12 @@ export default function Canvas({
           })
         }
       } catch (error) {
+        captureCanvasError(error as Error, {
+          canvasId: 'main',
+          noteCount: notes.length,
+          connectionCount: connections.length,
+          userAction: 'note_move'
+        });
         console.warn('Error in object moving handler:', error)
       }
     }

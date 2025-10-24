@@ -391,37 +391,44 @@ export default function BlockBasedEditor({ note, onUpdate, onClose, onOpenConcep
       }
     }
 
-    // Gestionnaire de clic simple pour empêcher l'édition directe
+    // Gestionnaire de clic simple amélioré - Permet le drag, contrôle l'édition
     const handleSingleClick = (e: Event) => {
       const target = e.target as HTMLElement
       const blockOuter = target.closest('.bn-block-outer')
       
       // Si on clique sur un bloc
       if (blockOuter) {
-        // Vérifier si on clique directement sur le contenu éditable
-        const isContentEditable = target.matches('[contenteditable="true"]') || 
-                                 target.closest('[contenteditable="true"]')
-        
         // Vérifier si le bloc est déjà en mode édition
         const isAlreadyFocused = blockOuter.matches(':focus-within')
         
-        // Si on clique sur le bloc mais pas en mode édition ET pas sur un drag handle
-        if (!isAlreadyFocused && !target.closest('.bn-drag-handle')) {
-          // Empêcher l'édition automatique - même sur le contenu éditable
+        // Vérifier si on clique sur la zone de drag (marge gauche)
+        const isDragArea = target.closest('.bn-side-menu') || target.closest('.bn-drag-handle')
+        
+        // Vérifier si on clique directement sur le contenu éditable
+        const isDirectContentClick = target.matches('[contenteditable="true"]')
+        
+        // PERMETTRE le drag - Ne pas bloquer les clics sur la zone de drag
+        if (isDragArea) {
+          // Laisser BlockNote gérer le drag naturellement
+          return
+        }
+        
+        // CONTRÔLER l'édition - Bloquer seulement l'édition directe (pas les drags)
+        if (!isAlreadyFocused && isDirectContentClick) {
+          // Bloquer l'édition directe sur le contenu
           e.preventDefault()
-          e.stopImmediatePropagation()
-          console.log('🚫 Clic simple bloqué - utilisez double-clic pour éditer')
+          console.log('💡 Clic simple bloqué - utilisez double-clic pour éditer')
           return false
         }
       }
     }
 
-    // Attacher les gestionnaires d'événements avec phase de capture
+    // Attacher les gestionnaires d'événements - Phase bubble pour coexister avec BlockNote
     const editorElement = document.querySelector('.bn-editor')
     if (editorElement) {
-      // Phase de capture pour intercepter AVANT BlockNote
-      editorElement.addEventListener('click', handleSingleClick, { capture: true })
-      editorElement.addEventListener('dblclick', handleDoubleClick, { capture: true })
+      // Phase bubble pour ne pas interférer avec le drag natif de BlockNote
+      editorElement.addEventListener('click', handleSingleClick, { capture: false })
+      editorElement.addEventListener('dblclick', handleDoubleClick, { capture: false })
     }
 
     // Écouter les changements pour détecter les patterns (URLs, etc.) + auto-scroll
@@ -496,8 +503,8 @@ export default function BlockBasedEditor({ note, onUpdate, onClose, onOpenConcep
     return () => {
       const editorElement = document.querySelector('.bn-editor')
       if (editorElement) {
-        editorElement.removeEventListener('click', handleSingleClick, { capture: true })
-        editorElement.removeEventListener('dblclick', handleDoubleClick, { capture: true })
+        editorElement.removeEventListener('click', handleSingleClick, { capture: false })
+        editorElement.removeEventListener('dblclick', handleDoubleClick, { capture: false })
       }
     }
   }, [editor])
@@ -700,15 +707,35 @@ export default function BlockBasedEditor({ note, onUpdate, onClose, onOpenConcep
               display: none !important;
             }
             
-            /* Side menu épuré - seulement drag handle */
+            /* Side menu épuré - seulement drag handle avec indication claire */
             .bn-side-menu {
               background: transparent !important;
               border: none !important;
               box-shadow: none !important;
+              position: relative !important;
             }
             
             .bn-side-menu > *:not(.bn-drag-handle) {
               display: none !important;
+            }
+            
+            /* Ajout d'une indication de zone draggable */
+            .bn-side-menu::after {
+              content: '⋮⋮' !important;
+              position: absolute !important;
+              left: 50% !important;
+              top: 50% !important;
+              transform: translate(-50%, -50%) !important;
+              opacity: 0 !important;
+              color: hsl(var(--muted-foreground)) !important;
+              font-size: 14px !important;
+              line-height: 0.8 !important;
+              pointer-events: none !important;
+              transition: opacity 0.2s ease !important;
+            }
+            
+            .bn-block-outer:hover .bn-side-menu::after {
+              opacity: 0.6 !important;
             }
             
             /* ZONE DE COMPOSITION CENTRÉE selon modèle */
@@ -723,7 +750,7 @@ export default function BlockBasedEditor({ note, onUpdate, onClose, onOpenConcep
               font-size: 16px !important;
             }
             
-            /* FRAGMENTS DE PENSÉE - Blocs constamment visibles selon modèle */
+            /* FRAGMENTS DE PENSÉE - Blocs comme tuiles interactives */
             .bn-block-outer {
               margin: 1rem 0 !important;
               padding: 1rem 1.5rem !important;
@@ -733,6 +760,8 @@ export default function BlockBasedEditor({ note, onUpdate, onClose, onOpenConcep
               /* VISIBILITÉ PERMANENTE améliorée - fond distinct de la page */
               border: 1px solid hsl(var(--border)) !important;
               background: hsl(var(--accent)) !important;
+              /* Indication visuelle subtile de la capacité de drag */
+              border-left: 4px solid transparent !important;
             }
             
             /* États subtils inspirés du modèle - Hiérarchie visuelle progressive */
@@ -741,7 +770,9 @@ export default function BlockBasedEditor({ note, onUpdate, onClose, onOpenConcep
               box-shadow: 0 2px 8px hsl(var(--border) / 0.2) !important;
               transform: translateY(-1px) !important;
               border-color: hsl(var(--ao-blue)) !important;
-              cursor: grab !important;
+              /* Indication drag disponible */
+              border-left-color: hsl(var(--ao-blue)) !important;
+              cursor: default !important; /* Pas grab sur le bloc entier */
             }
             
             .bn-block-outer:active {
@@ -756,18 +787,27 @@ export default function BlockBasedEditor({ note, onUpdate, onClose, onOpenConcep
               cursor: text !important;
             }
             
-            /* Différenciation visuelle entre zone d'édition et zone de drag */
+            /* Différenciation claire entre zones de drag et d'édition */
             .bn-block-outer:hover .bn-block-content {
-              cursor: grab !important;
               border-left: 2px solid transparent !important;
               padding-left: 1rem !important;
               transition: all 0.2s ease !important;
+              cursor: default !important; /* Pas de cursor grab sur le contenu */
             }
             
             .bn-block-outer:focus-within .bn-block-content {
               border-left: 2px solid hsl(var(--ao-blue)) !important;
               padding-left: 1rem !important;
               cursor: text !important;
+            }
+            
+            /* Zone de contenu - cursor approprié selon l'état */
+            .bn-block-content[contenteditable="true"] {
+              cursor: text !important;
+            }
+            
+            .bn-block-outer:not(:focus-within) .bn-block-content {
+              cursor: default !important;
             }
             
             /* TYPOGRAPHIE COGNITIVE */
@@ -851,9 +891,9 @@ export default function BlockBasedEditor({ note, onUpdate, onClose, onOpenConcep
               transform: scale(1.02) !important;
             }
             
-            /* DRAG HANDLES AMÉLIORÉS - Plus visibles et fonctionnels */
+            /* DRAG HANDLES AMÉLIORÉS - Zone élargie et réactive */
             .bn-drag-handle {
-              opacity: 0.3 !important;
+              opacity: 0.4 !important;
               transition: all 0.3s ease !important;
               background: linear-gradient(135deg, hsl(var(--ao-blue)), hsl(var(--ao-purple))) !important;
               border-radius: 8px !important;
@@ -864,39 +904,52 @@ export default function BlockBasedEditor({ note, onUpdate, onClose, onOpenConcep
               position: relative !important;
             }
             
-            /* Zone d'interaction élargie pour le drag */
+            /* Zone d'interaction considérablement élargie pour faciliter le drag */
             .bn-drag-handle::before {
               content: '' !important;
               position: absolute !important;
-              top: -8px !important;
-              left: -8px !important;
-              right: -8px !important;
-              bottom: -8px !important;
-              border-radius: 12px !important;
+              top: -12px !important;
+              left: -20px !important;
+              right: -12px !important;
+              bottom: -12px !important;
+              border-radius: 16px !important;
               background: transparent !important;
+              cursor: grab !important;
             }
             
             .bn-block-outer:hover .bn-drag-handle {
-              opacity: 0.8 !important;
-              transform: translateX(2px) !important;
+              opacity: 0.9 !important;
+              transform: translateX(3px) scale(1.1) !important;
             }
             
             .bn-drag-handle:hover {
               opacity: 1 !important;
-              transform: scale(1.15) translateX(4px) !important;
-              cursor: grabbing !important;
-              box-shadow: 0 2px 8px hsl(var(--ao-blue) / 0.3) !important;
+              transform: scale(1.25) translateX(6px) !important;
+              cursor: grab !important;
+              box-shadow: 0 4px 12px hsl(var(--ao-blue) / 0.4) !important;
             }
             
-            /* Amélioration de la zone de drag sur toute la marge */
+            .bn-drag-handle:active {
+              cursor: grabbing !important;
+              transform: scale(1.1) translateX(4px) !important;
+            }
+            
+            /* ZONE DE DRAG ÉLARGIE - Toute la marge gauche */
             .bn-side-menu {
-              width: 32px !important;
+              width: 48px !important;
               cursor: grab !important;
+              transition: all 0.2s ease !important;
             }
             
             .bn-side-menu:hover {
-              background: hsl(var(--muted) / 0.3) !important;
-              border-radius: 8px !important;
+              background: hsl(var(--muted) / 0.4) !important;
+              border-radius: 12px !important;
+              cursor: grab !important;
+            }
+            
+            .bn-side-menu:active {
+              cursor: grabbing !important;
+              background: hsl(var(--muted) / 0.6) !important;
             }
             
             /* ÉTATS DE FOCUS COGNITIFS */
