@@ -1,26 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { createClient } from '@/lib/supabase/server'
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { canvasId: string; id: string } }
+  { params }: { params: Promise<{ canvasId: string; id: string }> }
 ) {
   try {
-    const { canvasId, id } = params
+    const { canvasId, id } = await params
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
     const data = await request.json()
-    
-    // Vérifier que la note appartient bien au canvas
+
     const existingNote = await prisma.note.findFirst({
-      where: {
-        id: id,
-        canvasId: canvasId
-      }
+      where: { id, canvasId, userId: user.id }
     })
-    
+
     if (!existingNote) {
       return NextResponse.json({ error: 'Note not found in this canvas' }, { status: 404 })
     }
-    
+
     const note = await prisma.note.update({
       where: { id },
       data: {
@@ -38,14 +39,10 @@ export async function PUT(
       },
       include: {
         course: true,
-        concepts: {
-          include: {
-            concept: true
-          }
-        }
+        concepts: { include: { concept: true } }
       }
     })
-    
+
     return NextResponse.json(note)
   } catch (error) {
     console.error('Error updating canvas note:', error)
@@ -55,27 +52,24 @@ export async function PUT(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { canvasId: string; id: string } }
+  { params }: { params: Promise<{ canvasId: string; id: string }> }
 ) {
   try {
-    const { canvasId, id } = params
-    
-    // Vérifier que la note appartient bien au canvas
+    const { canvasId, id } = await params
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
     const existingNote = await prisma.note.findFirst({
-      where: {
-        id: id,
-        canvasId: canvasId
-      }
+      where: { id, canvasId, userId: user.id }
     })
-    
+
     if (!existingNote) {
       return NextResponse.json({ error: 'Note not found in this canvas' }, { status: 404 })
     }
-    
-    await prisma.note.delete({
-      where: { id }
-    })
-    
+
+    await prisma.note.delete({ where: { id } })
+
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error('Error deleting canvas note:', error)

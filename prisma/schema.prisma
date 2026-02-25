@@ -22,12 +22,21 @@ model Note {
   courseId        String?
   mainTakeaway    String?
   canvasId        String           @default("default-canvas")
+  // Auth & isolation
+  userId          String?
+  // Extension sync fields
+  source          String?          // 'extension' | 'manual'
+  sourceUrl       String?
+  favicon         String?
+  syncedAt        DateTime?
   course          Course?          @relation(fields: [courseId], references: [id])
   concepts        NoteConcept[]
   connections     NoteConnection[] @relation("FromNote")
   connectedFrom   NoteConnection[] @relation("ToNote")
 
   @@index([canvasId])
+  @@index([userId])
+  @@index([sourceUrl])
 }
 
 model Instructor {
