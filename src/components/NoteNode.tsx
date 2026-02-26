@@ -6,6 +6,40 @@ import { Edit, Trash2, Clock, Tag, GraduationCap, User } from 'lucide-react'
 import { stripHtml, formatRelativeTime } from '@/lib/utils'
 import { useState, useRef, useCallback } from 'react'
 
+function NodeExtensionBadge({ sourceUrl, favicon }: { sourceUrl: string; favicon?: string | null }) {
+  let domain = ''
+  try {
+    domain = new URL(sourceUrl).hostname.replace(/^www\./, '')
+  } catch {
+    domain = sourceUrl
+  }
+
+  return (
+    <a
+      href={sourceUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      onClick={(e) => e.stopPropagation()}
+      title={`Source : ${sourceUrl}`}
+      className="flex items-center gap-1 mt-1.5 px-1.5 py-0.5 rounded
+        bg-blue-50 border border-blue-100 text-blue-600
+        hover:bg-blue-100 transition-colors max-w-full overflow-hidden"
+    >
+      {favicon ? (
+        <img
+          src={favicon}
+          alt=""
+          className="w-3 h-3 flex-shrink-0 rounded-sm"
+          onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+        />
+      ) : (
+        <span className="w-3 h-3 flex-shrink-0 text-[8px] leading-none flex items-center justify-center">🔗</span>
+      )}
+      <span className="text-[10px] truncate">{domain}</span>
+    </a>
+  )
+}
+
 interface NoteNodeData extends NoteData {
   isSelected?: boolean
   isGroupSelected?: boolean
@@ -279,13 +313,17 @@ export default function NoteNode({ data, selected }: NodeProps<NoteNodeData>) {
           textColor={data.textColor} 
         />
         
-        <NodeMetadata 
+        <NodeMetadata
           courseName={data.courseName}
           instructorName={data.instructorName}
         />
-        
+
+        {data.source === 'extension' && data.sourceUrl && (
+          <NodeExtensionBadge sourceUrl={data.sourceUrl} favicon={data.favicon} />
+        )}
+
         <NodeConcepts concepts={data.concepts} />
-        
+
         <NodeContent content={data.content} />
         
         <NodeFooter updatedAt={data.updatedAt} />

@@ -39,6 +39,11 @@ export interface NoteData {
   }>
   createdAt: Date
   updatedAt: Date
+  // Extension sync fields
+  source?: string | null     // 'extension' | 'manual' | null
+  sourceUrl?: string | null
+  favicon?: string | null
+  syncedAt?: Date | string | null
 }
 
 export interface InstructorData {
