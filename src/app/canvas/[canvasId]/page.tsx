@@ -10,6 +10,7 @@ import GroupingModal from '@/components/GroupingModal'
 import TaggingModal from '@/components/TaggingModal'
 import TakeawayModal from '@/components/TakeawayModal'
 import CanvasNotification from '@/components/CanvasNotification'
+import UserMenu from '@/components/UserMenu'
 import { NoteData, CourseData, ConnectionData, InstructorData } from '@/types'
 import { useKeepAlive } from '@/hooks/useKeepAlive'
 import { v4 as uuidv4 } from 'uuid'
@@ -666,7 +667,7 @@ export default function CanvasPage() {
 
       {/* Indicateur de mode groupement */}
       {isGroupSelecting && (
-        <div className="absolute top-4 right-4 z-50">
+        <div className="absolute top-14 right-4 z-50">
           <div className="bg-orange-500 text-white px-4 py-2 rounded-lg shadow-lg flex items-center space-x-2">
             <span>🎯</span>
             <span className="text-sm">
@@ -730,6 +731,11 @@ export default function CanvasPage() {
         }}
         onSave={handleSaveTakeaway}
       />
+
+      {/* User menu — top right */}
+      <div className="absolute top-4 right-4 z-50">
+        <UserMenu canvasId={canvasId} />
+      </div>
 
       {/* Indicateur Canvas Info */}
       <div className="absolute bottom-4 right-4 z-40 pointer-events-none">

@@ -1,6 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { createClient } from '@/lib/supabase/server'
+import { createClient as createSupabaseClient } from '@supabase/supabase-js'
+
+async function getUserFromRequest(request: NextRequest) {
+  const authHeader = request.headers.get('Authorization')
+  if (authHeader?.startsWith('Bearer ')) {
+    const token = authHeader.slice(7)
+    const supabase = createSupabaseClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    )
+    const { data: { user } } = await supabase.auth.getUser(token)
+    return user
+  }
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  return user
+}
 
 export async function GET(
   request: NextRequest,
@@ -8,8 +25,7 @@ export async function GET(
 ) {
   try {
     const { canvasId } = await params
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = await getUserFromRequest(request)
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const notes = await prisma.note.findMany({
@@ -37,8 +53,7 @@ export async function POST(
 ) {
   try {
     const { canvasId } = await params
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = await getUserFromRequest(request)
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const data = await request.json()
