@@ -8,100 +8,99 @@ datasource db {
 }
 
 model Note {
-  id              String           @id @default(uuid())
-  title           String           @default("Nouvelle note")
-  content         String           @default("")
-  x               Float            @default(0)
-  y               Float            @default(0)
-  width           Float            @default(300)
-  height          Float            @default(200)
-  backgroundColor String           @default("#ffffff")
-  textColor       String           @default("#000000")
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
-  courseId        String?
-  mainTakeaway    String?
-  canvasId        String           @default("default-canvas")
-  // Auth & isolation
-  userId          String?
-  // Extension sync fields
-  source          String?          // 'extension' | 'manual'
-  sourceUrl       String?
-  favicon         String?
-  syncedAt        DateTime?
-  course          Course?          @relation(fields: [courseId], references: [id])
-  concepts        NoteConcept[]
-  connections     NoteConnection[] @relation("FromNote")
-  connectedFrom   NoteConnection[] @relation("ToNote")
+  id          String    @id @default(uuid())
+  title       String    @default("Nouvelle note")
+  content     String    @default("")
+  contentHash String?
+  userId      String
+  source      String?
+  sourceUrl   String?
+  favicon     String?
+  syncedAt    DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  messages    Message[]
+  canvas      Canvas?
 
-  @@index([canvasId])
   @@index([userId])
   @@index([sourceUrl])
 }
 
-model Instructor {
-  id        String   @id @default(uuid())
-  name      String
-  email     String?
-  avatar    String?
-  color     String   @default("#6366f1")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  canvasId  String   @default("default-canvas")
-  courses   Course[]
+model Message {
+  id      String       @id @default(uuid())
+  noteId  String
+  content String
+  order   Int
+  type    String       @default("text")
+  note    Note         @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  tags    MessageTag[]
+
+  @@index([noteId])
+}
+
+model Canvas {
+  id              String       @id @default(uuid())
+  type            String
+  userId          String
+  noteId          String?      @unique
+  noteContentHash String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  note            Note?        @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  nodes           CanvasNode[]
+  edges           CanvasEdge[]
+
+  @@index([userId])
+}
+
+model CanvasNode {
+  id        String       @id @default(uuid())
+  canvasId  String
+  messageId String?
+  noteId    String?
+  x         Float
+  y         Float
+  width     Float        @default(280)
+  height    Float        @default(120)
+  canvas    Canvas       @relation(fields: [canvasId], references: [id], onDelete: Cascade)
+  fromEdges CanvasEdge[] @relation("EdgeFrom")
+  toEdges   CanvasEdge[] @relation("EdgeTo")
 
   @@index([canvasId])
 }
 
-model Course {
-  id           String      @id @default(uuid())
-  name         String
-  description  String?
-  color        String      @default("#3b82f6")
-  instructorId String?
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
-  canvasId     String      @default("default-canvas")
-  instructor   Instructor? @relation(fields: [instructorId], references: [id])
-  notes        Note[]
-
-  @@index([canvasId])
-}
-
-model Concept {
-  id          String        @id @default(uuid())
-  name        String        @unique
-  description String?
-  category    String?
-  frequency   Int           @default(1)
-  createdAt   DateTime      @default(now())
-  notes       NoteConcept[]
-}
-
-model NoteConcept {
-  noteId    String
-  conceptId String
-  concept   Concept @relation(fields: [conceptId], references: [id], onDelete: Cascade)
-  note      Note    @relation(fields: [noteId], references: [id], onDelete: Cascade)
-
-  @@id([noteId, conceptId])
-}
-
-model NoteConnection {
-  id       String  @id @default(uuid())
+model CanvasEdge {
+  id       String     @id @default(uuid())
+  canvasId String
   fromId   String
   toId     String
   label    String?
-  fromNote Note    @relation("FromNote", fields: [fromId], references: [id], onDelete: Cascade)
-  toNote   Note    @relation("ToNote", fields: [toId], references: [id], onDelete: Cascade)
+  style    String     @default("curved")
+  canvas   Canvas     @relation(fields: [canvasId], references: [id], onDelete: Cascade)
+  from     CanvasNode @relation("EdgeFrom", fields: [fromId], references: [id], onDelete: Cascade)
+  to       CanvasNode @relation("EdgeTo", fields: [toId], references: [id], onDelete: Cascade)
 
   @@unique([fromId, toId])
 }
 
-model Image {
-  id        String   @id @default(uuid())
-  filename  String
-  path      String
-  noteId    String?
-  createdAt DateTime @default(now())
+model Tag {
+  id        String       @id @default(uuid())
+  name      String
+  category  String?
+  color     String       @default("#3b82f6")
+  userId    String
+  createdAt DateTime     @default(now())
+  messages  MessageTag[]
+
+  @@unique([name, userId])
+  @@index([userId])
+}
+
+model MessageTag {
+  messageId String
+  tagId     String
+  message   Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  tag       Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([messageId, tagId])
 }

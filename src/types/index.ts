@@ -1,117 +1,63 @@
-export interface Position {
-  x: number
-  y: number
-}
-
-export interface Size {
-  width: number
-  height: number
-}
-
-export interface NoteBlock {
-  id: string
-  type: 'paragraph' | 'heading' | 'image' | 'video' | 'link' | 'quote' | 'code'
-  content: any
-  order: number
-  metadata?: Record<string, any>
-}
-
 export interface NoteData {
   id: string
   title: string
-  content: string // Garde pour compatibilité, sera migré vers blocks
-  blocks?: NoteBlock[] // Nouvelle structure par blocs
-  mainTakeaway?: string // Enseignement principal de la note
+  content: string
+  contentHash?: string | null
+  userId: string
+  source?: string | null
+  sourceUrl?: string | null
+  favicon?: string | null
+  syncedAt?: Date | string | null
+  createdAt: Date | string
+  updatedAt: Date | string
+  messages?: MessageData[]
+}
+
+export interface MessageData {
+  id: string
+  noteId: string
+  content: string
+  order: number
+  type: string
+  tags?: { tag: TagData }[]
+}
+
+export interface CanvasData {
+  id: string
+  type: string
+  userId: string
+  noteId?: string | null
+  noteContentHash?: string | null
+  createdAt: Date | string
+  updatedAt: Date | string
+  nodes: CanvasNodeData[]
+  edges: CanvasEdgeData[]
+}
+
+export interface CanvasNodeData {
+  id: string
+  canvasId: string
+  messageId?: string | null
+  noteId?: string | null
   x: number
   y: number
   width: number
   height: number
-  backgroundColor: string
-  textColor: string
-  courseId?: string
-  concepts?: Array<{
-    id: string
-    concept: {
-      id: string
-      name: string
-      category?: string
-    }
-  }>
-  createdAt: Date
-  updatedAt: Date
-  // Extension sync fields
-  source?: string | null     // 'extension' | 'manual' | null
-  sourceUrl?: string | null
-  favicon?: string | null
-  syncedAt?: Date | string | null
 }
 
-export interface InstructorData {
+export interface CanvasEdgeData {
   id: string
-  name: string
-  email?: string
-  avatar?: string
-  color: string
-  createdAt: Date
-  updatedAt: Date
-}
-
-export interface CourseData {
-  id: string
-  name: string
-  description?: string
-  color: string
-  instructorId?: string
-  instructor?: InstructorData
-  createdAt: Date
-  updatedAt: Date
-}
-
-export interface ConceptData {
-  id: string
-  name: string
-  description?: string
-  category?: string
-  frequency: number
-  createdAt: Date
-}
-
-export interface ConnectionData {
-  id: string
+  canvasId: string
   fromId: string
   toId: string
-  label?: string
-  fromPoint?: { x: number; y: number }
-  toPoint?: { x: number; y: number }
-  color?: string
-  style?: 'straight' | 'curved' | 'elbow'
-  strokeWidth?: number
+  label?: string | null
+  style: string
 }
 
-export interface CanvasState {
-  zoom: number
-  pan: Position
-  selectedNoteId?: string
-  isConnecting?: boolean
-  connectingFromId?: string
-  isGroupSelecting?: boolean
-  groupSelection?: {
-    startPoint: Position
-    endPoint: Position
-    selectedItems: string[]
-  }
-  tempConnection?: {
-    fromId: string
-    startPoint: Position
-    endPoint: Position
-  }
-}
-
-export interface ICTConcepts {
-  [key: string]: {
-    category: string
-    definition: string
-    keywords: string[]
-    weight: number
-  }
+export interface TagData {
+  id: string
+  name: string
+  category?: string | null
+  color: string
+  userId: string
 }

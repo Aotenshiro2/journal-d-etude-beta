@@ -26,7 +26,6 @@ interface ThemeProviderProps {
 
 export function ThemeProvider({ children }: ThemeProviderProps) {
   const [theme, setThemeState] = useState<Theme>('light')
-  const [mounted, setMounted] = useState(false)
 
   // Charger le thème depuis localStorage au montage
   useEffect(() => {
@@ -34,21 +33,17 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
     if (savedTheme && (savedTheme === 'light' || savedTheme === 'dark')) {
       setThemeState(savedTheme)
     } else {
-      // Détecter la préférence système
       const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
       setThemeState(prefersDark ? 'dark' : 'light')
     }
-    setMounted(true)
   }, [])
 
   // Appliquer le thème au document
   useEffect(() => {
-    if (mounted) {
-      document.documentElement.setAttribute('data-theme', theme)
-      document.documentElement.classList.toggle('dark', theme === 'dark')
-      localStorage.setItem('journal-theme', theme)
-    }
-  }, [theme, mounted])
+    document.documentElement.setAttribute('data-theme', theme)
+    document.documentElement.classList.toggle('dark', theme === 'dark')
+    localStorage.setItem('journal-theme', theme)
+  }, [theme])
 
   const toggleTheme = () => {
     setThemeState(prev => prev === 'light' ? 'dark' : 'light')
@@ -56,11 +51,6 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
 
   const setTheme = (newTheme: Theme) => {
     setThemeState(newTheme)
-  }
-
-  // Éviter l'hydration mismatch
-  if (!mounted) {
-    return <div className="min-h-screen bg-gray-50">{children}</div>
   }
 
   return (

@@ -25,47 +25,30 @@ export async function middleware(request: NextRequest) {
     }
   )
 
-  // Refresh session — required for SSR auth
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
+  const { data: { user } } = await supabase.auth.getUser()
   const { pathname } = request.nextUrl
 
-  // Routes publiques — toujours autorisées
-  const publicPaths = ['/auth', '/api/health', '/api/export']
+  // Public routes
+  const publicPaths = ['/auth', '/api/health', '/guide']
   const isPublic = publicPaths.some(p => pathname.startsWith(p))
-
   if (isPublic) return supabaseResponse
 
-  // API canvas — 401 JSON si non connecté
-  if (pathname.startsWith('/api/canvas') || pathname.startsWith('/api/concepts')) {
+  // API routes — allow Bearer token through (handled in route handlers)
+  if (pathname.startsWith('/api/')) {
     if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      const authHeader = request.headers.get('authorization')
+      if (!authHeader?.startsWith('Bearer ')) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      }
     }
     return supabaseResponse
   }
 
-  // Pages canvas — redirect vers /auth si non connecté
-  if (pathname.startsWith('/canvas')) {
-    if (!user) {
-      const url = request.nextUrl.clone()
-      url.pathname = '/auth'
-      url.searchParams.set('redirectTo', pathname)
-      return NextResponse.redirect(url)
-    }
-    return supabaseResponse
-  }
-
-  // Page racine — redirect selon état auth
-  if (pathname === '/') {
-    if (!user) {
-      const url = request.nextUrl.clone()
-      url.pathname = '/auth'
-      return NextResponse.redirect(url)
-    }
+  // Protected pages
+  if (!user) {
     const url = request.nextUrl.clone()
-    url.pathname = '/canvas/default-canvas'
+    url.pathname = '/auth'
+    url.searchParams.set('redirectTo', pathname)
     return NextResponse.redirect(url)
   }
 
