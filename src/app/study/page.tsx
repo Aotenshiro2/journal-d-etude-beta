@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db'
 import Link from 'next/link'
 import NoteCard from '@/components/NoteCard'
 import AppHeader from '@/components/AppHeader'
+import EmptyNotesState from '@/components/EmptyNotesState'
 
 export default async function StudyPage() {
   const supabase = await createClient()
@@ -54,13 +55,7 @@ export default async function StudyPage() {
         </div>
 
         {notes.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-24 text-center">
-            <div className="text-4xl mb-4">📭</div>
-            <h2 className="text-lg font-semibold text-white mb-2">Aucune note pour l&apos;instant</h2>
-            <p className="text-sm text-gray-500 max-w-sm">
-              Installe l&apos;extension Chrome AOKnowledge pour capturer tes premières notes depuis le web.
-            </p>
-          </div>
+          <EmptyNotesState />
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {notes.map((note) => (
