@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useMemo } from 'react'
+import { useCallback, useEffect, useMemo } from 'react'
 import {
   ReactFlow,
   Node,
@@ -41,12 +41,17 @@ function MessageNode({ data }: NodeProps) {
       <Handle type="target" position={Position.Top} className="!bg-yellow-400" />
       <Handle type="source" position={Position.Bottom} className="!bg-yellow-400" />
       {d.type === 'image' ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={d.content.match(/src="([^"]+)"/)?.[1] ?? ''}
-          alt=""
-          className="w-full h-full object-cover rounded-lg"
-        />
+        (() => {
+          const src = d.content.match(/src=["']([^"']+)["']/)?.[1]
+          return src ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={src} alt="" className="w-full h-full object-cover rounded-lg" />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center text-gray-500 text-sm">
+              Image non disponible
+            </div>
+          )
+        })()
       ) : (
         <p className="leading-relaxed overflow-hidden" style={{ display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical' }}>
           {text}
@@ -116,6 +121,22 @@ export default function StudyCanvas({
 
   const [nodes, setNodes, onNodesChange] = useNodesState(rfNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(rfEdges)
+
+  // Sync React Flow internal state when nodes/edges are added/removed externally
+  useEffect(() => {
+    setNodes((prev) => {
+      const existingIds = new Set(prev.map((n) => n.id))
+      const newNodes = rfNodes.filter((n) => !existingIds.has(n.id))
+      if (newNodes.length === 0) return prev
+      return [...prev, ...newNodes]
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rfNodes])
+
+  useEffect(() => {
+    setEdges(rfEdges)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rfEdges])
 
   const onConnect = useCallback(
     (params: Connection) => {
