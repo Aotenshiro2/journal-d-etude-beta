@@ -68,6 +68,7 @@ async function createMessagesFromHtml(noteId: string, html: string) {
 }
 
 export async function POST(req: NextRequest) {
+  try {
   const userId = await getUserId(req)
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -145,4 +146,11 @@ export async function POST(req: NextRequest) {
   }
 
   return NextResponse.json(note, { status: 201 })
+  } catch (err) {
+    console.error('[API /notes POST]', err)
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : 'Internal server error' },
+      { status: 500 }
+    )
+  }
 }

@@ -37,7 +37,7 @@ export default function EmptyNotesState() {
         </button>
       ) : (
         <a
-          href="https://chromewebstore.google.com/detail/aoknowledge/YOUR_EXTENSION_ID"
+          href="https://chromewebstore.google.com/detail/aoknowledge/njibkjnbghnjmladimppjdlhhhhipdce"
           target="_blank"
           rel="noopener noreferrer"
           className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white/5 border border-white/10 text-gray-300 text-sm font-medium hover:bg-white/10 transition-colors"
