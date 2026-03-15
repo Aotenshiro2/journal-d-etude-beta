@@ -65,6 +65,13 @@ export default function AuthPage() {
     if (error) {
       setError(error.message)
     } else {
+      if (newsletter) {
+        await fetch('/api/newsletter/subscribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, name }),
+        }).catch(() => {})
+      }
       setSuccess('Vérifie tes emails pour confirmer ton compte.')
     }
     setLoading(false)
