@@ -18,13 +18,14 @@ model Note {
   sourceUrl   String?
   favicon     String?
   syncedAt    DateTime?
+  deletedAt   DateTime?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   messages    Message[]
   canvas      Canvas?
 
+  @@unique([userId, sourceUrl])
   @@index([userId])
-  @@index([sourceUrl])
 }
 
 model Message {

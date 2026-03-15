@@ -24,8 +24,20 @@ export async function GET(req: NextRequest) {
   const userId = await getUserId(req)
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
+  const { searchParams } = new URL(req.url)
+
+  // ?format=sourceUrls — utilisé par l'extension pour vérifier l'état réel de la sync
+  // Retourne toutes les notes avec sourceUrl (incluant les soft-deleted)
+  if (searchParams.get('format') === 'sourceUrls') {
+    const notes = await prisma.note.findMany({
+      where: { userId, sourceUrl: { not: null } },
+      select: { sourceUrl: true, deletedAt: true },
+    })
+    return NextResponse.json(notes)
+  }
+
   const notes = await prisma.note.findMany({
-    where: { userId },
+    where: { userId, deletedAt: null },
     orderBy: { updatedAt: 'desc' },
     select: {
       id: true,

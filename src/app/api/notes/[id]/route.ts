@@ -24,7 +24,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const { id } = await params
 
   const note = await prisma.note.findFirst({
-    where: { id, userId },
+    where: { id, userId, deletedAt: null },
     include: {
       messages: {
         orderBy: { order: 'asc' },
@@ -35,4 +35,20 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   if (!note) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   return NextResponse.json(note)
+}
+
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const userId = await getUserId(req)
+  if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const { id } = await params
+
+  const note = await prisma.note.findFirst({ where: { id, userId } })
+  if (!note) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
+  await prisma.note.update({
+    where: { id },
+    data: { deletedAt: new Date() },
+  })
+
+  return NextResponse.json({ success: true })
 }
