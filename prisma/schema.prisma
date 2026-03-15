@@ -17,9 +17,11 @@ model Note {
   source      String?
   sourceUrl   String?
   favicon     String?
-  syncedAt    DateTime?
-  deletedAt   DateTime?
-  createdAt   DateTime  @default(now())
+  syncedAt         DateTime?
+  deletedAt        DateTime?
+  capturedAt       DateTime?  // date originale de création dans l'extension
+  extensionVersion String?    // version de l'extension au moment de la capture
+  createdAt        DateTime   @default(now())
   updatedAt   DateTime  @updatedAt
   messages    Message[]
   canvas      Canvas?

@@ -85,7 +85,7 @@ export async function POST(req: NextRequest) {
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await req.json()
-  const { title, content, sourceUrl, favicon, source, syncedAt, messages } = body
+  const { title, content, sourceUrl, favicon, source, syncedAt, messages, capturedAt, extensionVersion } = body
 
   const contentHash = content ? crypto.createHash('sha256').update(content).digest('hex') : null
 
@@ -101,6 +101,7 @@ export async function POST(req: NextRequest) {
           contentHash,
           favicon: favicon ?? existing.favicon,
           syncedAt: syncedAt ? new Date(syncedAt) : new Date(),
+          extensionVersion: extensionVersion ?? existing.extensionVersion,
           updatedAt: new Date(),
         },
       })
@@ -115,6 +116,8 @@ export async function POST(req: NextRequest) {
           sourceUrl,
           favicon,
           syncedAt: syncedAt ? new Date(syncedAt) : new Date(),
+          capturedAt: capturedAt ? new Date(capturedAt) : null,
+          extensionVersion: extensionVersion ?? null,
         },
       })
     }
