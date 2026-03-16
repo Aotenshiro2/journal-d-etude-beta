@@ -27,11 +27,11 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
 
   // ?format=sourceUrls — utilisé par l'extension pour vérifier l'état réel de la sync
-  // Retourne toutes les notes avec sourceUrl (incluant les soft-deleted)
+  // Retourne toutes les notes synquées depuis l'extension (incluant les soft-deleted)
   if (searchParams.get('format') === 'sourceUrls') {
     const notes = await prisma.note.findMany({
-      where: { userId, sourceUrl: { not: null } },
-      select: { sourceUrl: true, deletedAt: true },
+      where: { userId, OR: [{ sourceUrl: { not: null } }, { extensionNoteId: { not: null } }] },
+      select: { sourceUrl: true, extensionNoteId: true, deletedAt: true },
     })
     return NextResponse.json(notes)
   }
@@ -85,42 +85,66 @@ export async function POST(req: NextRequest) {
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await req.json()
-  const { title, content, sourceUrl, favicon, source, syncedAt, messages, capturedAt, extensionVersion } = body
+  const { title, content, sourceUrl, favicon, source, syncedAt, messages, capturedAt, extensionVersion, extensionNoteId } = body
 
   const contentHash = content ? crypto.createHash('sha256').update(content).digest('hex') : null
 
   let note
-  if (sourceUrl) {
-    const existing = await prisma.note.findFirst({ where: { userId, sourceUrl } })
-    if (existing) {
-      note = await prisma.note.update({
-        where: { id: existing.id },
-        data: {
-          title: title ?? existing.title,
-          content: content ?? existing.content,
-          contentHash,
-          favicon: favicon ?? existing.favicon,
-          syncedAt: syncedAt ? new Date(syncedAt) : new Date(),
-          extensionVersion: extensionVersion ?? existing.extensionVersion,
-          updatedAt: new Date(),
-        },
-      })
-    } else {
-      note = await prisma.note.create({
-        data: {
-          title: title ?? 'Nouvelle note',
-          content: content ?? '',
-          contentHash,
-          userId,
-          source: source ?? 'extension',
-          sourceUrl,
-          favicon,
-          syncedAt: syncedAt ? new Date(syncedAt) : new Date(),
-          capturedAt: capturedAt ? new Date(capturedAt) : null,
-          extensionVersion: extensionVersion ?? null,
-        },
-      })
-    }
+  // Upsert logic:
+  // 1. If extensionNoteId provided → look by ID first (exact match for this extension note)
+  // 2. Fallback URL → only match legacy notes (extensionNoteId IS NULL):
+  //    - If extensionNoteId provided: claim a legacy entry for this URL (migration), or skip if none
+  //    - If no extensionNoteId: match any note by URL (manual journal notes)
+  const existingByNoteId = extensionNoteId
+    ? await prisma.note.findFirst({ where: { userId, extensionNoteId } })
+    : null
+  const existing = existingByNoteId ?? (
+    sourceUrl
+      ? await prisma.note.findFirst({
+          where: {
+            userId,
+            sourceUrl,
+            // When extensionNoteId is provided, only match legacy notes (no extensionNoteId yet)
+            // This allows N notes per URL once all legacy entries have been claimed
+            ...(extensionNoteId ? { extensionNoteId: null } : {}),
+          },
+        })
+      : null
+  )
+
+  if (existing) {
+    note = await prisma.note.update({
+      where: { id: existing.id },
+      data: {
+        title: title ?? existing.title,
+        content: content ?? existing.content,
+        contentHash,
+        favicon: favicon ?? existing.favicon,
+        syncedAt: syncedAt ? new Date(syncedAt) : new Date(),
+        extensionVersion: extensionVersion ?? existing.extensionVersion,
+        // Backfill capturedAt si absent (notes synquées avant que ce champ existait)
+        capturedAt: capturedAt ? new Date(capturedAt) : existing.capturedAt,
+        // Backfill extensionNoteId if it was missing (legacy notes synced before this change)
+        ...(extensionNoteId && !existing.extensionNoteId ? { extensionNoteId } : {}),
+        updatedAt: new Date(),
+      },
+    })
+  } else if (sourceUrl || extensionNoteId) {
+    note = await prisma.note.create({
+      data: {
+        title: title ?? 'Nouvelle note',
+        content: content ?? '',
+        contentHash,
+        userId,
+        source: source ?? 'extension',
+        sourceUrl: sourceUrl ?? null,
+        favicon,
+        syncedAt: syncedAt ? new Date(syncedAt) : new Date(),
+        capturedAt: capturedAt ? new Date(capturedAt) : null,
+        extensionVersion: extensionVersion ?? null,
+        extensionNoteId: extensionNoteId ?? null,
+      },
+    })
   } else {
     note = await prisma.note.create({
       data: {

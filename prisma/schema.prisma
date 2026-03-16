@@ -21,13 +21,17 @@ model Note {
   deletedAt        DateTime?
   capturedAt       DateTime?  // date originale de création dans l'extension
   extensionVersion String?    // version de l'extension au moment de la capture
+  extensionNoteId  String?    // ID de la note dans l'extension (clé d'upsert prioritaire)
   createdAt        DateTime   @default(now())
   updatedAt   DateTime  @updatedAt
   messages    Message[]
   canvas      Canvas?
 
-  @@unique([userId, sourceUrl])
+  // Note: @@unique([userId, sourceUrl]) replaced by a partial DB index (see SQL migration):
+  // CREATE UNIQUE INDEX "Note_userId_sourceUrl_legacy_idx" ON "Note" ("userId","sourceUrl") WHERE "extensionNoteId" IS NULL
+  // → legacy notes (no extensionNoteId): 1 per URL max; extension notes: N per URL allowed
   @@index([userId])
+  @@index([userId, extensionNoteId])
 }
 
 model Message {
