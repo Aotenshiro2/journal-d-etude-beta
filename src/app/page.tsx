@@ -75,6 +75,10 @@ export default async function HomePage() {
 
       <main className="max-w-4xl mx-auto px-6 py-16">
         <div className="mb-12 text-center">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-yellow-400/10 border border-yellow-400/20 text-yellow-300 text-xs font-medium mb-4">
+            <span>🚧</span>
+            Bêta — application en cours de développement
+          </div>
           <h1 className="text-3xl font-bold text-white mb-3">
             Que veux-tu faire aujourd&apos;hui&nbsp;?
           </h1>
