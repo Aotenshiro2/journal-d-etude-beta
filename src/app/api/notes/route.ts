@@ -164,15 +164,21 @@ export async function POST(req: NextRequest) {
   if (Array.isArray(messages) && messages.length > 0) {
     if (source === 'extension') {
       // Extension → remplace toujours tous les messages pour capturer les images
-      await prisma.message.deleteMany({ where: { noteId: note.id } })
-      await prisma.message.createMany({
-        data: messages.map((msg: { content?: string; type?: string }, i: number) => ({
+      // Filtrer les éléments null/undefined qui causent des erreurs de validation Prisma
+      const validMessages = (messages as unknown[])
+        .filter((msg) => msg != null)
+        .map((msg: { content?: string; type?: string }, i: number) => ({
           noteId: note.id,
           content: typeof msg === 'string' ? msg : (msg.content ?? ''),
           order: i,
           type: (msg as { type?: string }).type ?? detectType(typeof msg === 'string' ? msg : (msg.content ?? '')),
-        })),
-      })
+        }))
+      // Transaction batch (compatible PgBouncer transaction mode)
+      // Si createMany échoue → deleteMany est rollbacké, messages existants préservés
+      await prisma.$transaction([
+        prisma.message.deleteMany({ where: { noteId: note.id } }),
+        prisma.message.createMany({ data: validMessages }),
+      ])
     } else {
       // Manual (journal) → conserver la logique incrémentale existante
       const existingMessages = await prisma.message.findMany({
