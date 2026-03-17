@@ -7,9 +7,10 @@ export interface NoteData {
   source?: string | null
   sourceUrl?: string | null
   favicon?: string | null
-  syncedAt?: Date | string | null
-  createdAt: Date | string
-  updatedAt: Date | string
+  lastSyncAt?: Date | string | null
+  createdAt?: Date | string | null
+  firstSyncAt: Date | string
+  lastModifiedAt: Date | string
   messages?: MessageData[]
 }
 

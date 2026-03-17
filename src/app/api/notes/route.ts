@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
 
   const notes = await prisma.note.findMany({
     where: { userId, deletedAt: null },
-    orderBy: { updatedAt: 'desc' },
+    orderBy: { lastModifiedAt: 'desc' },
     select: {
       id: true,
       title: true,
@@ -47,9 +47,10 @@ export async function GET(req: NextRequest) {
       source: true,
       sourceUrl: true,
       favicon: true,
-      syncedAt: true,
+      lastSyncAt: true,
       createdAt: true,
-      updatedAt: true,
+      firstSyncAt: true,
+      lastModifiedAt: true,
       userId: true,
     },
   })
@@ -85,7 +86,7 @@ export async function POST(req: NextRequest) {
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await req.json()
-  const { title, content, sourceUrl, favicon, source, syncedAt, messages, capturedAt, extensionVersion, extensionNoteId } = body
+  const { title, content, sourceUrl, favicon, source, lastSyncAt, messages, createdAt, extensionVersion, extensionNoteId } = body
 
   const contentHash = content ? crypto.createHash('sha256').update(content).digest('hex') : null
 
@@ -120,13 +121,13 @@ export async function POST(req: NextRequest) {
         content: content ?? existing.content,
         contentHash,
         favicon: favicon ?? existing.favicon,
-        syncedAt: syncedAt ? new Date(syncedAt) : new Date(),
+        lastSyncAt: lastSyncAt ? new Date(lastSyncAt) : new Date(),
         extensionVersion: extensionVersion ?? existing.extensionVersion,
-        // Backfill capturedAt si absent (notes synquées avant que ce champ existait)
-        capturedAt: capturedAt ? new Date(capturedAt) : existing.capturedAt,
+        // Backfill createdAt si absent (notes synquées avant que ce champ existait)
+        createdAt: createdAt ? new Date(createdAt) : existing.createdAt,
         // Backfill extensionNoteId if it was missing (legacy notes synced before this change)
         ...(extensionNoteId && !existing.extensionNoteId ? { extensionNoteId } : {}),
-        updatedAt: new Date(),
+        lastModifiedAt: new Date(),
       },
     })
   } else if (sourceUrl || extensionNoteId) {
@@ -139,8 +140,8 @@ export async function POST(req: NextRequest) {
         source: source ?? 'extension',
         sourceUrl: sourceUrl ?? null,
         favicon,
-        syncedAt: syncedAt ? new Date(syncedAt) : new Date(),
-        capturedAt: capturedAt ? new Date(capturedAt) : null,
+        lastSyncAt: lastSyncAt ? new Date(lastSyncAt) : new Date(),
+        createdAt: createdAt ? new Date(createdAt) : null,
         extensionVersion: extensionVersion ?? null,
         extensionNoteId: extensionNoteId ?? null,
       },
@@ -154,7 +155,7 @@ export async function POST(req: NextRequest) {
         userId,
         source: source ?? 'manual',
         favicon,
-        syncedAt: syncedAt ? new Date(syncedAt) : null,
+        lastSyncAt: lastSyncAt ? new Date(lastSyncAt) : null,
       },
     })
   }

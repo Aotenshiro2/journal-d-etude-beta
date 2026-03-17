@@ -17,13 +17,13 @@ model Note {
   source      String?
   sourceUrl   String?
   favicon     String?
-  syncedAt         DateTime?
+  lastSyncAt       DateTime?  // dernier push depuis l'extension
   deletedAt        DateTime?
-  capturedAt       DateTime?  // date originale de création dans l'extension
+  createdAt        DateTime?  // date originale de capture dans l'extension (ancien capturedAt)
   extensionVersion String?    // version de l'extension au moment de la capture
   extensionNoteId  String?    // ID de la note dans l'extension (clé d'upsert prioritaire)
-  createdAt        DateTime   @default(now())
-  updatedAt   DateTime  @updatedAt
+  firstSyncAt      DateTime   @default(now())  // première entrée en DB
+  lastModifiedAt   DateTime   @updatedAt       // dernière modification dans le journal
   messages    Message[]
   canvas      Canvas?
 

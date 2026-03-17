@@ -8,7 +8,7 @@ interface NoteCardProps {
 
 export default function NoteCard({ note }: NoteCardProps) {
   const excerpt = truncateText(stripHtml(note.content), 120)
-  const date = formatRelativeTime(new Date(note.updatedAt))
+  const date = formatRelativeTime(new Date(note.lastModifiedAt))
   const firstImage = note.content
     ? extractImageSrc(note.content.match(/<img[^>]*>/)?.[0] ?? '')
     : null

@@ -63,7 +63,7 @@ export default function NoteMapCanvas({ notes, canvas }: NoteMapCanvasProps) {
           type: 'noteMap',
           position: { x: n.x, y: n.y },
           style: { width: 200, height: 80 },
-          data: { note: noteMap.get(n.noteId!) ?? { id: n.noteId!, title: '...', content: '', userId: '', createdAt: '', updatedAt: '' } },
+          data: { note: noteMap.get(n.noteId!) ?? { id: n.noteId!, title: '...', content: '', userId: '', firstSyncAt: '', lastModifiedAt: '' } },
         })),
     [canvas.nodes, noteMap]
   )

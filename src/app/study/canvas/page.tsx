@@ -12,7 +12,7 @@ export default async function NoteMapPage() {
 
   const notes = await prisma.note.findMany({
     where: { userId: user.id },
-    orderBy: { updatedAt: 'desc' },
+    orderBy: { lastModifiedAt: 'desc' },
     select: {
       id: true,
       title: true,
@@ -21,9 +21,10 @@ export default async function NoteMapPage() {
       favicon: true,
       sourceUrl: true,
       source: true,
-      syncedAt: true,
+      lastSyncAt: true,
       createdAt: true,
-      updatedAt: true,
+      firstSyncAt: true,
+      lastModifiedAt: true,
       userId: true,
     },
   })
