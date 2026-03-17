@@ -162,21 +162,35 @@ export async function POST(req: NextRequest) {
 
   // Handle messages
   if (Array.isArray(messages) && messages.length > 0) {
-    const existingMessages = await prisma.message.findMany({
-      where: { noteId: note.id },
-      select: { order: true },
-    })
-    const existingOrders = new Set(existingMessages.map((m) => m.order))
-    const newMsgs = messages
-      .filter((_: unknown, i: number) => !existingOrders.has(i))
-      .map((msg: { content?: string; type?: string }, i: number) => ({
-        noteId: note.id,
-        content: typeof msg === 'string' ? msg : (msg.content ?? ''),
-        order: i,
-        type: (msg as { type?: string }).type ?? detectType(typeof msg === 'string' ? msg : (msg.content ?? '')),
-      }))
-    if (newMsgs.length > 0) {
-      await prisma.message.createMany({ data: newMsgs })
+    if (source === 'extension') {
+      // Extension → remplace toujours tous les messages pour capturer les images
+      await prisma.message.deleteMany({ where: { noteId: note.id } })
+      await prisma.message.createMany({
+        data: messages.map((msg: { content?: string; type?: string }, i: number) => ({
+          noteId: note.id,
+          content: typeof msg === 'string' ? msg : (msg.content ?? ''),
+          order: i,
+          type: (msg as { type?: string }).type ?? detectType(typeof msg === 'string' ? msg : (msg.content ?? '')),
+        })),
+      })
+    } else {
+      // Manual (journal) → conserver la logique incrémentale existante
+      const existingMessages = await prisma.message.findMany({
+        where: { noteId: note.id },
+        select: { order: true },
+      })
+      const existingOrders = new Set(existingMessages.map((m) => m.order))
+      const newMsgs = messages
+        .filter((_: unknown, i: number) => !existingOrders.has(i))
+        .map((msg: { content?: string; type?: string }, i: number) => ({
+          noteId: note.id,
+          content: typeof msg === 'string' ? msg : (msg.content ?? ''),
+          order: i,
+          type: (msg as { type?: string }).type ?? detectType(typeof msg === 'string' ? msg : (msg.content ?? '')),
+        }))
+      if (newMsgs.length > 0) {
+        await prisma.message.createMany({ data: newMsgs })
+      }
     }
   } else {
     const existingCount = await prisma.message.count({ where: { noteId: note.id } })
@@ -193,4 +207,12 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     )
   }
+}
+
+export async function DELETE(req: NextRequest) {
+  const userId = await getUserId(req)
+  if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  await prisma.note.deleteMany({ where: { userId } })
+  return NextResponse.json({ deleted: true })
 }
