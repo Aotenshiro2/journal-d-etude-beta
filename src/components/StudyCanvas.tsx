@@ -18,7 +18,7 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { MessageData, CanvasNodeData, CanvasEdgeData } from '@/types'
-import { stripHtml, truncateText } from '@/lib/utils'
+import { stripHtml, truncateText, extractImageSrc } from '@/lib/utils'
 
 interface StudyCanvasProps {
   canvasId: string
@@ -42,7 +42,7 @@ function MessageNode({ data }: NodeProps) {
       <Handle type="source" position={Position.Bottom} className="!bg-yellow-400" />
       {d.type === 'image' ? (
         (() => {
-          const src = d.content.match(/src=["']([^"']+)["']/)?.[1]
+          const src = extractImageSrc(d.content)
           return src ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={src} alt="" className="w-full h-full object-cover rounded-lg" />

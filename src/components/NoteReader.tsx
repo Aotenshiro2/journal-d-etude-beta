@@ -25,7 +25,7 @@ export default function NoteReader({ note }: NoteReaderProps) {
         </a>
       )}
       <div
-        className="text-gray-300 text-xs leading-relaxed"
+        className="note-content text-gray-300 text-sm leading-relaxed"
         dangerouslySetInnerHTML={{ __html: note.content }}
       />
     </div>

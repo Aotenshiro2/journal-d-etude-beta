@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { MessageData } from '@/types'
-import { stripHtml, truncateText } from '@/lib/utils'
+import { stripHtml, truncateText, extractImageSrc } from '@/lib/utils'
 
 interface MessagePanelProps {
   canvasId: string
@@ -73,12 +73,15 @@ function MessageBlock({
       onDragStart={(e) => onDragStart(e, message.id)}
       className="flex-shrink-0 w-48 p-2.5 rounded-lg border border-white/10 bg-gray-800 hover:border-yellow-400/40 cursor-grab active:cursor-grabbing transition-all text-xs text-gray-300 leading-relaxed"
     >
-      {message.type === 'image' ? (
-        <div className="text-center text-gray-500">
-          <span>🖼</span>
-          <span className="ml-1">Image</span>
-        </div>
-      ) : (
+      {message.type === 'image' ? (() => {
+        const src = extractImageSrc(message.content)
+        return src ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={src} alt="" className="w-full h-20 object-cover rounded-md" />
+        ) : (
+          <span className="text-xs text-gray-500">Image non disponible</span>
+        )
+      })() : (
         <p className="line-clamp-3">{text || '(bloc vide)'}</p>
       )}
       {message.tags && message.tags.length > 0 && (

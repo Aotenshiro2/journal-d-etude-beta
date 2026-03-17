@@ -25,6 +25,21 @@ export function truncateText(text: string, maxLength: number): string {
 }
 
 /**
+ * Extrait l'URL d'une image depuis un contenu message.
+ * Gère deux cas : HTML avec attribut src OU URL brute envoyée par l'extension.
+ */
+export function extractImageSrc(content: string): string | null {
+  if (!content) return null
+  // Case 1: HTML <img src="...">
+  const fromAttr = content.match(/src=["']([^"']+)["']/)?.[1]
+  if (fromAttr) return fromAttr
+  // Case 2: Raw URL (sent by extension as message content)
+  const trimmed = content.trim()
+  if (/^https?:\/\//.test(trimmed) || /^data:image\//.test(trimmed)) return trimmed
+  return null
+}
+
+/**
  * Formate une date relative (ex: "2h", "3j")
  */
 export function formatRelativeTime(date: Date): string {
