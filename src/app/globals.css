@@ -48,6 +48,10 @@
   --canvas-bg: #f6f7f9;
   --canvas-dot: rgba(0, 0, 0, 0.08);
   --canvas-dot-lit: rgba(0, 0, 0, 0.35);
+  --canvas-top-fade: rgba(246, 247, 249, 0.92);
+  --float-bg: rgba(255, 255, 255, 0.82);
+  --float-border: rgba(0, 0, 0, 0.07);
+  --float-shadow: 0 2px 12px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0,0,0,0.04);
   --node-bg: #ffffff;
   --node-border: rgba(0, 0, 0, 0.06);
   --node-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
@@ -135,6 +139,10 @@
   --canvas-bg: #101216;
   --canvas-dot: rgba(255, 255, 255, 0.1);
   --canvas-dot-lit: rgba(255, 255, 255, 0.55);
+  --canvas-top-fade: rgba(16, 18, 22, 0.88);
+  --float-bg: rgba(20, 24, 32, 0.82);
+  --float-border: rgba(255, 255, 255, 0.08);
+  --float-shadow: 0 2px 12px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255,255,255,0.04);
   --node-bg: rgba(24, 30, 42, 0.92);
   --node-border: rgba(255, 255, 255, 0.08);
   --node-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
@@ -324,6 +332,28 @@ input[type="search"]::-moz-selection {
     background-size: 22px 22px;
     pointer-events: none;
     z-index: 0;
+  }
+
+  /* Top fade gradient — remplace le header */
+  .canvas-top-gradient {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 72px;
+    background: linear-gradient(to bottom, var(--canvas-top-fade) 0%, transparent 100%);
+    pointer-events: none;
+    z-index: 10;
+  }
+
+  /* Floating panel — glass pill pour les contrôles */
+  .canvas-float-pill {
+    backdrop-filter: blur(12px) saturate(1.4);
+    -webkit-backdrop-filter: blur(12px) saturate(1.4);
+    background: var(--float-bg);
+    border: 1px solid var(--float-border);
+    box-shadow: var(--float-shadow);
+    border-radius: 10px;
   }
 
   /* Spotlight dot layer — dots s'illuminent autour du curseur */
