@@ -43,8 +43,16 @@
   --ring: 240 5.9% 10%;
   
   /* Canvas specific */
-  --canvas-bg: 240 4.8% 98%;
-  --canvas-grid: 240 5.9% 90%;
+  --canvas-bg: #f6f7f9;
+  --canvas-dot: rgba(0, 0, 0, 0.05);
+  --canvas-glow: rgba(0, 0, 0, 0.05);
+  --node-bg: #ffffff;
+  --node-border: rgba(0, 0, 0, 0.06);
+  --node-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+  --node-title: #0f172a;
+  --node-preview: #64748b;
+  --node-meta: #94a3b8;
+  --node-handle: rgba(59, 130, 246, 0.7);
   
   /* Modal and Editor - Compatibility with old system */
   --modal-overlay: rgba(0, 0, 0, 0.5);
@@ -107,8 +115,16 @@
   --ring: 240 4.9% 83.9%;
   
   /* Canvas specific */
-  --canvas-bg: 240 10% 6%;
-  --canvas-grid: 240 3.7% 15.9%;
+  --canvas-bg: #101216;
+  --canvas-dot: rgba(255, 255, 255, 0.07);
+  --canvas-glow: rgba(255, 255, 255, 0.055);
+  --node-bg: rgba(24, 30, 42, 0.92);
+  --node-border: rgba(255, 255, 255, 0.08);
+  --node-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  --node-title: #f1f5f9;
+  --node-preview: #8fdcc7;
+  --node-meta: #475569;
+  --node-handle: rgba(59, 130, 246, 0.8);
   
   /* Modal and Editor - Dark mode */
   --modal-overlay: rgba(0, 0, 0, 0.7);
@@ -257,12 +273,55 @@ input[type="search"]::-moz-selection {
    =============================================== */
 
 @layer components {
-  /* Canvas styles */
-  .canvas-background {
-    background-color: hsl(var(--canvas-bg));
-    background-image: 
-      radial-gradient(circle at 1px 1px, hsl(var(--canvas-grid)) 1px, transparent 0);
-    background-size: 20px 20px;
+  /* Canvas root */
+  .canvas-root {
+    position: relative;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* Dot grid background */
+  .canvas-grid {
+    position: absolute;
+    inset: 0;
+    background-color: var(--canvas-bg);
+    background-image: radial-gradient(circle, var(--canvas-dot) 1px, transparent 1px);
+    background-size: 22px 22px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* Cursor glow */
+  .canvas-cursor-glow {
+    position: absolute;
+    width: 420px;
+    height: 420px;
+    border-radius: 50%;
+    background: radial-gradient(circle, var(--canvas-glow) 0%, transparent 70%);
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+    z-index: 1;
+    transition: opacity 0.3s ease;
+  }
+
+  /* Note map node card */
+  .note-map-card {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    background: var(--node-bg);
+    border: 1px solid var(--node-border);
+    border-radius: 12px;
+    box-shadow: var(--node-shadow);
+    overflow: hidden;
+    cursor: default;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+
+  .note-map-card:hover {
+    border-color: rgba(59, 130, 246, 0.35);
+    box-shadow: var(--node-shadow), 0 0 0 1px rgba(59, 130, 246, 0.15);
   }
   
   /* Note styles */
@@ -482,8 +541,12 @@ input[type="search"]::-moz-selection {
    REACT FLOW CUSTOMISATION
    =============================================== */
 
-.react-flow__background {
-  background-color: hsl(var(--canvas-bg)) !important;
+.canvas-root .react-flow__background {
+  display: none !important;
+}
+
+.react-flow__pane {
+  background: transparent !important;
 }
 
 .react-flow__controls {

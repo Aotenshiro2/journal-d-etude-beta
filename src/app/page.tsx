@@ -73,36 +73,47 @@ export default async function HomePage() {
   }
 
   return (
-    <div className="h-screen bg-[#080808] text-white flex flex-col overflow-hidden">
+    <div className="h-screen flex flex-col overflow-hidden" style={{ background: 'var(--canvas-bg)', color: 'var(--node-title)' }}>
 
       {/* ── Minimal header ── */}
-      <header className="flex items-center justify-between px-5 py-2.5 border-b border-white/[0.06] flex-shrink-0 bg-[#0a0a0a]">
+      <header
+        className="flex items-center justify-between px-5 py-2.5 flex-shrink-0"
+        style={{ background: 'var(--node-bg)', borderBottom: '1px solid var(--node-border)' }}
+      >
         <div className="flex items-center gap-3">
-          <span className="text-[15px] font-bold text-white tracking-tight">Journal d&apos;Études</span>
-          <span className="text-[10px] text-gray-700 border border-white/[0.08] rounded-full px-2 py-0.5 font-medium">
+          <span className="text-[15px] font-bold tracking-tight" style={{ color: 'var(--node-title)' }}>
+            Journal d&apos;Études
+          </span>
+          <span
+            className="text-[10px] rounded-full px-2 py-0.5 font-medium"
+            style={{ color: 'var(--node-meta)', border: '1px solid var(--node-border)' }}
+          >
             bêta
           </span>
         </div>
         <nav className="flex items-center gap-4">
           <Link
             href="/study"
-            className="text-xs text-gray-600 hover:text-gray-300 transition-colors"
+            className="text-xs transition-colors"
+            style={{ color: 'var(--node-meta)' }}
           >
             Vue liste
           </Link>
           <Link
             href="/concepts"
-            className="text-xs text-gray-600 hover:text-gray-300 transition-colors"
+            className="text-xs transition-colors"
+            style={{ color: 'var(--node-meta)' }}
           >
             Concepts
           </Link>
           <Link
             href="/guide"
-            className="text-xs text-gray-600 hover:text-gray-300 transition-colors"
+            className="text-xs transition-colors"
+            style={{ color: 'var(--node-meta)' }}
           >
             Guide
           </Link>
-          <div className="w-px h-4 bg-white/[0.08]" />
+          <div className="w-px h-4" style={{ background: 'var(--node-border)' }} />
           <ThemeToggle />
           <UserMenu
             user={{ email: user.email ?? '', name: user.user_metadata?.full_name ?? '' }}
@@ -114,16 +125,19 @@ export default async function HomePage() {
       <NoteMapCanvas notes={notes as NoteData[]} canvas={canvasData} />
 
       {/* ── Bottom hint bar ── */}
-      <div className="flex items-center justify-center gap-6 px-6 py-2 border-t border-white/[0.06] bg-[#0a0a0a] flex-shrink-0">
-        <span className="text-[11px] text-gray-700">
+      <div
+        className="flex items-center justify-center gap-6 px-6 py-2 flex-shrink-0"
+        style={{ background: 'var(--node-bg)', borderTop: '1px solid var(--node-border)' }}
+      >
+        <span className="text-[11px]" style={{ color: 'var(--node-meta)' }}>
           Double-clic pour ouvrir une note
         </span>
-        <span className="text-[11px] text-gray-800">·</span>
-        <span className="text-[11px] text-gray-700">
+        <span className="text-[11px]" style={{ color: 'var(--node-border)' }}>·</span>
+        <span className="text-[11px]" style={{ color: 'var(--node-meta)' }}>
           Glisse pour repositionner
         </span>
-        <span className="text-[11px] text-gray-800">·</span>
-        <span className="text-[11px] text-gray-700">
+        <span className="text-[11px]" style={{ color: 'var(--node-border)' }}>·</span>
+        <span className="text-[11px]" style={{ color: 'var(--node-meta)' }}>
           Connecte les nœuds depuis les poignées bleues
         </span>
       </div>

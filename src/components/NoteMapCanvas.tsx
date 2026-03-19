@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useCallback, useMemo, useRef } from 'react'
+import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   ReactFlow,
@@ -12,7 +12,6 @@ import {
   useEdgesState,
   useReactFlow,
   ReactFlowProvider,
-  Background,
   Controls,
   MiniMap,
   Handle,
@@ -57,59 +56,87 @@ const NoteMapNode = React.memo(function NoteMapNode({ data }: NodeProps) {
 
   return (
     <div
-      className="w-full h-full flex flex-col bg-[#141414] border border-white/[0.08] rounded-2xl shadow-2xl overflow-hidden group cursor-default"
-      style={{ transition: 'border-color 0.15s' }}
+      className="note-map-card"
       onDoubleClick={() => router.push(`/study/${note.id}`)}
-      onMouseEnter={e => (e.currentTarget.style.borderColor = 'rgba(59,130,246,0.45)')}
-      onMouseLeave={e => (e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)')}
     >
       <Handle
         type="target"
         position={Position.Top}
-        className="!opacity-0 group-hover:!opacity-100 !w-2 !h-2 !min-w-0 !bg-blue-400 !border-0 !transition-opacity"
+        style={{ background: 'var(--node-handle)', opacity: 0, width: 8, height: 8, minWidth: 0, border: 'none' }}
+        className="!transition-opacity group-hover:!opacity-100"
       />
       <Handle
         type="source"
         position={Position.Bottom}
-        className="!opacity-0 group-hover:!opacity-100 !w-2 !h-2 !min-w-0 !bg-blue-400 !border-0 !transition-opacity"
+        style={{ background: 'var(--node-handle)', opacity: 0, width: 8, height: 8, minWidth: 0, border: 'none' }}
+        className="!transition-opacity group-hover:!opacity-100"
       />
 
       {/* Header */}
-      <div className="flex items-start gap-2 px-3.5 pt-3.5 pb-2">
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '14px 14px 8px' }}>
         {note.favicon ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={note.favicon} alt="" className="w-4 h-4 rounded flex-shrink-0 mt-0.5" />
+          <img src={note.favicon} alt="" style={{ width: 16, height: 16, borderRadius: 3, flexShrink: 0, marginTop: 2 }} />
         ) : (
-          <div className="w-4 h-4 rounded bg-white/10 flex-shrink-0 mt-0.5" />
+          <div style={{ width: 16, height: 16, borderRadius: 3, background: 'var(--node-border)', flexShrink: 0, marginTop: 2 }} />
         )}
-        <span className="text-[13px] font-semibold text-white line-clamp-2 leading-tight flex-1">
+        <span style={{
+          fontSize: 13,
+          fontWeight: 600,
+          color: 'var(--node-title)',
+          lineHeight: '1.3',
+          flex: 1,
+          display: '-webkit-box',
+          WebkitLineClamp: 2,
+          WebkitBoxOrient: 'vertical',
+          overflow: 'hidden',
+        }}>
           {note.title}
         </span>
       </div>
 
       {/* Preview */}
       {preview && (
-        <p className="px-3.5 text-[11px] text-gray-500 line-clamp-3 leading-relaxed flex-1">
+        <p style={{
+          padding: '0 14px',
+          fontSize: 11,
+          color: 'var(--node-preview)',
+          lineHeight: '1.6',
+          flex: 1,
+          display: '-webkit-box',
+          WebkitLineClamp: 3,
+          WebkitBoxOrient: 'vertical',
+          overflow: 'hidden',
+        }}>
           {preview}
         </p>
       )}
 
       {/* Footer */}
-      <div className="flex items-center justify-between px-3.5 py-2.5 mt-auto border-t border-white/[0.05]">
-        <div className="flex items-center gap-2">
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '10px 14px',
+        marginTop: 'auto',
+        borderTop: '1px solid var(--node-border)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {badge && (
-            <span
-              className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full"
-              style={{ background: `${badge.color}20`, color: badge.color }}
-            >
+            <span style={{
+              fontSize: 10,
+              fontWeight: 600,
+              padding: '2px 6px',
+              borderRadius: 100,
+              background: `${badge.color}20`,
+              color: badge.color,
+            }}>
               {badge.label}
             </span>
           )}
-          <span className="text-[10px] text-gray-600">{relativeDate}</span>
+          <span style={{ fontSize: 10, color: 'var(--node-meta)' }}>{relativeDate}</span>
         </div>
-        <span className="text-[10px] text-gray-700 group-hover:text-blue-400 transition-colors">
-          ↗ ouvrir
-        </span>
+        <span style={{ fontSize: 10, color: 'var(--node-meta)' }}>↗ ouvrir</span>
       </div>
     </div>
   )
@@ -141,7 +168,31 @@ function NoteMapCanvasInner({ notes, canvas }: NoteMapCanvasProps) {
   const [search, setSearch] = useState('')
   const { setCenter } = useReactFlow()
 
-  // noteId → { dbNodeId, x, y } — mutable ref so drag saves don't need re-render
+  // Cursor glow
+  const canvasRef = useRef<HTMLDivElement>(null)
+  const glowRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const el = canvasRef.current
+    if (!el) return
+    const glow = glowRef.current
+    const onMove = (e: MouseEvent) => {
+      if (!glow) return
+      const rect = el.getBoundingClientRect()
+      glow.style.left = `${e.clientX - rect.left}px`
+      glow.style.top = `${e.clientY - rect.top}px`
+      glow.style.opacity = '1'
+    }
+    const onLeave = () => { if (glow) glow.style.opacity = '0' }
+    el.addEventListener('mousemove', onMove)
+    el.addEventListener('mouseleave', onLeave)
+    return () => {
+      el.removeEventListener('mousemove', onMove)
+      el.removeEventListener('mouseleave', onLeave)
+    }
+  }, [])
+
+  // noteId → dbNodeId
   const savedNodeRef = useRef(new Map<string, string>())
   useMemo(() => {
     canvas.nodes.forEach(n => {
@@ -157,7 +208,6 @@ function NoteMapCanvasInner({ notes, canvas }: NoteMapCanvasProps) {
     return map
   }, [canvas.nodes])
 
-  // Build initial nodes — ALL notes appear on canvas
   const initialNodes: Node[] = useMemo(() =>
     notes.map((note, i) => {
       const saved = savedPositions.get(note.id)
@@ -171,7 +221,7 @@ function NoteMapCanvasInner({ notes, canvas }: NoteMapCanvasProps) {
       }
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [] // intentionally static — canvas layout managed by drag
+    []
   )
 
   const initialEdges: Edge[] = useMemo(() =>
@@ -189,7 +239,6 @@ function NoteMapCanvasInner({ notes, canvas }: NoteMapCanvasProps) {
   const [nodes, , onNodesChange] = useNodesState(initialNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
 
-  // Save position after drag
   const handleNodeDragStop: OnNodeDrag = useCallback(async (_, node) => {
     const { x, y } = node.position
     const dbNodeId = savedNodeRef.current.get(node.id)
@@ -213,7 +262,6 @@ function NoteMapCanvasInner({ notes, canvas }: NoteMapCanvasProps) {
     }
   }, [canvas.id])
 
-  // Create edge
   const onConnect = useCallback(async (params: Connection) => {
     setEdges(eds => addEdge(
       { ...params, type: 'smoothstep', style: { stroke: '#3b82f6', strokeWidth: 1.5, opacity: 0.5 } },
@@ -228,7 +276,6 @@ function NoteMapCanvasInner({ notes, canvas }: NoteMapCanvasProps) {
     }
   }, [setEdges, canvas.id])
 
-  // Focus note on canvas (from left panel click)
   const focusNote = useCallback((noteId: string) => {
     const node = nodes.find(n => n.id === noteId)
     if (node) {
@@ -236,7 +283,6 @@ function NoteMapCanvasInner({ notes, canvas }: NoteMapCanvasProps) {
     }
   }, [nodes, setCenter])
 
-  // Filtered notes for left panel
   const filteredNotes = useMemo(() =>
     notes.filter(n => n.title.toLowerCase().includes(search.toLowerCase())),
     [notes, search]
@@ -247,51 +293,74 @@ function NoteMapCanvasInner({ notes, canvas }: NoteMapCanvasProps) {
 
       {/* ── Left panel ── */}
       <div
-        className="flex-shrink-0 bg-[#0c0c0c] border-r border-white/[0.06] flex flex-col overflow-hidden"
+        className="flex-shrink-0 flex flex-col overflow-hidden"
         style={{
           width: leftOpen ? 256 : 0,
-          transition: 'width 0.2s ease',
           minWidth: leftOpen ? 256 : 0,
+          transition: 'width 0.2s ease',
+          background: 'var(--node-bg)',
+          borderRight: '1px solid var(--node-border)',
         }}
       >
         {/* Search */}
-        <div className="p-3 border-b border-white/[0.06] flex-shrink-0">
+        <div style={{ padding: 12, borderBottom: '1px solid var(--node-border)', flexShrink: 0 }}>
           <input
             type="text"
             placeholder="Rechercher..."
             value={search}
             onChange={e => setSearch(e.target.value)}
-            className="w-full bg-white/[0.05] border border-white/[0.08] rounded-lg px-3 py-1.5 text-sm text-white placeholder-gray-700 outline-none focus:border-blue-500/40 transition-colors"
+            style={{
+              width: '100%',
+              background: 'var(--canvas-bg)',
+              border: '1px solid var(--node-border)',
+              borderRadius: 8,
+              padding: '6px 12px',
+              fontSize: 13,
+              color: 'var(--node-title)',
+              outline: 'none',
+            }}
           />
-          <p className="text-[10px] text-gray-700 mt-2 px-0.5">{notes.length} note{notes.length !== 1 ? 's' : ''}</p>
+          <p style={{ fontSize: 10, color: 'var(--node-meta)', marginTop: 8, paddingLeft: 2 }}>
+            {notes.length} note{notes.length !== 1 ? 's' : ''}
+          </p>
         </div>
 
         {/* Note list */}
-        <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
+        <div style={{ flex: 1, overflowY: 'auto', padding: 8 }}>
           {filteredNotes.map(note => (
             <button
               key={note.id}
               onClick={() => focusNote(note.id)}
-              className="w-full text-left px-3 py-2 rounded-xl hover:bg-white/[0.05] transition-colors group"
+              style={{
+                width: '100%',
+                textAlign: 'left',
+                padding: '8px 12px',
+                borderRadius: 10,
+                background: 'transparent',
+                border: 'none',
+                cursor: 'pointer',
+              }}
+              onMouseEnter={e => (e.currentTarget.style.background = 'var(--canvas-bg)')}
+              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
             >
-              <div className="flex items-center gap-2">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 {note.favicon ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={note.favicon} alt="" className="w-3.5 h-3.5 rounded flex-shrink-0" />
+                  <img src={note.favicon} alt="" style={{ width: 14, height: 14, borderRadius: 3, flexShrink: 0 }} />
                 ) : (
-                  <div className="w-3.5 h-3.5 rounded bg-white/10 flex-shrink-0" />
+                  <div style={{ width: 14, height: 14, borderRadius: 3, background: 'var(--node-border)', flexShrink: 0 }} />
                 )}
-                <span className="text-xs text-gray-400 group-hover:text-white transition-colors line-clamp-1">
+                <span style={{ fontSize: 12, color: 'var(--node-preview)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
                   {note.title}
                 </span>
               </div>
-              <div className="text-[10px] text-gray-700 mt-0.5 pl-5">
+              <div style={{ fontSize: 10, color: 'var(--node-meta)', marginTop: 2, paddingLeft: 22 }}>
                 {formatRelativeTime(new Date(note.lastModifiedAt))}
               </div>
             </button>
           ))}
           {filteredNotes.length === 0 && (
-            <p className="text-xs text-gray-700 text-center py-8">Aucune note</p>
+            <p style={{ fontSize: 12, color: 'var(--node-meta)', textAlign: 'center', paddingTop: 32 }}>Aucune note</p>
           )}
         </div>
       </div>
@@ -299,8 +368,14 @@ function NoteMapCanvasInner({ notes, canvas }: NoteMapCanvasProps) {
       {/* ── Toggle button ── */}
       <button
         onClick={() => setLeftOpen(o => !o)}
-        className="absolute top-4 z-20 w-5 h-8 bg-[#1a1a1a] border border-white/[0.08] rounded-r-lg flex items-center justify-center text-gray-600 hover:text-white hover:bg-[#222] transition-colors"
-        style={{ left: leftOpen ? 256 : 0, transition: 'left 0.2s ease' }}
+        className="absolute top-4 z-20 w-5 h-8 rounded-r-lg flex items-center justify-center transition-colors"
+        style={{
+          left: leftOpen ? 256 : 0,
+          transition: 'left 0.2s ease',
+          background: 'var(--node-bg)',
+          border: '1px solid var(--node-border)',
+          color: 'var(--node-meta)',
+        }}
         title={leftOpen ? 'Fermer le panneau' : 'Ouvrir le panneau'}
       >
         <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
@@ -315,7 +390,10 @@ function NoteMapCanvasInner({ notes, canvas }: NoteMapCanvasProps) {
       </button>
 
       {/* ── Canvas ── */}
-      <div className="flex-1 relative">
+      <div ref={canvasRef} className="canvas-root">
+        <div className="canvas-grid" />
+        <div ref={glowRef} className="canvas-cursor-glow" style={{ opacity: 0 }} />
+
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -329,24 +407,34 @@ function NoteMapCanvasInner({ notes, canvas }: NoteMapCanvasProps) {
           minZoom={0.08}
           maxZoom={2.5}
           deleteKeyCode={null}
-          className="bg-[#080808]"
+          onlyRenderVisibleElements
+          proOptions={{ hideAttribution: true }}
+          style={{ background: 'transparent', position: 'relative', zIndex: 2 }}
         >
-          <Background color="#1c1c1c" gap={32} size={1} />
           <Controls
-            className="[&>button]:bg-[#1a1a1a] [&>button]:border-white/[0.08] [&>button]:text-gray-500 [&>button:hover]:bg-[#252525] [&>button:hover]:text-white"
+            style={{
+              background: 'var(--node-bg)',
+              border: '1px solid var(--node-border)',
+              borderRadius: 8,
+              boxShadow: 'var(--node-shadow)',
+            }}
           />
           <MiniMap
-            nodeColor="#1e1e1e"
-            maskColor="rgba(0,0,0,0.7)"
-            className="!bg-[#0c0c0c] !border !border-white/[0.08] !rounded-xl overflow-hidden"
+            nodeColor="var(--node-border)"
+            maskColor="rgba(0,0,0,0.15)"
+            style={{
+              background: 'var(--node-bg)',
+              border: '1px solid var(--node-border)',
+              borderRadius: 12,
+            }}
           />
 
           {notes.length === 0 && (
             <Panel position="top-center">
               <div className="text-center mt-32">
                 <div className="text-5xl mb-4 opacity-10">📘</div>
-                <p className="text-sm text-gray-600">Aucune note pour l&apos;instant</p>
-                <p className="text-xs text-gray-700 mt-1.5">
+                <p style={{ fontSize: 14, color: 'var(--node-meta)' }}>Aucune note pour l&apos;instant</p>
+                <p style={{ fontSize: 12, color: 'var(--node-meta)', marginTop: 6, opacity: 0.7 }}>
                   Utilise l&apos;extension Trading Note pour capturer tes premières notes
                 </p>
               </div>
