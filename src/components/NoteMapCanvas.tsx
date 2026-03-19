@@ -21,6 +21,7 @@ import {
   Panel,
   PanOnScrollMode,
   SelectionMode,
+  useViewport,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { NoteData, CanvasData } from '@/types'
@@ -219,24 +220,36 @@ function NoteMapCanvasInner({ notes, canvas }: NoteMapCanvasProps) {
   const [search, setSearch] = useState('')
   const [spacePressed, setSpacePressed] = useState(false)
   const { setCenter } = useReactFlow()
+  const { x: vpX, y: vpY, zoom } = useViewport()
 
-  // Cursor glow
+  // Dot size in screen-space follows zoom
+  const dotSize = 22 * zoom
+  // Background position follows viewport pan (modulo avoids large values)
+  const dotPosX = ((vpX % dotSize) + dotSize) % dotSize
+  const dotPosY = ((vpY % dotSize) + dotSize) % dotSize
+  const dotBgStyle = {
+    backgroundSize: `${dotSize}px ${dotSize}px`,
+    backgroundPosition: `${dotPosX}px ${dotPosY}px`,
+  }
+
+  // Spotlight: dots near cursor light up
   const canvasRef = useRef<HTMLDivElement>(null)
-  const glowRef = useRef<HTMLDivElement>(null)
+  const spotlightRef = useRef<HTMLDivElement>(null)
 
-  // Cursor glow mouse tracking
   useEffect(() => {
     const el = canvasRef.current
     if (!el) return
-    const glow = glowRef.current
+    const spotlight = spotlightRef.current
     const onMove = (e: MouseEvent) => {
-      if (!glow) return
+      if (!spotlight) return
       const rect = el.getBoundingClientRect()
-      glow.style.left = `${e.clientX - rect.left}px`
-      glow.style.top = `${e.clientY - rect.top}px`
-      glow.style.opacity = '1'
+      const mx = e.clientX - rect.left
+      const my = e.clientY - rect.top
+      spotlight.style.setProperty('--mx', `${mx}px`)
+      spotlight.style.setProperty('--my', `${my}px`)
+      spotlight.style.opacity = '1'
     }
-    const onLeave = () => { if (glow) glow.style.opacity = '0' }
+    const onLeave = () => { if (spotlight) spotlight.style.opacity = '0' }
     el.addEventListener('mousemove', onMove)
     el.addEventListener('mouseleave', onLeave)
     return () => {
@@ -467,8 +480,8 @@ function NoteMapCanvasInner({ notes, canvas }: NoteMapCanvasProps) {
         className="canvas-root"
         style={{ cursor: spacePressed ? 'grab' : 'default' }}
       >
-        <div className="canvas-grid" />
-        <div ref={glowRef} className="canvas-cursor-glow" style={{ opacity: 0 }} />
+        <div className="canvas-grid" style={dotBgStyle} />
+        <div ref={spotlightRef} className="canvas-dot-spotlight" style={dotBgStyle} />
 
         <ReactFlow
           nodes={nodes}

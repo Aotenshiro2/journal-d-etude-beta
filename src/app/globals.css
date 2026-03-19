@@ -46,8 +46,8 @@
 
   /* Canvas specific */
   --canvas-bg: #f6f7f9;
-  --canvas-dot: rgba(0, 0, 0, 0.05);
-  --canvas-glow: rgba(0, 0, 0, 0.05);
+  --canvas-dot: rgba(0, 0, 0, 0.08);
+  --canvas-dot-lit: rgba(0, 0, 0, 0.35);
   --node-bg: #ffffff;
   --node-border: rgba(0, 0, 0, 0.06);
   --node-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
@@ -133,8 +133,8 @@
 
   /* Canvas specific */
   --canvas-bg: #101216;
-  --canvas-dot: rgba(255, 255, 255, 0.07);
-  --canvas-glow: rgba(255, 255, 255, 0.055);
+  --canvas-dot: rgba(255, 255, 255, 0.1);
+  --canvas-dot-lit: rgba(255, 255, 255, 0.55);
   --node-bg: rgba(24, 30, 42, 0.92);
   --node-border: rgba(255, 255, 255, 0.08);
   --node-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
@@ -326,17 +326,18 @@ input[type="search"]::-moz-selection {
     z-index: 0;
   }
 
-  /* Cursor glow */
-  .canvas-cursor-glow {
+  /* Spotlight dot layer — dots s'illuminent autour du curseur */
+  .canvas-dot-spotlight {
     position: absolute;
-    width: 420px;
-    height: 420px;
-    border-radius: 50%;
-    background: radial-gradient(circle, var(--canvas-glow) 0%, transparent 70%);
+    inset: 0;
+    background-image: radial-gradient(circle, var(--canvas-dot-lit) 1px, transparent 1px);
+    /* background-size et background-position sont contrôlés via JS pour suivre le viewport */
+    -webkit-mask-image: radial-gradient(circle 200px at var(--mx, -999px) var(--my, -999px), black 0%, transparent 100%);
+    mask-image: radial-gradient(circle 200px at var(--mx, -999px) var(--my, -999px), black 0%, transparent 100%);
     pointer-events: none;
-    transform: translate(-50%, -50%);
     z-index: 1;
-    transition: opacity 0.3s ease;
+    opacity: 0;
+    transition: opacity 0.25s ease;
   }
 
   /* Note map node card */
