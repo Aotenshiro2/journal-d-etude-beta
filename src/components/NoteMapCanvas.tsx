@@ -19,10 +19,25 @@ import {
   NodeProps,
   OnNodeDrag,
   Panel,
+  PanOnScrollMode,
+  SelectionMode,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { NoteData, CanvasData } from '@/types'
 import { stripHtml, formatRelativeTime } from '@/lib/utils'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu'
 
 // ─── Source badge ─────────────────────────────────────────────────────────────
 
@@ -55,90 +70,126 @@ const NoteMapNode = React.memo(function NoteMapNode({ data }: NodeProps) {
   const badge = useMemo(() => getSourceBadge(note.sourceUrl), [note.sourceUrl])
 
   return (
-    <div
-      className="note-map-card"
-      onDoubleClick={() => router.push(`/study/${note.id}`)}
-    >
-      <Handle
-        type="target"
-        position={Position.Top}
-        style={{ background: 'var(--node-handle)', opacity: 0, width: 8, height: 8, minWidth: 0, border: 'none' }}
-        className="!transition-opacity group-hover:!opacity-100"
-      />
-      <Handle
-        type="source"
-        position={Position.Bottom}
-        style={{ background: 'var(--node-handle)', opacity: 0, width: 8, height: 8, minWidth: 0, border: 'none' }}
-        className="!transition-opacity group-hover:!opacity-100"
-      />
+    <ContextMenu>
+      {/* ContextMenuTrigger wraps the card — no asChild needed with base-ui */}
+      <ContextMenuTrigger>
+        <div
+          className="note-map-card"
+          onDoubleClick={() => router.push(`/study/${note.id}`)}
+        >
+          <Handle
+            type="target"
+            position={Position.Top}
+            style={{ background: 'var(--node-handle)', opacity: 0, width: 8, height: 8, minWidth: 0, border: 'none' }}
+            className="!transition-opacity group-hover:!opacity-100"
+          />
+          <Handle
+            type="source"
+            position={Position.Bottom}
+            style={{ background: 'var(--node-handle)', opacity: 0, width: 8, height: 8, minWidth: 0, border: 'none' }}
+            className="!transition-opacity group-hover:!opacity-100"
+          />
 
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '14px 14px 8px' }}>
-        {note.favicon ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={note.favicon} alt="" style={{ width: 16, height: 16, borderRadius: 3, flexShrink: 0, marginTop: 2 }} />
-        ) : (
-          <div style={{ width: 16, height: 16, borderRadius: 3, background: 'var(--node-border)', flexShrink: 0, marginTop: 2 }} />
-        )}
-        <span style={{
-          fontSize: 13,
-          fontWeight: 600,
-          color: 'var(--node-title)',
-          lineHeight: '1.3',
-          flex: 1,
-          display: '-webkit-box',
-          WebkitLineClamp: 2,
-          WebkitBoxOrient: 'vertical',
-          overflow: 'hidden',
-        }}>
-          {note.title}
-        </span>
-      </div>
+          {/* Header */}
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '14px 14px 8px' }}>
+            {note.favicon ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={note.favicon} alt="" style={{ width: 16, height: 16, borderRadius: 3, flexShrink: 0, marginTop: 2 }} />
+            ) : (
+              <div style={{ width: 16, height: 16, borderRadius: 3, background: 'var(--node-border)', flexShrink: 0, marginTop: 2 }} />
+            )}
+            {/* Tooltip on title — base-ui: TooltipTrigger renders as span via render prop */}
+            <TooltipProvider delay={700}>
+              <Tooltip>
+                <TooltipTrigger render={<span style={{
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: 'var(--node-title)',
+                  lineHeight: '1.3',
+                  flex: 1,
+                  display: '-webkit-box',
+                  WebkitLineClamp: 2,
+                  WebkitBoxOrient: 'vertical',
+                  overflow: 'hidden',
+                }} />}>
+                  {note.title}
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-xs">
+                  <p className="text-xs font-medium">{note.title}</p>
+                  {note.sourceUrl && (
+                    <p className="text-[10px] opacity-60 truncate mt-0.5">{note.sourceUrl}</p>
+                  )}
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
 
-      {/* Preview */}
-      {preview && (
-        <p style={{
-          padding: '0 14px',
-          fontSize: 11,
-          color: 'var(--node-preview)',
-          lineHeight: '1.6',
-          flex: 1,
-          display: '-webkit-box',
-          WebkitLineClamp: 3,
-          WebkitBoxOrient: 'vertical',
-          overflow: 'hidden',
-        }}>
-          {preview}
-        </p>
-      )}
-
-      {/* Footer */}
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '10px 14px',
-        marginTop: 'auto',
-        borderTop: '1px solid var(--node-border)',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {badge && (
-            <span style={{
-              fontSize: 10,
-              fontWeight: 600,
-              padding: '2px 6px',
-              borderRadius: 100,
-              background: `${badge.color}20`,
-              color: badge.color,
+          {/* Preview */}
+          {preview && (
+            <p style={{
+              padding: '0 14px',
+              fontSize: 11,
+              color: 'var(--node-preview)',
+              lineHeight: '1.6',
+              flex: 1,
+              display: '-webkit-box',
+              WebkitLineClamp: 3,
+              WebkitBoxOrient: 'vertical',
+              overflow: 'hidden',
             }}>
-              {badge.label}
-            </span>
+              {preview}
+            </p>
           )}
-          <span style={{ fontSize: 10, color: 'var(--node-meta)' }}>{relativeDate}</span>
+
+          {/* Footer */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '10px 14px',
+            marginTop: 'auto',
+            borderTop: '1px solid var(--node-border)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {badge && (
+                <span style={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  padding: '2px 6px',
+                  borderRadius: 100,
+                  background: `${badge.color}20`,
+                  color: badge.color,
+                }}>
+                  {badge.label}
+                </span>
+              )}
+              <span style={{ fontSize: 10, color: 'var(--node-meta)' }}>{relativeDate}</span>
+            </div>
+            <span style={{ fontSize: 10, color: 'var(--node-meta)' }}>↗ ouvrir</span>
+          </div>
         </div>
-        <span style={{ fontSize: 10, color: 'var(--node-meta)' }}>↗ ouvrir</span>
-      </div>
-    </div>
+      </ContextMenuTrigger>
+
+      <ContextMenuContent className="w-48">
+        <ContextMenuItem onClick={() => router.push(`/study/${note.id}`)}>
+          ↗ Ouvrir la note
+        </ContextMenuItem>
+        {note.sourceUrl && (
+          <ContextMenuItem onClick={() => window.open(note.sourceUrl!, '_blank')}>
+            🔗 Source originale
+          </ContextMenuItem>
+        )}
+        <ContextMenuSeparator />
+        <ContextMenuItem onClick={() => navigator.clipboard.writeText(note.title)}>
+          Copier le titre
+        </ContextMenuItem>
+        {note.sourceUrl && (
+          <ContextMenuItem onClick={() => navigator.clipboard.writeText(note.sourceUrl!)}>
+            Copier le lien
+          </ContextMenuItem>
+        )}
+      </ContextMenuContent>
+    </ContextMenu>
   )
 })
 
@@ -156,7 +207,7 @@ function autoPosition(index: number): { x: number; y: number } {
   }
 }
 
-// ─── Inner canvas (needs ReactFlowProvider) ───────────────────────────────────
+// ─── Inner canvas ─────────────────────────────────────────────────────────────
 
 interface NoteMapCanvasProps {
   notes: NoteData[]
@@ -166,12 +217,14 @@ interface NoteMapCanvasProps {
 function NoteMapCanvasInner({ notes, canvas }: NoteMapCanvasProps) {
   const [leftOpen, setLeftOpen] = useState(true)
   const [search, setSearch] = useState('')
+  const [spacePressed, setSpacePressed] = useState(false)
   const { setCenter } = useReactFlow()
 
   // Cursor glow
   const canvasRef = useRef<HTMLDivElement>(null)
   const glowRef = useRef<HTMLDivElement>(null)
 
+  // Cursor glow mouse tracking
   useEffect(() => {
     const el = canvasRef.current
     if (!el) return
@@ -189,6 +242,25 @@ function NoteMapCanvasInner({ notes, canvas }: NoteMapCanvasProps) {
     return () => {
       el.removeEventListener('mousemove', onMove)
       el.removeEventListener('mouseleave', onLeave)
+    }
+  }, [])
+
+  // Space key → grab cursor
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && (e.target as HTMLElement).tagName !== 'INPUT' && (e.target as HTMLElement).tagName !== 'TEXTAREA') {
+        e.preventDefault()
+        setSpacePressed(true)
+      }
+    }
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space') setSpacePressed(false)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('keyup', onKeyUp)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('keyup', onKeyUp)
     }
   }, [])
 
@@ -390,7 +462,11 @@ function NoteMapCanvasInner({ notes, canvas }: NoteMapCanvasProps) {
       </button>
 
       {/* ── Canvas ── */}
-      <div ref={canvasRef} className="canvas-root">
+      <div
+        ref={canvasRef}
+        className="canvas-root"
+        style={{ cursor: spacePressed ? 'grab' : 'default' }}
+      >
         <div className="canvas-grid" />
         <div ref={glowRef} className="canvas-cursor-glow" style={{ opacity: 0 }} />
 
@@ -407,6 +483,18 @@ function NoteMapCanvasInner({ notes, canvas }: NoteMapCanvasProps) {
           minZoom={0.08}
           maxZoom={2.5}
           deleteKeyCode={null}
+
+          // ── Interactions Figma-style ──────────────────────────
+          panOnScroll
+          panOnScrollMode={PanOnScrollMode.Vertical}
+          zoomOnScroll={false}
+          zoomActivationKeyCode="Control"
+          panActivationKeyCode="Space"
+          panOnDrag={false}
+          selectionOnDrag
+          selectionMode={SelectionMode.Partial}
+          // ─────────────────────────────────────────────────────
+
           onlyRenderVisibleElements
           proOptions={{ hideAttribution: true }}
           style={{ background: 'transparent', position: 'relative', zIndex: 2 }}
@@ -446,7 +534,7 @@ function NoteMapCanvasInner({ notes, canvas }: NoteMapCanvasProps) {
   )
 }
 
-// ─── Export (wraps with ReactFlowProvider) ────────────────────────────────────
+// ─── Export ───────────────────────────────────────────────────────────────────
 
 export default function NoteMapCanvas(props: NoteMapCanvasProps) {
   return (

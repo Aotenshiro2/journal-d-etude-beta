@@ -1,4 +1,8 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
 
 /* ===============================================
    DESIGN SYSTEM MODERNE - Inspiré ShadCN UI
@@ -6,42 +10,40 @@
 
 :root {
   /* Base colors */
-  --background: 0 0% 100%;
-  --foreground: 240 10% 3.9%;
-  
+
   /* Card colors */
-  --card: 0 0% 100%;
-  --card-foreground: 240 10% 3.9%;
-  
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+
   /* Popover colors */
-  --popover: 0 0% 100%;
-  --popover-foreground: 240 10% 3.9%;
-  
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+
   /* Primary colors */
-  --primary: 240 5.9% 10%;
-  --primary-foreground: 0 0% 98%;
-  
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+
   /* Secondary colors */
-  --secondary: 240 4.8% 95.9%;
-  --secondary-foreground: 240 5.9% 10%;
-  
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+
   /* Muted colors */
-  --muted: 240 4.8% 95.9%;
-  --muted-foreground: 240 3.8% 46.1%;
-  
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+
   /* Accent colors */
-  --accent: 240 4.8% 95.9%;
-  --accent-foreground: 240 5.9% 10%;
-  
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+
   /* Destructive colors */
-  --destructive: 0 84.2% 60.2%;
+  --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: 0 0% 98%;
-  
+
   /* Border colors */
-  --border: 240 5.9% 90%;
-  --input: 240 5.9% 90%;
-  --ring: 240 5.9% 10%;
-  
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+
   /* Canvas specific */
   --canvas-bg: #f6f7f9;
   --canvas-dot: rgba(0, 0, 0, 0.05);
@@ -53,7 +55,7 @@
   --node-preview: #64748b;
   --node-meta: #94a3b8;
   --node-handle: rgba(59, 130, 246, 0.7);
-  
+
   /* Modal and Editor - Compatibility with old system */
   --modal-overlay: rgba(0, 0, 0, 0.5);
   --modal-bg: 0 0% 100%;
@@ -71,49 +73,64 @@
   --ao-blue: 217 91% 60%;
   --ao-blue-hover: 217 91% 55%;
   --ao-red: 0 84.2% 60.2%;
-  
+
   /* Border radius */
-  --radius: 0.5rem;
+  --radius: 0.625rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --chart-1: oklch(0.809 0.105 251.813);
+  --chart-2: oklch(0.623 0.214 259.815);
+  --chart-3: oklch(0.546 0.245 262.881);
+  --chart-4: oklch(0.488 0.243 264.376);
+  --chart-5: oklch(0.424 0.199 265.638);
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
 }
 
 .dark {
   /* Base colors */
-  --background: 240 10% 3.9%;
-  --foreground: 0 0% 98%;
-  
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+
   /* Card colors */
-  --card: 240 10% 3.9%;
-  --card-foreground: 0 0% 98%;
-  
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+
   /* Popover colors */
-  --popover: 240 10% 3.9%;
-  --popover-foreground: 0 0% 98%;
-  
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+
   /* Primary colors */
-  --primary: 0 0% 98%;
-  --primary-foreground: 240 5.9% 10%;
-  
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+
   /* Secondary colors */
-  --secondary: 240 3.7% 15.9%;
-  --secondary-foreground: 0 0% 98%;
-  
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+
   /* Muted colors */
-  --muted: 240 3.7% 15.9%;
-  --muted-foreground: 240 5% 64.9%;
-  
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+
   /* Accent colors */
-  --accent: 240 3.7% 15.9%;
-  --accent-foreground: 0 0% 98%;
-  
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+
   /* Destructive colors */
-  --destructive: 0 62.8% 30.6%;
+  --destructive: oklch(0.704 0.191 22.216);
   --destructive-foreground: 0 0% 98%;
-  
+
   /* Border colors */
-  --border: 240 3.7% 15.9%;
-  --input: 240 3.7% 15.9%;
-  --ring: 240 4.9% 83.9%;
-  
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+
   /* Canvas specific */
   --canvas-bg: #101216;
   --canvas-dot: rgba(255, 255, 255, 0.07);
@@ -125,7 +142,7 @@
   --node-preview: #8fdcc7;
   --node-meta: #475569;
   --node-handle: rgba(59, 130, 246, 0.8);
-  
+
   /* Modal and Editor - Dark mode */
   --modal-overlay: rgba(0, 0, 0, 0.7);
   --modal-bg: 240 10% 3.9%;
@@ -143,68 +160,86 @@
   --ao-blue: 217 91% 65%;
   --ao-blue-hover: 217 91% 70%;
   --ao-red: 0 62.8% 30.6%;
+  --chart-1: oklch(0.809 0.105 251.813);
+  --chart-2: oklch(0.623 0.214 259.815);
+  --chart-3: oklch(0.546 0.245 262.881);
+  --chart-4: oklch(0.488 0.243 264.376);
+  --chart-5: oklch(0.424 0.199 265.638);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
 }
 
 @layer base {
   * {
     border-color: hsl(var(--border));
+    @apply border-border outline-ring/50;
   }
-  
+
   body {
     background-color: hsl(var(--background));
     color: hsl(var(--foreground));
     font-feature-settings: "rlig" 1, "calt" 1;
+    @apply bg-background text-foreground;
   }
-  
+
   /* Typography base */
   h1, h2, h3, h4, h5, h6 {
     font-weight: 600;
     letter-spacing: -0.025em;
   }
-  
+
   h1 {
     font-size: 1.875rem;
     line-height: 2.25rem;
   }
-  
+
   h2 {
     font-size: 1.5rem;
     line-height: 2rem;
   }
-  
+
   h3 {
     font-size: 1.25rem;
     line-height: 1.75rem;
   }
-  
+
   h4 {
     font-size: 1.125rem;
     line-height: 1.75rem;
   }
-  
+
   /* Focus visible pour accessibilité */
   *:focus-visible {
     outline: 2px solid transparent;
     outline-offset: 2px;
     box-shadow: 0 0 0 2px hsl(var(--ring)), 0 0 0 4px hsl(var(--background));
   }
-  
+
   /* Scrollbar styling */
   ::-webkit-scrollbar {
     width: 0.5rem;
   }
-  
+
   ::-webkit-scrollbar-track {
     background-color: hsl(var(--secondary));
   }
-  
+
   ::-webkit-scrollbar-thumb {
     background-color: hsl(var(--muted-foreground) / 0.2);
     border-radius: 0.375rem;
   }
-  
+
   ::-webkit-scrollbar-thumb:hover {
     background-color: hsl(var(--muted-foreground) / 0.3);
+  }
+  html {
+    @apply font-sans;
   }
 }
 
@@ -323,7 +358,7 @@ input[type="search"]::-moz-selection {
     border-color: rgba(59, 130, 246, 0.35);
     box-shadow: var(--node-shadow), 0 0 0 1px rgba(59, 130, 246, 0.15);
   }
-  
+
   /* Note styles */
   .note-card {
     background-color: hsl(var(--card));
@@ -332,23 +367,23 @@ input[type="search"]::-moz-selection {
     box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
     transition: all 0.2s;
   }
-  
+
   .note-card:hover {
     box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
   }
-  
+
   .note-card.selected {
     outline: 2px solid hsl(var(--ring));
     outline-offset: 2px;
     border-color: transparent;
   }
-  
+
   .note-card.group-selected {
     outline: 2px solid #f97316;
     outline-offset: 2px;
     border-color: transparent;
   }
-  
+
   /* Sidebar styles */
   .sidebar-card {
     background-color: hsl(var(--card));
@@ -357,7 +392,7 @@ input[type="search"]::-moz-selection {
     box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
     backdrop-filter: blur(16px);
   }
-  
+
   .sidebar-tab {
     padding: 0.5rem 0.75rem;
     font-size: 0.875rem;
@@ -365,22 +400,22 @@ input[type="search"]::-moz-selection {
     border-radius: 0.375rem;
     transition: all 0.2s;
   }
-  
+
   .sidebar-tab.active {
     background-color: hsl(var(--primary));
     color: hsl(var(--primary-foreground));
     box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
   }
-  
+
   .sidebar-tab.inactive {
     color: hsl(var(--muted-foreground));
   }
-  
+
   .sidebar-tab.inactive:hover {
     color: hsl(var(--foreground));
     background-color: hsl(var(--muted));
   }
-  
+
   /* Modal styles */
   .modal-overlay {
     position: fixed;
@@ -388,14 +423,14 @@ input[type="search"]::-moz-selection {
     background-color: rgb(0 0 0 / 0.5);
     backdrop-filter: blur(4px);
   }
-  
+
   .modal-content {
     background-color: hsl(var(--card));
     border: 1px solid hsl(var(--border));
     border-radius: 0.5rem;
     box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25);
   }
-  
+
   /* Button variants inspirés ShadCN */
   .btn {
     display: inline-flex;
@@ -410,74 +445,74 @@ input[type="search"]::-moz-selection {
     border: none;
     cursor: pointer;
   }
-  
+
   .btn:focus-visible {
     outline: 2px solid hsl(var(--ring));
     outline-offset: 2px;
   }
-  
+
   .btn:disabled {
     opacity: 0.5;
     pointer-events: none;
   }
-  
+
   .btn-default {
     background-color: hsl(var(--primary));
     color: hsl(var(--primary-foreground));
     height: 2.5rem;
     padding: 0.5rem 1rem;
   }
-  
+
   .btn-default:hover {
     background-color: hsl(var(--primary) / 0.9);
   }
-  
+
   .btn-secondary {
     background-color: hsl(var(--secondary));
     color: hsl(var(--secondary-foreground));
     height: 2.5rem;
     padding: 0.5rem 1rem;
   }
-  
+
   .btn-secondary:hover {
     background-color: hsl(var(--secondary) / 0.8);
   }
-  
+
   .btn-ghost {
     height: 2.5rem;
     padding: 0.5rem 1rem;
     background-color: transparent;
   }
-  
+
   .btn-ghost:hover {
     background-color: hsl(var(--accent));
     color: hsl(var(--accent-foreground));
   }
-  
+
   .btn-outline {
     border: 1px solid hsl(var(--input));
     height: 2.5rem;
     padding: 0.5rem 1rem;
     background-color: transparent;
   }
-  
+
   .btn-outline:hover {
     background-color: hsl(var(--accent));
     color: hsl(var(--accent-foreground));
   }
-  
+
   .btn-sm {
     height: 2.25rem;
     border-radius: 0.375rem;
     padding: 0 0.75rem;
   }
-  
+
   .btn-lg {
     height: 2.75rem;
     border-radius: 0.375rem;
     padding: 0 2rem;
   }
-  
+
   /* Input styles */
   .input {
     display: flex;
@@ -490,17 +525,17 @@ input[type="search"]::-moz-selection {
     font-size: 0.875rem;
     transition: box-shadow 0.2s;
   }
-  
+
   .input:focus-visible {
     outline: 2px solid transparent;
     outline-offset: 2px;
     box-shadow: 0 0 0 2px hsl(var(--ring));
   }
-  
+
   .input::placeholder {
     color: hsl(var(--muted-foreground));
   }
-  
+
   .input:disabled {
     cursor: not-allowed;
     opacity: 0.5;
@@ -516,22 +551,22 @@ input[type="search"]::-moz-selection {
   .theme-transition {
     transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
   }
-  
+
   /* Animations d'entrée */
   .animate-in {
     animation: fade-in 0.2s ease-out;
   }
-  
+
   .animate-out {
     animation: fade-out 0.2s ease-out;
   }
-  
+
   /* Glass effect */
   .glass {
     backdrop-filter: blur(16px) saturate(180%);
     background-color: rgba(255, 255, 255, 0.7);
   }
-  
+
   .dark .glass {
     background-color: rgba(17, 25, 40, 0.75);
   }
@@ -629,4 +664,46 @@ input[type="search"]::-moz-selection {
   color: #60a5fa;
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+
+@theme inline {
+  --font-sans: var(--font-sans);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
 }
