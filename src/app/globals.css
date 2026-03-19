@@ -390,6 +390,26 @@ input[type="search"]::-moz-selection {
     box-shadow: var(--node-shadow), 0 0 0 1px rgba(59, 130, 246, 0.15);
   }
 
+  /* Note HTML content — preview panel & expanded card */
+  .note-preview-content,
+  .note-content-preview {
+    font-size: 12px;
+    line-height: 1.65;
+    color: var(--node-preview);
+  }
+  .note-preview-content h1, .note-preview-content h2, .note-preview-content h3,
+  .note-content-preview h1,  .note-content-preview h2,  .note-content-preview h3 {
+    color: var(--node-title);
+    font-size: 13px;
+    font-weight: 600;
+    margin: 10px 0 4px;
+  }
+  .note-preview-content p, .note-content-preview p { margin: 4px 0; }
+  .note-preview-content ul, .note-preview-content ol,
+  .note-content-preview ul, .note-content-preview ol  { padding-left: 16px; margin: 4px 0; }
+  .note-preview-content a, .note-content-preview a { color: #3b82f6; text-decoration: none; }
+  .note-preview-content img, .note-content-preview img { max-width: 100%; border-radius: 6px; margin: 6px 0; }
+
   /* Note styles */
   .note-card {
     background-color: hsl(var(--card));
