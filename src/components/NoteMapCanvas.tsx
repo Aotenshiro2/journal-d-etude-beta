@@ -600,7 +600,7 @@ function NoteMapCanvasInner({ notes, canvas, user, title }: NoteMapCanvasProps) 
   }, [nodes, setCenter])
 
   return (
-    <div className="flex flex-1 overflow-hidden relative" style={{ background: 'var(--canvas-bg)' }}>
+    <div className="flex h-full overflow-hidden relative" style={{ background: 'var(--canvas-bg)' }}>
 
       {/* ── Canvas ── */}
       <div ref={canvasRef} className="canvas-root" style={{ cursor: spacePressed ? 'grab' : 'default' }}>
