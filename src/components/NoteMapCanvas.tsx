@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
 import {
   ReactFlow,
@@ -24,7 +24,7 @@ import {
   useViewport,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { Sun, Moon, Map as MapIcon, Grid3x3, PanelLeft, ChevronDown } from 'lucide-react'
+import { Sun, Moon, Map as MapIcon, Grid3x3, PanelLeft, ChevronDown, BookOpen, Lightbulb, TrendingUp, BookMarked, BarChart2 } from 'lucide-react'
 import { NoteData, CanvasData } from '@/types'
 import { stripHtml, formatRelativeTime } from '@/lib/utils'
 import { useTheme } from '@/contexts/ThemeContext'
@@ -42,6 +42,16 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
+
+// ─── Modes ────────────────────────────────────────────────────────────────────
+
+const MODES = [
+  { label: 'Étudier mes notes',       href: '/',          Icon: BookOpen,   match: (p: string) => p === '/' || p.startsWith('/study') },
+  { label: 'Observer les concepts',   href: '/concepts',  Icon: Lightbulb,  match: (p: string) => p === '/concepts' },
+  { label: 'Étudier le Price Action', href: '/review',    Icon: TrendingUp, match: (p: string) => p === '/review' },
+  { label: 'Documenter mes trades',   href: '/journal',   Icon: BookMarked, match: (p: string) => p === '/journal' },
+  { label: 'Analyser mes données',    href: '/analytics', Icon: BarChart2,  match: (p: string) => p === '/analytics' },
+]
 
 // ─── Source badge ─────────────────────────────────────────────────────────────
 
@@ -239,8 +249,12 @@ interface SettingsPanelProps {
 
 function SettingsPanel({ showGrid, setShowGrid, showMiniMap, setShowMiniMap, leftOpen, setLeftOpen }: SettingsPanelProps) {
   const [open, setOpen] = useState(false)
+  const pathname = usePathname()
+  const router = useRouter()
 
-  const items = [
+  const activeMode = MODES.find(m => m.match(pathname)) ?? MODES[0]
+
+  const canvasItems = [
     { label: 'Panneau notes', icon: <PanelLeft size={13} />, value: leftOpen, toggle: () => setLeftOpen(!leftOpen) },
     { label: 'Grille', icon: <Grid3x3 size={13} />, value: showGrid, toggle: () => setShowGrid(!showGrid) },
     { label: 'Mini-carte', icon: <MapIcon size={13} />, value: showMiniMap, toggle: () => setShowMiniMap(!showMiniMap) },
@@ -256,10 +270,13 @@ function SettingsPanel({ showGrid, setShowGrid, showMiniMap, setShowMiniMap, lef
           padding: '5px 10px', cursor: 'pointer', border: 'none',
           color: 'var(--node-title)', fontSize: 12, fontWeight: 500,
         }}
-        title="Paramètres du canvas"
+        title="Changer de module"
       >
-        <Grid3x3 size={13} style={{ color: 'var(--node-meta)' }} />
-        <ChevronDown size={11} style={{ color: 'var(--node-meta)', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} />
+        <activeMode.Icon size={13} style={{ color: 'var(--node-meta)', flexShrink: 0 }} />
+        <span style={{ maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12 }}>
+          {activeMode.label}
+        </span>
+        <ChevronDown size={11} style={{ color: 'var(--node-meta)', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s', flexShrink: 0 }} />
       </button>
 
       {open && (
@@ -267,12 +284,48 @@ function SettingsPanel({ showGrid, setShowGrid, showMiniMap, setShowMiniMap, lef
           <div style={{ position: 'fixed', inset: 0, zIndex: 40 }} onClick={() => setOpen(false)} />
           <div
             className="canvas-float-pill"
-            style={{ position: 'absolute', top: 42, left: 0, zIndex: 50, minWidth: 180, padding: '6px 0', overflow: 'hidden' }}
+            style={{ position: 'absolute', top: 42, left: 0, zIndex: 50, minWidth: 210, padding: '6px 0', overflow: 'hidden' }}
           >
-            {items.map(item => (
+            {/* Modules section */}
+            <p style={{ fontSize: 10, fontWeight: 600, color: 'var(--node-meta)', padding: '4px 14px 6px', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+              Modules
+            </p>
+            {MODES.map(mode => {
+              const isActive = mode.match(pathname)
+              return (
+                <button
+                  key={mode.href}
+                  onClick={() => { router.push(mode.href); setOpen(false) }}
+                  style={{
+                    width: '100%', display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '8px 14px', background: isActive ? 'var(--canvas-bg)' : 'none',
+                    border: 'none', cursor: 'pointer', color: 'var(--node-title)', fontSize: 12,
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.background = 'var(--canvas-bg)')}
+                  onMouseLeave={e => (e.currentTarget.style.background = isActive ? 'var(--canvas-bg)' : 'none')}
+                >
+                  <mode.Icon size={13} style={{ color: isActive ? '#3b82f6' : 'var(--node-meta)', flexShrink: 0 }} />
+                  <span style={{ flex: 1, textAlign: 'left', color: isActive ? 'var(--node-title)' : 'var(--node-preview)' }}>
+                    {mode.label}
+                  </span>
+                  {isActive && (
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#3b82f6', flexShrink: 0 }} />
+                  )}
+                </button>
+              )
+            })}
+
+            {/* Divider */}
+            <div style={{ height: 1, background: 'var(--float-border)', margin: '6px 0' }} />
+
+            {/* Canvas section */}
+            <p style={{ fontSize: 10, fontWeight: 600, color: 'var(--node-meta)', padding: '4px 14px 6px', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+              Canvas
+            </p>
+            {canvasItems.map(item => (
               <button
                 key={item.label}
-                onClick={() => { item.toggle(); }}
+                onClick={() => { item.toggle() }}
                 style={{
                   width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                   padding: '8px 14px', background: 'none', border: 'none', cursor: 'pointer',
@@ -285,7 +338,6 @@ function SettingsPanel({ showGrid, setShowGrid, showMiniMap, setShowMiniMap, lef
                   {item.icon}
                   {item.label}
                 </span>
-                {/* Toggle pill */}
                 <span style={{
                   width: 28, height: 16, borderRadius: 8, position: 'relative', flexShrink: 0,
                   background: item.value ? '#3b82f6' : 'var(--node-border)',
@@ -337,7 +389,11 @@ interface NoteMapCanvasProps {
   title?: string
 }
 
-function NoteMapCanvasInner({ notes, canvas, user, title = "Journal d'Études" }: NoteMapCanvasProps) {
+function NoteMapCanvasInner({ notes, canvas, user, title }: NoteMapCanvasProps) {
+  const pathname = usePathname()
+  const activeMode = MODES.find(m => m.match(pathname)) ?? MODES[0]
+  const displayTitle = title ?? activeMode.label
+
   const [leftOpen, setLeftOpen] = useState(true)
   const [search, setSearch] = useState('')
   const [spacePressed, setSpacePressed] = useState(false)
@@ -527,7 +583,7 @@ function NoteMapCanvasInner({ notes, canvas, user, title = "Journal d'Études" }
         {/* ── Floating panel : top-left — titre + settings ── */}
         <div style={{ position: 'absolute', top: 14, left: 14, zIndex: 20, display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--node-title)', letterSpacing: '-0.02em', textShadow: '0 1px 3px rgba(0,0,0,0.12)' }}>
-            {title}
+            {displayTitle}
           </span>
           <SettingsPanel
             showGrid={showGrid} setShowGrid={setShowGrid}
