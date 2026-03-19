@@ -24,7 +24,7 @@ import {
   useViewport,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { Sun, Moon, Map as MapIcon, Grid3x3, PanelLeft, ChevronDown, BookOpen, Lightbulb, TrendingUp, BookMarked, BarChart2 } from 'lucide-react'
+import { Sun, Moon, Map as MapIcon, Grid3x3, ChevronDown, BookOpen, Lightbulb, TrendingUp, BookMarked, BarChart2, FileText } from 'lucide-react'
 import { NoteData, CanvasData } from '@/types'
 import { stripHtml, formatRelativeTime } from '@/lib/utils'
 import { useTheme } from '@/contexts/ThemeContext'
@@ -236,6 +236,99 @@ function AvatarBubble({ user }: { user: { email: string; name: string; avatarUrl
   )
 }
 
+// ─── Notes bubble (style Stitch "Agent log") ─────────────────────────────────
+
+interface NotesBubbleProps {
+  notes: NoteData[]
+  onFocus: (noteId: string) => void
+}
+
+function NotesBubble({ notes, onFocus }: NotesBubbleProps) {
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState('')
+
+  const filtered = useMemo(
+    () => notes.filter(n => n.title.toLowerCase().includes(search.toLowerCase())),
+    [notes, search]
+  )
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="canvas-float-pill"
+        style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          padding: '5px 12px', cursor: 'pointer', border: 'none',
+          color: 'var(--node-title)', fontSize: 12, fontWeight: 500,
+        }}
+      >
+        <FileText size={13} style={{ color: 'var(--node-meta)' }} />
+        <span>Notes · {notes.length}</span>
+        <span style={{ color: 'var(--node-meta)', fontSize: 11 }}>→</span>
+      </button>
+
+      {open && (
+        <>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 40 }} onClick={() => setOpen(false)} />
+          <div
+            className="canvas-float-pill"
+            style={{
+              position: 'absolute', bottom: 42, left: 0, zIndex: 50,
+              width: 280, maxHeight: 420, display: 'flex', flexDirection: 'column',
+              overflow: 'hidden', padding: 0,
+            }}
+          >
+            <div style={{ padding: '10px 12px 8px', borderBottom: '1px solid var(--float-border)', flexShrink: 0 }}>
+              <input
+                type="text" placeholder="Rechercher..."
+                value={search} onChange={e => setSearch(e.target.value)}
+                autoFocus
+                style={{
+                  width: '100%', background: 'var(--canvas-bg)',
+                  border: '1px solid var(--node-border)', borderRadius: 7,
+                  padding: '5px 10px', fontSize: 12,
+                  color: 'var(--node-title)', outline: 'none',
+                }}
+              />
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}>
+              {filtered.map(note => (
+                <button key={note.id}
+                  onClick={() => { onFocus(note.id); setOpen(false) }}
+                  style={{
+                    width: '100%', textAlign: 'left', padding: '7px 12px',
+                    background: 'none', border: 'none', cursor: 'pointer',
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.background = 'var(--canvas-bg)')}
+                  onMouseLeave={e => (e.currentTarget.style.background = 'none')}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {note.favicon
+                      // eslint-disable-next-line @next/next/no-img-element
+                      ? <img src={note.favicon} alt="" style={{ width: 14, height: 14, borderRadius: 3, flexShrink: 0 }} />
+                      : <div style={{ width: 14, height: 14, borderRadius: 3, background: 'var(--node-border)', flexShrink: 0 }} />
+                    }
+                    <span style={{ fontSize: 12, color: 'var(--node-preview)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+                      {note.title}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 10, color: 'var(--node-meta)', marginTop: 2, paddingLeft: 22 }}>
+                    {formatRelativeTime(new Date(note.lastModifiedAt))}
+                  </div>
+                </button>
+              ))}
+              {filtered.length === 0 && (
+                <p style={{ fontSize: 12, color: 'var(--node-meta)', textAlign: 'center', paddingTop: 20 }}>Aucune note</p>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 // ─── Settings panel toggle ────────────────────────────────────────────────────
 
 interface SettingsPanelProps {
@@ -243,11 +336,9 @@ interface SettingsPanelProps {
   setShowGrid: (v: boolean) => void
   showMiniMap: boolean
   setShowMiniMap: (v: boolean) => void
-  leftOpen: boolean
-  setLeftOpen: (v: boolean) => void
 }
 
-function SettingsPanel({ showGrid, setShowGrid, showMiniMap, setShowMiniMap, leftOpen, setLeftOpen }: SettingsPanelProps) {
+function SettingsPanel({ showGrid, setShowGrid, showMiniMap, setShowMiniMap }: SettingsPanelProps) {
   const [open, setOpen] = useState(false)
   const pathname = usePathname()
   const router = useRouter()
@@ -255,7 +346,6 @@ function SettingsPanel({ showGrid, setShowGrid, showMiniMap, setShowMiniMap, lef
   const activeMode = MODES.find(m => m.match(pathname)) ?? MODES[0]
 
   const canvasItems = [
-    { label: 'Panneau notes', icon: <PanelLeft size={13} />, value: leftOpen, toggle: () => setLeftOpen(!leftOpen) },
     { label: 'Grille', icon: <Grid3x3 size={13} />, value: showGrid, toggle: () => setShowGrid(!showGrid) },
     { label: 'Mini-carte', icon: <MapIcon size={13} />, value: showMiniMap, toggle: () => setShowMiniMap(!showMiniMap) },
   ]
@@ -394,8 +484,6 @@ function NoteMapCanvasInner({ notes, canvas, user, title }: NoteMapCanvasProps) 
   const activeMode = MODES.find(m => m.match(pathname)) ?? MODES[0]
   const displayTitle = title ?? activeMode.label
 
-  const [leftOpen, setLeftOpen] = useState(true)
-  const [search, setSearch] = useState('')
   const [spacePressed, setSpacePressed] = useState(false)
   const [showMiniMap, setShowMiniMap] = useState(true)
   const [showGrid, setShowGrid] = useState(true)
@@ -511,64 +599,8 @@ function NoteMapCanvasInner({ notes, canvas, user, title }: NoteMapCanvasProps) 
     if (node) setCenter(node.position.x + 130, node.position.y + 76, { zoom: 1.1, duration: 600 })
   }, [nodes, setCenter])
 
-  const filteredNotes = useMemo(() =>
-    notes.filter(n => n.title.toLowerCase().includes(search.toLowerCase())),
-    [notes, search]
-  )
-
   return (
     <div className="flex flex-1 overflow-hidden relative" style={{ background: 'var(--canvas-bg)' }}>
-
-      {/* ── Left panel ── */}
-      <div
-        className="flex-shrink-0 flex flex-col overflow-hidden"
-        style={{
-          width: leftOpen ? 256 : 0, minWidth: leftOpen ? 256 : 0,
-          transition: 'width 0.2s ease',
-          background: 'var(--node-bg)', borderRight: '1px solid var(--node-border)',
-          zIndex: 5,
-        }}
-      >
-        <div style={{ padding: '52px 12px 12px', borderBottom: '1px solid var(--node-border)', flexShrink: 0 }}>
-          <input
-            type="text" placeholder="Rechercher..."
-            value={search} onChange={e => setSearch(e.target.value)}
-            style={{
-              width: '100%', background: 'var(--canvas-bg)', border: '1px solid var(--node-border)',
-              borderRadius: 8, padding: '6px 12px', fontSize: 13, color: 'var(--node-title)', outline: 'none',
-            }}
-          />
-          <p style={{ fontSize: 10, color: 'var(--node-meta)', marginTop: 8, paddingLeft: 2 }}>
-            {notes.length} note{notes.length !== 1 ? 's' : ''}
-          </p>
-        </div>
-        <div style={{ flex: 1, overflowY: 'auto', padding: 8 }}>
-          {filteredNotes.map(note => (
-            <button key={note.id} onClick={() => focusNote(note.id)}
-              style={{ width: '100%', textAlign: 'left', padding: '8px 12px', borderRadius: 10, background: 'transparent', border: 'none', cursor: 'pointer' }}
-              onMouseEnter={e => (e.currentTarget.style.background = 'var(--canvas-bg)')}
-              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                {note.favicon
-                  // eslint-disable-next-line @next/next/no-img-element
-                  ? <img src={note.favicon} alt="" style={{ width: 14, height: 14, borderRadius: 3, flexShrink: 0 }} />
-                  : <div style={{ width: 14, height: 14, borderRadius: 3, background: 'var(--node-border)', flexShrink: 0 }} />
-                }
-                <span style={{ fontSize: 12, color: 'var(--node-preview)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
-                  {note.title}
-                </span>
-              </div>
-              <div style={{ fontSize: 10, color: 'var(--node-meta)', marginTop: 2, paddingLeft: 22 }}>
-                {formatRelativeTime(new Date(note.lastModifiedAt))}
-              </div>
-            </button>
-          ))}
-          {filteredNotes.length === 0 && (
-            <p style={{ fontSize: 12, color: 'var(--node-meta)', textAlign: 'center', paddingTop: 32 }}>Aucune note</p>
-          )}
-        </div>
-      </div>
 
       {/* ── Canvas ── */}
       <div ref={canvasRef} className="canvas-root" style={{ cursor: spacePressed ? 'grab' : 'default' }}>
@@ -580,16 +612,15 @@ function NoteMapCanvasInner({ notes, canvas, user, title }: NoteMapCanvasProps) 
         {/* Top gradient (remplace le header) */}
         <div className="canvas-top-gradient" />
 
-        {/* ── Floating panel : top-left — titre + settings ── */}
+        {/* ── Floating panel : top-left — settings + titre ── */}
         <div style={{ position: 'absolute', top: 14, left: 14, zIndex: 20, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--node-title)', letterSpacing: '-0.02em', textShadow: '0 1px 3px rgba(0,0,0,0.12)' }}>
-            {displayTitle}
-          </span>
           <SettingsPanel
             showGrid={showGrid} setShowGrid={setShowGrid}
             showMiniMap={showMiniMap} setShowMiniMap={setShowMiniMap}
-            leftOpen={leftOpen} setLeftOpen={setLeftOpen}
           />
+          <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--node-title)', letterSpacing: '-0.02em', textShadow: '0 1px 3px rgba(0,0,0,0.12)' }}>
+            {displayTitle}
+          </span>
         </div>
 
         {/* ── Floating panel : top-right — avatar Google ── */}
@@ -598,6 +629,11 @@ function NoteMapCanvasInner({ notes, canvas, user, title }: NoteMapCanvasProps) 
             <AvatarBubble user={user} />
           </div>
         )}
+
+        {/* ── Notes bubble : bottom-left ── */}
+        <div style={{ position: 'absolute', bottom: 16, left: 14, zIndex: 20 }}>
+          <NotesBubble notes={notes} onFocus={focusNote} />
+        </div>
 
         {/* ── Floating panel : bottom-center — theme + nav ── */}
         <div style={{ position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)', zIndex: 20 }}>
@@ -619,18 +655,6 @@ function NoteMapCanvasInner({ notes, canvas, user, title }: NoteMapCanvasProps) 
             ))}
           </div>
         </div>
-
-        {/* ── Left panel edge toggle ── */}
-        <button
-          onClick={() => setLeftOpen(o => !o)}
-          className="absolute top-4 z-20 w-5 h-8 rounded-r-lg flex items-center justify-center transition-colors"
-          style={{ left: 0, background: 'var(--node-bg)', border: '1px solid var(--node-border)', color: 'var(--node-meta)' }}
-          title={leftOpen ? 'Fermer le panneau' : 'Ouvrir le panneau'}
-        >
-          <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-            <path d={leftOpen ? 'M6 2L4 5L6 8' : 'M4 2L6 5L4 8'} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
 
         {/* ── ReactFlow ── */}
         <ReactFlow
