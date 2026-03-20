@@ -59,6 +59,9 @@
   --node-preview: #64748b;
   --node-meta: #94a3b8;
   --node-handle: rgba(59, 130, 246, 0.7);
+  --drawer-bg: rgba(32, 33, 36, 0.82);
+  --drawer-border: rgba(0, 0, 0, 0.20);
+  --drawer-icon: rgba(229, 231, 233, 0.75);
 
   /* Modal and Editor - Compatibility with old system */
   --modal-overlay: rgba(0, 0, 0, 0.5);
@@ -150,6 +153,9 @@
   --node-preview: #8fdcc7;
   --node-meta: #475569;
   --node-handle: rgba(59, 130, 246, 0.8);
+  --drawer-bg: rgba(229, 231, 233, 0.82);
+  --drawer-border: rgba(255, 255, 255, 0.20);
+  --drawer-icon: rgba(32, 33, 36, 0.75);
 
   /* Modal and Editor - Dark mode */
   --modal-overlay: rgba(0, 0, 0, 0.7);

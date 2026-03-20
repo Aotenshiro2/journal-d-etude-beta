@@ -880,9 +880,9 @@ function NoteMapCanvasInner({ notes, canvas, user, title }: NoteMapCanvasProps) 
               width: 20, height: 36,
               padding: 0,
               cursor: 'pointer',
-              background: 'var(--float-bg)',
-              border: '1px solid var(--float-border)',
-              borderLeft: previewNoteId ? 'none' : '1px solid var(--float-border)',
+              background: 'var(--drawer-bg)',
+              border: '1px solid var(--drawer-border)',
+              borderLeft: previewNoteId ? 'none' : '1px solid var(--drawer-border)',
               borderRadius: previewNoteId ? '0 8px 8px 0' : '8px',
               boxShadow: 'var(--float-shadow)',
               backdropFilter: 'blur(12px)',
@@ -891,8 +891,8 @@ function NoteMapCanvasInner({ notes, canvas, user, title }: NoteMapCanvasProps) 
             }}
           >
             {previewNoteId
-              ? <ChevronLeft size={12} style={{ color: 'var(--node-meta)' }} />
-              : <ChevronRight size={12} style={{ color: 'var(--node-meta)' }} />
+              ? <ChevronLeft size={12} style={{ color: 'var(--drawer-icon)' }} />
+              : <ChevronRight size={12} style={{ color: 'var(--drawer-icon)' }} />
             }
           </button>
         )}
