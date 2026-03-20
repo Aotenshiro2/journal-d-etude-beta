@@ -362,10 +362,10 @@ input[type="search"]::-moz-selection {
     inset: 0;
     background-image: radial-gradient(circle, var(--canvas-dot-lit) 1px, transparent 1px);
     /* background-size et background-position sont contrôlés via JS pour suivre le viewport */
-    -webkit-mask-image: radial-gradient(circle 200px at var(--mx, -999px) var(--my, -999px), black 0%, transparent 100%);
-    mask-image: radial-gradient(circle 200px at var(--mx, -999px) var(--my, -999px), black 0%, transparent 100%);
+    -webkit-mask-image: radial-gradient(circle 100px at var(--mx, -999px) var(--my, -999px), black 0%, transparent 100%);
+    mask-image: radial-gradient(circle 100px at var(--mx, -999px) var(--my, -999px), black 0%, transparent 100%);
     pointer-events: none;
-    z-index: 1;
+    z-index: 0;
     opacity: 0;
     transition: opacity 0.25s ease;
   }
