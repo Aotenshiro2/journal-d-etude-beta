@@ -130,10 +130,7 @@ const NoteMapNode = React.memo(function NoteMapNode({ data }: NodeProps) {
           {/* Body — compact or expanded */}
           {isExpanded ? (
             <div style={{ flex: 1, overflowY: 'auto', padding: '0 14px 14px' }}>
-              <div
-                className="note-content-preview"
-                dangerouslySetInnerHTML={{ __html: note.content || '' }}
-              />
+              <NoteContentRenderer note={note} className="note-content-preview" />
             </div>
           ) : (
             preview && (
@@ -346,6 +343,25 @@ function NotesBubble({ notes, onFocus, onPreview }: NotesBubbleProps) {
   )
 }
 
+// ─── Note content renderer (messages-first, content fallback) ────────────────
+
+const IMAGE_TYPES = new Set(['image', 'screenshot', 'capture'])
+
+function NoteContentRenderer({ note, className }: { note: NoteData; className: string }) {
+  if (note.messages && note.messages.length > 0) {
+    return (
+      <div className={className}>
+        {note.messages.map(msg =>
+          IMAGE_TYPES.has(msg.type)
+            ? <img key={msg.id} src={msg.content} alt="" style={{ maxWidth: '100%', borderRadius: 6, margin: '6px 0', display: 'block' }} />
+            : <div key={msg.id} dangerouslySetInnerHTML={{ __html: msg.content }} />
+        )}
+      </div>
+    )
+  }
+  return <div className={className} dangerouslySetInnerHTML={{ __html: note.content || '<p>Aucun contenu</p>' }} />
+}
+
 // ─── Note preview panel (left overlay) ───────────────────────────────────────
 
 interface NotePreviewPanelProps {
@@ -394,10 +410,7 @@ function NotePreviewPanel({ note }: NotePreviewPanelProps) {
 
       {/* Content */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '12px 14px' }}>
-        <div
-          className="note-preview-content"
-          dangerouslySetInnerHTML={{ __html: note.content || '<p>Aucun contenu</p>' }}
-        />
+        <NoteContentRenderer note={note} className="note-preview-content" />
       </div>
 
       {/* Footer */}

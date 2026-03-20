@@ -26,6 +26,10 @@ export default async function NoteMapPage() {
       firstSyncAt: true,
       lastModifiedAt: true,
       userId: true,
+      messages: {
+        select: { id: true, type: true, content: true, order: true },
+        orderBy: { order: 'asc' as const },
+      },
     },
   })
 
