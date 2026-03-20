@@ -292,7 +292,7 @@ function NotesBubble({ notes, onFocus, onPreview }: NotesBubbleProps) {
             className="canvas-float-pill"
             style={{
               position: 'absolute', bottom: 42, left: 0, zIndex: 50,
-              width: 280, maxHeight: 420, display: 'flex', flexDirection: 'column',
+              width: 280, maxHeight: 200, display: 'flex', flexDirection: 'column',
               overflow: 'hidden', padding: 0,
             }}
           >
@@ -360,7 +360,7 @@ function NotePreviewPanel({ note }: NotePreviewPanelProps) {
     <div
       className="canvas-float-pill"
       style={{
-        position: 'absolute', left: 14, top: 56, bottom: 56, zIndex: 30,
+        position: 'absolute', left: 14, top: 56, bottom: 270, zIndex: 30,
         width: 300, display: 'flex', flexDirection: 'column',
         overflow: 'hidden', padding: 0,
       }}
