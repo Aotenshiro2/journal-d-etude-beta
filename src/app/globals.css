@@ -52,7 +52,7 @@
   --float-bg: rgba(255, 255, 255, 0.82);
   --float-border: rgba(0, 0, 0, 0.07);
   --float-shadow: 0 2px 12px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0,0,0,0.04);
-  --node-bg: #ffffff;
+  --node-bg: rgba(255, 255, 255, 0.97);
   --node-border: rgba(0, 0, 0, 0.06);
   --node-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
   --node-title: #0f172a;
