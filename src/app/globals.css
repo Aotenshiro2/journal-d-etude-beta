@@ -136,14 +136,14 @@
   --ring: oklch(0.556 0 0);
 
   /* Canvas specific */
-  --canvas-bg: #101216;
+  --canvas-bg: #202124;
   --canvas-dot: rgba(255, 255, 255, 0.1);
   --canvas-dot-lit: rgba(255, 255, 255, 0.55);
-  --canvas-top-fade: rgba(16, 18, 22, 0.88);
-  --float-bg: rgba(20, 24, 32, 0.82);
+  --canvas-top-fade: rgba(32, 33, 36, 0.88);
+  --float-bg: rgba(27, 28, 30, 0.88);
   --float-border: rgba(255, 255, 255, 0.08);
   --float-shadow: 0 2px 12px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255,255,255,0.04);
-  --node-bg: rgba(24, 30, 42, 0.97);
+  --node-bg: rgba(27, 28, 30, 0.97);
   --node-border: rgba(255, 255, 255, 0.08);
   --node-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
   --node-title: #f1f5f9;
