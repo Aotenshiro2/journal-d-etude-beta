@@ -27,7 +27,7 @@ import {
   Sun, Moon, Map as MapIcon, Grid3x3, ChevronDown,
   BookOpen, Lightbulb, TrendingUp, BookMarked, BarChart2, FileText,
   MousePointer2, Hand, Pencil, Square, ZoomIn, ZoomOut, Maximize2,
-  Star, X, PanelLeft,
+  Star, PanelLeft, PanelLeftClose,
 } from 'lucide-react'
 import { NoteData, CanvasData } from '@/types'
 import { stripHtml, formatRelativeTime } from '@/lib/utils'
@@ -350,10 +350,9 @@ function NotesBubble({ notes, onFocus, onPreview }: NotesBubbleProps) {
 
 interface NotePreviewPanelProps {
   note: NoteData | undefined
-  onClose: () => void
 }
 
-function NotePreviewPanel({ note, onClose }: NotePreviewPanelProps) {
+function NotePreviewPanel({ note }: NotePreviewPanelProps) {
   if (!note) return null
   const badge = getSourceBadge(note.sourceUrl)
 
@@ -368,28 +367,18 @@ function NotePreviewPanel({ note, onClose }: NotePreviewPanelProps) {
     >
       {/* Header */}
       <div style={{ padding: '14px 14px 10px', borderBottom: '1px solid var(--float-border)', flexShrink: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-            {note.favicon
-              // eslint-disable-next-line @next/next/no-img-element
-              ? <img src={note.favicon} alt="" style={{ width: 16, height: 16, borderRadius: 3, flexShrink: 0 }} />
-              : <div style={{ width: 16, height: 16, borderRadius: 3, background: 'var(--node-border)', flexShrink: 0 }} />
-            }
-            <span style={{
-              fontSize: 13, fontWeight: 600, color: 'var(--node-title)', overflow: 'hidden',
-              display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
-            }}>
-              {note.title}
-            </span>
-          </div>
-          <button
-            onClick={onClose}
-            style={{ flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--node-meta)', padding: 2, borderRadius: 4 }}
-            onMouseEnter={e => (e.currentTarget.style.color = 'var(--node-title)')}
-            onMouseLeave={e => (e.currentTarget.style.color = 'var(--node-meta)')}
-          >
-            <X size={14} />
-          </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+          {note.favicon
+            // eslint-disable-next-line @next/next/no-img-element
+            ? <img src={note.favicon} alt="" style={{ width: 16, height: 16, borderRadius: 3, flexShrink: 0 }} />
+            : <div style={{ width: 16, height: 16, borderRadius: 3, background: 'var(--node-border)', flexShrink: 0 }} />
+          }
+          <span style={{
+            fontSize: 13, fontWeight: 600, color: 'var(--node-title)', overflow: 'hidden',
+            display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+          }}>
+            {note.title}
+          </span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
           {badge && (
@@ -431,13 +420,11 @@ function NotePreviewPanel({ note, onClose }: NotePreviewPanelProps) {
 interface RightToolbarProps {
   activeTool: Tool
   setActiveTool: (t: Tool) => void
-  showPreview: boolean
-  onTogglePreview: () => void
   isFav: boolean
   onToggleFav: () => void
 }
 
-function RightToolbar({ activeTool, setActiveTool, showPreview, onTogglePreview, isFav, onToggleFav }: RightToolbarProps) {
+function RightToolbar({ activeTool, setActiveTool, isFav, onToggleFav }: RightToolbarProps) {
   const { zoomIn, zoomOut, fitView } = useReactFlow()
 
   const tools: { id: Tool; Icon: React.ElementType; label: string }[] = [
@@ -504,21 +491,6 @@ function RightToolbar({ activeTool, setActiveTool, showPreview, onTogglePreview,
           onMouseLeave={e => { if (!isFav) e.currentTarget.style.color = 'var(--node-meta)' }}
         >
           <Star size={14} fill={isFav ? '#f59e0b' : 'none'} />
-        </button>
-
-        {/* Toggle note preview — "Quitter le mode focus" quand fermé */}
-        <button
-          onClick={onTogglePreview}
-          title={showPreview ? 'Mode focus (fermer la note)' : 'Quitter le mode focus'}
-          style={{
-            ...btnBase,
-            background: showPreview ? 'rgba(59,130,246,0.1)' : 'none',
-            color: showPreview ? '#3b82f6' : 'var(--node-meta)',
-          }}
-          onMouseEnter={e => { if (!showPreview) e.currentTarget.style.color = 'var(--node-title)' }}
-          onMouseLeave={e => { if (!showPreview) e.currentTarget.style.color = 'var(--node-meta)' }}
-        >
-          <PanelLeft size={14} />
         </button>
 
       </div>
@@ -677,7 +649,24 @@ function NoteMapCanvasInner({ notes, canvas, user, title }: NoteMapCanvasProps) 
 
   const [activeTool, setActiveTool] = useState<Tool>('select')
   const [previewNoteId, setPreviewNoteId] = useState<string | null>(null)
+  const [lastPreviewNoteId, setLastPreviewNoteId] = useState<string | null>(null)
   const [favNoteIds, setFavNoteIds] = useState<Set<string>>(new Set())
+
+  const openPreview = useCallback((id: string) => {
+    setPreviewNoteId(id)
+    setLastPreviewNoteId(id)
+  }, [])
+  const closePreview = useCallback(() => {
+    if (previewNoteId) setLastPreviewNoteId(previewNoteId)
+    setPreviewNoteId(null)
+  }, [previewNoteId])
+  const togglePreview = useCallback(() => {
+    if (previewNoteId) {
+      closePreview()
+    } else if (lastPreviewNoteId) {
+      openPreview(lastPreviewNoteId)
+    }
+  }, [previewNoteId, lastPreviewNoteId, openPreview, closePreview])
   const singleClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const [spacePressed, setSpacePressed] = useState(false)
@@ -732,7 +721,7 @@ function NoteMapCanvasInner({ notes, canvas, user, title }: NoteMapCanvasProps) 
         if (e.key === 'm' || e.key === 'M') setActiveTool('mark')
         if (e.key === 'e' || e.key === 'E') setActiveTool('connect')
         if (e.key === 'h' || e.key === 'H') setActiveTool('pan')
-        if (e.key === 'Escape') setPreviewNoteId(null)
+        if (e.key === 'Escape') closePreview()
       }
     }
     const onKeyUp = (e: KeyboardEvent) => { if (e.code === 'Space') setSpacePressed(false) }
@@ -789,7 +778,7 @@ function NoteMapCanvasInner({ notes, canvas, user, title }: NoteMapCanvasProps) 
   const handleNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
     if (singleClickTimerRef.current) clearTimeout(singleClickTimerRef.current)
     singleClickTimerRef.current = setTimeout(() => {
-      setPreviewNoteId(node.id)
+      openPreview(node.id)
     }, 220)
   }, [])
 
@@ -875,14 +864,31 @@ function NoteMapCanvasInner({ notes, canvas, user, title }: NoteMapCanvasProps) 
         )}
 
         {/* ── Note preview panel (left overlay) ── */}
-        <NotePreviewPanel note={previewNote} onClose={() => setPreviewNoteId(null)} />
+        <NotePreviewPanel note={previewNote} />
+
+        {/* ── Pill toggle — ouvrir/fermer le panel ── */}
+        {lastPreviewNoteId !== null && (
+          <button
+            onClick={togglePreview}
+            className="canvas-float-pill"
+            title={previewNoteId ? 'Réduire la note' : 'Rouvrir la note'}
+            style={{
+              position: 'absolute', left: 14, top: 56, zIndex: 35,
+              display: 'flex', alignItems: 'center', gap: 4,
+              padding: '5px 10px', cursor: 'pointer', border: 'none',
+            }}
+          >
+            {previewNoteId
+              ? <PanelLeftClose size={14} style={{ color: 'var(--node-title)' }} />
+              : <PanelLeft size={14} style={{ color: 'var(--node-meta)' }} />
+            }
+          </button>
+        )}
 
         {/* ── Right toolbar ── */}
         <RightToolbar
           activeTool={activeTool}
           setActiveTool={setActiveTool}
-          showPreview={previewNoteId !== null}
-          onTogglePreview={() => setPreviewNoteId(v => v ? null : v)}
           isFav={previewNoteId ? favNoteIds.has(previewNoteId) : false}
           onToggleFav={() => {
             if (!previewNoteId) return
@@ -896,7 +902,7 @@ function NoteMapCanvasInner({ notes, canvas, user, title }: NoteMapCanvasProps) 
 
         {/* ── Notes bubble : bottom-left ── */}
         <div style={{ position: 'absolute', bottom: 16, left: 14, zIndex: 20 }}>
-          <NotesBubble notes={notes} onFocus={focusNote} onPreview={setPreviewNoteId} />
+          <NotesBubble notes={notes} onFocus={focusNote} onPreview={openPreview} />
         </div>
 
         {/* ── Bottom-center — theme + nav ── */}
