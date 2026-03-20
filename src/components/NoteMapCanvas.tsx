@@ -900,9 +900,13 @@ function NoteMapCanvasInner({ notes, canvas, user, title }: NoteMapCanvasProps) 
           }}
         />
 
-        {/* ── Bottom-left — notes bubble + nav ── */}
-        <div style={{ position: 'absolute', bottom: showMiniMap ? 168 : 16, left: 14, zIndex: 20, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8 }}>
+        {/* ── Bottom-left — notes bubble ── */}
+        <div style={{ position: 'absolute', bottom: 16, left: 14, zIndex: 20 }}>
           <NotesBubble notes={notes} onFocus={focusNote} onPreview={openPreview} />
+        </div>
+
+        {/* ── Bottom-right — theme + nav ── */}
+        <div style={{ position: 'absolute', bottom: showMiniMap ? 168 : 16, right: 14, zIndex: 20 }}>
           <div className="canvas-float-pill" style={{ display: 'flex', alignItems: 'center', gap: 2, padding: '4px 8px' }}>
             <ThemeToggleInline />
             <div style={{ width: 1, height: 16, background: 'var(--float-border)', margin: '0 4px' }} />
