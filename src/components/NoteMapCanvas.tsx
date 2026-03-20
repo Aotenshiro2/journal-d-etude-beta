@@ -670,7 +670,7 @@ function NoteMapCanvasInner({ notes, canvas, user, title }: NoteMapCanvasProps) 
   const singleClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const [spacePressed, setSpacePressed] = useState(false)
-  const [showMiniMap, setShowMiniMap] = useState(true)
+  const [showMiniMap, setShowMiniMap] = useState(false)
   const [showGrid, setShowGrid] = useState(true)
   const { setCenter } = useReactFlow()
   const { x: vpX, y: vpY, zoom } = useViewport()
@@ -900,13 +900,9 @@ function NoteMapCanvasInner({ notes, canvas, user, title }: NoteMapCanvasProps) 
           }}
         />
 
-        {/* ── Notes bubble : bottom-left ── */}
-        <div style={{ position: 'absolute', bottom: 16, left: 14, zIndex: 20 }}>
+        {/* ── Bottom-left — notes bubble + nav ── */}
+        <div style={{ position: 'absolute', bottom: showMiniMap ? 168 : 16, left: 14, zIndex: 20, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8 }}>
           <NotesBubble notes={notes} onFocus={focusNote} onPreview={openPreview} />
-        </div>
-
-        {/* ── Bottom-center — theme + nav ── */}
-        <div style={{ position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)', zIndex: 20 }}>
           <div className="canvas-float-pill" style={{ display: 'flex', alignItems: 'center', gap: 2, padding: '4px 8px' }}>
             <ThemeToggleInline />
             <div style={{ width: 1, height: 16, background: 'var(--float-border)', margin: '0 4px' }} />
