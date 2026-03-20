@@ -24,10 +24,10 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import {
-  Sun, Moon, Map as MapIcon, Grid3x3, ChevronDown,
+  Sun, Moon, Map as MapIcon, Grid3x3, ChevronDown, ChevronLeft, ChevronRight,
   BookOpen, Lightbulb, TrendingUp, BookMarked, BarChart2, FileText,
   MousePointer2, Hand, Pencil, Square, ZoomIn, ZoomOut, Maximize2,
-  Star, PanelLeft, PanelLeftClose,
+  Star,
 } from 'lucide-react'
 import { NoteData, CanvasData } from '@/types'
 import { stripHtml, formatRelativeTime } from '@/lib/utils'
@@ -866,21 +866,33 @@ function NoteMapCanvasInner({ notes, canvas, user, title }: NoteMapCanvasProps) 
         {/* ── Note preview panel (left overlay) ── */}
         <NotePreviewPanel note={previewNote} />
 
-        {/* ── Pill toggle — ouvrir/fermer le panel ── */}
+        {/* ── Drawer handle — ouvrir/fermer le panel ── */}
         {lastPreviewNoteId !== null && (
           <button
             onClick={togglePreview}
-            className="canvas-float-pill"
             title={previewNoteId ? 'Réduire la note' : 'Rouvrir la note'}
             style={{
-              position: 'absolute', left: 14, top: 56, zIndex: 35,
-              display: 'flex', alignItems: 'center', gap: 4,
-              padding: '5px 10px', cursor: 'pointer', border: 'none',
+              position: 'absolute',
+              left: previewNoteId ? 314 : 14,
+              top: 100,
+              zIndex: 35,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              width: 20, height: 36,
+              padding: 0,
+              cursor: 'pointer',
+              background: 'var(--float-bg)',
+              border: '1px solid var(--float-border)',
+              borderLeft: previewNoteId ? 'none' : '1px solid var(--float-border)',
+              borderRadius: previewNoteId ? '0 8px 8px 0' : '8px',
+              boxShadow: 'var(--float-shadow)',
+              backdropFilter: 'blur(12px)',
+              WebkitBackdropFilter: 'blur(12px)',
+              transition: 'left 0.25s ease',
             }}
           >
             {previewNoteId
-              ? <PanelLeftClose size={14} style={{ color: 'var(--node-title)' }} />
-              : <PanelLeft size={14} style={{ color: 'var(--node-meta)' }} />
+              ? <ChevronLeft size={12} style={{ color: 'var(--node-meta)' }} />
+              : <ChevronRight size={12} style={{ color: 'var(--node-meta)' }} />
             }
           </button>
         )}
