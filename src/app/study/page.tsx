@@ -27,6 +27,11 @@ export default async function StudyPage() {
       firstSyncAt: true,
       lastModifiedAt: true,
       userId: true,
+      messages: {
+        where: { type: 'image' },
+        take: 1,
+        select: { id: true, content: true, type: true, order: true, noteId: true },
+      },
     },
   })
 
@@ -62,10 +67,7 @@ export default async function StudyPage() {
             {notes.map((note) => (
               <NoteCard
                 key={note.id}
-                note={{
-                  ...note,
-                  messages: undefined,
-                }}
+                note={note}
               />
             ))}
           </div>

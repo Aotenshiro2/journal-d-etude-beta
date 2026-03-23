@@ -11,12 +11,12 @@
 :root {
   /* Base colors */
 
-  /* Card colors */
-  --card: oklch(1 0 0);
+  /* Card colors — #e5e7e9 pour cohérence avec le canvas */
+  --card: oklch(0.931 0.002 262);
   --card-foreground: oklch(0.145 0 0);
 
   /* Popover colors */
-  --popover: oklch(1 0 0);
+  --popover: oklch(0.931 0.002 262);
   --popover-foreground: oklch(0.145 0 0);
 
   /* Primary colors */

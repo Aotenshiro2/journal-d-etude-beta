@@ -9,9 +9,13 @@ interface NoteCardProps {
 export default function NoteCard({ note }: NoteCardProps) {
   const excerpt = truncateText(stripHtml(note.content), 120)
   const date = formatRelativeTime(new Date(note.lastModifiedAt))
-  const firstImage = note.content
+  const firstImageFromMessages = note.messages?.[0]?.content
+    ? extractImageSrc(note.messages[0].content)
+    : null
+  const firstImageFromContent = note.content
     ? extractImageSrc(note.content.match(/<img[^>]*>/)?.[0] ?? '')
     : null
+  const firstImage = firstImageFromMessages ?? firstImageFromContent
 
   return (
     <div className="group rounded-2xl border border-white/10 bg-white/[0.03] hover:bg-white/[0.06] hover:border-white/20 transition-all duration-200 overflow-hidden flex flex-col">

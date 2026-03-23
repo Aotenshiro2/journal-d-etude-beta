@@ -33,7 +33,10 @@ export function formatRelativeTime(date: Date): string {
   return `il y a ${Math.floor(diffMonth / 12)} an${Math.floor(diffMonth / 12) > 1 ? 's' : ''}`
 }
 
-export function extractImageSrc(html: string): string | null {
-  const match = html.match(/<img[^>]+src=["']([^"']+)["']/)
+export function extractImageSrc(content: string): string | null {
+  // URL brute (format utilisé par l'extension pour les messages image)
+  if (/^https?:\/\//.test(content) || content.startsWith('//')) return content
+  // HTML avec balise <img>
+  const match = content.match(/<img[^>]+src=["']([^"']+)["']/)
   return match ? match[1] : null
 }
