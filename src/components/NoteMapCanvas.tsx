@@ -29,7 +29,8 @@ import {
   MousePointer2, Hand, Pencil, Square, ZoomIn, ZoomOut, Maximize2,
   Star,
 } from 'lucide-react'
-import { NoteData, CanvasData } from '@/types'
+import { NoteData, CanvasData, MessageData } from '@/types'
+import CaptureBar from '@/components/CaptureBar'
 import { stripHtml, formatRelativeTime } from '@/lib/utils'
 import { useTheme } from '@/contexts/ThemeContext'
 import { createClient } from '@/lib/supabase/client'
@@ -75,9 +76,18 @@ function getSourceBadge(sourceUrl?: string | null): { label: string; color: stri
 
 // ─── Note card node ───────────────────────────────────────────────────────────
 
-const NoteMapNode = React.memo(function NoteMapNode({ data }: NodeProps) {
+const NoteMapNode = React.memo(function NoteMapNode({ id, data }: NodeProps) {
   const router = useRouter()
-  const { note, isExpanded } = data as { note: NoteData; isExpanded?: boolean }
+  const { setNodes } = useReactFlow()
+  const { note, isExpanded, dbNodeId, canvasId } = data as { note: NoteData; isExpanded?: boolean; dbNodeId?: string; canvasId?: string }
+  const [hovered, setHovered] = useState(false)
+
+  const handleRemove = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!dbNodeId || !canvasId) return
+    await fetch(`/api/canvas/${canvasId}/nodes/${dbNodeId}`, { method: 'DELETE' })
+    setNodes(nds => nds.filter(n => n.id !== id))
+  }, [id, dbNodeId, canvasId, setNodes])
 
   const preview = useMemo(() => {
     const text = stripHtml(note.content || '')
@@ -94,7 +104,27 @@ const NoteMapNode = React.memo(function NoteMapNode({ data }: NodeProps) {
   return (
     <ContextMenu>
       <ContextMenuTrigger>
-        <div className="note-map-card">
+        <div
+          className="note-map-card"
+          style={{ position: 'relative' }}
+          onMouseEnter={() => setHovered(true)}
+          onMouseLeave={() => setHovered(false)}
+        >
+          {/* Remove from canvas button */}
+          {dbNodeId && hovered && (
+            <button
+              onClick={handleRemove}
+              title="Retirer du canvas"
+              style={{
+                position: 'absolute', top: 6, right: 6, zIndex: 10,
+                width: 18, height: 18, borderRadius: '50%',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: 'rgba(239,68,68,0.85)', border: 'none',
+                cursor: 'pointer', color: '#fff', fontSize: 13, lineHeight: 1,
+                padding: 0,
+              }}
+            >×</button>
+          )}
           <Handle type="target" position={Position.Top}
             style={{ background: 'var(--node-handle)', opacity: 0, width: 8, height: 8, minWidth: 0, border: 'none' }}
             className="!transition-opacity group-hover:!opacity-100"
@@ -253,11 +283,12 @@ function AvatarBubble({ user }: { user: { email: string; name: string; avatarUrl
 
 interface NotesBubbleProps {
   notes: NoteData[]
+  pinnedNoteIds: Set<string>
   onFocus: (noteId: string) => void
   onPreview: (noteId: string) => void
 }
 
-function NotesBubble({ notes, onFocus, onPreview }: NotesBubbleProps) {
+function NotesBubble({ notes, pinnedNoteIds, onFocus, onPreview }: NotesBubbleProps) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
 
@@ -307,31 +338,47 @@ function NotesBubble({ notes, onFocus, onPreview }: NotesBubbleProps) {
               />
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}>
-              {filtered.map(note => (
-                <button key={note.id}
-                  onClick={() => { onFocus(note.id); onPreview(note.id); setOpen(false) }}
-                  style={{
-                    width: '100%', textAlign: 'left', padding: '7px 12px',
-                    background: 'none', border: 'none', cursor: 'pointer',
+              {filtered.map(note => {
+                const isPinned = pinnedNoteIds.has(note.id)
+                return (
+                <div
+                  key={note.id}
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData('noteId', note.id)
+                    e.dataTransfer.effectAllowed = 'copy'
                   }}
-                  onMouseEnter={e => (e.currentTarget.style.background = 'var(--canvas-bg)')}
-                  onMouseLeave={e => (e.currentTarget.style.background = 'none')}
+                  style={{ position: 'relative' }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    {note.favicon
-                      // eslint-disable-next-line @next/next/no-img-element
-                      ? <img src={note.favicon} alt="" style={{ width: 14, height: 14, borderRadius: 3, flexShrink: 0 }} />
-                      : <div style={{ width: 14, height: 14, borderRadius: 3, background: 'var(--node-border)', flexShrink: 0 }} />
-                    }
-                    <span style={{ fontSize: 12, color: 'var(--node-preview)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
-                      {note.title}
-                    </span>
-                  </div>
-                  <div style={{ fontSize: 10, color: 'var(--node-meta)', marginTop: 2, paddingLeft: 22 }}>
-                    {formatRelativeTime(new Date(note.lastModifiedAt))}
-                  </div>
-                </button>
-              ))}
+                  <button
+                    onClick={() => { onFocus(note.id); onPreview(note.id); setOpen(false) }}
+                    style={{
+                      width: '100%', textAlign: 'left', padding: '7px 12px',
+                      background: 'none', border: 'none', cursor: 'grab',
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.background = 'var(--canvas-bg)')}
+                    onMouseLeave={e => (e.currentTarget.style.background = 'none')}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      {note.favicon
+                        // eslint-disable-next-line @next/next/no-img-element
+                        ? <img src={note.favicon} alt="" style={{ width: 14, height: 14, borderRadius: 3, flexShrink: 0 }} />
+                        : <div style={{ width: 14, height: 14, borderRadius: 3, background: 'var(--node-border)', flexShrink: 0 }} />
+                      }
+                      <span style={{ fontSize: 12, color: 'var(--node-preview)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', flex: 1 }}>
+                        {note.title}
+                      </span>
+                      {isPinned && (
+                        <span style={{ fontSize: 9, color: '#3b82f6', flexShrink: 0 }}>●</span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: 10, color: 'var(--node-meta)', marginTop: 2, paddingLeft: 22 }}>
+                      {formatRelativeTime(new Date(note.lastModifiedAt))}
+                    </div>
+                  </button>
+                </div>
+                )
+              })}
               {filtered.length === 0 && (
                 <p style={{ fontSize: 12, color: 'var(--node-meta)', textAlign: 'center', paddingTop: 20 }}>Aucune note</p>
               )}
@@ -366,10 +413,22 @@ function NoteContentRenderer({ note, className }: { note: NoteData; className: s
 
 interface NotePreviewPanelProps {
   note: NoteData | undefined
+  refreshTrigger: number
 }
 
-function NotePreviewPanel({ note }: NotePreviewPanelProps) {
+function NotePreviewPanel({ note, refreshTrigger }: NotePreviewPanelProps) {
+  const [fetchedMessages, setFetchedMessages] = useState<MessageData[] | null>(null)
+
+  useEffect(() => {
+    if (!note) { setFetchedMessages(null); return }
+    fetch(`/api/notes/${note.id}/messages`)
+      .then(r => r.ok ? r.json() : null)
+      .then(setFetchedMessages)
+      .catch(() => setFetchedMessages(null))
+  }, [note?.id, refreshTrigger])
+
   if (!note) return null
+  const displayNote: NoteData = fetchedMessages ? { ...note, messages: fetchedMessages } : note
   const badge = getSourceBadge(note.sourceUrl)
 
   return (
@@ -410,7 +469,7 @@ function NotePreviewPanel({ note }: NotePreviewPanelProps) {
 
       {/* Content */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '12px 14px' }}>
-        <NoteContentRenderer note={note} className="note-preview-content" />
+        <NoteContentRenderer note={displayNote} className="note-preview-content" />
       </div>
 
       {/* Footer */}
@@ -664,6 +723,8 @@ function NoteMapCanvasInner({ notes, canvas, user, title }: NoteMapCanvasProps) 
   const [previewNoteId, setPreviewNoteId] = useState<string | null>(null)
   const [lastPreviewNoteId, setLastPreviewNoteId] = useState<string | null>(null)
   const [favNoteIds, setFavNoteIds] = useState<Set<string>>(new Set())
+  const [refreshTrigger, setRefreshTrigger] = useState(0)
+  const reactFlowWrapper = useRef<HTMLDivElement>(null)
 
   const openPreview = useCallback((id: string) => {
     setPreviewNoteId(id)
@@ -685,7 +746,7 @@ function NoteMapCanvasInner({ notes, canvas, user, title }: NoteMapCanvasProps) 
   const [spacePressed, setSpacePressed] = useState(false)
   const [showMiniMap, setShowMiniMap] = useState(false)
   const [showGrid, setShowGrid] = useState(true)
-  const { setCenter } = useReactFlow()
+  const { setCenter, screenToFlowPosition } = useReactFlow()
   const { x: vpX, y: vpY, zoom } = useViewport()
 
   const dotSize = 22 * zoom
@@ -754,12 +815,18 @@ function NoteMapCanvasInner({ notes, canvas, user, title }: NoteMapCanvasProps) 
   }, [canvas.nodes])
 
   const initialNodes: Node[] = useMemo(() =>
-    notes.map((note, i) => ({
-      id: note.id, type: 'noteMap',
-      position: savedPositions.get(note.id) ?? autoPosition(i),
-      style: { width: 260, height: 152 },
-      data: { note, isExpanded: false },
-    })),
+    canvas.nodes
+      .filter(n => n.noteId != null)
+      .flatMap(n => {
+        const note = notes.find(note => note.id === n.noteId)
+        if (!note) return []
+        return [{
+          id: note.id, type: 'noteMap',
+          position: { x: n.x, y: n.y },
+          style: { width: 260, height: 152 },
+          data: { note, isExpanded: false, dbNodeId: n.id, canvasId: canvas.id },
+        }]
+      }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     []
   )
@@ -816,7 +883,15 @@ function NoteMapCanvasInner({ notes, canvas, user, title }: NoteMapCanvasProps) 
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ noteId: node.id, x, y }),
       })
-      if (res.ok) { const data = await res.json(); savedNodeRef.current.set(node.id, data.id) }
+      if (res.ok) {
+        const data = await res.json()
+        savedNodeRef.current.set(node.id, data.id)
+        // Backfill dbNodeId + canvasId into node data
+        setNodes(nds => nds.map(n => n.id === node.id
+          ? { ...n, data: { ...n.data, dbNodeId: data.id, canvasId: canvas.id } }
+          : n
+        ))
+      }
     }
   }, [canvas.id])
 
@@ -835,6 +910,34 @@ function NoteMapCanvasInner({ notes, canvas, user, title }: NoteMapCanvasProps) 
     if (node) setCenter(node.position.x + 130, node.position.y + 76, { zoom: 1.1, duration: 600 })
   }, [nodes, setCenter])
 
+  const pinnedNoteIds = useMemo(() => new Set(nodes.map(n => n.id)), [nodes])
+
+  const onDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault()
+    const noteId = e.dataTransfer.getData('noteId')
+    if (!noteId) return
+    if (nodes.some(n => n.id === noteId)) return
+
+    const position = screenToFlowPosition({ x: e.clientX, y: e.clientY })
+    const note = notes.find(n => n.id === noteId)
+    if (!note) return
+
+    const res = await fetch(`/api/canvas/${canvas.id}/nodes`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ noteId, x: position.x, y: position.y }),
+    })
+    if (!res.ok) return
+    const dbNode = await res.json()
+
+    savedNodeRef.current.set(noteId, dbNode.id)
+    setNodes(prev => [...prev, {
+      id: noteId, type: 'noteMap',
+      position,
+      style: { width: 260, height: 152 },
+      data: { note, isExpanded: false, dbNodeId: dbNode.id, canvasId: canvas.id },
+    }])
+  }, [nodes, notes, canvas.id, screenToFlowPosition, setNodes])
+
   // Tool → ReactFlow props mapping
   const toolProps = {
     select:  { panOnDrag: false as const, selectionOnDrag: true,  nodesConnectable: false, nodesDraggable: true,  selectionMode: SelectionMode.Partial },
@@ -844,12 +947,17 @@ function NoteMapCanvasInner({ notes, canvas, user, title }: NoteMapCanvasProps) 
   }
 
   const previewNote = previewNoteId ? notes.find(n => n.id === previewNoteId) : undefined
+  const previewNoteTitle = previewNote?.title
 
   return (
     <div className="flex h-full overflow-hidden relative" style={{ background: 'var(--canvas-bg)' }}>
 
       {/* ── Canvas ── */}
-      <div ref={canvasRef} className="canvas-root" style={{ cursor: spacePressed ? 'grab' : activeTool === 'pan' ? 'grab' : 'default' }}>
+      <div
+        ref={canvasRef}
+        className="canvas-root"
+        style={{ cursor: spacePressed ? 'grab' : activeTool === 'pan' ? 'grab' : 'default' }}
+      >
 
         {/* Dot grid */}
         {showGrid && <div className="canvas-grid" style={dotBgStyle} />}
@@ -877,7 +985,7 @@ function NoteMapCanvasInner({ notes, canvas, user, title }: NoteMapCanvasProps) 
         )}
 
         {/* ── Note preview panel (left overlay) ── */}
-        <NotePreviewPanel note={previewNote} />
+        <NotePreviewPanel note={previewNote} refreshTrigger={refreshTrigger} />
 
         {/* ── Drawer handle — ouvrir/fermer le panel ── */}
         {lastPreviewNoteId !== null && (
@@ -927,8 +1035,15 @@ function NoteMapCanvasInner({ notes, canvas, user, title }: NoteMapCanvasProps) 
 
         {/* ── Bottom-left — notes bubble ── */}
         <div style={{ position: 'absolute', bottom: 16, left: 14, zIndex: 20 }}>
-          <NotesBubble notes={notes} onFocus={focusNote} onPreview={openPreview} />
+          <NotesBubble notes={notes} pinnedNoteIds={pinnedNoteIds} onFocus={focusNote} onPreview={openPreview} />
         </div>
+
+        {/* ── Capture bar ── */}
+        <CaptureBar
+          noteId={previewNoteId}
+          noteTitle={previewNoteTitle}
+          onMessageAdded={() => setRefreshTrigger(t => t + 1)}
+        />
 
         {/* ── Bottom-right — theme + nav ── */}
         <div style={{ position: 'absolute', bottom: showMiniMap ? 168 : 16, right: 14, zIndex: 20 }}>
@@ -952,28 +1067,48 @@ function NoteMapCanvasInner({ notes, canvas, user, title }: NoteMapCanvasProps) 
         </div>
 
         {/* ── ReactFlow ── */}
-        <ReactFlow
-          nodes={nodes} edges={edges}
-          onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
-          onConnect={onConnect} onNodeDragStop={handleNodeDragStop}
-          onNodeClick={handleNodeClick}
-          onNodeDoubleClick={handleNodeDoubleClick}
-          nodeTypes={nodeTypes}
-          fitView fitViewOptions={{ padding: 0.12, maxZoom: 1 }}
-          minZoom={0.08} maxZoom={2.5} deleteKeyCode={null}
-          panOnScroll panOnScrollMode={PanOnScrollMode.Vertical}
-          zoomOnScroll={false} zoomActivationKeyCode="Control"
-          panActivationKeyCode="Space"
-          onlyRenderVisibleElements proOptions={{ hideAttribution: true }}
-          style={{ background: 'transparent', position: 'relative', zIndex: 2 }}
-          {...toolProps[activeTool]}
+        <div
+          ref={reactFlowWrapper}
+          style={{ position: 'absolute', inset: 0, zIndex: 2 }}
+          onDrop={onDrop}
+          onDragOver={(e) => e.preventDefault()}
         >
-          {showMiniMap && (
-            <MiniMap nodeColor="var(--node-border)" maskColor="rgba(0,0,0,0.12)"
-              style={{ background: 'var(--float-bg)', border: '1px solid var(--float-border)', borderRadius: 12, backdropFilter: 'blur(12px)' }}
-            />
+          {nodes.length === 0 && (
+            <div style={{
+              position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              zIndex: 1, pointerEvents: 'none',
+            }}>
+              <p style={{
+                fontSize: 14, color: 'var(--node-meta)', fontWeight: 500,
+                textAlign: 'center', lineHeight: 1.7,
+              }}>
+                Glisse une note depuis la liste ↙ pour l&apos;ajouter au canvas
+              </p>
+            </div>
           )}
-        </ReactFlow>
+          <ReactFlow
+            nodes={nodes} edges={edges}
+            onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
+            onConnect={onConnect} onNodeDragStop={handleNodeDragStop}
+            onNodeClick={handleNodeClick}
+            onNodeDoubleClick={handleNodeDoubleClick}
+            nodeTypes={nodeTypes}
+            fitView fitViewOptions={{ padding: 0.12, maxZoom: 1 }}
+            minZoom={0.08} maxZoom={2.5} deleteKeyCode={null}
+            panOnScroll panOnScrollMode={PanOnScrollMode.Vertical}
+            zoomOnScroll={false} zoomActivationKeyCode="Control"
+            panActivationKeyCode="Space"
+            onlyRenderVisibleElements proOptions={{ hideAttribution: true }}
+            style={{ background: 'transparent', position: 'relative', zIndex: 2 }}
+            {...toolProps[activeTool]}
+          >
+            {showMiniMap && (
+              <MiniMap nodeColor="var(--node-border)" maskColor="rgba(0,0,0,0.12)"
+                style={{ background: 'var(--float-bg)', border: '1px solid var(--float-border)', borderRadius: 12, backdropFilter: 'blur(12px)' }}
+              />
+            )}
+          </ReactFlow>
+        </div>
       </div>
     </div>
   )
