@@ -14,6 +14,9 @@ export default function CaptureBar({ noteId, noteTitle, onMessageAdded }: Captur
   const [isSending, setIsSending] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  const MAX_HEIGHT = 160 // 8 lignes × ~20px
 
   const disabled = !noteId
   const busy = isSending || isUploading
@@ -22,14 +25,16 @@ export default function CaptureBar({ noteId, noteTitle, onMessageAdded }: Captur
   const handleSubmit = useCallback(async () => {
     if (!noteId || !hasText || busy) return
     setIsSending(true)
+    const htmlContent = text.trim().split('\n').map(l => `<p>${l || '&nbsp;'}</p>`).join('')
     try {
       const res = await fetch(`/api/notes/${noteId}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: `<p>${text.trim()}</p>`, type: 'text' }),
+        body: JSON.stringify({ content: htmlContent, type: 'text' }),
       })
       if (res.ok) {
         setText('')
+        if (textareaRef.current) textareaRef.current.style.height = 'auto'
         onMessageAdded()
       }
     } catch {
@@ -91,7 +96,6 @@ export default function CaptureBar({ noteId, noteTitle, onMessageAdded }: Captur
     border: '1.5px solid var(--surface-match-border)',
     borderRadius: 24,
     boxShadow: '0 4px 24px rgba(0,0,0,0.25), 0 1px 4px rgba(0,0,0,0.12)',
-    overflow: 'hidden',
   }
 
   const iconBtnStyle: React.CSSProperties = {
@@ -122,11 +126,17 @@ export default function CaptureBar({ noteId, noteTitle, onMessageAdded }: Captur
       />
 
       {/* Upper zone — text input */}
-      <div style={{ padding: '14px 16px 10px', flex: 1 }}>
-        <input
-          type="text"
+      <div style={{ padding: '14px 16px 10px' }}>
+        <textarea
+          ref={textareaRef}
+          rows={1}
           value={text}
-          onChange={e => setText(e.target.value)}
+          onChange={e => {
+            setText(e.target.value)
+            const el = e.target
+            el.style.height = 'auto'
+            el.style.height = Math.min(el.scrollHeight, MAX_HEIGHT) + 'px'
+          }}
           onKeyDown={handleKeyDown}
           disabled={disabled || busy}
           placeholder={disabled
@@ -138,9 +148,14 @@ export default function CaptureBar({ noteId, noteTitle, onMessageAdded }: Captur
             background: 'transparent',
             border: 'none',
             outline: 'none',
+            resize: 'none',
             fontSize: 13,
+            lineHeight: '20px',
+            overflowY: 'auto',
+            maxHeight: MAX_HEIGHT,
             color: disabled ? 'var(--muted-foreground)' : 'var(--surface-match-fg)',
             caretColor: 'var(--surface-match-fg)',
+            fontFamily: 'inherit',
           }}
         />
       </div>

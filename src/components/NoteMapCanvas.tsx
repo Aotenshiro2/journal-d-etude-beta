@@ -31,7 +31,7 @@ import {
 } from 'lucide-react'
 import { NoteData, CanvasData, MessageData } from '@/types'
 import CaptureBar from '@/components/CaptureBar'
-import { stripHtml, formatRelativeTime } from '@/lib/utils'
+import { stripHtml, formatRelativeTime, extractImageSrc } from '@/lib/utils'
 import { useTheme } from '@/contexts/ThemeContext'
 import { createClient } from '@/lib/supabase/client'
 import {
@@ -399,7 +399,7 @@ function NoteContentRenderer({ note, className }: { note: NoteData; className: s
       <div className={className}>
         {note.messages.map(msg =>
           IMAGE_TYPES.has(msg.type)
-            ? <img key={msg.id} src={msg.content} alt="" style={{ maxWidth: '100%', borderRadius: 6, margin: '6px 0', display: 'block' }} />
+            ? <img key={msg.id} src={extractImageSrc(msg.content) ?? msg.content} alt="" style={{ maxWidth: '100%', borderRadius: 6, margin: '6px 0', display: 'block' }} />
             : <div key={msg.id} dangerouslySetInnerHTML={{ __html: msg.content }} />
         )}
       </div>
