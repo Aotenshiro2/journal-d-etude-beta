@@ -347,6 +347,7 @@ function NotesBubble({ notes, pinnedNoteIds, onFocus, onPreview }: NotesBubblePr
                   onDragStart={(e) => {
                     e.dataTransfer.setData('noteId', note.id)
                     e.dataTransfer.effectAllowed = 'copy'
+                    setOpen(false)
                   }}
                   style={{ position: 'relative' }}
                 >
@@ -957,6 +958,8 @@ function NoteMapCanvasInner({ notes, canvas, user, title }: NoteMapCanvasProps) 
         ref={canvasRef}
         className="canvas-root"
         style={{ cursor: spacePressed ? 'grab' : activeTool === 'pan' ? 'grab' : 'default' }}
+        onDrop={onDrop}
+        onDragOver={(e) => e.preventDefault()}
       >
 
         {/* Dot grid */}
@@ -1034,7 +1037,7 @@ function NoteMapCanvasInner({ notes, canvas, user, title }: NoteMapCanvasProps) 
         />
 
         {/* ── Bottom-left — notes bubble ── */}
-        <div style={{ position: 'absolute', bottom: 16, left: 14, zIndex: 20 }}>
+        <div style={{ position: 'absolute', bottom: 64, left: 14, zIndex: 20 }}>
           <NotesBubble notes={notes} pinnedNoteIds={pinnedNoteIds} onFocus={focusNote} onPreview={openPreview} />
         </div>
 
@@ -1046,7 +1049,7 @@ function NoteMapCanvasInner({ notes, canvas, user, title }: NoteMapCanvasProps) 
         />
 
         {/* ── Bottom-right — theme + nav ── */}
-        <div style={{ position: 'absolute', bottom: showMiniMap ? 168 : 16, right: 14, zIndex: 20 }}>
+        <div style={{ position: 'absolute', bottom: showMiniMap ? 220 : 64, right: 14, zIndex: 20 }}>
           <div className="canvas-float-pill" style={{ display: 'flex', alignItems: 'center', gap: 2, padding: '4px 8px' }}>
             <ThemeToggleInline />
             <div style={{ width: 1, height: 16, background: 'var(--float-border)', margin: '0 4px' }} />
@@ -1070,8 +1073,6 @@ function NoteMapCanvasInner({ notes, canvas, user, title }: NoteMapCanvasProps) 
         <div
           ref={reactFlowWrapper}
           style={{ position: 'absolute', inset: 0, zIndex: 2 }}
-          onDrop={onDrop}
-          onDragOver={(e) => e.preventDefault()}
         >
           {nodes.length === 0 && (
             <div style={{

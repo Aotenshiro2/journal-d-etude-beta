@@ -79,21 +79,19 @@ export default function CaptureBar({ noteId, noteTitle, onMessageAdded }: Captur
 
   const containerStyle: React.CSSProperties = {
     position: 'absolute',
-    bottom: 58,
-    left: noteId ? 328 : 14,
-    right: 60,
+    bottom: 0,
+    left: 0,
+    right: 0,
     zIndex: 25,
     display: 'flex',
     alignItems: 'center',
     gap: 8,
-    padding: '8px 12px',
+    padding: '0 16px',
+    height: 56,
     background: 'var(--float-bg)',
-    border: '1px solid var(--float-border)',
-    borderRadius: 14,
+    borderTop: '1px solid var(--float-border)',
     backdropFilter: 'blur(14px)',
     WebkitBackdropFilter: 'blur(14px)',
-    boxShadow: 'var(--float-shadow)',
-    transition: 'left 0.25s ease',
   }
 
   const btnStyle: React.CSSProperties = {
