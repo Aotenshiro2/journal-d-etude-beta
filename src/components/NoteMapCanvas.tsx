@@ -291,6 +291,18 @@ interface NotesBubbleProps {
 function NotesBubble({ notes, pinnedNoteIds, onFocus, onPreview }: NotesBubbleProps) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
+  const popupRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const handleOutside = (e: MouseEvent) => {
+      if (popupRef.current && e.target instanceof Element && !popupRef.current.contains(e.target)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleOutside)
+    return () => document.removeEventListener('mousedown', handleOutside)
+  }, [open])
 
   const filtered = useMemo(
     () => notes.filter(n => n.title.toLowerCase().includes(search.toLowerCase())),
@@ -315,8 +327,8 @@ function NotesBubble({ notes, pinnedNoteIds, onFocus, onPreview }: NotesBubblePr
 
       {open && (
         <>
-          <div style={{ position: 'fixed', inset: 0, zIndex: 40 }} onClick={() => setOpen(false)} />
           <div
+            ref={popupRef}
             className="canvas-float-pill"
             style={{
               position: 'absolute', bottom: 42, left: 0, zIndex: 50,
@@ -347,7 +359,6 @@ function NotesBubble({ notes, pinnedNoteIds, onFocus, onPreview }: NotesBubblePr
                   onDragStart={(e) => {
                     e.dataTransfer.setData('noteId', note.id)
                     e.dataTransfer.effectAllowed = 'copy'
-                    setOpen(false)
                   }}
                   style={{ position: 'relative' }}
                 >
@@ -1037,7 +1048,7 @@ function NoteMapCanvasInner({ notes, canvas, user, title }: NoteMapCanvasProps) 
         />
 
         {/* ── Bottom-left — notes bubble ── */}
-        <div style={{ position: 'absolute', bottom: 64, left: 14, zIndex: 20 }}>
+        <div style={{ position: 'absolute', bottom: 16, left: 14, zIndex: 20 }}>
           <NotesBubble notes={notes} pinnedNoteIds={pinnedNoteIds} onFocus={focusNote} onPreview={openPreview} />
         </div>
 
@@ -1049,7 +1060,7 @@ function NoteMapCanvasInner({ notes, canvas, user, title }: NoteMapCanvasProps) 
         />
 
         {/* ── Bottom-right — theme + nav ── */}
-        <div style={{ position: 'absolute', bottom: showMiniMap ? 220 : 64, right: 14, zIndex: 20 }}>
+        <div style={{ position: 'absolute', bottom: showMiniMap ? 168 : 16, right: 14, zIndex: 20 }}>
           <div className="canvas-float-pill" style={{ display: 'flex', alignItems: 'center', gap: 2, padding: '4px 8px' }}>
             <ThemeToggleInline />
             <div style={{ width: 1, height: 16, background: 'var(--float-border)', margin: '0 4px' }} />

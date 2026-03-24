@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useRef, useCallback } from 'react'
-import { Send, Paperclip } from 'lucide-react'
+import { ArrowUp, Plus } from 'lucide-react'
 
 interface CaptureBarProps {
   noteId: string | null
@@ -14,13 +14,13 @@ export default function CaptureBar({ noteId, noteTitle, onMessageAdded }: Captur
   const [isSending, setIsSending] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
 
   const disabled = !noteId
   const busy = isSending || isUploading
+  const hasText = text.trim().length > 0
 
   const handleSubmit = useCallback(async () => {
-    if (!noteId || !text.trim() || busy) return
+    if (!noteId || !hasText || busy) return
     setIsSending(true)
     try {
       const res = await fetch(`/api/notes/${noteId}/messages`, {
@@ -37,7 +37,7 @@ export default function CaptureBar({ noteId, noteTitle, onMessageAdded }: Captur
     } finally {
       setIsSending(false)
     }
-  }, [noteId, text, busy, onMessageAdded])
+  }, [noteId, hasText, text, busy, onMessageAdded])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -79,27 +79,36 @@ export default function CaptureBar({ noteId, noteTitle, onMessageAdded }: Captur
 
   const containerStyle: React.CSSProperties = {
     position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
+    bottom: 72,
+    left: '50%',
+    transform: 'translateX(-50%)',
     zIndex: 25,
     display: 'flex',
     alignItems: 'center',
-    gap: 8,
-    padding: '0 16px',
-    height: 56,
+    width: 440,
+    maxWidth: 'calc(100% - 180px)',
+    height: 48,
     background: 'var(--float-bg)',
-    borderTop: '1px solid var(--float-border)',
+    border: '1px solid var(--float-border)',
+    borderRadius: 24,
     backdropFilter: 'blur(14px)',
     WebkitBackdropFilter: 'blur(14px)',
+    boxShadow: 'var(--float-shadow)',
+    overflow: 'hidden',
   }
 
-  const btnStyle: React.CSSProperties = {
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    width: 28, height: 28, borderRadius: 8,
-    background: 'none', border: 'none', cursor: disabled || busy ? 'not-allowed' : 'pointer',
+  const sideBtnStyle: React.CSSProperties = {
+    flexShrink: 0,
+    width: 44,
+    height: '100%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: 'none',
+    border: 'none',
+    cursor: disabled || busy ? 'not-allowed' : 'pointer',
     color: disabled ? 'var(--node-border)' : 'var(--node-meta)',
-    flexShrink: 0, transition: 'color 0.15s',
+    transition: 'color 0.15s',
     opacity: disabled ? 0.4 : 1,
   }
 
@@ -117,9 +126,9 @@ export default function CaptureBar({ noteId, noteTitle, onMessageAdded }: Captur
         }}
       />
 
-      {/* Image attach button */}
+      {/* + button (image upload) */}
       <button
-        style={btnStyle}
+        style={sideBtnStyle}
         onClick={() => fileInputRef.current?.click()}
         disabled={disabled || busy}
         title="Joindre une image"
@@ -127,20 +136,22 @@ export default function CaptureBar({ noteId, noteTitle, onMessageAdded }: Captur
         onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = disabled ? 'var(--node-border)' : 'var(--node-meta)' }}
       >
         {isUploading
-          ? <span style={{ fontSize: 10, color: 'var(--node-meta)' }}>...</span>
-          : <Paperclip size={14} />
+          ? <span style={{ fontSize: 11, color: 'var(--node-meta)' }}>…</span>
+          : <Plus size={16} />
         }
       </button>
 
       {/* Text input */}
       <input
-        ref={inputRef}
         type="text"
         value={text}
         onChange={e => setText(e.target.value)}
         onKeyDown={handleKeyDown}
         disabled={disabled || busy}
-        placeholder={disabled ? 'Sélectionne une note...' : `Écrire dans "${noteTitle ?? ''}"...`}
+        placeholder={disabled
+          ? 'Sélectionne une note pour écrire...'
+          : `Écrire dans « ${noteTitle ?? ''} »...`
+        }
         style={{
           flex: 1,
           background: 'transparent',
@@ -149,24 +160,31 @@ export default function CaptureBar({ noteId, noteTitle, onMessageAdded }: Captur
           fontSize: 13,
           color: disabled ? 'var(--node-meta)' : 'var(--node-title)',
           caretColor: 'var(--node-title)',
+          minWidth: 0,
         }}
       />
 
-      {/* Send button */}
+      {/* ↑ send button */}
       <button
         style={{
-          ...btnStyle,
-          background: text.trim() && !disabled ? 'rgba(59,130,246,0.15)' : 'none',
-          color: text.trim() && !disabled ? '#3b82f6' : 'var(--node-border)',
-          border: text.trim() && !disabled ? '1px solid rgba(59,130,246,0.3)' : '1px solid transparent',
+          ...sideBtnStyle,
+          background: hasText && !disabled ? '#3b82f6' : 'none',
+          color: hasText && !disabled ? '#fff' : 'var(--node-border)',
+          borderRadius: '50%',
+          width: 32,
+          height: 32,
+          marginRight: 8,
+          opacity: disabled ? 0.4 : 1,
         }}
         onClick={handleSubmit}
-        disabled={disabled || !text.trim() || busy}
+        disabled={disabled || !hasText || busy}
         title="Envoyer (Entrée)"
+        onMouseEnter={e => { if (hasText && !disabled) (e.currentTarget as HTMLElement).style.background = '#2563eb' }}
+        onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = hasText && !disabled ? '#3b82f6' : 'none' }}
       >
         {isSending
-          ? <span style={{ fontSize: 10 }}>...</span>
-          : <Send size={13} />
+          ? <span style={{ fontSize: 10 }}>…</span>
+          : <ArrowUp size={14} />
         }
       </button>
     </div>
