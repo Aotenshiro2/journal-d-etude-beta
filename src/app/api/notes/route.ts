@@ -179,6 +179,36 @@ export async function POST(req: NextRequest) {
         prisma.message.deleteMany({ where: { noteId: note.id } }),
         prisma.message.createMany({ data: validMessages }),
       ])
+
+      // Process message-level tags (MessageTag upsert)
+      const messagesWithTags = (messages as Array<{ tags?: string[]; content?: string }>)
+        .filter(m => m != null && Array.isArray(m.tags) && m.tags.length > 0)
+      if (messagesWithTags.length > 0) {
+        const createdMessages = await prisma.message.findMany({
+          where: { noteId: note.id },
+          orderBy: { order: 'asc' },
+          select: { id: true, order: true },
+        })
+        for (let i = 0; i < messages.length; i++) {
+          const msgPayload = messages[i] as { tags?: string[] }
+          if (!Array.isArray(msgPayload.tags) || msgPayload.tags.length === 0) continue
+          const dbMessage = createdMessages.find(m => m.order === i)
+          if (!dbMessage) continue
+          for (const tagName of msgPayload.tags) {
+            if (!tagName || typeof tagName !== 'string') continue
+            const tag = await prisma.tag.upsert({
+              where: { name_userId: { name: tagName, userId } },
+              create: { name: tagName, userId },
+              update: {},
+            })
+            await prisma.messageTag.upsert({
+              where: { messageId_tagId: { messageId: dbMessage.id, tagId: tag.id } },
+              create: { messageId: dbMessage.id, tagId: tag.id },
+              update: {},
+            })
+          }
+        }
+      }
     } else {
       // Manual (journal) → conserver la logique incrémentale existante
       const existingMessages = await prisma.message.findMany({
