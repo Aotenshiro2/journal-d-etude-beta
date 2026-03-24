@@ -84,10 +84,9 @@ export default function CaptureBar({ noteId, noteTitle, onMessageAdded }: Captur
     transform: 'translateX(-50%)',
     zIndex: 25,
     display: 'flex',
-    alignItems: 'center',
+    flexDirection: 'column',
     width: 440,
     maxWidth: 'calc(100% - 180px)',
-    minHeight: 104,
     background: 'var(--surface-match)',
     border: '1.5px solid var(--surface-match-border)',
     borderRadius: 24,
@@ -95,19 +94,17 @@ export default function CaptureBar({ noteId, noteTitle, onMessageAdded }: Captur
     overflow: 'hidden',
   }
 
-  const sideBtnStyle: React.CSSProperties = {
-    flexShrink: 0,
-    width: 44,
-    height: '100%',
+  const iconBtnStyle: React.CSSProperties = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     background: 'none',
     border: 'none',
     cursor: disabled || busy ? 'not-allowed' : 'pointer',
-    color: disabled ? 'var(--muted-foreground)' : 'var(--muted-foreground)',
+    color: 'var(--muted-foreground)',
     transition: 'color 0.15s',
     opacity: disabled ? 0.35 : 1,
+    padding: 0,
   }
 
   return (
@@ -124,67 +121,75 @@ export default function CaptureBar({ noteId, noteTitle, onMessageAdded }: Captur
         }}
       />
 
-      {/* + button (image upload) */}
-      <button
-        style={sideBtnStyle}
-        onClick={() => fileInputRef.current?.click()}
-        disabled={disabled || busy}
-        title="Joindre une image"
-        onMouseEnter={e => { if (!disabled) (e.currentTarget as HTMLElement).style.color = 'var(--surface-match-fg)' }}
-        onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = 'var(--muted-foreground)' }}
-      >
-        {isUploading
-          ? <span style={{ fontSize: 11, color: 'var(--node-meta)' }}>…</span>
-          : <Plus size={16} />
-        }
-      </button>
+      {/* Upper zone — text input */}
+      <div style={{ padding: '14px 16px 10px', flex: 1 }}>
+        <input
+          type="text"
+          value={text}
+          onChange={e => setText(e.target.value)}
+          onKeyDown={handleKeyDown}
+          disabled={disabled || busy}
+          placeholder={disabled
+            ? 'Sélectionne une note pour écrire...'
+            : `Écrire dans « ${noteTitle ?? ''} »...`
+          }
+          style={{
+            width: '100%',
+            background: 'transparent',
+            border: 'none',
+            outline: 'none',
+            fontSize: 13,
+            color: disabled ? 'var(--muted-foreground)' : 'var(--surface-match-fg)',
+            caretColor: 'var(--surface-match-fg)',
+          }}
+        />
+      </div>
 
-      {/* Text input */}
-      <input
-        type="text"
-        value={text}
-        onChange={e => setText(e.target.value)}
-        onKeyDown={handleKeyDown}
-        disabled={disabled || busy}
-        placeholder={disabled
-          ? 'Sélectionne une note pour écrire...'
-          : `Écrire dans « ${noteTitle ?? ''} »...`
-        }
-        style={{
-          flex: 1,
-          background: 'transparent',
-          border: 'none',
-          outline: 'none',
-          fontSize: 13,
-          color: disabled ? 'var(--muted-foreground)' : 'var(--surface-match-fg)',
-          caretColor: 'var(--surface-match-fg)',
-          minWidth: 0,
-        }}
-      />
+      {/* Lower zone — action buttons */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '6px 10px 10px',
+      }}>
+        {/* + button (image upload) */}
+        <button
+          style={{ ...iconBtnStyle, width: 32, height: 32 }}
+          onClick={() => fileInputRef.current?.click()}
+          disabled={disabled || busy}
+          title="Joindre une image"
+          onMouseEnter={e => { if (!disabled) (e.currentTarget as HTMLElement).style.color = 'var(--surface-match-fg)' }}
+          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = 'var(--muted-foreground)' }}
+        >
+          {isUploading
+            ? <span style={{ fontSize: 11 }}>…</span>
+            : <Plus size={16} />
+          }
+        </button>
 
-      {/* ↑ send button */}
-      <button
-        style={{
-          ...sideBtnStyle,
-          background: hasText && !disabled ? '#3b82f6' : 'none',
-          color: hasText && !disabled ? '#fff' : 'var(--node-border)',
-          borderRadius: '50%',
-          width: 32,
-          height: 32,
-          marginRight: 8,
-          opacity: disabled ? 0.4 : 1,
-        }}
-        onClick={handleSubmit}
-        disabled={disabled || !hasText || busy}
-        title="Envoyer (Entrée)"
-        onMouseEnter={e => { if (hasText && !disabled) (e.currentTarget as HTMLElement).style.background = '#2563eb' }}
-        onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = hasText && !disabled ? '#3b82f6' : 'none' }}
-      >
-        {isSending
-          ? <span style={{ fontSize: 10 }}>…</span>
-          : <ArrowUp size={14} />
-        }
-      </button>
+        {/* ↑ send button */}
+        <button
+          style={{
+            ...iconBtnStyle,
+            background: hasText && !disabled ? '#3b82f6' : 'rgba(0,0,0,0.08)',
+            color: hasText && !disabled ? '#fff' : 'var(--muted-foreground)',
+            borderRadius: '50%',
+            width: 32,
+            height: 32,
+            opacity: disabled ? 0.4 : 1,
+          }}
+          onClick={handleSubmit}
+          disabled={disabled || !hasText || busy}
+          title="Envoyer (Entrée)"
+          onMouseEnter={e => { if (hasText && !disabled) (e.currentTarget as HTMLElement).style.background = '#2563eb' }}
+          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = hasText && !disabled ? '#3b82f6' : 'rgba(0,0,0,0.08)' }}
+        >
+          {isSending
+            ? <span style={{ fontSize: 10 }}>…</span>
+            : <ArrowUp size={14} />
+          }
+        </button>
+      </div>
     </div>
   )
 }
