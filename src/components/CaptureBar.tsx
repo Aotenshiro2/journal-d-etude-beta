@@ -88,10 +88,10 @@ export default function CaptureBar({ noteId, noteTitle, onMessageAdded }: Captur
     width: 440,
     maxWidth: 'calc(100% - 180px)',
     minHeight: 104,
-    background: 'var(--card)',
-    border: '1.5px solid rgba(255,255,255,0.14)',
+    background: 'var(--surface-match)',
+    border: '1.5px solid var(--surface-match-border)',
     borderRadius: 24,
-    boxShadow: '0 4px 24px rgba(0,0,0,0.35), 0 1px 4px rgba(0,0,0,0.2)',
+    boxShadow: '0 4px 24px rgba(0,0,0,0.25), 0 1px 4px rgba(0,0,0,0.12)',
     overflow: 'hidden',
   }
 
@@ -130,7 +130,7 @@ export default function CaptureBar({ noteId, noteTitle, onMessageAdded }: Captur
         onClick={() => fileInputRef.current?.click()}
         disabled={disabled || busy}
         title="Joindre une image"
-        onMouseEnter={e => { if (!disabled) (e.currentTarget as HTMLElement).style.color = 'var(--card-foreground)' }}
+        onMouseEnter={e => { if (!disabled) (e.currentTarget as HTMLElement).style.color = 'var(--surface-match-fg)' }}
         onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = 'var(--muted-foreground)' }}
       >
         {isUploading
@@ -156,8 +156,8 @@ export default function CaptureBar({ noteId, noteTitle, onMessageAdded }: Captur
           border: 'none',
           outline: 'none',
           fontSize: 13,
-          color: disabled ? 'var(--muted-foreground)' : 'var(--card-foreground)',
-          caretColor: 'var(--card-foreground)',
+          color: disabled ? 'var(--muted-foreground)' : 'var(--surface-match-fg)',
+          caretColor: 'var(--surface-match-fg)',
           minWidth: 0,
         }}
       />
