@@ -79,7 +79,7 @@ export default function CaptureBar({ noteId, noteTitle, onMessageAdded }: Captur
 
   const containerStyle: React.CSSProperties = {
     position: 'absolute',
-    bottom: 72,
+    bottom: 20,
     left: '50%',
     transform: 'translateX(-50%)',
     zIndex: 25,
@@ -87,11 +87,11 @@ export default function CaptureBar({ noteId, noteTitle, onMessageAdded }: Captur
     alignItems: 'center',
     width: 440,
     maxWidth: 'calc(100% - 180px)',
-    minHeight: 52,
+    minHeight: 104,
     background: 'var(--card)',
-    border: '1px solid var(--border)',
+    border: '1.5px solid rgba(255,255,255,0.14)',
     borderRadius: 24,
-    boxShadow: 'var(--float-shadow)',
+    boxShadow: '0 4px 24px rgba(0,0,0,0.35), 0 1px 4px rgba(0,0,0,0.2)',
     overflow: 'hidden',
   }
 
