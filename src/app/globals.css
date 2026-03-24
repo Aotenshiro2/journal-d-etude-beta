@@ -59,8 +59,8 @@
   --node-border: rgba(0, 0, 0, 0.06);
   --node-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
   --node-title: #0f172a;
-  --node-preview: #64748b;
-  --node-meta: #94a3b8;
+  --node-preview: #475569;
+  --node-meta: #64748b;
   --node-handle: rgba(59, 130, 246, 0.7);
   --drawer-bg: rgba(32, 33, 36, 0.82);
   --drawer-border: rgba(0, 0, 0, 0.20);
@@ -146,22 +146,22 @@
   --canvas-dot: rgba(255, 255, 255, 0.1);
   --canvas-dot-lit: rgba(255, 255, 255, 0.55);
   --canvas-top-fade: rgba(32, 33, 36, 0.88);
-  --float-bg: rgba(27, 28, 30, 0.88);
-  --float-border: rgba(255, 255, 255, 0.08);
+  --float-bg: #1e1f23;
+  --float-border: rgba(255, 255, 255, 0.10);
   --surface-match: #1e1f23;
   --surface-match-border: rgba(255, 255, 255, 0.12);
   --surface-match-fg: #f1f5f9;
-  --float-shadow: 0 2px 12px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255,255,255,0.04);
-  --node-bg: rgba(27, 28, 30, 0.97);
-  --node-border: rgba(255, 255, 255, 0.08);
+  --float-shadow: 0 2px 12px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255,255,255,0.06);
+  --node-bg: #1e1f23;
+  --node-border: rgba(255, 255, 255, 0.10);
   --node-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
   --node-title: #f1f5f9;
-  --node-preview: #8fdcc7;
-  --node-meta: #475569;
+  --node-preview: #94a3b8;
+  --node-meta: #64748b;
   --node-handle: rgba(59, 130, 246, 0.8);
-  --drawer-bg: rgba(229, 231, 233, 0.82);
-  --drawer-border: rgba(255, 255, 255, 0.20);
-  --drawer-icon: rgba(32, 33, 36, 0.75);
+  --drawer-bg: #1e1f23;
+  --drawer-border: rgba(255, 255, 255, 0.12);
+  --drawer-icon: rgba(241, 245, 249, 0.75);
 
   /* Modal and Editor - Dark mode */
   --modal-overlay: rgba(0, 0, 0, 0.7);
