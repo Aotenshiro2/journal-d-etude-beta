@@ -87,12 +87,10 @@ export default function CaptureBar({ noteId, noteTitle, onMessageAdded }: Captur
     alignItems: 'center',
     width: 440,
     maxWidth: 'calc(100% - 180px)',
-    height: 48,
-    background: 'var(--float-bg)',
-    border: '1px solid var(--float-border)',
+    minHeight: 52,
+    background: 'var(--card)',
+    border: '1px solid var(--border)',
     borderRadius: 24,
-    backdropFilter: 'blur(14px)',
-    WebkitBackdropFilter: 'blur(14px)',
     boxShadow: 'var(--float-shadow)',
     overflow: 'hidden',
   }
@@ -107,9 +105,9 @@ export default function CaptureBar({ noteId, noteTitle, onMessageAdded }: Captur
     background: 'none',
     border: 'none',
     cursor: disabled || busy ? 'not-allowed' : 'pointer',
-    color: disabled ? 'var(--node-border)' : 'var(--node-meta)',
+    color: disabled ? 'var(--muted-foreground)' : 'var(--muted-foreground)',
     transition: 'color 0.15s',
-    opacity: disabled ? 0.4 : 1,
+    opacity: disabled ? 0.35 : 1,
   }
 
   return (
@@ -132,8 +130,8 @@ export default function CaptureBar({ noteId, noteTitle, onMessageAdded }: Captur
         onClick={() => fileInputRef.current?.click()}
         disabled={disabled || busy}
         title="Joindre une image"
-        onMouseEnter={e => { if (!disabled) (e.currentTarget as HTMLElement).style.color = 'var(--node-title)' }}
-        onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = disabled ? 'var(--node-border)' : 'var(--node-meta)' }}
+        onMouseEnter={e => { if (!disabled) (e.currentTarget as HTMLElement).style.color = 'var(--card-foreground)' }}
+        onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = 'var(--muted-foreground)' }}
       >
         {isUploading
           ? <span style={{ fontSize: 11, color: 'var(--node-meta)' }}>…</span>
@@ -158,8 +156,8 @@ export default function CaptureBar({ noteId, noteTitle, onMessageAdded }: Captur
           border: 'none',
           outline: 'none',
           fontSize: 13,
-          color: disabled ? 'var(--node-meta)' : 'var(--node-title)',
-          caretColor: 'var(--node-title)',
+          color: disabled ? 'var(--muted-foreground)' : 'var(--card-foreground)',
+          caretColor: 'var(--card-foreground)',
           minWidth: 0,
         }}
       />

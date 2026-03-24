@@ -291,18 +291,6 @@ interface NotesBubbleProps {
 function NotesBubble({ notes, pinnedNoteIds, onFocus, onPreview }: NotesBubbleProps) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
-  const popupRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    const handleOutside = (e: MouseEvent) => {
-      if (popupRef.current && e.target instanceof Element && !popupRef.current.contains(e.target)) {
-        setOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handleOutside)
-    return () => document.removeEventListener('mousedown', handleOutside)
-  }, [open])
 
   const filtered = useMemo(
     () => notes.filter(n => n.title.toLowerCase().includes(search.toLowerCase())),
@@ -328,7 +316,6 @@ function NotesBubble({ notes, pinnedNoteIds, onFocus, onPreview }: NotesBubblePr
       {open && (
         <>
           <div
-            ref={popupRef}
             className="canvas-float-pill"
             style={{
               position: 'absolute', bottom: 42, left: 0, zIndex: 50,
