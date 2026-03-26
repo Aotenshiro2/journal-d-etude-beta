@@ -1,13 +1,14 @@
 'use client'
 
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { Suspense, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 
 type AuthMode = 'signin' | 'signup'
 
-export default function AuthPage() {
+function AuthPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [mode, setMode] = useState<AuthMode>('signin')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -15,7 +16,11 @@ export default function AuthPage() {
   const [newsletter, setNewsletter] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(
+    searchParams.get('error') === 'auth_callback_failed'
+      ? 'Connexion Google échouée. Réessaie.'
+      : null
+  )
   const [success, setSuccess] = useState<string | null>(null)
 
   const handleGoogleLogin = async () => {
@@ -234,5 +239,13 @@ export default function AuthPage() {
         </p>
       </div>
     </div>
+  )
+}
+
+export default function AuthPageWrapper() {
+  return (
+    <Suspense>
+      <AuthPage />
+    </Suspense>
   )
 }
