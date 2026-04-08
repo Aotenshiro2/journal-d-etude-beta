@@ -286,11 +286,16 @@ interface NotesBubbleProps {
   pinnedNoteIds: Set<string>
   onFocus: (noteId: string) => void
   onPreview: (noteId: string) => void
+  dropCounter: number
 }
 
-function NotesBubble({ notes, pinnedNoteIds, onFocus, onPreview }: NotesBubbleProps) {
+function NotesBubble({ notes, pinnedNoteIds, onFocus, onPreview, dropCounter }: NotesBubbleProps) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
+
+  useEffect(() => {
+    if (dropCounter > 0) setOpen(false)
+  }, [dropCounter])
 
   const filtered = useMemo(
     () => notes.filter(n => n.title.toLowerCase().includes(search.toLowerCase())),
@@ -745,6 +750,9 @@ function NoteMapCanvasInner({ notes, canvas, user, title }: NoteMapCanvasProps) 
   const [spacePressed, setSpacePressed] = useState(false)
   const [showMiniMap, setShowMiniMap] = useState(false)
   const [showGrid, setShowGrid] = useState(true)
+  const [isDragOver, setIsDragOver] = useState(false)
+  const [dropCounter, setDropCounter] = useState(0)
+  const dragEnterCounterRef = useRef(0)
   const { setCenter, screenToFlowPosition } = useReactFlow()
   const { x: vpX, y: vpY, zoom } = useViewport()
 
@@ -913,11 +921,15 @@ function NoteMapCanvasInner({ notes, canvas, user, title }: NoteMapCanvasProps) 
 
   const onDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault()
+    dragEnterCounterRef.current = 0
+    setIsDragOver(false)
+
     const noteId = e.dataTransfer.getData('noteId')
     if (!noteId) return
     if (nodes.some(n => n.id === noteId)) return
 
-    const position = screenToFlowPosition({ x: e.clientX, y: e.clientY })
+    // Center the node on the drop cursor position
+    const position = screenToFlowPosition({ x: e.clientX - 130, y: e.clientY - 76 })
     const note = notes.find(n => n.id === noteId)
     if (!note) return
 
@@ -935,6 +947,7 @@ function NoteMapCanvasInner({ notes, canvas, user, title }: NoteMapCanvasProps) 
       style: { width: 260, height: 152 },
       data: { note, isExpanded: false, dbNodeId: dbNode.id, canvasId: canvas.id },
     }])
+    setDropCounter(c => c + 1)
   }, [nodes, notes, canvas.id, screenToFlowPosition, setNodes])
 
   // Tool → ReactFlow props mapping
@@ -958,11 +971,23 @@ function NoteMapCanvasInner({ notes, canvas, user, title }: NoteMapCanvasProps) 
         style={{ cursor: spacePressed ? 'grab' : activeTool === 'pan' ? 'grab' : 'default' }}
         onDrop={onDrop}
         onDragOver={(e) => e.preventDefault()}
+        onDragEnter={() => { dragEnterCounterRef.current++; setIsDragOver(true) }}
+        onDragLeave={() => { dragEnterCounterRef.current--; if (dragEnterCounterRef.current === 0) setIsDragOver(false) }}
       >
 
         {/* Dot grid */}
         {showGrid && <div className="canvas-grid" style={dotBgStyle} />}
         {showGrid && <div ref={spotlightRef} className="canvas-dot-spotlight" style={dotBgStyle} />}
+
+        {/* Drop zone overlay */}
+        {isDragOver && (
+          <div style={{
+            position: 'absolute', inset: 0, zIndex: 100, pointerEvents: 'none',
+            border: '2px dashed var(--node-handle)',
+            borderRadius: 12,
+            boxShadow: 'inset 0 0 40px rgba(59,130,246,0.06)',
+          }} />
+        )}
 
         {/* Top gradient */}
         <div className="canvas-top-gradient" />
@@ -1036,7 +1061,7 @@ function NoteMapCanvasInner({ notes, canvas, user, title }: NoteMapCanvasProps) 
 
         {/* ── Bottom-left — notes bubble ── */}
         <div style={{ position: 'absolute', bottom: 16, left: 14, zIndex: 20 }}>
-          <NotesBubble notes={notes} pinnedNoteIds={pinnedNoteIds} onFocus={focusNote} onPreview={openPreview} />
+          <NotesBubble notes={notes} pinnedNoteIds={pinnedNoteIds} onFocus={focusNote} onPreview={openPreview} dropCounter={dropCounter} />
         </div>
 
         {/* ── Capture bar ── */}
