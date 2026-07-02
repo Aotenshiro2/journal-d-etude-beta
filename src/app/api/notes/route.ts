@@ -37,6 +37,7 @@ export async function GET(req: NextRequest) {
       userId: true,
       concepts: true,
       trades: true,
+      folderId: true,
       tags: { select: { tag: { select: { name: true } } } },
     },
   })
@@ -75,7 +76,16 @@ export async function POST(req: NextRequest) {
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await req.json()
-  const { title, content, sourceUrl, favicon, source, lastSyncAt, messages, createdAt, extensionVersion, extensionNoteId, tags, concepts, trades } = body
+  const { title, content, sourceUrl, favicon, source, lastSyncAt, messages, createdAt, extensionVersion, extensionNoteId, tags, concepts, trades, folderId, folderName } = body
+
+  // Dossier extension : upsert du nom pour que le pull puisse tout restaurer
+  if (typeof folderId === 'string' && folderId && typeof folderName === 'string' && folderName.trim()) {
+    await prisma.folder.upsert({
+      where: { id: folderId },
+      create: { id: folderId, userId, name: folderName.trim() },
+      update: { name: folderName.trim() },
+    })
+  }
 
   const cleanConcepts: string[] | null = Array.isArray(concepts)
     ? concepts.filter((c: unknown): c is string => typeof c === 'string' && c.trim().length > 0)
@@ -124,6 +134,7 @@ export async function POST(req: NextRequest) {
         ...(extensionNoteId && !existing.extensionNoteId ? { extensionNoteId } : {}),
         ...(cleanConcepts !== null ? { concepts: cleanConcepts } : {}),
         ...(cleanTrades !== null ? { trades: cleanTrades } : {}),
+        ...(folderId !== undefined ? { folderId: folderId ?? null } : {}),
         lastModifiedAt: new Date(),
       },
     })
@@ -143,6 +154,7 @@ export async function POST(req: NextRequest) {
         extensionNoteId: extensionNoteId ?? null,
         concepts: cleanConcepts ?? [],
         ...(cleanTrades !== null ? { trades: cleanTrades } : {}),
+        folderId: folderId ?? null,
       },
     })
   } else {

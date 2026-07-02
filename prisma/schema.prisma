@@ -26,6 +26,7 @@ model Note {
   lastModifiedAt   DateTime   @updatedAt       // dernière modification dans le journal
   concepts    String[]  @default([])  // concepts extraits par la smart capture (pas la taxonomie user)
   trades      Json?     // segments de trade [{id, startedAt, closedAt?, outcome?}] — source de vérité extension
+  folderId    String?   // dossier extension (couplage lâche, cf. model Folder)
   messages    Message[]
   canvas      Canvas?
   tags        NoteTag[]
@@ -118,6 +119,16 @@ model MessageTag {
   tag       Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
 
   @@id([messageId, tagId])
+}
+
+// Dossiers de l'extension (id = uuid extension) — la sync les upserte, le pull les restaure
+model Folder {
+  id        String   @id
+  userId    String
+  name      String
+  createdAt DateTime @default(now())
+
+  @@index([userId])
 }
 
 // Tag au niveau note (grouper les cours par thème) — même taxonomie Tag que les messages
