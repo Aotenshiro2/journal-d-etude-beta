@@ -36,6 +36,7 @@ export async function GET(req: NextRequest) {
       lastModifiedAt: true,
       userId: true,
       concepts: true,
+      trades: true,
       tags: { select: { tag: { select: { name: true } } } },
     },
   })
@@ -74,11 +75,13 @@ export async function POST(req: NextRequest) {
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await req.json()
-  const { title, content, sourceUrl, favicon, source, lastSyncAt, messages, createdAt, extensionVersion, extensionNoteId, tags, concepts } = body
+  const { title, content, sourceUrl, favicon, source, lastSyncAt, messages, createdAt, extensionVersion, extensionNoteId, tags, concepts, trades } = body
 
   const cleanConcepts: string[] | null = Array.isArray(concepts)
     ? concepts.filter((c: unknown): c is string => typeof c === 'string' && c.trim().length > 0)
     : null
+
+  const cleanTrades = Array.isArray(trades) ? trades.filter((t: unknown) => t != null && typeof t === 'object') : null
 
   const contentHash = content ? crypto.createHash('sha256').update(content).digest('hex') : null
 
@@ -120,6 +123,7 @@ export async function POST(req: NextRequest) {
         // Backfill extensionNoteId if it was missing (legacy notes synced before this change)
         ...(extensionNoteId && !existing.extensionNoteId ? { extensionNoteId } : {}),
         ...(cleanConcepts !== null ? { concepts: cleanConcepts } : {}),
+        ...(cleanTrades !== null ? { trades: cleanTrades } : {}),
         lastModifiedAt: new Date(),
       },
     })
@@ -138,6 +142,7 @@ export async function POST(req: NextRequest) {
         extensionVersion: extensionVersion ?? null,
         extensionNoteId: extensionNoteId ?? null,
         concepts: cleanConcepts ?? [],
+        ...(cleanTrades !== null ? { trades: cleanTrades } : {}),
       },
     })
   } else {
@@ -177,13 +182,14 @@ export async function POST(req: NextRequest) {
       // Filtrer les éléments null/undefined qui causent des erreurs de validation Prisma
       const validMessages = (messages as unknown[])
         .filter((msg) => msg != null)
-        .map((msg: { content?: string; type?: string; id?: string }, i: number) => ({
+        .map((msg: { content?: string; type?: string; id?: string; tradeRef?: string }, i: number) => ({
           noteId: note.id,
           content: typeof msg === 'string' ? msg : (msg.content ?? ''),
           order: i,
           type: (msg as { type?: string }).type ?? detectType(typeof msg === 'string' ? msg : (msg.content ?? '')),
           // ID stable côté extension — les annotations de messages s'y réfèrent (messageRef)
           extensionMessageId: typeof msg === 'string' ? null : (msg.id ?? null),
+          tradeRef: typeof msg === 'string' ? null : (msg.tradeRef ?? null),
         }))
       // Transaction batch (compatible PgBouncer transaction mode)
       // Si createMany échoue → deleteMany est rollbacké, messages existants préservés

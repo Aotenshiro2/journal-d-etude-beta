@@ -25,6 +25,7 @@ model Note {
   firstSyncAt      DateTime   @default(now())  // première entrée en DB
   lastModifiedAt   DateTime   @updatedAt       // dernière modification dans le journal
   concepts    String[]  @default([])  // concepts extraits par la smart capture (pas la taxonomie user)
+  trades      Json?     // segments de trade [{id, startedAt, closedAt?, outcome?}] — source de vérité extension
   messages    Message[]
   canvas      Canvas?
   tags        NoteTag[]
@@ -44,6 +45,7 @@ model Message {
   order   Int
   type    String       @default("text")
   extensionMessageId String? // ID stable du message côté extension (survit au replace-all de la sync)
+  tradeRef String?            // segment de trade auquel le bloc appartient (réassignable)
   note    Note         @relation(fields: [noteId], references: [id], onDelete: Cascade)
   tags    MessageTag[]
 
@@ -137,6 +139,7 @@ model Annotation {
   userId        String
   noteId        String?
   messageRef    String?   // extensionMessageId (note extension) ou Message.id (note journal)
+  tradeRef      String?   // TradeSegment.id — jugement d'un trade (vision + cause du SL)
   grade         String    // 'A' | 'B' | 'C'
   phrase        String    // « pourquoi ce trade/cette note mérite cette note »
   causeCategory String?   // 'technique' | 'connaissance' | 'emotionnel'

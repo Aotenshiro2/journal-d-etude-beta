@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
     if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const body = await req.json()
-    const { id, noteId, messageRef, grade, phrase, causeCategory, reviewDueAt, reviewedAt } = body
+    const { id, noteId, messageRef, tradeRef, grade, phrase, causeCategory, reviewDueAt, reviewedAt } = body
 
     if (!GRADES.has(grade)) {
       return NextResponse.json({ error: 'grade doit être A, B ou C' }, { status: 400 })
@@ -72,6 +72,7 @@ export async function POST(req: NextRequest) {
     const data = {
       noteId: resolvedNoteId,
       messageRef: typeof messageRef === 'string' ? messageRef : null,
+      tradeRef: typeof tradeRef === 'string' ? tradeRef : null,
       grade,
       phrase: phrase.trim(),
       causeCategory: causeCategory ?? null,
