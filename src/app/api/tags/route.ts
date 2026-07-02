@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { createClient } from '@/lib/supabase/server'
+import { getUserId } from '@/lib/api-auth'
 
 export async function GET(req: NextRequest) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  // getUserId gère cookies (journal) ET Bearer token (extension → TagPickerPopup)
+  const userId = await getUserId(req)
+  if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const tags = await prisma.tag.findMany({
-    where: { userId: user.id },
-    orderBy: { name: 'asc' },
+    where: { userId },
+    orderBy: [{ category: 'asc' }, { name: 'asc' }],
   })
 
   return NextResponse.json(tags)

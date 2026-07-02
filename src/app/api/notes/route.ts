@@ -1,24 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { createClient } from '@/lib/supabase/server'
-import { createClient as createBrowserClient } from '@supabase/supabase-js'
+import { getUserId } from '@/lib/api-auth'
 import crypto from 'crypto'
-
-async function getUserId(req: NextRequest): Promise<string | null> {
-  const authHeader = req.headers.get('authorization')
-  if (authHeader?.startsWith('Bearer ')) {
-    const token = authHeader.slice(7)
-    const supabase = createBrowserClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-    )
-    const { data: { user } } = await supabase.auth.getUser(token)
-    return user?.id ?? null
-  }
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  return user?.id ?? null
-}
 
 export async function GET(req: NextRequest) {
   const userId = await getUserId(req)
@@ -52,10 +35,15 @@ export async function GET(req: NextRequest) {
       firstSyncAt: true,
       lastModifiedAt: true,
       userId: true,
+      concepts: true,
+      tags: { select: { tag: { select: { name: true } } } },
     },
   })
 
-  return NextResponse.json(notes)
+  // Aplatir les tags de note en simple liste de noms (consommé par le pull extension)
+  return NextResponse.json(
+    notes.map(n => ({ ...n, tags: n.tags.map(t => t.tag.name) }))
+  )
 }
 
 function detectType(content: string): string {
@@ -86,7 +74,11 @@ export async function POST(req: NextRequest) {
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await req.json()
-  const { title, content, sourceUrl, favicon, source, lastSyncAt, messages, createdAt, extensionVersion, extensionNoteId } = body
+  const { title, content, sourceUrl, favicon, source, lastSyncAt, messages, createdAt, extensionVersion, extensionNoteId, tags, concepts } = body
+
+  const cleanConcepts: string[] | null = Array.isArray(concepts)
+    ? concepts.filter((c: unknown): c is string => typeof c === 'string' && c.trim().length > 0)
+    : null
 
   const contentHash = content ? crypto.createHash('sha256').update(content).digest('hex') : null
 
@@ -127,6 +119,7 @@ export async function POST(req: NextRequest) {
         createdAt: createdAt ? new Date(createdAt) : existing.createdAt,
         // Backfill extensionNoteId if it was missing (legacy notes synced before this change)
         ...(extensionNoteId && !existing.extensionNoteId ? { extensionNoteId } : {}),
+        ...(cleanConcepts !== null ? { concepts: cleanConcepts } : {}),
         lastModifiedAt: new Date(),
       },
     })
@@ -144,6 +137,7 @@ export async function POST(req: NextRequest) {
         createdAt: createdAt ? new Date(createdAt) : null,
         extensionVersion: extensionVersion ?? null,
         extensionNoteId: extensionNoteId ?? null,
+        concepts: cleanConcepts ?? [],
       },
     })
   } else {
@@ -160,6 +154,22 @@ export async function POST(req: NextRequest) {
     })
   }
 
+  // Tags au niveau note (NoteTag) — même taxonomie Tag que les messages.
+  // Sync extension = source de vérité : on remplace l'état complet (un tag retiré
+  // dans l'extension disparaît aussi du journal).
+  if (source === 'extension' && Array.isArray(tags)) {
+    const cleanTags = tags.filter((t: unknown): t is string => typeof t === 'string' && t.trim().length > 0)
+    await prisma.noteTag.deleteMany({ where: { noteId: note.id } })
+    for (const tagName of cleanTags) {
+      const tag = await prisma.tag.upsert({
+        where: { name_userId: { name: tagName, userId } },
+        create: { name: tagName, userId },
+        update: {},
+      })
+      await prisma.noteTag.create({ data: { noteId: note.id, tagId: tag.id } })
+    }
+  }
+
   // Handle messages
   if (Array.isArray(messages) && messages.length > 0) {
     if (source === 'extension') {
@@ -167,11 +177,13 @@ export async function POST(req: NextRequest) {
       // Filtrer les éléments null/undefined qui causent des erreurs de validation Prisma
       const validMessages = (messages as unknown[])
         .filter((msg) => msg != null)
-        .map((msg: { content?: string; type?: string }, i: number) => ({
+        .map((msg: { content?: string; type?: string; id?: string }, i: number) => ({
           noteId: note.id,
           content: typeof msg === 'string' ? msg : (msg.content ?? ''),
           order: i,
           type: (msg as { type?: string }).type ?? detectType(typeof msg === 'string' ? msg : (msg.content ?? '')),
+          // ID stable côté extension — les annotations de messages s'y réfèrent (messageRef)
+          extensionMessageId: typeof msg === 'string' ? null : (msg.id ?? null),
         }))
       // Transaction batch (compatible PgBouncer transaction mode)
       // Si createMany échoue → deleteMany est rollbacké, messages existants préservés

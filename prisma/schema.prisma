@@ -24,8 +24,11 @@ model Note {
   extensionNoteId  String?    // ID de la note dans l'extension (clé d'upsert prioritaire)
   firstSyncAt      DateTime   @default(now())  // première entrée en DB
   lastModifiedAt   DateTime   @updatedAt       // dernière modification dans le journal
+  concepts    String[]  @default([])  // concepts extraits par la smart capture (pas la taxonomie user)
   messages    Message[]
   canvas      Canvas?
+  tags        NoteTag[]
+  annotations Annotation[]
 
   // Note: @@unique([userId, sourceUrl]) replaced by a partial DB index (see SQL migration):
   // CREATE UNIQUE INDEX "Note_userId_sourceUrl_legacy_idx" ON "Note" ("userId","sourceUrl") WHERE "extensionNoteId" IS NULL
@@ -40,6 +43,7 @@ model Message {
   content String
   order   Int
   type    String       @default("text")
+  extensionMessageId String? // ID stable du message côté extension (survit au replace-all de la sync)
   note    Note         @relation(fields: [noteId], references: [id], onDelete: Cascade)
   tags    MessageTag[]
 
@@ -99,6 +103,7 @@ model Tag {
   userId    String
   createdAt DateTime     @default(now())
   messages  MessageTag[]
+  notes     NoteTag[]
 
   @@unique([name, userId])
   @@index([userId])
@@ -111,4 +116,35 @@ model MessageTag {
   tag       Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
 
   @@id([messageId, tagId])
+}
+
+// Tag au niveau note (grouper les cours par thème) — même taxonomie Tag que les messages
+model NoteTag {
+  noteId String
+  tagId  String
+  note   Note @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  tag    Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([noteId, tagId])
+}
+
+// La « notation » (masterclass edge) : un jugement posé en 2e temps, découplé du résultat.
+// grade A/B/C + une phrase de justification + catégorie de cause, puis cycle de relecture.
+// Ciblage message : via extensionMessageId (String libre, PAS de FK) — les messages sont
+// détruits/recréés à chaque sync extension, une FK serait cascadée à tort.
+model Annotation {
+  id            String    @id @default(uuid())
+  userId        String
+  noteId        String?
+  messageRef    String?   // extensionMessageId (note extension) ou Message.id (note journal)
+  grade         String    // 'A' | 'B' | 'C'
+  phrase        String    // « pourquoi ce trade/cette note mérite cette note »
+  causeCategory String?   // 'technique' | 'connaissance' | 'emotionnel'
+  createdAt     DateTime  @default(now())
+  reviewDueAt   DateTime? // échéance de relecture (~2 semaines)
+  reviewedAt    DateTime? // relue le (null = pas encore relue)
+  note          Note?     @relation(fields: [noteId], references: [id], onDelete: Cascade)
+
+  @@index([userId, reviewDueAt])
+  @@index([noteId])
 }
