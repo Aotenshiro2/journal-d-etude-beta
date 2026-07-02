@@ -34,8 +34,9 @@ export async function GET(req: NextRequest) {
 
 /**
  * POST /api/annotations
- * Body : { noteId?, messageRef?, grade: 'A'|'B'|'C', phrase, causeCategory? }
+ * Body : { id?, noteId?, messageRef?, grade: 'A'|'B'|'C', phrase, causeCategory?, reviewDueAt?, reviewedAt? }
  * noteId accepte aussi un extensionNoteId (résolu côté serveur).
+ * `id` client (uuid extension) → upsert idempotent : la re-sync ne duplique pas.
  * reviewDueAt est posé automatiquement à +14 jours si absent.
  */
 export async function POST(req: NextRequest) {
@@ -44,7 +45,7 @@ export async function POST(req: NextRequest) {
     if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const body = await req.json()
-    const { noteId, messageRef, grade, phrase, causeCategory, reviewDueAt } = body
+    const { id, noteId, messageRef, grade, phrase, causeCategory, reviewDueAt, reviewedAt } = body
 
     if (!GRADES.has(grade)) {
       return NextResponse.json({ error: 'grade doit être A, B ou C' }, { status: 400 })
@@ -68,14 +69,38 @@ export async function POST(req: NextRequest) {
       resolvedNoteId = note.id
     }
 
+    const data = {
+      noteId: resolvedNoteId,
+      messageRef: typeof messageRef === 'string' ? messageRef : null,
+      grade,
+      phrase: phrase.trim(),
+      causeCategory: causeCategory ?? null,
+      ...(reviewedAt ? { reviewedAt: new Date(reviewedAt) } : {}),
+    }
+
+    // Upsert idempotent quand l'extension fournit son propre id
+    if (typeof id === 'string' && id) {
+      const owned = await prisma.annotation.findUnique({ where: { id } })
+      if (owned && owned.userId !== userId) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
+      const annotation = owned
+        ? await prisma.annotation.update({ where: { id }, data })
+        : await prisma.annotation.create({
+            data: {
+              id,
+              userId,
+              ...data,
+              reviewDueAt: reviewDueAt ? new Date(reviewDueAt) : new Date(Date.now() + REVIEW_DELAY_MS),
+            },
+          })
+      return NextResponse.json(annotation, { status: owned ? 200 : 201 })
+    }
+
     const annotation = await prisma.annotation.create({
       data: {
         userId,
-        noteId: resolvedNoteId,
-        messageRef: typeof messageRef === 'string' ? messageRef : null,
-        grade,
-        phrase: phrase.trim(),
-        causeCategory: causeCategory ?? null,
+        ...data,
         reviewDueAt: reviewDueAt ? new Date(reviewDueAt) : new Date(Date.now() + REVIEW_DELAY_MS),
       },
     })
