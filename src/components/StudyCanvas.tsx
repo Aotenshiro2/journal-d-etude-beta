@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ReactFlow,
+  ReactFlowInstance,
   Node,
   Edge,
   Connection,
@@ -457,19 +458,31 @@ export default function StudyCanvas({
     [onDeleteEdge, setEdges]
   )
 
+  // Instance React Flow — indispensable pour convertir écran → coordonnées canvas
+  // (avec fitView/zoom/pan, les offsets bruts déposaient le bloc hors champ)
+  const [rfInstance, setRfInstance] = useState<ReactFlowInstance | null>(null)
+
   const onDrop = useCallback(
     (event: React.DragEvent) => {
       event.preventDefault()
       const messageId = event.dataTransfer.getData('messageId')
       if (!messageId) return
 
-      const reactFlowBounds = (event.currentTarget as HTMLElement).getBoundingClientRect()
-      const x = event.clientX - reactFlowBounds.left - 140
-      const y = event.clientY - reactFlowBounds.top - 60
+      let x: number
+      let y: number
+      if (rfInstance) {
+        const pos = rfInstance.screenToFlowPosition({ x: event.clientX, y: event.clientY })
+        x = pos.x - 140
+        y = pos.y - 60
+      } else {
+        const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect()
+        x = event.clientX - bounds.left - 140
+        y = event.clientY - bounds.top - 60
+      }
 
       onDropMessage(messageId, x, y)
     },
-    [onDropMessage]
+    [onDropMessage, rfInstance]
   )
 
   const onDragOver = useCallback((event: React.DragEvent) => {
@@ -487,6 +500,7 @@ export default function StudyCanvas({
         onConnect={onConnect}
         onNodeDragStop={onNodeDragStop}
         onEdgeDoubleClick={onEdgeDoubleClick}
+        onInit={setRfInstance}
         nodeTypes={nodeTypes}
         deleteKeyCode={null}
         fitView
