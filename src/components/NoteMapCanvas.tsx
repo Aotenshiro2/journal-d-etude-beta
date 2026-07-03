@@ -159,7 +159,9 @@ const NoteMapNode = React.memo(function NoteMapNode({ id, data }: NodeProps) {
 
           {/* Body — compact or expanded */}
           {isExpanded ? (
-            <div style={{ flex: 1, overflowY: 'auto', padding: '0 14px 14px' }}>
+            /* nowheel : la molette scrolle le contenu au lieu de zoomer le canvas
+               (le zoom canvas faisait « disparaître » la carte) */
+            <div className="nowheel" style={{ flex: 1, overflowY: 'auto', padding: '0 14px 14px' }}>
               <NoteContentRenderer note={note} className="note-content-preview" />
             </div>
           ) : (
@@ -866,7 +868,7 @@ function NoteMapCanvasInner({ notes, canvas, user, title }: NoteMapCanvasProps) 
       const wasExpanded = !!(n.data as { isExpanded?: boolean }).isExpanded
       return {
         ...n,
-        style: wasExpanded ? { width: 260, height: 152 } : { width: 300, height: 500 },
+        style: wasExpanded ? { width: 260, height: 152 } : { width: 400, height: 580 },
         data: { ...n.data, isExpanded: !wasExpanded },
       }
     }))

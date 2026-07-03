@@ -11,6 +11,7 @@ import {
   useNodesState,
   useEdgesState,
   NodeProps,
+  NodeResizer,
   Handle,
   Position,
   Panel,
@@ -52,39 +53,79 @@ interface GroupHandlers {
   recolor: (id: string, color: string) => void
   promote: (label: string) => Promise<boolean>
   dissolve: (id: string) => void
+  resize: (id: string, p: { width: number; height: number; x: number; y: number }) => void
 }
 
-function MessageNode({ data }: NodeProps) {
-  const d = data as { content: string; type: string; onRemove: () => void }
-  const text = truncateText(stripHtml(d.content), 150)
+const IMAGE_TYPES = new Set(['image', 'screenshot', 'capture'])
+
+// Un bloc peut être : une image typée (URL nue ou <img>), du texte, OU du texte
+// contenant une <img> inline (réalité des données synquées — base64 inclus).
+export function parseBlockContent(content: string, type: string): { imgSrc: string | null; text: string } {
+  let imgSrc: string | null = null
+  const imgMatch = content.match(/<img[^>]*src=["']([^"']+)["']/i)
+  if (imgMatch) {
+    imgSrc = imgMatch[1]
+  } else if (IMAGE_TYPES.has(type) && /^(https?:\/\/|data:image)/.test(content.trim())) {
+    imgSrc = content.trim()
+  } else if (IMAGE_TYPES.has(type)) {
+    imgSrc = extractImageSrc(content)
+  }
+  const text = stripHtml(content.replace(/<img[^>]*>/gi, '')).trim()
+  return { imgSrc, text }
+}
+
+function MessageNode({ data, selected }: NodeProps) {
+  const d = data as { content: string; type: string; onRemove: () => void; onResizeEnd: (p: { width: number; height: number; x: number; y: number }) => void }
+  const { imgSrc, text } = useMemo(() => parseBlockContent(d.content, d.type), [d.content, d.type])
+  const isImageOnly = !!imgSrc && !text
 
   return (
     <div
-      className="relative rounded-xl p-3 w-full h-full text-xs group"
-      style={{ background: 'var(--node-bg)', border: '1px solid var(--node-border)', boxShadow: 'var(--node-shadow)', color: 'var(--node-preview)' }}
+      className="relative rounded-xl w-full h-full text-xs group"
+      style={isImageOnly
+        ? { border: '1px solid var(--node-border)', overflow: 'hidden', background: 'transparent' }
+        : { background: 'var(--node-bg)', border: '1px solid var(--node-border)', boxShadow: 'var(--node-shadow)', color: 'var(--node-preview)', padding: imgSrc ? 8 : 12, display: 'flex', flexDirection: 'column', gap: 6, overflow: 'hidden' }
+      }
     >
+      <NodeResizer
+        isVisible={selected}
+        minWidth={140}
+        minHeight={70}
+        lineStyle={{ borderColor: 'rgba(59,130,246,0.6)' }}
+        handleStyle={{ background: '#3b82f6', border: 'none', width: 8, height: 8, borderRadius: 2 }}
+        onResizeEnd={(_, p) => d.onResizeEnd({ width: p.width, height: p.height, x: p.x, y: p.y })}
+      />
       <Handle type="target" position={Position.Top} className="!bg-blue-500" />
       <Handle type="source" position={Position.Bottom} className="!bg-blue-500" />
-      {d.type === 'image' ? (
-        (() => {
-          const src = extractImageSrc(d.content)
-          return src ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={src} alt="" className="w-full h-full object-cover rounded-lg" />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center text-sm" style={{ color: 'var(--node-meta)' }}>
-              Image non disponible
-            </div>
-          )
-        })()
-      ) : (
-        <p className="leading-relaxed overflow-hidden" style={{ display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical' }}>
-          {text}
+      {imgSrc ? (
+        <>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={imgSrc}
+            alt=""
+            className={isImageOnly ? 'w-full h-full object-contain' : 'w-full object-contain rounded-lg'}
+            style={isImageOnly ? undefined : { flex: 1, minHeight: 0 }}
+            draggable={false}
+          />
+          {text && (
+            <p className="leading-snug overflow-hidden flex-shrink-0" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+              {truncateText(text, 90)}
+            </p>
+          )}
+        </>
+      ) : text ? (
+        <p className="leading-relaxed overflow-hidden" style={{ display: '-webkit-box', WebkitLineClamp: 6, WebkitBoxOrient: 'vertical' }}>
+          {truncateText(text, 220)}
         </p>
+      ) : (
+        <div className="w-full h-full flex items-center justify-center text-sm" style={{ color: 'var(--node-meta)' }}>
+          (bloc vide)
+        </div>
       )}
       <button
         onClick={d.onRemove}
-        className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-red-500/0 hover:bg-red-500/80 text-white/0 hover:text-white transition-all flex items-center justify-center text-xs opacity-0 group-hover:opacity-100"
+        title="Retirer du canvas (le bloc revient dans la liste du bas)"
+        className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-red-500/85 text-white transition-opacity flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 z-10"
       >
         ✕
       </button>
@@ -93,7 +134,7 @@ function MessageNode({ data }: NodeProps) {
 }
 
 // Zone englobante nommée — le geste « ça va avec ça »
-function GroupNode({ id, data }: NodeProps) {
+function GroupNode({ id, data, selected }: NodeProps) {
   const d = data as { label: string; color: string; autoEdit?: boolean; handlers: React.MutableRefObject<GroupHandlers> }
   const [editing, setEditing] = useState(!!d.autoEdit)
   const [draft, setDraft] = useState(d.label)
@@ -111,6 +152,14 @@ function GroupNode({ id, data }: NodeProps) {
       className="w-full h-full rounded-2xl group/gz"
       style={{ border: `1.5px dashed ${palette.border}`, background: palette.bg }}
     >
+      <NodeResizer
+        isVisible={selected}
+        minWidth={220}
+        minHeight={150}
+        lineStyle={{ borderColor: palette.border }}
+        handleStyle={{ background: palette.border, border: 'none', width: 9, height: 9, borderRadius: 2 }}
+        onResizeEnd={(_, p) => d.handlers.current.resize(id, { width: p.width, height: p.height, x: p.x, y: p.y })}
+      />
       <div className="flex items-center gap-1.5 px-2.5 py-1.5">
         {editing ? (
           <input
@@ -296,7 +345,7 @@ function StudyCanvasInner({
 
   // Handlers de groupe accessibles depuis les nodes via ref (évite les fermetures périmées)
   const groupHandlersRef = useRef<GroupHandlers>({
-    rename: () => {}, recolor: () => {}, promote: async () => false, dissolve: () => {},
+    rename: () => {}, recolor: () => {}, promote: async () => false, dissolve: () => {}, resize: () => {},
   })
 
   const buildGroupNode = useCallback((g: CanvasNodeData, autoEdit = false): Node => ({
@@ -324,9 +373,11 @@ function StudyCanvasInner({
         content: msg?.content ?? '',
         type: msg?.type ?? 'text',
         onRemove: () => onRemoveNode(n.id),
+        onResizeEnd: (p: { width: number; height: number; x: number; y: number }) =>
+          onUpdateNode(n.id, { width: p.width, height: p.height, x: p.x, y: p.y }),
       },
     }
-  }, [messageMap, onRemoveNode])
+  }, [messageMap, onRemoveNode, onUpdateNode])
 
   const rfNodes: Node[] = useMemo(
     () => sortParentsFirst([
@@ -356,10 +407,13 @@ function StudyCanvasInner({
   // Sync React Flow internal state when nodes/edges are added/removed externally
   useEffect(() => {
     setNodes((prev) => {
-      const existingIds = new Set(prev.map((n) => n.id))
+      // Dédoublonnage par id (garde-fou : un double-ajout créait des groupes fantômes)
+      const seen = new Set<string>()
+      const deduped = prev.filter(n => !seen.has(n.id) && seen.add(n.id))
+      const existingIds = new Set(deduped.map((n) => n.id))
       const newNodes = rfNodes.filter((n) => !existingIds.has(n.id))
-      if (newNodes.length === 0) return prev
-      return sortParentsFirst([...prev, ...newNodes])
+      if (newNodes.length === 0 && deduped.length === prev.length) return prev
+      return sortParentsFirst([...deduped, ...newNodes])
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rfNodes])
@@ -405,22 +459,35 @@ function StudyCanvasInner({
     recolor: recolorGroup,
     promote: onPromoteGroupTag,
     dissolve: dissolveGroup,
+    resize: (id, p) => onUpdateNode(id, { width: p.width, height: p.height, x: p.x, y: p.y }),
   }
 
   const groupCount = nodes.filter(n => n.type === 'group').length
   const nextColor = COLOR_KEYS[groupCount % COLOR_KEYS.length]
 
+  // Anti double-clic : une seule création de groupe à la fois (les doubles POST créaient des groupes fantômes)
+  const creatingGroupRef = useRef(false)
+
   // Nouveau groupe vide
   const handleNewGroup = useCallback(async (pos: { x: number; y: number }) => {
-    const created = await onCreateGroup({ label: 'Groupe', color: nextColor, x: pos.x, y: pos.y })
-    if (!created) return
-    setNodes(nds => sortParentsFirst([...nds, buildGroupNode(created, true)]))
+    if (creatingGroupRef.current) return
+    creatingGroupRef.current = true
+    try {
+      const created = await onCreateGroup({ label: 'Groupe', color: nextColor, x: pos.x, y: pos.y })
+      if (!created) return
+      setNodes(nds => sortParentsFirst([...nds.filter(n => n.id !== created.id), buildGroupNode(created, true)]))
+    } finally {
+      creatingGroupRef.current = false
+    }
   }, [onCreateGroup, nextColor, buildGroupNode, setNodes])
 
   // Grouper la sélection (blocs libres uniquement)
   const selectedFree = nodes.filter(n => n.selected && n.type === 'message' && !n.parentId)
 
   const handleGroupSelection = useCallback(async () => {
+    if (creatingGroupRef.current) return
+    creatingGroupRef.current = true
+    try {
     const selected = nodes.filter(n => n.selected && n.type === 'message' && !n.parentId)
     if (selected.length < 2) return
     const boxes = selected.map(n => ({
@@ -444,6 +511,9 @@ function StudyCanvasInner({
     ]))
     for (const n of selected) {
       onUpdateNode(n.id, { parentId: created.id, x: n.position.x - minX, y: n.position.y - minY })
+    }
+    } finally {
+      creatingGroupRef.current = false
     }
   }, [nodes, onCreateGroup, nextColor, buildGroupNode, setNodes, onUpdateNode])
 

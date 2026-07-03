@@ -2,7 +2,8 @@
 
 import { useState } from 'react'
 import { MessageData } from '@/types'
-import { stripHtml, truncateText, extractImageSrc } from '@/lib/utils'
+import { truncateText } from '@/lib/utils'
+import { parseBlockContent } from './StudyCanvas'
 
 interface MessagePanelProps {
   canvasId: string
@@ -70,7 +71,7 @@ function MessageChip({
   message: MessageData
   onDragStart: (e: React.DragEvent, id: string) => void
 }) {
-  const text = truncateText(stripHtml(message.content), 80)
+  const { imgSrc, text } = parseBlockContent(message.content, message.type)
 
   return (
     <div
@@ -79,16 +80,14 @@ function MessageChip({
       className="flex-shrink-0 w-48 p-2.5 rounded-lg cursor-grab active:cursor-grabbing transition-all text-xs leading-relaxed"
       style={{ background: 'var(--node-bg)', border: '1px solid var(--node-border)', color: 'var(--node-preview)' }}
     >
-      {message.type === 'image' ? (() => {
-        const src = extractImageSrc(message.content)
-        return src ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={src} alt="" className="w-full h-20 object-cover rounded-md" />
-        ) : (
-          <span className="text-xs" style={{ color: 'var(--node-meta)' }}>Image non disponible</span>
-        )
-      })() : (
-        <p className="line-clamp-3">{text || '(bloc vide)'}</p>
+      {imgSrc ? (
+        <>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={imgSrc} alt="" className="w-full h-16 object-cover rounded-md" draggable={false} />
+          {text && <p className="line-clamp-1 mt-1.5">{truncateText(text, 40)}</p>}
+        </>
+      ) : (
+        <p className="line-clamp-3">{truncateText(text, 80) || '(bloc vide)'}</p>
       )}
       {message.tags && message.tags.length > 0 && (
         <div className="flex flex-wrap gap-1 mt-2">
