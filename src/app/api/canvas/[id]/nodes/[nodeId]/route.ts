@@ -22,6 +22,11 @@ export async function PATCH(
       y: body.y ?? undefined,
       width: body.width ?? undefined,
       height: body.height ?? undefined,
+      label: typeof body.label === string ? body.label : undefined,
+      color: typeof body.color === string ? body.color : undefined,
+      // parentId : null explicite = detacher du groupe
+      ...(body.parentId !== undefined ? { parentId: body.parentId } : {}),
+      ...(body.orderInParent !== undefined ? { orderInParent: body.orderInParent } : {}),
     },
   })
 
@@ -40,6 +45,9 @@ export async function DELETE(
   const canvas = await prisma.canvas.findFirst({ where: { id, userId: user.id } })
   if (!canvas) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
+  // Filet de securite : detacher les enfants d un groupe supprime
+  // (le client convertit leurs positions en absolu AVANT d appeler ce DELETE)
+  await prisma.canvasNode.updateMany({ where: { parentId: nodeId }, data: { parentId: null } })
   await prisma.canvasNode.delete({ where: { id: nodeId } })
   return NextResponse.json({ ok: true })
 }

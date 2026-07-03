@@ -14,3 +14,29 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json(tags)
 }
+
+/**
+ * POST /api/tags — créer/retrouver un tag par nom (idempotent).
+ * Utilisé par « promouvoir un groupe en tag » (proto-concept → taxonomie).
+ */
+export async function POST(req: NextRequest) {
+  const userId = await getUserId(req)
+  if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const body = await req.json()
+  const name = typeof body.name === 'string' ? body.name.trim().toLowerCase() : ''
+  if (!name) return NextResponse.json({ error: 'name requis' }, { status: 400 })
+
+  const tag = await prisma.tag.upsert({
+    where: { name_userId: { name, userId } },
+    create: {
+      name,
+      userId,
+      ...(typeof body.category === 'string' ? { category: body.category } : {}),
+      ...(typeof body.color === 'string' ? { color: body.color } : {}),
+    },
+    update: {},
+  })
+
+  return NextResponse.json(tag, { status: 201 })
+}

@@ -70,6 +70,11 @@ export interface CanvasNodeData {
   canvasId: string
   messageId?: string | null
   noteId?: string | null
+  kind?: string // 'message' | 'group'
+  label?: string | null // nom du groupe (proto-concept)
+  color?: string | null // clé de palette du groupe
+  parentId?: string | null // groupe parent — x/y relatifs au parent
+  orderInParent?: number | null
   x: number
   y: number
   width: number

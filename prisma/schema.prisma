@@ -73,6 +73,11 @@ model CanvasNode {
   canvasId  String
   messageId String?
   noteId    String?
+  kind      String       @default("message") // 'message' | 'group' ('text' au lot 3.4)
+  label     String?      // nom du groupe (proto-concept)
+  color     String?      // clé de palette du groupe
+  parentId  String?      // groupe parent — x/y alors RELATIFS au parent (convention React Flow)
+  orderInParent Int?     // ordre manuel dans le groupe (projection document, lot 3.5)
   x         Float
   y         Float
   width     Float        @default(280)
@@ -82,6 +87,7 @@ model CanvasNode {
   toEdges   CanvasEdge[] @relation("EdgeTo")
 
   @@index([canvasId])
+  @@index([parentId])
 }
 
 model CanvasEdge {

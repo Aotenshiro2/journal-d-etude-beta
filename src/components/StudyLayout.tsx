@@ -65,6 +65,50 @@ export default function StudyLayout({ note, canvas: initialCanvas, isDiverged }:
     [canvas.id]
   )
 
+  // Créer un groupe nommé (zone englobante) — retourne le node créé
+  const handleCreateGroup = useCallback(
+    async (group: { label: string; color: string; x: number; y: number; width?: number; height?: number }): Promise<CanvasNodeData | null> => {
+      const res = await fetch(`/api/canvas/${canvas.id}/nodes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: 'group', ...group }),
+      })
+      if (!res.ok) return null
+      const node: CanvasNodeData = await res.json()
+      setCanvas((prev) => ({ ...prev, nodes: [...prev.nodes, node] }))
+      return node
+    },
+    [canvas.id]
+  )
+
+  // Mise à jour générique d'un node (position, appartenance, label, couleur…)
+  const handleUpdateNode = useCallback(
+    async (nodeId: string, patch: Partial<Pick<CanvasNodeData, 'x' | 'y' | 'width' | 'height' | 'label' | 'color' | 'parentId' | 'orderInParent'>>) => {
+      const res = await fetch(`/api/canvas/${canvas.id}/nodes/${nodeId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      })
+      if (res.ok) {
+        setCanvas((prev) => ({
+          ...prev,
+          nodes: prev.nodes.map((n) => (n.id === nodeId ? { ...n, ...patch } : n)),
+        }))
+      }
+    },
+    [canvas.id]
+  )
+
+  // Promouvoir le nom d'un groupe en tag de la taxonomie (proto-concept → concept)
+  const handlePromoteGroupTag = useCallback(async (label: string): Promise<boolean> => {
+    const res = await fetch('/api/tags', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: label }),
+    })
+    return res.ok
+  }, [])
+
   const handleConnect = useCallback(
     async (fromId: string, toId: string) => {
       const res = await fetch(`/api/canvas/${canvas.id}/edges`, {
@@ -122,6 +166,9 @@ export default function StudyLayout({ note, canvas: initialCanvas, isDiverged }:
             onRemoveNode={handleRemoveNode}
             onConnect={handleConnect}
             onDeleteEdge={handleDeleteEdge}
+            onCreateGroup={handleCreateGroup}
+            onUpdateNode={handleUpdateNode}
+            onPromoteGroupTag={handlePromoteGroupTag}
           />
           <MessagePanel
             canvasId={canvas.id}
