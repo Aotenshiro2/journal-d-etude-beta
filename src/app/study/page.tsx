@@ -11,29 +11,46 @@ export default async function StudyPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/auth')
 
-  const notes = await prisma.note.findMany({
-    where: { userId: user.id },
-    orderBy: { lastModifiedAt: 'desc' },
-    select: {
-      id: true,
-      title: true,
-      content: true,
-      contentHash: true,
-      favicon: true,
-      sourceUrl: true,
-      source: true,
-      lastSyncAt: true,
-      createdAt: true,
-      firstSyncAt: true,
-      lastModifiedAt: true,
-      userId: true,
-      messages: {
-        where: { type: 'image' },
-        take: 1,
-        select: { id: true, content: true, type: true, order: true, noteId: true },
+  const [rawNotes, folders] = await Promise.all([
+    prisma.note.findMany({
+      where: { userId: user.id },
+      orderBy: { lastModifiedAt: 'desc' },
+      select: {
+        id: true,
+        title: true,
+        content: true,
+        contentHash: true,
+        favicon: true,
+        sourceUrl: true,
+        source: true,
+        lastSyncAt: true,
+        createdAt: true,
+        firstSyncAt: true,
+        lastModifiedAt: true,
+        userId: true,
+        concepts: true,
+        folderId: true,
+        trades: true,
+        tags: { select: { tag: true } },
+        annotations: true,
+        canvas: { select: { _count: { select: { nodes: true } } } },
+        messages: {
+          where: { type: 'image' },
+          take: 1,
+          select: { id: true, content: true, type: true, order: true, noteId: true },
+        },
       },
-    },
-  })
+    }),
+    prisma.folder.findMany({ where: { userId: user.id }, select: { id: true, name: true } }),
+  ])
+
+  const folderNames = new Map(folders.map(f => [f.id, f.name]))
+  const notes = rawNotes.map(({ canvas, trades, ...n }) => ({
+    ...n,
+    trades: (trades as unknown as import('@/types').TradeSegmentData[] | null) ?? undefined,
+    folderName: n.folderId ? folderNames.get(n.folderId) ?? null : null,
+    worked: (canvas?._count.nodes ?? 0) > 0,
+  }))
 
   return (
     <div className="min-h-screen bg-gray-950 text-white flex flex-col">

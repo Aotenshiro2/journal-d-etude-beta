@@ -12,6 +12,13 @@ export interface NoteData {
   firstSyncAt: Date | string
   lastModifiedAt: Date | string
   messages?: MessageData[]
+  concepts?: string[]
+  folderId?: string | null
+  folderName?: string | null
+  tags?: { tag: TagData }[]
+  annotations?: AnnotationData[]
+  trades?: TradeSegmentData[] | null
+  worked?: boolean // canvas d'étude non vide
 }
 
 export interface MessageData {
@@ -20,7 +27,30 @@ export interface MessageData {
   content: string
   order: number
   type: string
+  tradeRef?: string | null
   tags?: { tag: TagData }[]
+}
+
+// Notation A/B/C (masterclass edge) — miroir du modèle extension
+export interface AnnotationData {
+  id: string
+  noteId?: string | null
+  messageRef?: string | null
+  tradeRef?: string | null
+  grade: string // 'A' | 'B' | 'C'
+  phrase: string
+  causeCategory?: string | null // 'technique' | 'connaissance' | 'emotionnel'
+  createdAt: Date | string
+  reviewDueAt?: Date | string | null
+  reviewedAt?: Date | string | null
+}
+
+// Segment de trade (stocké en Json sur Note, source de vérité extension)
+export interface TradeSegmentData {
+  id: string
+  startedAt: number
+  closedAt?: number
+  outcome?: 'gain' | 'perte' | 'be'
 }
 
 export interface CanvasData {

@@ -18,10 +18,16 @@ export default async function StudyNotePage({ params }: { params: Promise<{ note
         orderBy: { order: 'asc' },
         include: { tags: { include: { tag: true } } },
       },
+      tags: { include: { tag: true } },
+      annotations: true,
     },
   })
 
   if (!note) notFound()
+
+  const folder = note.folderId
+    ? await prisma.folder.findFirst({ where: { id: note.folderId, userId: user.id }, select: { name: true } })
+    : null
 
   // Get or create canvas
   let canvas = await prisma.canvas.findUnique({
@@ -50,6 +56,8 @@ export default async function StudyNotePage({ params }: { params: Promise<{ note
   const noteWithMessages = {
     ...note,
     messages: note.messages as MessageData[],
+    trades: (note.trades as unknown as import('@/types').TradeSegmentData[] | null) ?? undefined,
+    folderName: folder?.name ?? null,
   }
 
   const canvasData: CanvasData = {
