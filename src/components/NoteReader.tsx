@@ -6,14 +6,14 @@ interface NoteReaderProps {
 }
 
 const GRADE_CLASS: Record<string, string> = {
-  A: 'bg-green-400/10 text-green-400',
-  B: 'bg-amber-400/10 text-amber-400',
-  C: 'bg-red-400/10 text-red-400',
+  A: 'bg-green-400/10 text-green-500',
+  B: 'bg-amber-400/10 text-amber-500',
+  C: 'bg-red-400/10 text-red-500',
 }
 
 const OUTCOME_LABEL: Record<string, { label: string; cls: string }> = {
-  gain: { label: 'Gain', cls: 'text-green-400' },
-  perte: { label: 'Perte', cls: 'text-red-400' },
+  gain: { label: 'Gain', cls: 'text-green-500' },
+  perte: { label: 'Perte', cls: 'text-red-500' },
   be: { label: 'BE', cls: 'text-gray-400' },
 }
 
@@ -37,15 +37,15 @@ export default function NoteReader({ note }: NoteReaderProps) {
 
   return (
     <div className="p-4">
-      <div className="flex items-center gap-2 mb-3 pb-3 border-b border-white/10">
+      <div className="flex items-center gap-2 mb-3 pb-3" style={{ borderBottom: '1px solid var(--float-border)' }}>
         {note.favicon && (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={note.favicon} alt="" className="w-4 h-4 rounded flex-shrink-0" />
         )}
-        <h2 className="flex-1 text-sm font-semibold text-white leading-tight">{note.title}</h2>
+        <h2 className="flex-1 text-sm font-semibold leading-tight" style={{ color: 'var(--node-title)' }}>{note.title}</h2>
         {noteAnnotation && (
           <span
-            className={`flex items-center justify-center w-5 h-5 rounded-full text-[11px] font-semibold flex-shrink-0 ${GRADE_CLASS[noteAnnotation.grade] ?? 'bg-white/10 text-gray-300'}`}
+            className={`flex items-center justify-center w-5 h-5 rounded-full text-[11px] font-semibold flex-shrink-0 ${GRADE_CLASS[noteAnnotation.grade] ?? ''}`}
             title={noteAnnotation.phrase}
           >
             {noteAnnotation.grade}
@@ -53,17 +53,21 @@ export default function NoteReader({ note }: NoteReaderProps) {
         )}
       </div>
       {noteAnnotation?.phrase && (
-        <p className="text-[11px] text-gray-400 italic mb-3">« {noteAnnotation.phrase} »</p>
+        <p className="text-[11px] italic mb-3" style={{ color: 'var(--node-meta)' }}>« {noteAnnotation.phrase} »</p>
       )}
       {(note.folderName || tags.length > 0) && (
         <div className="flex flex-wrap items-center gap-1 mb-3">
           {note.folderName && (
-            <span className="px-1.5 py-0.5 text-[10px] rounded-full bg-yellow-400/10 text-yellow-300/80">
+            <span className="px-1.5 py-0.5 text-[10px] rounded-full bg-amber-400/10 text-amber-500">
               📁 {note.folderName}
             </span>
           )}
           {tags.map(tag => (
-            <span key={tag.id} className="px-1.5 py-0.5 text-[10px] rounded-full bg-white/5 text-gray-400 border border-white/10">
+            <span
+              key={tag.id}
+              className="px-1.5 py-0.5 text-[10px] rounded-full"
+              style={{ border: '1px solid var(--node-border)', color: 'var(--node-meta)' }}
+            >
               #{tag.name}
             </span>
           ))}
@@ -75,21 +79,21 @@ export default function NoteReader({ note }: NoteReaderProps) {
             const tradeAnnotation = latestBy(annotations, a => a.tradeRef === trade.id)
             const outcome = trade.outcome ? OUTCOME_LABEL[trade.outcome] : null
             return (
-              <div key={trade.id} className="rounded-lg border border-blue-400/15 bg-blue-400/5 px-2.5 py-1.5">
+              <div key={trade.id} className="rounded-lg border border-blue-400/20 bg-blue-400/5 px-2.5 py-1.5">
                 <div className="flex items-center gap-2 text-[11px]">
-                  <span className="text-blue-400/90 font-medium">⌖ Trade {i + 1}</span>
+                  <span className="text-blue-500 font-medium">⌖ Trade {i + 1}</span>
                   <span className="flex-1" />
                   {outcome && <span className={`font-medium ${outcome.cls}`}>{outcome.label}</span>}
                   {tradeAnnotation && (
-                    <span className={`flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-semibold ${GRADE_CLASS[tradeAnnotation.grade] ?? 'bg-white/10 text-gray-300'}`}>
+                    <span className={`flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-semibold ${GRADE_CLASS[tradeAnnotation.grade] ?? ''}`}>
                       {tradeAnnotation.grade}
                     </span>
                   )}
                 </div>
                 {tradeAnnotation && (
-                  <p className="text-[10px] text-gray-400 italic mt-0.5">
+                  <p className="text-[10px] italic mt-0.5" style={{ color: 'var(--node-meta)' }}>
                     {tradeAnnotation.causeCategory && (
-                      <span className="not-italic text-red-400/80 mr-1">[{CAUSE_LABEL[tradeAnnotation.causeCategory] ?? tradeAnnotation.causeCategory}]</span>
+                      <span className="not-italic text-red-500/90 mr-1">[{CAUSE_LABEL[tradeAnnotation.causeCategory] ?? tradeAnnotation.causeCategory}]</span>
                     )}
                     « {tradeAnnotation.phrase} »
                   </p>
@@ -104,13 +108,15 @@ export default function NoteReader({ note }: NoteReaderProps) {
           href={note.sourceUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="block text-xs text-blue-400 hover:text-blue-300 mb-4 truncate transition-colors"
+          className="block text-xs mb-4 truncate transition-colors"
+          style={{ color: '#3b82f6' }}
         >
-          {note.sourceUrl}
+          ↗ {note.sourceUrl}
         </a>
       )}
       <div
-        className="note-content text-gray-300 text-sm leading-relaxed"
+        className="note-preview-content text-sm leading-relaxed"
+        style={{ color: 'var(--node-preview)' }}
         dangerouslySetInnerHTML={{ __html: note.content }}
       />
       {(() => {
@@ -128,7 +134,8 @@ export default function NoteReader({ note }: NoteReaderProps) {
                   key={m.id}
                   src={src}
                   alt=""
-                  className="w-full rounded-lg border border-white/10"
+                  className="w-full rounded-lg"
+                  style={{ border: '1px solid var(--node-border)' }}
                   loading="lazy"
                 />
               ) : null

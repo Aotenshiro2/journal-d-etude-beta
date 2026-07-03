@@ -55,7 +55,7 @@ type Tool = 'select' | 'mark' | 'connect' | 'pan'
 // ─── Modes ────────────────────────────────────────────────────────────────────
 
 const MODES = [
-  { label: 'Étudier mes notes',       href: '/',          Icon: BookOpen,   match: (p: string) => p === '/' || p.startsWith('/study') },
+  { label: 'Étudier mes notes',       href: '/',          Icon: BookOpen,   match: (p: string) => p === '/' || p.startsWith('/study') || p.startsWith('/notes') },
   { label: 'Observer les concepts',   href: '/concepts',  Icon: Lightbulb,  match: (p: string) => p === '/concepts' },
   { label: 'Étudier le Price Action', href: '/review',    Icon: TrendingUp, match: (p: string) => p === '/review' },
   { label: 'Documenter mes trades',   href: '/journal',   Icon: BookMarked, match: (p: string) => p === '/journal' },
@@ -190,7 +190,7 @@ const NoteMapNode = React.memo(function NoteMapNode({ id, data }: NodeProps) {
       </ContextMenuTrigger>
 
       <ContextMenuContent className="w-48">
-        <ContextMenuItem onClick={() => router.push(`/study/${note.id}`)}>↗ Ouvrir la note</ContextMenuItem>
+        <ContextMenuItem onClick={() => router.push(`/notes/${note.id}`)}>↗ Ouvrir la note</ContextMenuItem>
         {note.sourceUrl && (
           <ContextMenuItem onClick={() => window.open(note.sourceUrl!, '_blank')}>🔗 Source originale</ContextMenuItem>
         )}
@@ -1077,7 +1077,7 @@ function NoteMapCanvasInner({ notes, canvas, user, title }: NoteMapCanvasProps) 
             <ThemeToggleInline />
             <div style={{ width: 1, height: 16, background: 'var(--float-border)', margin: '0 4px' }} />
             {[
-              { href: '/study',    label: 'Vue liste' },
+              { href: '/notes',    label: 'Notes' },
               { href: '/concepts', label: 'Concepts' },
               { href: '/guide',    label: 'Guide' },
             ].map(({ href, label }) => (

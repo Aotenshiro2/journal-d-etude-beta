@@ -121,7 +121,7 @@ export default function NoteCard({ note }: NoteCardProps) {
           {note.worked && <span className="ml-2 text-yellow-300/60" title="Déjà travaillée sur le canvas">✎ travaillée</span>}
         </span>
         <Link
-          href={`/study/${note.id}`}
+          href={`/notes/${note.id}`}
           className="px-3 py-1.5 rounded-lg bg-yellow-400/10 border border-yellow-400/20 text-yellow-300 text-xs font-medium hover:bg-yellow-400/20 transition-colors"
         >
           Étudier →

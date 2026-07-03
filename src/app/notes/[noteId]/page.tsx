@@ -1,0 +1,102 @@
+import { createClient } from '@/lib/supabase/server'
+import { redirect, notFound } from 'next/navigation'
+import { prisma } from '@/lib/db'
+import StudyLayout from '@/components/StudyLayout'
+import { MessageData, CanvasData } from '@/types'
+
+export default async function StudyNotePage({ params }: { params: Promise<{ noteId: string }> }) {
+  const { noteId } = await params
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/auth')
+
+  const note = await prisma.note.findFirst({
+    where: { id: noteId, userId: user.id },
+    include: {
+      messages: {
+        orderBy: { order: 'asc' },
+        include: { tags: { include: { tag: true } } },
+      },
+      tags: { include: { tag: true } },
+      annotations: true,
+    },
+  })
+
+  if (!note) notFound()
+
+  const folder = note.folderId
+    ? await prisma.folder.findFirst({ where: { id: note.folderId, userId: user.id }, select: { name: true } })
+    : null
+
+  // Get or create canvas
+  let canvas = await prisma.canvas.findUnique({
+    where: { noteId },
+    include: { nodes: true, edges: true },
+  })
+
+  if (!canvas) {
+    canvas = await prisma.canvas.create({
+      data: {
+        type: 'note-study',
+        userId: user.id,
+        noteId,
+        noteContentHash: note.contentHash,
+      },
+      include: { nodes: true, edges: true },
+    })
+  }
+
+  const isDiverged = !!(
+    note.contentHash &&
+    canvas.noteContentHash &&
+    note.contentHash !== canvas.noteContentHash
+  )
+
+  const noteWithMessages = {
+    ...note,
+    messages: note.messages as MessageData[],
+    trades: (note.trades as unknown as import('@/types').TradeSegmentData[] | null) ?? undefined,
+    folderName: folder?.name ?? null,
+  }
+
+  const canvasData: CanvasData = {
+    id: canvas.id,
+    type: canvas.type,
+    userId: canvas.userId,
+    noteId: canvas.noteId,
+    noteContentHash: canvas.noteContentHash,
+    createdAt: canvas.createdAt,
+    updatedAt: canvas.updatedAt,
+    nodes: canvas.nodes.map((n) => ({
+      id: n.id,
+      canvasId: n.canvasId,
+      messageId: n.messageId,
+      noteId: n.noteId,
+      kind: n.kind,
+      label: n.label,
+      color: n.color,
+      parentId: n.parentId,
+      orderInParent: n.orderInParent,
+      x: n.x,
+      y: n.y,
+      width: n.width,
+      height: n.height,
+    })),
+    edges: canvas.edges.map((e) => ({
+      id: e.id,
+      canvasId: e.canvasId,
+      fromId: e.fromId,
+      toId: e.toId,
+      label: e.label,
+      style: e.style,
+    })),
+  }
+
+  return (
+    <StudyLayout
+      note={noteWithMessages}
+      canvas={canvasData}
+      isDiverged={isDiverged}
+    />
+  )
+}

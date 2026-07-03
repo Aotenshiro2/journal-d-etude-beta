@@ -10,8 +10,6 @@ import {
   useNodesState,
   useEdgesState,
   Background,
-  Controls,
-  MiniMap,
   NodeProps,
   Handle,
   Position,
@@ -19,6 +17,7 @@ import {
   useReactFlow,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
+import { FolderPlus, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react'
 import { MessageData, CanvasNodeData, CanvasEdgeData } from '@/types'
 import { stripHtml, truncateText, extractImageSrc } from '@/lib/utils'
 
@@ -59,9 +58,12 @@ function MessageNode({ data }: NodeProps) {
   const text = truncateText(stripHtml(d.content), 150)
 
   return (
-    <div className="relative bg-gray-800 border border-white/20 rounded-xl p-3 w-full h-full text-xs text-gray-200 group shadow-lg">
-      <Handle type="target" position={Position.Top} className="!bg-yellow-400" />
-      <Handle type="source" position={Position.Bottom} className="!bg-yellow-400" />
+    <div
+      className="relative rounded-xl p-3 w-full h-full text-xs group"
+      style={{ background: 'var(--node-bg)', border: '1px solid var(--node-border)', boxShadow: 'var(--node-shadow)', color: 'var(--node-preview)' }}
+    >
+      <Handle type="target" position={Position.Top} className="!bg-blue-500" />
+      <Handle type="source" position={Position.Bottom} className="!bg-blue-500" />
       {d.type === 'image' ? (
         (() => {
           const src = extractImageSrc(d.content)
@@ -69,7 +71,7 @@ function MessageNode({ data }: NodeProps) {
             // eslint-disable-next-line @next/next/no-img-element
             <img src={src} alt="" className="w-full h-full object-cover rounded-lg" />
           ) : (
-            <div className="w-full h-full flex items-center justify-center text-gray-500 text-sm">
+            <div className="w-full h-full flex items-center justify-center text-sm" style={{ color: 'var(--node-meta)' }}>
               Image non disponible
             </div>
           )
@@ -120,13 +122,13 @@ function GroupNode({ id, data }: NodeProps) {
               if (e.key === 'Escape') { setDraft(d.label); setEditing(false) }
             }}
             className="nodrag flex-1 min-w-0 bg-transparent text-xs font-medium outline-none border-b border-white/20 placeholder:text-gray-500"
-            style={{ color: palette.text }}
+            style={{ color: palette.border }}
             placeholder="Nom du groupe…"
           />
         ) : (
           <p
             className="flex-1 min-w-0 text-xs font-medium truncate cursor-text"
-            style={{ color: palette.text }}
+            style={{ color: palette.border }}
             onDoubleClick={() => { setDraft(d.label); setEditing(true) }}
             title="Double-clic pour renommer"
           >
@@ -147,7 +149,7 @@ function GroupNode({ id, data }: NodeProps) {
           <button
             onClick={async () => { if (await d.handlers.current.promote(d.label)) setPromoted(true) }}
             className="ml-1 px-1 rounded text-[10px] font-semibold hover:bg-white/10"
-            style={{ color: palette.text }}
+            style={{ color: palette.border }}
             title={promoted ? 'Tag créé ✓' : 'Créer un tag depuis ce nom (proto-concept → taxonomie)'}
           >
             {promoted ? '✓' : '#'}
@@ -172,30 +174,62 @@ function sortParentsFirst(nds: Node[]): Node[] {
   return [...nds.filter(n => n.type === 'group'), ...nds.filter(n => n.type !== 'group')]
 }
 
+// Pill d'outils à droite — même vocabulaire visuel que la RightToolbar du canvas home
 function CanvasToolbar({ selectedCount, onGroupSelection, onNewGroup }: {
   selectedCount: number
   onGroupSelection: () => void
   onNewGroup: (pos: { x: number; y: number }) => void
 }) {
-  const { screenToFlowPosition } = useReactFlow()
+  const { screenToFlowPosition, zoomIn, zoomOut, fitView } = useReactFlow()
+
+  const btnBase: React.CSSProperties = {
+    width: 30, height: 30, borderRadius: 7,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    background: 'none', border: '1px solid transparent',
+    cursor: 'pointer', color: 'var(--node-meta)',
+  }
+  const divider = <div style={{ height: 1, background: 'var(--float-border)', margin: '2px 0' }} />
+
   return (
-    <Panel position="top-right" className="flex items-center gap-2">
+    <>
       {selectedCount >= 2 && (
-        <button
-          onClick={onGroupSelection}
-          className="px-3 py-1.5 rounded-lg bg-yellow-400/15 border border-yellow-400/40 text-yellow-300 text-xs font-medium hover:bg-yellow-400/25 transition-colors shadow-lg"
-        >
-          Grouper la sélection ({selectedCount})
-        </button>
+        <Panel position="top-center">
+          <button
+            onClick={onGroupSelection}
+            className="canvas-float-pill"
+            style={{ padding: '7px 14px', fontSize: 12, fontWeight: 600, color: '#3b82f6', cursor: 'pointer' }}
+          >
+            Grouper la sélection ({selectedCount})
+          </button>
+        </Panel>
       )}
-      <button
-        onClick={(e) => onNewGroup(screenToFlowPosition({ x: e.clientX - 460, y: e.clientY + 140 }))}
-        className="px-3 py-1.5 rounded-lg bg-gray-800 border border-white/15 text-gray-300 text-xs hover:bg-gray-700 hover:border-white/25 transition-colors shadow-lg"
-        title="Créer une zone nommée vide, puis glisser des blocs dedans"
-      >
-        + Groupe
-      </button>
-    </Panel>
+      <div style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', zIndex: 20 }}>
+        <div className="canvas-float-pill" style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '6px 4px' }}>
+          <button
+            title="Nouveau groupe — une zone nommée, puis glisse des blocs dedans"
+            style={btnBase}
+            onClick={(e) => onNewGroup(screenToFlowPosition({ x: e.clientX - 460, y: e.clientY }))}
+            onMouseEnter={e => { e.currentTarget.style.color = '#3b82f6' }}
+            onMouseLeave={e => { e.currentTarget.style.color = 'var(--node-meta)' }}
+          >
+            <FolderPlus size={14} />
+          </button>
+          {divider}
+          {([
+            { Icon: ZoomIn, label: 'Zoom avant', action: () => zoomIn({ duration: 200 }) },
+            { Icon: ZoomOut, label: 'Zoom arrière', action: () => zoomOut({ duration: 200 }) },
+            { Icon: Maximize2, label: 'Ajuster la vue', action: () => fitView({ duration: 400 }) },
+          ] as { Icon: React.ElementType; label: string; action: () => void }[]).map(({ Icon, label, action }) => (
+            <button key={label} onClick={action} title={label} style={btnBase}
+              onMouseEnter={e => { e.currentTarget.style.color = 'var(--node-title)'; e.currentTarget.style.background = 'var(--canvas-bg)' }}
+              onMouseLeave={e => { e.currentTarget.style.color = 'var(--node-meta)'; e.currentTarget.style.background = 'none' }}
+            >
+              <Icon size={14} />
+            </button>
+          ))}
+        </div>
+      </div>
+    </>
   )
 }
 
@@ -267,8 +301,8 @@ export default function StudyCanvas({
         target: e.toId,
         label: e.label ?? undefined,
         type: 'smoothstep',
-        style: { stroke: '#facc15', strokeWidth: 1.5 },
-        labelStyle: { fill: '#d1d5db', fontSize: 10 },
+        style: { stroke: 'rgba(59,130,246,0.75)', strokeWidth: 1.5 },
+        labelStyle: { fill: 'var(--node-meta)', fontSize: 10 },
       })),
     [initialEdges]
   )
@@ -372,7 +406,7 @@ export default function StudyCanvas({
 
   const onConnect = useCallback(
     (params: Connection) => {
-      setEdges((eds) => addEdge({ ...params, type: 'smoothstep', style: { stroke: '#facc15', strokeWidth: 1.5 } }, eds))
+      setEdges((eds) => addEdge({ ...params, type: 'smoothstep', style: { stroke: 'rgba(59,130,246,0.75)', strokeWidth: 1.5 } }, eds))
       if (params.source && params.target) {
         onConnectCallback(params.source, params.target)
       }
@@ -456,11 +490,9 @@ export default function StudyCanvas({
         nodeTypes={nodeTypes}
         deleteKeyCode={null}
         fitView
-        className="bg-gray-900"
+        style={{ background: 'transparent' }}
       >
-        <Background color="#374151" gap={24} />
-        <Controls className="[&>button]:bg-gray-800 [&>button]:border-white/20 [&>button]:text-white" />
-        <MiniMap className="!bg-gray-900 [&_.react-flow__minimap-mask]:fill-gray-800" nodeColor="#374151" />
+        <Background color="var(--float-border)" gap={22} size={1.5} />
         <CanvasToolbar
           selectedCount={selectedFree.length}
           onGroupSelection={handleGroupSelection}
@@ -472,8 +504,8 @@ export default function StudyCanvas({
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <div className="text-center">
             <div className="text-4xl mb-3 opacity-30">🎯</div>
-            <p className="text-sm text-gray-600">Glisse des blocs depuis le panneau bas</p>
-            <p className="text-xs text-gray-700 mt-1">Shift + glisser = sélectionner plusieurs blocs → « Grouper »</p>
+            <p className="text-sm" style={{ color: 'var(--node-meta)' }}>Glisse des blocs depuis le panneau bas</p>
+            <p className="text-xs mt-1" style={{ color: 'var(--node-meta)', opacity: 0.7 }}>Shift + glisser = sélectionner plusieurs blocs → « Grouper »</p>
           </div>
         </div>
       )}
