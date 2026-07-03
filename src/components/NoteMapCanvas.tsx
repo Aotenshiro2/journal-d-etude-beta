@@ -182,9 +182,19 @@ const NoteMapNode = React.memo(function NoteMapNode({ id, data }: NodeProps) {
               )}
               <span style={{ fontSize: 10, color: 'var(--node-meta)' }}>{relativeDate}</span>
             </div>
-            <span style={{ fontSize: 10, color: 'var(--node-meta)' }}>
-              {isExpanded ? '↙ réduire' : '↗ ouvrir'}
-            </span>
+            <button
+              onClick={(e) => { e.stopPropagation(); router.push(`/notes/${note.id}`) }}
+              title="Ouvrir la note (double-clic sur la carte : agrandir/réduire ici)"
+              style={{
+                fontSize: 10, color: 'var(--node-meta)', background: 'none',
+                border: '1px solid transparent', borderRadius: 6, padding: '2px 6px',
+                cursor: 'pointer',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.color = '#3b82f6'; e.currentTarget.style.borderColor = 'rgba(59,130,246,0.35)' }}
+              onMouseLeave={e => { e.currentTarget.style.color = 'var(--node-meta)'; e.currentTarget.style.borderColor = 'transparent' }}
+            >
+              ↗ ouvrir
+            </button>
           </div>
         </div>
       </ContextMenuTrigger>

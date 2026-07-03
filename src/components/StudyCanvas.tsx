@@ -536,6 +536,7 @@ function StudyCanvasInner({
         nodeTypes={nodeTypes}
         deleteKeyCode={null}
         fitView
+        fitViewOptions={{ padding: 0.12, maxZoom: 1 }}
         style={{ background: 'transparent' }}
       >
         <CanvasToolbar
