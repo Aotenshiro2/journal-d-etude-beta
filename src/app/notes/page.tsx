@@ -53,7 +53,7 @@ export default async function StudyPage() {
   }))
 
   return (
-    <div className="min-h-screen bg-gray-950 text-white flex flex-col">
+    <div className="min-h-screen flex flex-col" style={{ background: 'var(--canvas-bg)', color: 'var(--node-title)' }}>
       <AppHeader
         user={{ email: user.email ?? '', name: user.user_metadata?.full_name ?? '' }}
         backHref="/"
@@ -64,8 +64,8 @@ export default async function StudyPage() {
       <main className="flex-1 max-w-5xl mx-auto w-full px-6 py-8">
         <div className="flex items-center justify-between mb-8">
           <div>
-            <h1 className="text-2xl font-bold text-white">Mes notes</h1>
-            <p className="text-sm text-gray-400 mt-1">
+            <h1 className="text-2xl font-bold" style={{ color: 'var(--node-title)' }}>Mes notes</h1>
+            <p className="text-sm mt-1" style={{ color: 'var(--node-meta)' }}>
               {notes.length} note{notes.length !== 1 ? 's' : ''} capturée{notes.length !== 1 ? 's' : ''}
             </p>
           </div>

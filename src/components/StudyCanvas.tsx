@@ -3,19 +3,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ReactFlow,
-  ReactFlowInstance,
+  ReactFlowProvider,
   Node,
   Edge,
   Connection,
   addEdge,
   useNodesState,
   useEdgesState,
-  Background,
   NodeProps,
   Handle,
   Position,
   Panel,
   useReactFlow,
+  useViewport,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { FolderPlus, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react'
@@ -234,7 +234,16 @@ function CanvasToolbar({ selectedCount, onGroupSelection, onNewGroup }: {
   )
 }
 
-export default function StudyCanvas({
+// Provider nécessaire pour useReactFlow/useViewport au niveau racine (même modèle que le home)
+export default function StudyCanvas(props: StudyCanvasProps) {
+  return (
+    <ReactFlowProvider>
+      <StudyCanvasInner {...props} />
+    </ReactFlowProvider>
+  )
+}
+
+function StudyCanvasInner({
   nodes: initialNodes,
   edges: initialEdges,
   messages,
@@ -251,6 +260,39 @@ export default function StudyCanvas({
     () => new Map(messages.map((m) => [m.id, m])),
     [messages]
   )
+
+  // ── Grille + spotlight — EXACTEMENT les couches du canvas home ──
+  const { screenToFlowPosition } = useReactFlow()
+  const { x: vpX, y: vpY, zoom } = useViewport()
+  const rootRef = useRef<HTMLDivElement>(null)
+  const spotlightRef = useRef<HTMLDivElement>(null)
+
+  const dotSize = 22 * zoom
+  const dotPosX = ((vpX % dotSize) + dotSize) % dotSize
+  const dotPosY = ((vpY % dotSize) + dotSize) % dotSize
+  const dotBgStyle = {
+    backgroundSize: `${dotSize}px ${dotSize}px`,
+    backgroundPosition: `${dotPosX}px ${dotPosY}px`,
+  }
+
+  useEffect(() => {
+    const el = rootRef.current
+    const spotlight = spotlightRef.current
+    if (!el || !spotlight) return
+    const onMove = (e: MouseEvent) => {
+      const rect = el.getBoundingClientRect()
+      spotlight.style.setProperty('--mx', `${e.clientX - rect.left}px`)
+      spotlight.style.setProperty('--my', `${e.clientY - rect.top}px`)
+      spotlight.style.opacity = '1'
+    }
+    const onLeave = () => { spotlight.style.opacity = '0' }
+    el.addEventListener('mousemove', onMove)
+    el.addEventListener('mouseleave', onLeave)
+    return () => {
+      el.removeEventListener('mousemove', onMove)
+      el.removeEventListener('mouseleave', onLeave)
+    }
+  }, [])
 
   // Handlers de groupe accessibles depuis les nodes via ref (évite les fermetures périmées)
   const groupHandlersRef = useRef<GroupHandlers>({
@@ -458,31 +500,17 @@ export default function StudyCanvas({
     [onDeleteEdge, setEdges]
   )
 
-  // Instance React Flow — indispensable pour convertir écran → coordonnées canvas
-  // (avec fitView/zoom/pan, les offsets bruts déposaient le bloc hors champ)
-  const [rfInstance, setRfInstance] = useState<ReactFlowInstance | null>(null)
-
   const onDrop = useCallback(
     (event: React.DragEvent) => {
       event.preventDefault()
       const messageId = event.dataTransfer.getData('messageId')
       if (!messageId) return
 
-      let x: number
-      let y: number
-      if (rfInstance) {
-        const pos = rfInstance.screenToFlowPosition({ x: event.clientX, y: event.clientY })
-        x = pos.x - 140
-        y = pos.y - 60
-      } else {
-        const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect()
-        x = event.clientX - bounds.left - 140
-        y = event.clientY - bounds.top - 60
-      }
-
-      onDropMessage(messageId, x, y)
+      // Conversion écran → coordonnées canvas (indispensable avec fitView/zoom/pan)
+      const pos = screenToFlowPosition({ x: event.clientX, y: event.clientY })
+      onDropMessage(messageId, pos.x - 140, pos.y - 60)
     },
-    [onDropMessage, rfInstance]
+    [onDropMessage, screenToFlowPosition]
   )
 
   const onDragOver = useCallback((event: React.DragEvent) => {
@@ -491,7 +519,12 @@ export default function StudyCanvas({
   }, [])
 
   return (
-    <div className="flex-1 relative" onDrop={onDrop} onDragOver={onDragOver}>
+    <div ref={rootRef} className="canvas-root" onDrop={onDrop} onDragOver={onDragOver}>
+      {/* Couches de fond identiques au canvas home */}
+      <div className="canvas-grid" style={dotBgStyle} />
+      <div ref={spotlightRef} className="canvas-dot-spotlight" style={dotBgStyle} />
+
+      <div style={{ position: 'absolute', inset: 0, zIndex: 2 }}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -500,22 +533,21 @@ export default function StudyCanvas({
         onConnect={onConnect}
         onNodeDragStop={onNodeDragStop}
         onEdgeDoubleClick={onEdgeDoubleClick}
-        onInit={setRfInstance}
         nodeTypes={nodeTypes}
         deleteKeyCode={null}
         fitView
         style={{ background: 'transparent' }}
       >
-        <Background color="var(--float-border)" gap={22} size={1.5} />
         <CanvasToolbar
           selectedCount={selectedFree.length}
           onGroupSelection={handleGroupSelection}
           onNewGroup={handleNewGroup}
         />
       </ReactFlow>
+      </div>
 
       {nodes.length === 0 && (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none" style={{ zIndex: 3 }}>
           <div className="text-center">
             <div className="text-4xl mb-3 opacity-30">🎯</div>
             <p className="text-sm" style={{ color: 'var(--node-meta)' }}>Glisse des blocs depuis le panneau bas</p>

@@ -11,24 +11,27 @@ interface AppHeaderProps {
 
 export default function AppHeader({ user, backHref, backLabel, title }: AppHeaderProps) {
   return (
-    <header className="flex items-center justify-between px-5 py-3 border-b border-white/10 bg-gray-950 flex-shrink-0">
+    <header
+      className="flex items-center justify-between px-5 py-3 flex-shrink-0"
+      style={{ borderBottom: '1px solid var(--float-border)', background: 'var(--canvas-bg)' }}
+    >
       <div className="flex items-center gap-2 min-w-0">
-        <Link href="/" className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors flex-shrink-0">
+        <Link href="/" className="flex items-center gap-2 transition-colors flex-shrink-0" style={{ color: 'var(--node-meta)' }}>
           <span>📚</span>
           <span className="text-sm font-medium hidden sm:block">AOKnowledge</span>
         </Link>
         {backHref && (
           <>
-            <span className="text-gray-700 flex-shrink-0">/</span>
-            <Link href={backHref} className="text-sm text-gray-400 hover:text-white transition-colors flex-shrink-0">
+            <span className="flex-shrink-0" style={{ color: 'var(--node-meta)', opacity: 0.5 }}>/</span>
+            <Link href={backHref} className="text-sm transition-colors flex-shrink-0" style={{ color: 'var(--node-meta)' }}>
               {backLabel}
             </Link>
           </>
         )}
         {title && (
           <>
-            <span className="text-gray-700 flex-shrink-0">/</span>
-            <span className="text-sm text-white font-medium truncate">{title}</span>
+            <span className="flex-shrink-0" style={{ color: 'var(--node-meta)', opacity: 0.5 }}>/</span>
+            <span className="text-sm font-medium truncate" style={{ color: 'var(--node-title)' }}>{title}</span>
           </>
         )}
       </div>

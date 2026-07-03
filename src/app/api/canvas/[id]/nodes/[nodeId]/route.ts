@@ -22,8 +22,8 @@ export async function PATCH(
       y: body.y ?? undefined,
       width: body.width ?? undefined,
       height: body.height ?? undefined,
-      label: typeof body.label === string ? body.label : undefined,
-      color: typeof body.color === string ? body.color : undefined,
+      label: typeof body.label === 'string' ? body.label : undefined,
+      color: typeof body.color === 'string' ? body.color : undefined,
       // parentId : null explicite = detacher du groupe
       ...(body.parentId !== undefined ? { parentId: body.parentId } : {}),
       ...(body.orderInParent !== undefined ? { orderInParent: body.orderInParent } : {}),
