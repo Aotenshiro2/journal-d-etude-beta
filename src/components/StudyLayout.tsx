@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from 'react'
 import Link from 'next/link'
-import { ChevronLeft, ChevronRight, Network, AlignLeft } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Network, AlignLeft, RotateCcw } from 'lucide-react'
 import NoteReader from './NoteReader'
 import StudyCanvas from './StudyCanvas'
 import DocumentView from './DocumentView'
@@ -159,6 +159,18 @@ export default function StudyLayout({ note, canvas: initialCanvas, isDiverged }:
     [canvas.id]
   )
 
+  // Remettre le canvas à zéro — si on n'est pas satisfait de sa réorganisation.
+  // Les blocs reviennent dans la liste du bas ; l'original n'est pas touché.
+  const handleResetCanvas = useCallback(async () => {
+    if (!window.confirm('Remettre ce canvas à zéro ?\n\nLes blocs reviennent dans la liste du bas, les groupes et textes libres sont supprimés. Ta note d\'origine n\'est pas touchée.')) return
+    const res = await fetch(`/api/canvas/${canvas.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reset: true }),
+    })
+    if (res.ok) setCanvas((prev) => ({ ...prev, nodes: [], edges: [] }))
+  }, [canvas.id])
+
   const handleDismissDivergence = useCallback(async () => {
     await fetch(`/api/canvas/${canvas.id}`, {
       method: 'PATCH',
@@ -235,6 +247,20 @@ export default function StudyLayout({ note, canvas: initialCanvas, isDiverged }:
               <Icon size={13} />
             </button>
           ))}
+          <div style={{ width: 1, height: 16, background: 'var(--float-border)', flexShrink: 0 }} />
+          <button
+            onClick={handleResetCanvas}
+            title="Remettre ce canvas à zéro (les blocs reviennent dans la liste, groupes supprimés)"
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              width: 26, height: 26, borderRadius: 6, cursor: 'pointer', flexShrink: 0,
+              background: 'none', border: '1px solid transparent', color: 'var(--node-meta)',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = '#ef4444'; e.currentTarget.style.background = 'var(--canvas-bg)' }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--node-meta)'; e.currentTarget.style.background = 'none' }}
+          >
+            <RotateCcw size={13} />
+          </button>
         </div>
       </div>
 

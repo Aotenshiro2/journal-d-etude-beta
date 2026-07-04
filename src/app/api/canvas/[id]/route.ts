@@ -27,6 +27,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     data.reviewReminderAt = new Date(Date.now() + body.reminderDays * 24 * 60 * 60 * 1000)
   }
 
+  // Remettre le canvas à zéro : blocs (qui reviennent dans la liste), groupes et textes
+  // libres supprimés. La note d'origine (Message) n'est PAS touchée. On repart « pas relu ».
+  if (body.reset === true) {
+    await prisma.canvasEdge.deleteMany({ where: { canvasId: id } })
+    await prisma.canvasNode.deleteMany({ where: { canvasId: id } })
+    data.reviewedAt = null
+    data.reviewReminderAt = null
+  }
+
   const updated = await prisma.canvas.update({
     where: { id },
     data,

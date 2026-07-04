@@ -555,13 +555,15 @@ function StudyCanvasInner({
   // Sync React Flow internal state when nodes/edges are added/removed externally
   useEffect(() => {
     setNodes((prev) => {
-      // Dédoublonnage par id (garde-fou : un double-ajout créait des groupes fantômes)
+      const rfById = new Map(rfNodes.map((n) => [n.id, n]))
+      // On garde l'état VIVANT des nodes encore présents (dédoublonnés), on RETIRE les
+      // disparus du modèle (ex. « remettre à zéro »), et on ajoute les nouveaux.
       const seen = new Set<string>()
-      const deduped = prev.filter(n => !seen.has(n.id) && seen.add(n.id))
-      const existingIds = new Set(deduped.map((n) => n.id))
+      const kept = prev.filter((n) => rfById.has(n.id) && !seen.has(n.id) && seen.add(n.id))
+      const existingIds = new Set(kept.map((n) => n.id))
       const newNodes = rfNodes.filter((n) => !existingIds.has(n.id))
-      if (newNodes.length === 0 && deduped.length === prev.length) return prev
-      return sortParentsFirst([...deduped, ...newNodes])
+      if (newNodes.length === 0 && kept.length === prev.length) return prev
+      return sortParentsFirst([...kept, ...newNodes])
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rfNodes])
