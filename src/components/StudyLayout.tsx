@@ -2,9 +2,10 @@
 
 import { useState, useCallback } from 'react'
 import Link from 'next/link'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Network, AlignLeft } from 'lucide-react'
 import NoteReader from './NoteReader'
 import StudyCanvas from './StudyCanvas'
+import DocumentView from './DocumentView'
 import MessagePanel from './MessagePanel'
 import DivergenceBanner from './DivergenceBanner'
 import { MessageData, CanvasData, NoteData, CanvasNodeData, CanvasEdgeData } from '@/types'
@@ -20,6 +21,8 @@ interface StudyLayoutProps {
 export default function StudyLayout({ note, canvas: initialCanvas, isDiverged }: StudyLayoutProps) {
   const [canvas, setCanvas] = useState<CanvasData>(initialCanvas)
   const [drawerOpen, setDrawerOpen] = useState(true)
+  // Deux projections du même modèle : tri spatial (canvas) ⇄ note linéaire (document)
+  const [view, setView] = useState<'canvas' | 'document'>('canvas')
 
   // Messages not yet placed on canvas
   const placedMessageIds = new Set(
@@ -166,23 +169,32 @@ export default function StudyLayout({ note, canvas: initialCanvas, isDiverged }:
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'var(--canvas-bg)', overflow: 'hidden' }}>
-      {/* ── Canvas plein cadre ── */}
+      {/* ── Canvas ou document, plein cadre ── */}
       <div style={{ position: 'absolute', inset: 0, zIndex: 2, display: 'flex' }}>
-        <StudyCanvas
-          canvasId={canvas.id}
-          nodes={canvas.nodes}
-          edges={canvas.edges}
-          messages={note.messages ?? []}
-          onDropMessage={handleDropMessage}
-          onMoveNode={handleMoveNode}
-          onRemoveNode={handleRemoveNode}
-          onConnect={handleConnect}
-          onDeleteEdge={handleDeleteEdge}
-          onCreateGroup={handleCreateGroup}
-          onCreateText={handleCreateText}
-          onUpdateNode={handleUpdateNode}
-          onPromoteGroupTag={handlePromoteGroupTag}
-        />
+        {view === 'canvas' ? (
+          <StudyCanvas
+            canvasId={canvas.id}
+            nodes={canvas.nodes}
+            edges={canvas.edges}
+            messages={note.messages ?? []}
+            onDropMessage={handleDropMessage}
+            onMoveNode={handleMoveNode}
+            onRemoveNode={handleRemoveNode}
+            onConnect={handleConnect}
+            onDeleteEdge={handleDeleteEdge}
+            onCreateGroup={handleCreateGroup}
+            onCreateText={handleCreateText}
+            onUpdateNode={handleUpdateNode}
+            onPromoteGroupTag={handlePromoteGroupTag}
+          />
+        ) : (
+          <DocumentView
+            nodes={canvas.nodes}
+            messages={note.messages ?? []}
+            insetLeft={drawerOpen ? 344 : 64}
+            onUpdateNode={handleUpdateNode}
+          />
+        )}
       </div>
 
       {/* ── Haut-gauche : retour à la carte + titre de la note ── */}
@@ -203,6 +215,26 @@ export default function StudyLayout({ note, canvas: initialCanvas, isDiverged }:
           <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--node-title)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {note.title}
           </span>
+          <div style={{ width: 1, height: 16, background: 'var(--float-border)', flexShrink: 0 }} />
+          {([
+            { id: 'canvas' as const, Icon: Network, label: 'Canvas — tri spatial' },
+            { id: 'document' as const, Icon: AlignLeft, label: 'Document — ta note triée, réordonnable' },
+          ]).map(({ id, Icon, label }) => (
+            <button
+              key={id}
+              onClick={() => setView(id)}
+              title={label}
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                width: 26, height: 26, borderRadius: 6, cursor: 'pointer', flexShrink: 0,
+                background: view === id ? 'rgba(59,130,246,0.15)' : 'none',
+                border: view === id ? '1px solid rgba(59,130,246,0.4)' : '1px solid transparent',
+                color: view === id ? '#3b82f6' : 'var(--node-meta)',
+              }}
+            >
+              <Icon size={13} />
+            </button>
+          ))}
         </div>
       </div>
 
@@ -260,8 +292,8 @@ export default function StudyLayout({ note, canvas: initialCanvas, isDiverged }:
         }
       </button>
 
-      {/* ── Blocs disponibles — pill flottante en bas ── */}
-      <MessagePanel canvasId={canvas.id} messages={availableMessages} />
+      {/* ── Blocs disponibles — pill flottante en bas (tri spatial uniquement) ── */}
+      {view === 'canvas' && <MessagePanel canvasId={canvas.id} messages={availableMessages} />}
     </div>
   )
 }
