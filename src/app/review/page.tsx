@@ -29,7 +29,7 @@ type CanvasWithNote = {
 function buildItem(c: CanvasWithNote): ReviewNote {
   const note = c.note!
   const anns = (note.annotations ?? []) as unknown as AnnotationData[]
-  const tradesRaw = Array.isArray(note.trades) ? (note.trades as { id: string; outcome?: string | null }[]) : []
+  const tradesRaw = Array.isArray(note.trades) ? (note.trades as { id: string; outcome?: string | null; startedAt?: number | null }[]) : []
   const tradeV = anns.some(a => a.tradeRef != null)
   const globalV = anns.some(a => a.tradeRef == null && a.messageRef == null)
   const type: ReviewNote['type'] = (tradesRaw.length > 0 || tradeV) ? 'trade' : globalV ? 'day' : 'course'
@@ -40,7 +40,7 @@ function buildItem(c: CanvasWithNote): ReviewNote {
     nodes: c.nodes.map(mapNode),
     messages: note.messages as unknown as MessageData[],
     verdicts: anns,
-    trades: tradesRaw.map(t => ({ id: t.id, outcome: t.outcome ?? null })),
+    trades: tradesRaw.map(t => ({ id: t.id, outcome: t.outcome ?? null, startedAt: t.startedAt ?? null })),
   }
 }
 

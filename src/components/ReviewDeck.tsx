@@ -17,7 +17,7 @@ export type ReviewNote = {
   nodes: CanvasNodeData[]
   messages: MessageData[]
   verdicts: AnnotationData[]
-  trades: { id: string; outcome: string | null }[]
+  trades: { id: string; outcome: string | null; startedAt: number | null }[]
 }
 
 // Une note de cours pas encore triée : on rappelle à l'élève de faire ce travail.
@@ -127,7 +127,7 @@ function RelectureCard({ item, onRead, onRemind, onSkip, onJudged }: {
   const [saving, setSaving] = useState(false)
   const meta = TYPE_META[item.type]
 
-  const tradeOutcome = useMemo(() => new Map(item.trades.map(t => [t.id, t.outcome])), [item.trades])
+  const tradeById = useMemo(() => new Map(item.trades.map(t => [t.id, t])), [item.trades])
   const globalVerdicts = item.verdicts.filter(v => v.tradeRef == null && v.messageRef == null)
   const tradeVerdicts = item.verdicts.filter(v => v.tradeRef != null)
 
@@ -183,11 +183,12 @@ function RelectureCard({ item, onRead, onRemind, onSkip, onJudged }: {
             <div className="space-y-2.5">
               <p className="text-[11px] uppercase tracking-wide" style={{ color: 'var(--node-meta)' }}>Trades notés</p>
               {tradeVerdicts.map(v => {
-                const oc = v.tradeRef ? tradeOutcome.get(v.tradeRef) : null
-                const info = oc ? OUTCOME[oc] : null
+                const t = v.tradeRef ? tradeById.get(v.tradeRef) : null
+                const info = t?.outcome ? OUTCOME[t.outcome] : null
+                const time = t?.startedAt ? new Date(t.startedAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : null
+                const label = ['Trade', time, info?.label].filter(Boolean).join(' · ')
                 return (
-                  <VerdictRow key={v.id} v={v} onJudged={onJudged}
-                    label={info ? `Trade · ${info.label}` : 'Trade'} dot={info?.color} />
+                  <VerdictRow key={v.id} v={v} onJudged={onJudged} label={label} dot={info?.color} />
                 )
               })}
             </div>

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db'
 import { getUserId } from '@/lib/api-auth'
 import crypto from 'crypto'
@@ -203,12 +204,40 @@ export async function POST(req: NextRequest) {
           extensionMessageId: typeof msg === 'string' ? null : (msg.id ?? null),
           tradeRef: typeof msg === 'string' ? null : (msg.tradeRef ?? null),
         }))
+      // Upsert par extensionMessageId pour PRÉSERVER Message.id d'une sync à l'autre.
+      // ⚠️ Avant : deleteMany + createMany régénérait tous les id → les nœuds du canvas
+      // d'étude (CanvasNode.messageId → Message.id) devenaient orphelins à CHAQUE sync,
+      // détruisant la réorganisation de l'élève. On met désormais à jour en place.
+      const existingMsgs = await prisma.message.findMany({
+        where: { noteId: note.id },
+        select: { id: true, extensionMessageId: true },
+      })
+      const idByExt = new Map(
+        existingMsgs
+          .filter((m) => m.extensionMessageId)
+          .map((m) => [m.extensionMessageId as string, m.id])
+      )
+      const ops: Prisma.PrismaPromise<unknown>[] = []
+      const keptIds = new Set<string>()
+      for (const m of validMessages) {
+        const existingId = m.extensionMessageId ? idByExt.get(m.extensionMessageId) : undefined
+        if (existingId) {
+          keptIds.add(existingId)
+          ops.push(prisma.message.update({
+            where: { id: existingId },
+            data: { content: m.content, order: m.order, type: m.type, tradeRef: m.tradeRef },
+          }))
+        } else {
+          ops.push(prisma.message.create({ data: m }))
+        }
+      }
+      // Messages disparus de l'extension (et legacy sans extid) : on les retire.
+      const toDelete = existingMsgs.filter((m) => !keptIds.has(m.id)).map((m) => m.id)
+      if (toDelete.length > 0) {
+        ops.unshift(prisma.message.deleteMany({ where: { id: { in: toDelete } } }))
+      }
       // Transaction batch (compatible PgBouncer transaction mode)
-      // Si createMany échoue → deleteMany est rollbacké, messages existants préservés
-      await prisma.$transaction([
-        prisma.message.deleteMany({ where: { noteId: note.id } }),
-        prisma.message.createMany({ data: validMessages }),
-      ])
+      await prisma.$transaction(ops)
 
       // Process message-level tags (MessageTag upsert)
       const messagesWithTags = (messages as Array<{ tags?: string[]; content?: string }>)
