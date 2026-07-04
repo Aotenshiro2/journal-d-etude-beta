@@ -999,7 +999,17 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
     dragEnterCounterRef.current = 0
     setIsDragOver(false)
 
-    const noteId = e.dataTransfer.getData('noteId')
+    let noteId = e.dataTransfer.getData('noteId')
+    // Pont extension → journal : la note glissée depuis le sidepanel arrive via text/plain
+    // (« carnet-note:<extensionNoteId> », seul format qui survit à la frontière extension ↔ page).
+    if (!noteId) {
+      const ext = e.dataTransfer.getData('application/x-carnet-note') || e.dataTransfer.getData('text/plain')
+      const m = ext.match(/^carnet-note:(.+)$/)
+      if (m) {
+        const match = notes.find(n => n.extensionNoteId === m[1].trim())
+        if (match) noteId = match.id
+      }
+    }
     if (!noteId) return
     if (nodes.some(n => n.id === noteId)) return
 

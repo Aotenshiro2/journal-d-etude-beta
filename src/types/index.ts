@@ -9,6 +9,7 @@ export interface NoteData {
   favicon?: string | null
   lastSyncAt?: Date | string | null
   createdAt?: Date | string | null
+  extensionNoteId?: string | null
   firstSyncAt: Date | string
   lastModifiedAt: Date | string
   messages?: MessageData[]

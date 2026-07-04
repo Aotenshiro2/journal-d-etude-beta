@@ -28,6 +28,7 @@ export default async function HomePage() {
       firstSyncAt: true,
       lastModifiedAt: true,
       userId: true,
+      extensionNoteId: true, // pour résoudre un drop venu de l'extension (pont capture → étude)
     },
   })
 
