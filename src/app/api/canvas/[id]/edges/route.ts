@@ -18,6 +18,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         canvasId: id,
         fromId: body.fromId,
         toId: body.toId,
+        fromHandle: typeof body.fromHandle === 'string' ? body.fromHandle : null,
+        toHandle: typeof body.toHandle === 'string' ? body.toHandle : null,
         label: body.label ?? null,
         style: body.style ?? 'curved',
       },

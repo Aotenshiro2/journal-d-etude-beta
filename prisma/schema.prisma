@@ -92,12 +92,14 @@ model CanvasNode {
 }
 
 model CanvasEdge {
-  id       String     @id @default(uuid())
-  canvasId String
-  fromId   String
-  toId     String
-  label    String?
-  style    String     @default("curved")
+  id         String     @id @default(uuid())
+  canvasId   String
+  fromId     String
+  toId       String
+  fromHandle String?    // côté de départ du trait (mindmap 4 côtés)
+  toHandle   String?    // côté d'arrivée
+  label      String?
+  style      String     @default("curved")
   canvas   Canvas     @relation(fields: [canvasId], references: [id], onDelete: Cascade)
   from     CanvasNode @relation("EdgeFrom", fields: [fromId], references: [id], onDelete: Cascade)
   to       CanvasNode @relation("EdgeTo", fields: [toId], references: [id], onDelete: Cascade)

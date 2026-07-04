@@ -87,6 +87,8 @@ export interface CanvasEdgeData {
   canvasId: string
   fromId: string
   toId: string
+  fromHandle?: string | null
+  toHandle?: string | null
   label?: string | null
   style: string
 }

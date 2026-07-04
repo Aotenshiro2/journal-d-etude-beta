@@ -33,7 +33,7 @@ interface StudyCanvasProps {
   onDropMessage: (messageId: string, x: number, y: number) => void
   onMoveNode: (nodeId: string, x: number, y: number) => void
   onRemoveNode: (nodeId: string) => void
-  onConnect: (fromId: string, toId: string) => void
+  onConnect: (fromId: string, toId: string, fromHandle?: string, toHandle?: string) => void
   onDeleteEdge: (edgeId: string) => void
   onCreateGroup: (group: { label: string; color: string; x: number; y: number; width?: number; height?: number }) => Promise<CanvasNodeData | null>
   onCreateText: (pos: { x: number; y: number }) => Promise<CanvasNodeData | null>
@@ -87,6 +87,7 @@ function MessageNode({ data, selected }: NodeProps) {
     onRemove: () => void
     onResizeEnd: (p: { width: number; height: number; x: number; y: number }) => void
     onSaveContent: (content: string) => void
+    onResetContent: () => void
   }
   const { imgSrc, text } = useMemo(() => parseBlockContent(d.content, d.type), [d.content, d.type])
   const isImageOnly = !!imgSrc && !text
@@ -120,8 +121,11 @@ function MessageNode({ data, selected }: NodeProps) {
         handleStyle={{ background: '#3b82f6', border: 'none', width: 8, height: 8, borderRadius: 2 }}
         onResizeEnd={(_, p) => d.onResizeEnd({ width: p.width, height: p.height, x: p.x, y: p.y })}
       />
-      <Handle type="target" position={Position.Top} className="!bg-blue-500" />
-      <Handle type="source" position={Position.Bottom} className="!bg-blue-500" />
+      {/* Mindmap : connexions sur les 4 côtés (haut/gauche = arrivée, bas/droite = départ) */}
+      <Handle id="tt" type="target" position={Position.Top} className="!bg-blue-500" />
+      <Handle id="tl" type="target" position={Position.Left} className="!bg-blue-500" />
+      <Handle id="sb" type="source" position={Position.Bottom} className="!bg-blue-500" />
+      <Handle id="sr" type="source" position={Position.Right} className="!bg-blue-500" />
       {editing ? (
         <textarea
           autoFocus
@@ -162,13 +166,22 @@ function MessageNode({ data, selected }: NodeProps) {
         </div>
       )}
       {d.edited && !editing && (
-        <span
-          className="absolute bottom-1 right-1.5 text-[9px] font-medium z-10"
-          style={{ color: '#3b82f6', opacity: 0.75 }}
-          title="Copie de travail — la note d'origine est intacte"
-        >
-          ✎
-        </span>
+        <>
+          <span
+            className="absolute bottom-1 right-1.5 text-[9px] font-medium z-10"
+            style={{ color: '#3b82f6', opacity: 0.75 }}
+            title="Copie de travail — la note d'origine est intacte"
+          >
+            ✎
+          </span>
+          <button
+            onClick={(e) => { e.stopPropagation(); d.onResetContent() }}
+            title="Rétablir l'original (annule l'édition/fusion de ce bloc)"
+            className="absolute top-1.5 right-8 w-5 h-5 rounded-full bg-blue-500/80 text-white transition-opacity flex items-center justify-center text-[11px] opacity-0 group-hover:opacity-100 z-10"
+          >
+            ↺
+          </button>
+        </>
       )}
       <button
         onClick={d.onRemove}
@@ -484,6 +497,12 @@ function StudyCanvasInner({
             ? { ...node, data: { ...node.data, content, edited: !!msg } }
             : node))
         },
+        onResetContent: () => {
+          onUpdateNode(n.id, { content: null })
+          setNodes(nds => nds.map(node => node.id === n.id
+            ? { ...node, data: { ...node.data, content: msg?.content ?? '', edited: false } }
+            : node))
+        },
       },
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -503,6 +522,8 @@ function StudyCanvasInner({
         id: e.id,
         source: e.fromId,
         target: e.toId,
+        sourceHandle: e.fromHandle ?? undefined,
+        targetHandle: e.toHandle ?? undefined,
         label: e.label ?? undefined,
         type: 'smoothstep',
         style: { stroke: 'rgba(59,130,246,0.75)', strokeWidth: 1.5 },
@@ -663,7 +684,7 @@ function StudyCanvasInner({
     (params: Connection) => {
       setEdges((eds) => addEdge({ ...params, type: 'smoothstep', style: { stroke: 'rgba(59,130,246,0.75)', strokeWidth: 1.5 } }, eds))
       if (params.source && params.target) {
-        onConnectCallback(params.source, params.target)
+        onConnectCallback(params.source, params.target, params.sourceHandle ?? undefined, params.targetHandle ?? undefined)
       }
     },
     [setEdges, onConnectCallback]

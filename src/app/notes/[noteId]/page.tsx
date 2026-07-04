@@ -88,6 +88,8 @@ export default async function StudyNotePage({ params }: { params: Promise<{ note
       canvasId: e.canvasId,
       fromId: e.fromId,
       toId: e.toId,
+      fromHandle: e.fromHandle,
+      toHandle: e.toHandle,
       label: e.label,
       style: e.style,
     })),

@@ -131,11 +131,11 @@ export default function StudyLayout({ note, canvas: initialCanvas, isDiverged }:
   }, [])
 
   const handleConnect = useCallback(
-    async (fromId: string, toId: string) => {
+    async (fromId: string, toId: string, fromHandle?: string, toHandle?: string) => {
       const res = await fetch(`/api/canvas/${canvas.id}/edges`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fromId, toId }),
+        body: JSON.stringify({ fromId, toId, fromHandle: fromHandle ?? null, toHandle: toHandle ?? null }),
       })
       if (res.ok) {
         const edge: CanvasEdgeData = await res.json()
