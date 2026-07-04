@@ -40,6 +40,7 @@ interface StudyCanvasProps {
   onCreateText: (pos: { x: number; y: number }) => Promise<CanvasNodeData | null>
   onUpdateNode: (nodeId: string, patch: Partial<Pick<CanvasNodeData, 'x' | 'y' | 'width' | 'height' | 'label' | 'color' | 'parentId' | 'orderInParent' | 'content'>>) => Promise<void> | void
   onPromoteGroupTag: (label: string) => Promise<boolean>
+  tradeMeta?: Record<string, TradeMeta>
 }
 
 // Palette sobre des groupes — « ça va avec ça »
@@ -51,6 +52,29 @@ export const GROUP_COLORS: Record<string, { border: string; bg: string; text: st
   pink: { border: '#f472b6', bg: 'rgba(244,114,182,0.07)', text: '#f9a8d4' },
 }
 const COLOR_KEYS = Object.keys(GROUP_COLORS)
+
+// Métadonnées du trade rattaché à un bloc — pour signaler « ceci est un trade » partout
+// (sur le canvas ET dans le panneau des blocs disponibles).
+export type TradeMeta = { index: number; outcome: string | null; startedAt: number | null; grade: string | null }
+export const OUTCOME_META: Record<string, { label: string; color: string }> = {
+  gain: { label: 'Gain', color: '#22c55e' },
+  perte: { label: 'Perte', color: '#ef4444' },
+  be: { label: 'BE', color: 'var(--node-meta)' },
+}
+export function TradeBadge({ meta }: { meta: TradeMeta }) {
+  const oc = meta.outcome ? OUTCOME_META[meta.outcome] : null
+  const time = meta.startedAt ? new Date(meta.startedAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : null
+  const full = [`Trade ${meta.index}`, time, oc?.label, meta.grade ? `Note ${meta.grade}` : null].filter(Boolean).join(' · ')
+  return (
+    <span
+      title={full}
+      className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full whitespace-nowrap"
+      style={{ background: 'var(--node-bg)', border: `1px solid ${oc?.color ?? 'var(--node-border)'}`, color: oc?.color ?? 'var(--node-meta)' }}
+    >
+      ⌖ Trade {meta.index}{oc ? ` · ${oc.label}` : ''}{meta.grade ? ` · ${meta.grade}` : ''}
+    </span>
+  )
+}
 
 interface GroupHandlers {
   rename: (id: string, label: string) => void
@@ -90,6 +114,7 @@ function MessageNode({ data, selected }: NodeProps) {
     onSaveContent: (content: string) => void
     onResetContent: () => void
     onZoom: (src: string) => void
+    trade?: TradeMeta
   }
   const { imgSrc, text } = useMemo(() => parseBlockContent(d.content, d.type), [d.content, d.type])
   const isImageOnly = !!imgSrc && !text
@@ -165,6 +190,11 @@ function MessageNode({ data, selected }: NodeProps) {
       ) : (
         <div className="w-full h-full flex items-center justify-center text-sm" style={{ color: 'var(--node-meta)' }}>
           {d.kind === 'text' ? 'Double-clic pour écrire' : '(bloc vide)'}
+        </div>
+      )}
+      {d.trade && !editing && (
+        <div className="absolute bottom-1 left-1.5 z-10">
+          <TradeBadge meta={d.trade} />
         </div>
       )}
       {d.edited && !editing && (
@@ -425,6 +455,7 @@ function StudyCanvasInner({
   onCreateText,
   onUpdateNode,
   onPromoteGroupTag,
+  tradeMeta,
 }: StudyCanvasProps) {
   const [activeTool, setActiveTool] = useState<CanvasTool>('select')
   const [zoomSrc, setZoomSrc] = useState<string | null>(null)
@@ -488,6 +519,7 @@ function StudyCanvasInner({
     const msg = n.messageId ? messageMap.get(n.messageId) : undefined
     // La surcharge locale (copie de travail) prime sur le contenu du message d'origine
     const displayContent = n.content ?? msg?.content ?? ''
+    const trade = msg?.tradeRef ? tradeMeta?.[msg.tradeRef] : undefined
     return {
       id: n.id,
       type: 'message',
@@ -500,6 +532,7 @@ function StudyCanvasInner({
         kind: n.kind === 'text' ? 'text' : 'message',
         edited: n.content != null && !!msg,
         autoEdit,
+        trade,
         onRemove: () => {
           onRemoveNode(n.id)
           // Retrait local immédiat — sinon le bloc restait sur le canvas ET revenait dans la liste du bas (doublon)
@@ -523,7 +556,7 @@ function StudyCanvasInner({
       },
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messageMap, onRemoveNode, onUpdateNode])
+  }, [messageMap, onRemoveNode, onUpdateNode, tradeMeta])
 
   const rfNodes: Node[] = useMemo(
     () => sortParentsFirst([

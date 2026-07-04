@@ -3,15 +3,16 @@
 import { useState } from 'react'
 import { MessageData } from '@/types'
 import { truncateText } from '@/lib/utils'
-import { parseBlockContent } from './StudyCanvas'
+import { parseBlockContent, TradeBadge, TradeMeta } from './StudyCanvas'
 
 interface MessagePanelProps {
   canvasId: string
   messages: MessageData[]
+  tradeMeta?: Record<string, TradeMeta>
 }
 
 // Pill flottante en bas — les blocs de la note pas encore posés sur le canvas
-export default function MessagePanel({ messages }: MessagePanelProps) {
+export default function MessagePanel({ messages, tradeMeta }: MessagePanelProps) {
   const [collapsed, setCollapsed] = useState(false)
 
   const handleDragStart = (e: React.DragEvent, messageId: string) => {
@@ -54,7 +55,7 @@ export default function MessagePanel({ messages }: MessagePanelProps) {
           ) : (
             <div className="flex gap-2 overflow-x-auto" style={{ scrollbarWidth: 'thin', padding: '2px 12px 12px' }}>
               {messages.map((msg) => (
-                <MessageChip key={msg.id} message={msg} onDragStart={handleDragStart} />
+                <MessageChip key={msg.id} message={msg} tradeMeta={tradeMeta} onDragStart={handleDragStart} />
               ))}
             </div>
           )
@@ -66,12 +67,15 @@ export default function MessagePanel({ messages }: MessagePanelProps) {
 
 function MessageChip({
   message,
+  tradeMeta,
   onDragStart,
 }: {
   message: MessageData
+  tradeMeta?: Record<string, TradeMeta>
   onDragStart: (e: React.DragEvent, id: string) => void
 }) {
   const { imgSrc, text } = parseBlockContent(message.content, message.type)
+  const trade = message.tradeRef ? tradeMeta?.[message.tradeRef] : undefined
 
   return (
     <div
@@ -80,6 +84,7 @@ function MessageChip({
       className="flex-shrink-0 w-48 p-2.5 rounded-lg cursor-grab active:cursor-grabbing transition-all text-xs leading-relaxed"
       style={{ background: 'var(--node-bg)', border: '1px solid var(--node-border)', color: 'var(--node-preview)' }}
     >
+      {trade && <div className="mb-1.5"><TradeBadge meta={trade} /></div>}
       {imgSrc ? (
         <>
           {/* eslint-disable-next-line @next/next/no-img-element */}

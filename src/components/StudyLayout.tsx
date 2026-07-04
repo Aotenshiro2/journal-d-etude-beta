@@ -1,10 +1,10 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import Link from 'next/link'
 import { ChevronLeft, ChevronRight, Network, AlignLeft, RotateCcw } from 'lucide-react'
 import NoteReader from './NoteReader'
-import StudyCanvas from './StudyCanvas'
+import StudyCanvas, { TradeMeta } from './StudyCanvas'
 import DocumentView from './DocumentView'
 import MessagePanel from './MessagePanel'
 import DivergenceBanner from './DivergenceBanner'
@@ -23,6 +23,20 @@ export default function StudyLayout({ note, canvas: initialCanvas, isDiverged }:
   const [drawerOpen, setDrawerOpen] = useState(true)
   // Deux projections du même modèle : tri spatial (canvas) ⇄ note linéaire (document)
   const [view, setView] = useState<'canvas' | 'document'>('canvas')
+
+  // Métadonnées des trades (index, résultat, heure, note A/B/C) indexées par id de trade,
+  // pour signaler « ceci est un trade » sur chaque bloc concerné (canvas + panneau bas).
+  const tradeMeta = useMemo<Record<string, TradeMeta>>(() => {
+    const map: Record<string, TradeMeta> = {}
+    const gradeByTrade = new Map<string, string>()
+    for (const a of note.annotations ?? []) {
+      if (a.tradeRef) gradeByTrade.set(a.tradeRef, a.grade)
+    }
+    ;(note.trades ?? []).forEach((t, i) => {
+      map[t.id] = { index: i + 1, outcome: t.outcome ?? null, startedAt: t.startedAt ?? null, grade: gradeByTrade.get(t.id) ?? null }
+    })
+    return map
+  }, [note.trades, note.annotations])
 
   // Messages not yet placed on canvas
   const placedMessageIds = new Set(
@@ -198,6 +212,7 @@ export default function StudyLayout({ note, canvas: initialCanvas, isDiverged }:
             onCreateText={handleCreateText}
             onUpdateNode={handleUpdateNode}
             onPromoteGroupTag={handlePromoteGroupTag}
+            tradeMeta={tradeMeta}
           />
         ) : (
           <DocumentView
@@ -319,7 +334,7 @@ export default function StudyLayout({ note, canvas: initialCanvas, isDiverged }:
       </button>
 
       {/* ── Blocs disponibles — pill flottante en bas (tri spatial uniquement) ── */}
-      {view === 'canvas' && <MessagePanel canvasId={canvas.id} messages={availableMessages} />}
+      {view === 'canvas' && <MessagePanel canvasId={canvas.id} messages={availableMessages} tradeMeta={tradeMeta} />}
     </div>
   )
 }
