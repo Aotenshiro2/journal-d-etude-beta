@@ -2,44 +2,81 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/db'
 import AppHeader from '@/components/AppHeader'
-import ReviewDeck, { ReviewNote, ReorganizeItem } from '@/components/ReviewDeck'
+import ReviewDeck, { ReviewNote, ReorganizeItem, SimpleNote } from '@/components/ReviewDeck'
 import { MessageData, AnnotationData, CanvasNodeData } from '@/types'
 
-// La relecture, dans l'ordre du parcours de l'élève :
-//   1. « À réorganiser » — les notes de cours pas encore triées (le travail d'ancrage à faire).
-//   2. « À relire » — les notes réorganisées, non relues (relue = mémorisée → sort de la file).
-export default async function ReviewPage() {
+const mapNode = (n: {
+  id: string; canvasId: string; messageId: string | null; noteId: string | null
+  kind: string; content: string | null; label: string | null; color: string | null
+  parentId: string | null; orderInParent: number | null
+  x: number; y: number; width: number; height: number
+}): CanvasNodeData => ({
+  id: n.id, canvasId: n.canvasId, messageId: n.messageId, noteId: n.noteId,
+  kind: n.kind, content: n.content, label: n.label, color: n.color,
+  parentId: n.parentId, orderInParent: n.orderInParent,
+  x: n.x, y: n.y, width: n.width, height: n.height,
+})
+
+// Construit un élément de relecture depuis un canvas d'étude (+ sa note chargée).
+type CanvasWithNote = {
+  id: string
+  nodes: Parameters<typeof mapNode>[0][]
+  note: {
+    id: string; title: string | null; favicon: string | null; trades: unknown
+    messages: unknown[]; annotations: unknown[]
+  } | null
+}
+function buildItem(c: CanvasWithNote): ReviewNote {
+  const note = c.note!
+  const anns = (note.annotations ?? []) as unknown as AnnotationData[]
+  const tradesRaw = Array.isArray(note.trades) ? (note.trades as { id: string; outcome?: string | null }[]) : []
+  const tradeV = anns.some(a => a.tradeRef != null)
+  const globalV = anns.some(a => a.tradeRef == null && a.messageRef == null)
+  const type: ReviewNote['type'] = (tradesRaw.length > 0 || tradeV) ? 'trade' : globalV ? 'day' : 'course'
+  return {
+    canvasId: c.id,
+    note: { id: note.id, title: note.title ?? 'Sans titre', favicon: note.favicon },
+    type,
+    nodes: c.nodes.map(mapNode),
+    messages: note.messages as unknown as MessageData[],
+    verdicts: anns,
+    trades: tradesRaw.map(t => ({ id: t.id, outcome: t.outcome ?? null })),
+  }
+}
+
+const noteSelect = {
+  id: true, title: true, favicon: true, trades: true,
+  messages: { orderBy: { order: 'asc' as const } },
+  annotations: true, // toutes (relues incluses) — pour VOIR les trades notés en contexte
+}
+
+export default async function ReviewPage({ searchParams }: { searchParams: Promise<{ note?: string }> }) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/auth')
   const userId = user.id
   const now = Date.now()
+  const { note: focusNoteId } = await searchParams
 
-  const mapNode = (n: {
-    id: string; canvasId: string; messageId: string | null; noteId: string | null
-    kind: string; content: string | null; label: string | null; color: string | null
-    parentId: string | null; orderInParent: number | null
-    x: number; y: number; width: number; height: number
-  }): CanvasNodeData => ({
-    id: n.id, canvasId: n.canvasId, messageId: n.messageId, noteId: n.noteId,
-    kind: n.kind, content: n.content, label: n.label, color: n.color,
-    parentId: n.parentId, orderInParent: n.orderInParent,
-    x: n.x, y: n.y, width: n.width, height: n.height,
-  })
+  // ── Mode focus : relire UNE note précise (même déjà relue) via ?note=<noteId> ──
+  if (focusNoteId) {
+    const c = await prisma.canvas.findFirst({
+      where: { userId, type: 'note-study', noteId: focusNoteId },
+      include: { nodes: true, note: { select: noteSelect } },
+    })
+    const items = c && c.note && c.nodes.length > 0 ? [buildItem(c as CanvasWithNote)] : []
+    return (
+      <div className="flex flex-col h-screen" style={{ background: 'var(--canvas-bg)' }}>
+        <AppHeader user={{ email: user.email ?? '', name: user.user_metadata?.full_name ?? '' }} backHref="/review" backLabel="Relecture" title="Relire" />
+        <ReviewDeck toRelire={items} toReorganize={[]} reviewedNotes={[]} focus />
+      </div>
+    )
+  }
 
-  // ── À relire : notes réorganisées (canvas d'étude non vide) non relues ──
+  // ── À relire : notes réorganisées non relues (relue et sans rappel échu → hors file) ──
   const canvases = await prisma.canvas.findMany({
     where: { userId, type: 'note-study', noteId: { not: null } },
-    include: {
-      nodes: true,
-      note: {
-        select: {
-          id: true, title: true, favicon: true, trades: true,
-          messages: { orderBy: { order: 'asc' } },
-          annotations: true, // toutes (relues incluses) — pour VOIR les trades notés en contexte
-        },
-      },
-    },
+    include: { nodes: true, note: { select: noteSelect } },
   })
 
   const toRelireBuilt = canvases
@@ -47,35 +84,19 @@ export default async function ReviewPage() {
     .filter(c => {
       const relue = c.reviewedAt != null
       const reminderDue = c.reviewReminderAt != null && new Date(c.reviewReminderAt).getTime() <= now
-      return !relue || reminderDue // relue et sans rappel échu → sort de la file
+      return !relue || reminderDue
     })
     .map(c => {
-      const note = c.note!
-      const anns = (note.annotations ?? []) as unknown as AnnotationData[]
-      const tradesRaw = Array.isArray(note.trades) ? (note.trades as unknown as { id: string; outcome?: string | null }[]) : []
-      const tradeV = anns.some(a => a.tradeRef != null)
-      const globalV = anns.some(a => a.tradeRef == null && a.messageRef == null)
-      // 3 niveaux : positions/trades → journée notée globalement → note de cours (aucune note)
-      const type: ReviewNote['type'] = (tradesRaw.length > 0 || tradeV) ? 'trade' : globalV ? 'day' : 'course'
-      const hasDue = anns.some(a => !a.reviewedAt && a.reviewDueAt != null && new Date(a.reviewDueAt).getTime() <= now)
-      const item: ReviewNote = {
-        canvasId: c.id,
-        note: { id: note.id, title: note.title ?? 'Sans titre', favicon: note.favicon },
-        type,
-        nodes: c.nodes.map(mapNode),
-        messages: note.messages as unknown as MessageData[],
-        verdicts: anns,
-        trades: tradesRaw.map(t => ({ id: t.id, outcome: t.outcome ?? null })),
-      }
+      const item = buildItem(c as CanvasWithNote)
+      const hasDue = item.verdicts.some(a => !a.reviewedAt && a.reviewDueAt != null && new Date(a.reviewDueAt).getTime() <= now)
       return { item, hasDue }
     })
-
-  // Verdict échu en tête (il « appelle » la relecture), le reste ensuite.
   toRelireBuilt.sort((a, b) => Number(b.hasDue) - Number(a.hasDue))
   const toRelire = toRelireBuilt.map(b => b.item)
 
-  // ── À réorganiser : notes de cours (aucune note A/B/C) avec du contenu mais pas encore triées ──
-  const [unorganized, folders] = await Promise.all([
+  // ── À réorganiser : notes de cours (aucune note A/B/C) avec du contenu mais pas triées ──
+  // ── Déjà relues : pour pouvoir en rouvrir une à la demande ──
+  const [unorganized, folders, reviewedCanvases] = await Promise.all([
     prisma.note.findMany({
       where: {
         userId, deletedAt: null,
@@ -83,26 +104,31 @@ export default async function ReviewPage() {
         messages: { some: {} },
         OR: [{ canvas: { is: null } }, { canvas: { nodes: { none: {} } } }],
       },
-      select: { id: true, title: true, favicon: true, folderId: true, lastModifiedAt: true },
+      select: { id: true, title: true, favicon: true, folderId: true },
       orderBy: { lastModifiedAt: 'desc' },
     }),
     prisma.folder.findMany({ where: { userId }, select: { id: true, name: true } }),
+    prisma.canvas.findMany({
+      where: { userId, type: 'note-study', reviewedAt: { not: null } },
+      include: { nodes: { select: { id: true } }, note: { select: { id: true, title: true, favicon: true } } },
+      orderBy: { reviewedAt: 'desc' },
+      take: 40,
+    }),
   ])
+
   const folderName = new Map(folders.map(f => [f.id, f.name]))
   const toReorganize: ReorganizeItem[] = unorganized.map(n => ({
     id: n.id, title: n.title ?? 'Sans titre', favicon: n.favicon,
     folder: n.folderId ? folderName.get(n.folderId) ?? null : null,
   }))
+  const reviewedNotes: SimpleNote[] = reviewedCanvases
+    .filter(c => c.note && c.nodes.length > 0)
+    .map(c => ({ id: c.note!.id, title: c.note!.title ?? 'Sans titre', favicon: c.note!.favicon }))
 
   return (
     <div className="flex flex-col h-screen" style={{ background: 'var(--canvas-bg)' }}>
-      <AppHeader
-        user={{ email: user.email ?? '', name: user.user_metadata?.full_name ?? '' }}
-        backHref="/"
-        backLabel="Accueil"
-        title="Relecture"
-      />
-      <ReviewDeck toRelire={toRelire} toReorganize={toReorganize} />
+      <AppHeader user={{ email: user.email ?? '', name: user.user_metadata?.full_name ?? '' }} backHref="/" backLabel="Accueil" title="Relecture" />
+      <ReviewDeck toRelire={toRelire} toReorganize={toReorganize} reviewedNotes={reviewedNotes} />
     </div>
   )
 }

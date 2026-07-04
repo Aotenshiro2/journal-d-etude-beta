@@ -4,6 +4,9 @@ import { prisma } from '@/lib/db'
 import NoteMapCanvas from '@/components/NoteMapCanvas'
 import { NoteData, CanvasData } from '@/types'
 
+// Badge « Relire » toujours frais (recalculé à chaque visite, jamais mis en cache)
+export const dynamic = 'force-dynamic'
+
 export default async function HomePage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()

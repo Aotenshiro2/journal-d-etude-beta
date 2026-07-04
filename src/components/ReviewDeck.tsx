@@ -2,7 +2,8 @@
 
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
-import { Check, SkipForward, ArrowRight, ExternalLink, TrendingUp, BookOpen, CalendarDays, Plus, FolderPlus, ChevronRight, ChevronDown } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { Check, SkipForward, ArrowRight, ExternalLink, TrendingUp, BookOpen, CalendarDays, Plus, FolderPlus, ChevronRight, ChevronDown, RotateCcw } from 'lucide-react'
 import { AnnotationData, MessageData, CanvasNodeData } from '@/types'
 import DocumentView from './DocumentView'
 
@@ -21,6 +22,9 @@ export type ReviewNote = {
 
 // Une note de cours pas encore triée : on rappelle à l'élève de faire ce travail.
 export type ReorganizeItem = { id: string; title: string; favicon: string | null; folder: string | null }
+
+// Note minimale (déjà relue) — pour la rouvrir à la demande.
+export type SimpleNote = { id: string; title: string; favicon: string | null }
 
 const GRADE_CLASS: Record<string, string> = {
   A: 'bg-green-400/10 text-green-500 border-green-500/30',
@@ -304,15 +308,54 @@ function ReorganizeSection({ items }: { items: ReorganizeItem[] }) {
   )
 }
 
-export default function ReviewDeck({ toRelire, toReorganize }: { toRelire: ReviewNote[]; toReorganize: ReorganizeItem[] }) {
+// Repliable : les notes déjà relues, pour en rouvrir une à la demande (mode focus ?note=).
+function ReviewedSection({ items }: { items: SimpleNote[] }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <section className="mt-8">
+      <button onClick={() => setOpen(o => !o)} className="w-full flex items-center gap-2 rounded-xl px-3.5 py-2.5"
+        style={{ background: 'var(--node-bg)', border: '1px solid var(--node-border)' }}>
+        <BookOpen size={15} style={{ color: 'var(--node-meta)' }} />
+        <span className="text-sm font-semibold" style={{ color: 'var(--node-title)' }}>Déjà relues</span>
+        <span className="text-[11px] px-1.5 rounded-full" style={{ background: 'var(--canvas-bg)', color: 'var(--node-meta)' }}>{items.length}</span>
+        <span className="flex-1" />
+        {open ? <ChevronDown size={15} style={{ color: 'var(--node-meta)' }} /> : <ChevronRight size={15} style={{ color: 'var(--node-meta)' }} />}
+      </button>
+      {open && (
+        <div className="space-y-1.5 mt-2 pr-1" style={{ maxHeight: 300, overflowY: 'auto' }}>
+          {items.map(n => (
+            <div key={n.id} className="flex items-center gap-2.5 rounded-xl px-3.5 py-2" style={{ background: 'var(--node-bg)', border: '1px solid var(--node-border)' }}>
+              {n.favicon && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={n.favicon} alt="" style={{ width: 14, height: 14, borderRadius: 3, flexShrink: 0 }} />
+              )}
+              <span className="flex-1 min-w-0 text-sm truncate" style={{ color: 'var(--node-title)' }}>{n.title}</span>
+              <Link href={`/review?note=${n.id}`} className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg flex-shrink-0" style={{ border: '1px solid var(--node-border)', color: 'var(--node-title)' }}>
+                <RotateCcw size={12} /> Relire
+              </Link>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+export default function ReviewDeck({ toRelire, toReorganize, reviewedNotes = [], focus = false }: {
+  toRelire: ReviewNote[]; toReorganize: ReorganizeItem[]; reviewedNotes?: SimpleNote[]; focus?: boolean
+}) {
+  const router = useRouter()
+  // On fige la file à l'ouverture : un router.refresh() (pour rafraîchir le badge home
+  // + les autres sections) ne doit PAS réordonner le parcours en cours.
+  const [queue] = useState(toRelire)
   const [idx, setIdx] = useState(0)
   const [tally, setTally] = useState<Record<string, number>>({ A: 0, B: 0, C: 0 })
   const [readCount, setReadCount] = useState(0)
   const [skipped, setSkipped] = useState(0)
 
-  const total = toRelire.length
+  const total = queue.length
   const done = idx >= total
-  const current = toRelire[idx]
+  const current = queue[idx]
 
   const advance = () => setIdx(i => i + 1)
   const onSkip = () => { setSkipped(s => s + 1); advance() }
@@ -322,10 +365,12 @@ export default function ReviewDeck({ toRelire, toReorganize }: { toRelire: Revie
     if (current) await fetch(`/api/canvas/${current.canvasId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reviewed: true }) })
     setReadCount(c => c + 1)
     advance()
+    router.refresh() // badge home + « déjà relues » à jour, sans toucher la file figée
   }
   const onRemind = async (days: number) => {
     if (current) await fetch(`/api/canvas/${current.canvasId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reminderDays: days }) })
     advance()
+    router.refresh()
   }
 
   const judgedTotal = tally.A + tally.B + tally.C
@@ -334,7 +379,7 @@ export default function ReviewDeck({ toRelire, toReorganize }: { toRelire: Revie
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="max-w-2xl mx-auto px-5 py-8">
-        {toReorganize.length > 0 && <ReorganizeSection items={toReorganize} />}
+        {!focus && toReorganize.length > 0 && <ReorganizeSection items={toReorganize} />}
 
         {total === 0 ? (
           toReorganize.length > 0 ? (
@@ -386,6 +431,7 @@ export default function ReviewDeck({ toRelire, toReorganize }: { toRelire: Revie
             </p>
           </>
         )}
+        {!focus && reviewedNotes.length > 0 && <ReviewedSection items={reviewedNotes} />}
       </div>
     </div>
   )
