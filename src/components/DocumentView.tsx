@@ -9,12 +9,18 @@ import ImageLightbox from './ImageLightbox'
 // La vue document — l'AUTRE projection du même modèle : les groupes du canvas
 // deviennent des sections, les blocs une liste réordonnable. Rien de nouveau
 // n'est stocké : l'ordre manuel vit dans CanvasNode.orderInParent.
+//
+// Mode `readOnly` + `embedded` : la MÊME projection, sans drag ni persistance,
+// posée dans un flux normal. Réutilisée telle quelle par la relecture — on relit
+// sa réorganisation (structure, blocs modifiés, images cliquables en grand).
 
 interface DocumentViewProps {
   nodes: CanvasNodeData[]
   messages: MessageData[]
-  insetLeft: number
-  onUpdateNode: (nodeId: string, patch: Partial<Pick<CanvasNodeData, 'x' | 'y' | 'parentId' | 'orderInParent'>>) => Promise<void> | void
+  insetLeft?: number
+  readOnly?: boolean
+  embedded?: boolean
+  onUpdateNode?: (nodeId: string, patch: Partial<Pick<CanvasNodeData, 'x' | 'y' | 'parentId' | 'orderInParent'>>) => Promise<void> | void
 }
 
 const FREE = '__free__'
@@ -23,7 +29,9 @@ const FREE = '__free__'
 const byOrder = (a: CanvasNodeData, b: CanvasNodeData) =>
   ((a.orderInParent ?? 1e9) - (b.orderInParent ?? 1e9)) || (a.y - b.y) || (a.x - b.x)
 
-export default function DocumentView({ nodes, messages, insetLeft, onUpdateNode }: DocumentViewProps) {
+export default function DocumentView({ nodes, messages, insetLeft = 0, readOnly = false, embedded = false, onUpdateNode }: DocumentViewProps) {
+  const interactive = !readOnly
+  const update = onUpdateNode ?? (() => {})
   const messageMap = useMemo(() => new Map(messages.map(m => [m.id, m])), [messages])
   const nodeById = useMemo(() => new Map(nodes.map(n => [n.id, n])), [nodes])
   const [zoom, setZoom] = useState<string | null>(null)
@@ -63,7 +71,7 @@ export default function DocumentView({ nodes, messages, insetLeft, onUpdateNode 
           patch.y = 48 + idx * 44
         }
       }
-      onUpdateNode(id, patch)
+      update(id, patch)
     })
   }
 
@@ -104,7 +112,7 @@ export default function DocumentView({ nodes, messages, insetLeft, onUpdateNode 
     arr.splice(Math.max(0, Math.min(idx, arr.length)), 0, drag.id)
     if (arr.join() === sectionIds.join()) return
     setSectionIds(arr)
-    arr.forEach((id, i) => onUpdateNode(id, { orderInParent: i }))
+    arr.forEach((id, i) => update(id, { orderInParent: i }))
   }
 
   const allowDrop = (hint: string) => (e: React.DragEvent) => {
@@ -122,23 +130,25 @@ export default function DocumentView({ nodes, messages, insetLeft, onUpdateNode 
     const hintKey = `${listKey}:${index}`
     return (
       <div
-        draggable
-        onDragStart={(e) => { dragRef.current = { type: 'block', id }; e.dataTransfer.effectAllowed = 'move' }}
-        onDragOver={allowDrop(hintKey)}
-        onDrop={(e) => { e.preventDefault(); e.stopPropagation(); dropBlock(listKey, index) }}
+        draggable={interactive}
+        onDragStart={interactive ? (e) => { dragRef.current = { type: 'block', id }; e.dataTransfer.effectAllowed = 'move' } : undefined}
+        onDragOver={interactive ? allowDrop(hintKey) : undefined}
+        onDrop={interactive ? (e) => { e.preventDefault(); e.stopPropagation(); dropBlock(listKey, index) } : undefined}
         className="group/row relative flex gap-2.5 rounded-xl"
         style={{
           background: 'var(--node-bg)',
           border: '1px solid var(--node-border)',
           boxShadow: 'var(--node-shadow)',
-          padding: '12px 14px 12px 8px',
+          padding: interactive ? '12px 14px 12px 8px' : '13px 16px',
           marginTop: 10,
-          cursor: 'grab',
+          cursor: interactive ? 'grab' : 'default',
           outline: dropHint === hintKey ? '2px solid rgba(59,130,246,0.7)' : 'none',
           outlineOffset: 2,
         }}
       >
-        <GripVertical size={14} className="flex-shrink-0 mt-0.5 opacity-0 group-hover/row:opacity-60 transition-opacity" style={{ color: 'var(--node-meta)' }} />
+        {interactive && (
+          <GripVertical size={14} className="flex-shrink-0 mt-0.5 opacity-0 group-hover/row:opacity-60 transition-opacity" style={{ color: 'var(--node-meta)' }} />
+        )}
         <div className="flex-1 min-w-0">
           {imgSrc && (
             // eslint-disable-next-line @next/next/no-img-element
@@ -175,46 +185,52 @@ export default function DocumentView({ nodes, messages, insetLeft, onUpdateNode 
     return (
       <section style={{ marginTop: index === 0 ? 0 : 36 }}>
         <header
-          draggable
-          onDragStart={(e) => { dragRef.current = { type: 'section', id: sid }; e.dataTransfer.effectAllowed = 'move' }}
-          onDragOver={allowDrop(headerHint)}
-          onDrop={(e) => {
+          draggable={interactive}
+          onDragStart={interactive ? (e) => { dragRef.current = { type: 'section', id: sid }; e.dataTransfer.effectAllowed = 'move' } : undefined}
+          onDragOver={interactive ? allowDrop(headerHint) : undefined}
+          onDrop={interactive ? (e) => {
             e.preventDefault(); e.stopPropagation()
             if (dragRef.current?.type === 'section') dropSection(index)
             else dropBlock(sid, 0)
-          }}
+          } : undefined}
           className="group/sec flex items-center gap-2.5"
           style={{
-            cursor: 'grab',
+            cursor: interactive ? 'grab' : 'default',
             paddingBottom: 8,
             borderBottom: `1px solid ${palette.border}40`,
             outline: dropHint === headerHint ? '2px solid rgba(59,130,246,0.7)' : 'none',
             outlineOffset: 4,
             borderRadius: 4,
           }}
-          title="Glisser pour réordonner les sections"
+          title={interactive ? 'Glisser pour réordonner les sections' : undefined}
         >
-          <GripVertical size={13} className="opacity-0 group-hover/sec:opacity-60 transition-opacity" style={{ color: 'var(--node-meta)' }} />
+          {interactive && (
+            <GripVertical size={13} className="opacity-0 group-hover/sec:opacity-60 transition-opacity" style={{ color: 'var(--node-meta)' }} />
+          )}
           <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: palette.border }} />
           <h2 className="text-sm font-semibold truncate" style={{ color: palette.text }}>{g.label || 'Groupe'}</h2>
           <span className="text-[10px] flex-shrink-0" style={{ color: 'var(--node-meta)' }}>{ids.length} bloc{ids.length > 1 ? 's' : ''}</span>
         </header>
         {ids.map((bid, bi) => <BlockRow key={bid} id={bid} listKey={sid} index={bi} />)}
-        {/* Zone de dépôt en fin de section (aussi utile quand la section est vide) */}
-        <div
-          onDragOver={allowDrop(`${sid}:${ids.length}`)}
-          onDrop={(e) => { e.preventDefault(); dropBlock(sid, ids.length) }}
-          style={{
-            height: ids.length === 0 ? 44 : 18,
-            borderRadius: 8,
-            marginTop: 6,
-            border: ids.length === 0 ? `1px dashed ${palette.border}50` : 'none',
-            outline: dropHint === `${sid}:${ids.length}` ? '2px solid rgba(59,130,246,0.7)' : 'none',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}
-        >
-          {ids.length === 0 && <span className="text-[10px]" style={{ color: 'var(--node-meta)' }}>Dépose un bloc ici</span>}
-        </div>
+        {interactive ? (
+          /* Zone de dépôt en fin de section (aussi utile quand la section est vide) */
+          <div
+            onDragOver={allowDrop(`${sid}:${ids.length}`)}
+            onDrop={(e) => { e.preventDefault(); dropBlock(sid, ids.length) }}
+            style={{
+              height: ids.length === 0 ? 44 : 18,
+              borderRadius: 8,
+              marginTop: 6,
+              border: ids.length === 0 ? `1px dashed ${palette.border}50` : 'none',
+              outline: dropHint === `${sid}:${ids.length}` ? '2px solid rgba(59,130,246,0.7)' : 'none',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          >
+            {ids.length === 0 && <span className="text-[10px]" style={{ color: 'var(--node-meta)' }}>Dépose un bloc ici</span>}
+          </div>
+        ) : (
+          ids.length === 0 && <p className="text-[10px] mt-1.5" style={{ color: 'var(--node-meta)', opacity: 0.6 }}>(section vide)</p>
+        )}
       </section>
     )
   }
@@ -222,14 +238,21 @@ export default function DocumentView({ nodes, messages, insetLeft, onUpdateNode 
   const freeIds = lists[FREE] ?? []
   const isEmpty = sectionIds.length === 0 && freeIds.length === 0
 
+  const outerStyle: React.CSSProperties = embedded
+    ? { position: 'relative', width: '100%' }
+    : { position: 'absolute', inset: 0, overflowY: 'auto', paddingLeft: insetLeft, paddingRight: 48 }
+  const innerStyle: React.CSSProperties = embedded
+    ? { width: '100%' }
+    : { maxWidth: 700, margin: '0 auto', padding: '76px 0 160px' }
+
   return (
-    <div style={{ position: 'absolute', inset: 0, overflowY: 'auto', paddingLeft: insetLeft, paddingRight: 48 }}>
-      <div style={{ maxWidth: 700, margin: '0 auto', padding: '76px 0 160px' }}>
+    <div style={outerStyle}>
+      <div style={innerStyle}>
         {isEmpty ? (
-          <div className="text-center" style={{ paddingTop: 120 }}>
+          <div className="text-center" style={{ paddingTop: embedded ? 24 : 120 }}>
             <div className="text-4xl mb-3 opacity-30">📄</div>
-            <p className="text-sm" style={{ color: 'var(--node-meta)' }}>Le document reflète ton canvas</p>
-            <p className="text-xs mt-1" style={{ color: 'var(--node-meta)', opacity: 0.7 }}>Place des blocs et groupe-les : chaque groupe devient une section</p>
+            <p className="text-sm" style={{ color: 'var(--node-meta)' }}>{embedded ? 'Cette note n\'a pas encore été réorganisée' : 'Le document reflète ton canvas'}</p>
+            {!embedded && <p className="text-xs mt-1" style={{ color: 'var(--node-meta)', opacity: 0.7 }}>Place des blocs et groupe-les : chaque groupe devient une section</p>}
           </div>
         ) : (
           <>
@@ -242,11 +265,13 @@ export default function DocumentView({ nodes, messages, insetLeft, onUpdateNode 
                   <span className="text-[10px]" style={{ color: 'var(--node-meta)' }}>{freeIds.length} bloc{freeIds.length > 1 ? 's' : ''}</span>
                 </header>
                 {freeIds.map((bid, bi) => <BlockRow key={bid} id={bid} listKey={FREE} index={bi} />)}
-                <div
-                  onDragOver={allowDrop(`${FREE}:${freeIds.length}`)}
-                  onDrop={(e) => { e.preventDefault(); dropBlock(FREE, freeIds.length) }}
-                  style={{ height: 18, outline: dropHint === `${FREE}:${freeIds.length}` ? '2px solid rgba(59,130,246,0.7)' : 'none', borderRadius: 8, marginTop: 6 }}
-                />
+                {interactive && (
+                  <div
+                    onDragOver={allowDrop(`${FREE}:${freeIds.length}`)}
+                    onDrop={(e) => { e.preventDefault(); dropBlock(FREE, freeIds.length) }}
+                    style={{ height: 18, outline: dropHint === `${FREE}:${freeIds.length}` ? '2px solid rgba(59,130,246,0.7)' : 'none', borderRadius: 8, marginTop: 6 }}
+                  />
+                )}
               </section>
             )}
           </>
