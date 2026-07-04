@@ -28,9 +28,9 @@ export default async function HomePage() {
     },
   })
 
-  // Jugements A/B/C échus (file de relecture) — pour le badge « Relire »
-  const dueCount = await prisma.annotation.count({
-    where: { userId: user.id, reviewedAt: null, reviewDueAt: { lte: new Date() } },
+  // Notes réorganisées mais pas encore relues (relue = mémorisée) — pour le badge « Relire »
+  const dueCount = await prisma.canvas.count({
+    where: { userId: user.id, type: 'note-study', reviewedAt: null, nodes: { some: {} } },
   })
 
   let canvas = await prisma.canvas.findFirst({

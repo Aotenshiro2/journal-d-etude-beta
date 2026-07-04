@@ -59,6 +59,8 @@ model Canvas {
   userId          String
   noteId          String?      @unique
   noteContentHash String?
+  reviewedAt       DateTime?   // note réorganisée relue le (null = pas encore) → sort de la file
+  reviewReminderAt DateTime?   // rappel fixé par l'élève : la reproposer à cette date
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
   note            Note?        @relation(fields: [noteId], references: [id], onDelete: Cascade)
