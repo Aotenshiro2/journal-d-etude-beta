@@ -36,7 +36,7 @@ export default async function ReviewPage() {
         select: {
           id: true, title: true, favicon: true, trades: true,
           messages: { orderBy: { order: 'asc' } },
-          annotations: { where: { reviewedAt: null } },
+          annotations: true, // toutes (relues incluses) — pour VOIR les trades notés en contexte
         },
       },
     },
@@ -52,12 +52,12 @@ export default async function ReviewPage() {
     .map(c => {
       const note = c.note!
       const anns = (note.annotations ?? []) as unknown as AnnotationData[]
-      const tradesArr = Array.isArray(note.trades) ? note.trades : []
+      const tradesRaw = Array.isArray(note.trades) ? (note.trades as unknown as { id: string; outcome?: string | null }[]) : []
       const tradeV = anns.some(a => a.tradeRef != null)
       const globalV = anns.some(a => a.tradeRef == null && a.messageRef == null)
       // 3 niveaux : positions/trades → journée notée globalement → note de cours (aucune note)
-      const type: ReviewNote['type'] = (tradesArr.length > 0 || tradeV) ? 'trade' : globalV ? 'day' : 'course'
-      const hasDue = anns.some(a => a.reviewDueAt != null && new Date(a.reviewDueAt).getTime() <= now)
+      const type: ReviewNote['type'] = (tradesRaw.length > 0 || tradeV) ? 'trade' : globalV ? 'day' : 'course'
+      const hasDue = anns.some(a => !a.reviewedAt && a.reviewDueAt != null && new Date(a.reviewDueAt).getTime() <= now)
       const item: ReviewNote = {
         canvasId: c.id,
         note: { id: note.id, title: note.title ?? 'Sans titre', favicon: note.favicon },
@@ -65,6 +65,7 @@ export default async function ReviewPage() {
         nodes: c.nodes.map(mapNode),
         messages: note.messages as unknown as MessageData[],
         verdicts: anns,
+        trades: tradesRaw.map(t => ({ id: t.id, outcome: t.outcome ?? null })),
       }
       return { item, hasDue }
     })
@@ -74,19 +75,23 @@ export default async function ReviewPage() {
   const toRelire = toRelireBuilt.map(b => b.item)
 
   // ── À réorganiser : notes de cours (aucune note A/B/C) avec du contenu mais pas encore triées ──
-  const unorganized = await prisma.note.findMany({
-    where: {
-      userId, deletedAt: null,
-      annotations: { none: {} },
-      messages: { some: {} },
-      OR: [{ canvas: { is: null } }, { canvas: { nodes: { none: {} } } }],
-    },
-    select: { id: true, title: true, favicon: true },
-    orderBy: { lastModifiedAt: 'desc' },
-    take: 12,
-  })
+  const [unorganized, folders] = await Promise.all([
+    prisma.note.findMany({
+      where: {
+        userId, deletedAt: null,
+        annotations: { none: {} },
+        messages: { some: {} },
+        OR: [{ canvas: { is: null } }, { canvas: { nodes: { none: {} } } }],
+      },
+      select: { id: true, title: true, favicon: true, folderId: true, lastModifiedAt: true },
+      orderBy: { lastModifiedAt: 'desc' },
+    }),
+    prisma.folder.findMany({ where: { userId }, select: { id: true, name: true } }),
+  ])
+  const folderName = new Map(folders.map(f => [f.id, f.name]))
   const toReorganize: ReorganizeItem[] = unorganized.map(n => ({
     id: n.id, title: n.title ?? 'Sans titre', favicon: n.favicon,
+    folder: n.folderId ? folderName.get(n.folderId) ?? null : null,
   }))
 
   return (

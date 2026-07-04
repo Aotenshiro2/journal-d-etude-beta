@@ -1,8 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import Link from 'next/link'
-import { Check, SkipForward, ArrowRight, ExternalLink, TrendingUp, BookOpen, CalendarDays, Plus, FolderPlus } from 'lucide-react'
+import { Check, SkipForward, ArrowRight, ExternalLink, TrendingUp, BookOpen, CalendarDays, Plus, FolderPlus, ChevronRight, ChevronDown } from 'lucide-react'
 import { AnnotationData, MessageData, CanvasNodeData } from '@/types'
 import DocumentView from './DocumentView'
 
@@ -16,10 +16,11 @@ export type ReviewNote = {
   nodes: CanvasNodeData[]
   messages: MessageData[]
   verdicts: AnnotationData[]
+  trades: { id: string; outcome: string | null }[]
 }
 
 // Une note de cours pas encore triée : on rappelle à l'élève de faire ce travail.
-export type ReorganizeItem = { id: string; title: string; favicon: string | null }
+export type ReorganizeItem = { id: string; title: string; favicon: string | null; folder: string | null }
 
 const GRADE_CLASS: Record<string, string> = {
   A: 'bg-green-400/10 text-green-500 border-green-500/30',
@@ -37,15 +38,20 @@ const TYPE_META: Record<ReviewNote['type'], { label: string; color: string; Icon
   day: { label: 'Journée / réflexion', color: '#a78bfa', Icon: CalendarDays },
   course: { label: 'Note de cours', color: 'var(--node-meta)', Icon: BookOpen },
 }
+const OUTCOME: Record<string, { label: string; color: string }> = {
+  gain: { label: 'Gain', color: '#22c55e' },
+  perte: { label: 'Perte', color: '#ef4444' },
+  be: { label: 'BE', color: 'var(--node-meta)' },
+}
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
-// Re-jugement d'un verdict (trade / journée) — compact, sous la relecture.
-function VerdictRow({ v, onJudged }: { v: AnnotationData; onJudged: (grade: string) => void }) {
+// Re-jugement d'un verdict — compact. `label`/`dot` situent le verdict (trade, note entière…).
+function VerdictRow({ v, onJudged, label, dot }: { v: AnnotationData; onJudged: (grade: string) => void; label?: string; dot?: string }) {
   const [grade, setGrade] = useState<string>(v.grade)
   const [phrase, setPhrase] = useState<string>(v.phrase)
   const [cause, setCause] = useState<string | null>(v.causeCategory ?? null)
-  const [saved, setSaved] = useState(false)
+  const [saved, setSaved] = useState(!!v.reviewedAt)
   const [saving, setSaving] = useState(false)
   const changed = grade !== v.grade || phrase.trim() !== v.phrase || (cause ?? null) !== (v.causeCategory ?? null)
 
@@ -66,7 +72,13 @@ function VerdictRow({ v, onJudged }: { v: AnnotationData; onJudged: (grade: stri
   }
 
   return (
-    <div className="rounded-xl p-3" style={{ background: 'var(--canvas-bg)', border: '1px solid var(--node-border)', opacity: saved ? 0.6 : 1 }}>
+    <div className="rounded-xl p-3" style={{ background: 'var(--canvas-bg)', border: '1px solid var(--node-border)', opacity: saved ? 0.7 : 1 }}>
+      {label && (
+        <div className="flex items-center gap-1.5 mb-2">
+          {dot && <span className="w-2 h-2 rounded-full" style={{ background: dot }} />}
+          <span className="text-[11px] uppercase tracking-wide" style={{ color: 'var(--node-meta)' }}>{label}</span>
+        </div>
+      )}
       <div className="flex items-center gap-1.5 mb-2 flex-wrap">
         {GRADES.map(g => (
           <button key={g} disabled={saved} onClick={() => setGrade(g)}
@@ -111,6 +123,10 @@ function RelectureCard({ item, onRead, onRemind, onSkip, onJudged }: {
   const [saving, setSaving] = useState(false)
   const meta = TYPE_META[item.type]
 
+  const tradeOutcome = useMemo(() => new Map(item.trades.map(t => [t.id, t.outcome])), [item.trades])
+  const globalVerdicts = item.verdicts.filter(v => v.tradeRef == null && v.messageRef == null)
+  const tradeVerdicts = item.verdicts.filter(v => v.tradeRef != null)
+
   const addThought = async () => {
     const t = thought.trim()
     if (!t || saving) return
@@ -149,13 +165,29 @@ function RelectureCard({ item, onRead, onRemind, onSkip, onJudged }: {
         <DocumentView nodes={item.nodes} messages={item.messages} readOnly embedded />
       </div>
 
-      {/* Verdict — seulement pour un trade / journée */}
-      {item.type !== 'course' && item.verdicts.length > 0 && (
-        <div className="px-5 py-4 space-y-2.5" style={{ borderTop: '1px solid var(--float-border)', background: 'var(--canvas-bg)' }}>
-          <p className="text-[11px] uppercase tracking-wide" style={{ color: 'var(--node-meta)' }}>
-            {item.verdicts.length} verdict{item.verdicts.length > 1 ? 's' : ''} — garder ou requalifier
-          </p>
-          {item.verdicts.map(v => <VerdictRow key={v.id} v={v} onJudged={onJudged} />)}
+      {/* Verdicts — seulement pour un trade / journée */}
+      {item.type !== 'course' && (globalVerdicts.length > 0 || tradeVerdicts.length > 0) && (
+        <div className="px-5 py-4 space-y-3" style={{ borderTop: '1px solid var(--float-border)', background: 'var(--canvas-bg)' }}>
+          {globalVerdicts.length > 0 && (
+            <div className="space-y-2.5">
+              {globalVerdicts.map(v => (
+                <VerdictRow key={v.id} v={v} onJudged={onJudged} label={item.type === 'day' ? 'Verdict de la journée' : 'Verdict de la note'} />
+              ))}
+            </div>
+          )}
+          {tradeVerdicts.length > 0 && (
+            <div className="space-y-2.5">
+              <p className="text-[11px] uppercase tracking-wide" style={{ color: 'var(--node-meta)' }}>Trades notés</p>
+              {tradeVerdicts.map(v => {
+                const oc = v.tradeRef ? tradeOutcome.get(v.tradeRef) : null
+                const info = oc ? OUTCOME[oc] : null
+                return (
+                  <VerdictRow key={v.id} v={v} onJudged={onJudged}
+                    label={info ? `Trade · ${info.label}` : 'Trade'} dot={info?.color} />
+                )
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -200,38 +232,74 @@ function RelectureCard({ item, onRead, onRemind, onSkip, onJudged }: {
         </div>
         <p className="text-center text-[11px] mt-2.5" style={{ color: 'var(--node-meta)', opacity: 0.8 }}>
           Pas encore ancrée ? Me la reproposer dans{' '}
-          <button onClick={() => onRemind(7)} className="underline hover:opacity-100" style={{ color: 'var(--node-meta)' }}>7 j</button>
+          <button onClick={() => onRemind(7)} className="underline" style={{ color: 'var(--node-meta)' }}>7 j</button>
           {' · '}
-          <button onClick={() => onRemind(30)} className="underline hover:opacity-100" style={{ color: 'var(--node-meta)' }}>30 j</button>
+          <button onClick={() => onRemind(30)} className="underline" style={{ color: 'var(--node-meta)' }}>30 j</button>
         </p>
       </div>
     </div>
   )
 }
 
+// Repliable (replié par défaut) pour ne pas écraser la relecture ; groupé par dossier.
 function ReorganizeSection({ items }: { items: ReorganizeItem[] }) {
+  const [open, setOpen] = useState(false)
+
+  const groups = useMemo(() => {
+    const byFolder = new Map<string, ReorganizeItem[]>()
+    for (const it of items) {
+      const key = it.folder ?? '￿Sans dossier' // ￿ : trie « Sans dossier » en dernier
+      if (!byFolder.has(key)) byFolder.set(key, [])
+      byFolder.get(key)!.push(it)
+    }
+    return [...byFolder.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+  }, [items])
+
   return (
-    <section className="mb-8">
-      <header className="flex items-center gap-2 mb-1">
+    <section className="mb-6">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center gap-2 rounded-xl px-3.5 py-2.5"
+        style={{ background: 'var(--node-bg)', border: '1px solid var(--node-border)' }}
+      >
         <FolderPlus size={15} style={{ color: 'var(--node-title)' }} />
-        <h2 className="text-sm font-semibold" style={{ color: 'var(--node-title)' }}>À réorganiser d&apos;abord</h2>
-        <span className="text-[11px] px-1.5 rounded-full" style={{ background: 'var(--node-bg)', color: 'var(--node-meta)' }}>{items.length}</span>
-      </header>
-      <p className="text-xs mb-3" style={{ color: 'var(--node-meta)' }}>Ces notes de cours ne sont pas encore triées — c&apos;est l&apos;étape qui ancre la connaissance, avant de pouvoir les relire.</p>
-      <div className="space-y-2">
-        {items.map(n => (
-          <div key={n.id} className="flex items-center gap-2.5 rounded-xl px-3.5 py-2.5" style={{ background: 'var(--node-bg)', border: '1px solid var(--node-border)' }}>
-            {n.favicon && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={n.favicon} alt="" style={{ width: 14, height: 14, borderRadius: 3, flexShrink: 0 }} />
-            )}
-            <span className="flex-1 min-w-0 text-sm truncate" style={{ color: 'var(--node-title)' }}>{n.title}</span>
-            <Link href={`/notes/${n.id}`} className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg text-white flex-shrink-0" style={{ background: '#3b82f6' }}>
-              <FolderPlus size={13} /> Réorganiser
-            </Link>
+        <span className="text-sm font-semibold" style={{ color: 'var(--node-title)' }}>À réorganiser d&apos;abord</span>
+        <span className="text-[11px] px-1.5 rounded-full" style={{ background: 'var(--canvas-bg)', color: 'var(--node-meta)' }}>{items.length}</span>
+        <span className="flex-1" />
+        {open ? <ChevronDown size={15} style={{ color: 'var(--node-meta)' }} /> : <ChevronRight size={15} style={{ color: 'var(--node-meta)' }} />}
+      </button>
+
+      {open && (
+        <>
+          <p className="text-xs mt-2 mb-2 px-1" style={{ color: 'var(--node-meta)' }}>
+            Ces notes de cours ne sont pas encore triées — c&apos;est l&apos;étape qui ancre la connaissance, avant de pouvoir les relire.
+          </p>
+          <div className="space-y-3 pr-1" style={{ maxHeight: 300, overflowY: 'auto' }}>
+            {groups.map(([key, notes]) => (
+              <div key={key}>
+                <p className="text-[11px] uppercase tracking-wide mb-1.5 px-1 flex items-center gap-1.5" style={{ color: 'var(--node-meta)' }}>
+                  <span>{key.startsWith('￿') ? 'Sans dossier' : `📁 ${key}`}</span>
+                  <span style={{ opacity: 0.6 }}>· {notes.length}</span>
+                </p>
+                <div className="space-y-1.5">
+                  {notes.map(n => (
+                    <div key={n.id} className="flex items-center gap-2.5 rounded-xl px-3.5 py-2" style={{ background: 'var(--node-bg)', border: '1px solid var(--node-border)' }}>
+                      {n.favicon && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={n.favicon} alt="" style={{ width: 14, height: 14, borderRadius: 3, flexShrink: 0 }} />
+                      )}
+                      <span className="flex-1 min-w-0 text-sm truncate" style={{ color: 'var(--node-title)' }}>{n.title}</span>
+                      <Link href={`/notes/${n.id}`} className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg text-white flex-shrink-0" style={{ background: '#3b82f6' }}>
+                        <FolderPlus size={13} /> Réorganiser
+                      </Link>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        </>
+      )}
     </section>
   )
 }
