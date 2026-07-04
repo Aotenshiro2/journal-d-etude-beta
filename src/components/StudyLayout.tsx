@@ -219,6 +219,7 @@ export default function StudyLayout({ note, canvas: initialCanvas, isDiverged }:
             nodes={canvas.nodes}
             messages={note.messages ?? []}
             insetLeft={drawerOpen ? 344 : 64}
+            tradeMeta={tradeMeta}
             onUpdateNode={handleUpdateNode}
           />
         )}

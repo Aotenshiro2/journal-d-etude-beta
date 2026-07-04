@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { Check, SkipForward, ArrowRight, ExternalLink, TrendingUp, BookOpen, CalendarDays, Plus, FolderPlus, ChevronRight, ChevronDown, RotateCcw } from 'lucide-react'
 import { AnnotationData, MessageData, CanvasNodeData } from '@/types'
 import DocumentView from './DocumentView'
+import { TradeMeta } from './StudyCanvas'
 
 // Une note à relire = une note réorganisée. On relit d'abord la réorganisation
 // (structure, blocs, images en grand) ; le verdict A/B/C n'est central que pour
@@ -131,6 +132,15 @@ function RelectureCard({ item, onRead, onRemind, onSkip, onJudged }: {
   const globalVerdicts = item.verdicts.filter(v => v.tradeRef == null && v.messageRef == null)
   const tradeVerdicts = item.verdicts.filter(v => v.tradeRef != null)
 
+  // Métadonnées de trade pour badger les blocs dans la relecture (comme sur le canvas)
+  const tradeMeta = useMemo<Record<string, TradeMeta>>(() => {
+    const gradeByTrade = new Map<string, string>()
+    for (const v of item.verdicts) if (v.tradeRef) gradeByTrade.set(v.tradeRef, v.grade)
+    const map: Record<string, TradeMeta> = {}
+    item.trades.forEach((t, i) => { map[t.id] = { index: i + 1, outcome: t.outcome, startedAt: t.startedAt, grade: gradeByTrade.get(t.id) ?? null } })
+    return map
+  }, [item.trades, item.verdicts])
+
   const addThought = async () => {
     const t = thought.trim()
     if (!t || saving) return
@@ -166,7 +176,7 @@ function RelectureCard({ item, onRead, onRemind, onSkip, onJudged }: {
 
       {/* La réorganisation, relue (lecture seule, images cliquables en grand) */}
       <div className="px-5 py-4 overflow-y-auto" style={{ maxHeight: '48vh' }}>
-        <DocumentView nodes={item.nodes} messages={item.messages} readOnly embedded />
+        <DocumentView nodes={item.nodes} messages={item.messages} readOnly embedded tradeMeta={tradeMeta} />
       </div>
 
       {/* Verdicts — seulement pour un trade / journée */}

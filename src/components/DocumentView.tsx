@@ -3,7 +3,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { GripVertical } from 'lucide-react'
 import { MessageData, CanvasNodeData } from '@/types'
-import { parseBlockContent, GROUP_COLORS } from './StudyCanvas'
+import { parseBlockContent, GROUP_COLORS, TradeBadge, TradeMeta } from './StudyCanvas'
 import ImageLightbox from './ImageLightbox'
 
 // La vue document — l'AUTRE projection du même modèle : les groupes du canvas
@@ -20,6 +20,7 @@ interface DocumentViewProps {
   insetLeft?: number
   readOnly?: boolean
   embedded?: boolean
+  tradeMeta?: Record<string, TradeMeta>
   onUpdateNode?: (nodeId: string, patch: Partial<Pick<CanvasNodeData, 'x' | 'y' | 'parentId' | 'orderInParent'>>) => Promise<void> | void
 }
 
@@ -29,7 +30,7 @@ const FREE = '__free__'
 const byOrder = (a: CanvasNodeData, b: CanvasNodeData) =>
   ((a.orderInParent ?? 1e9) - (b.orderInParent ?? 1e9)) || (a.y - b.y) || (a.x - b.x)
 
-export default function DocumentView({ nodes, messages, insetLeft = 0, readOnly = false, embedded = false, onUpdateNode }: DocumentViewProps) {
+export default function DocumentView({ nodes, messages, insetLeft = 0, readOnly = false, embedded = false, tradeMeta, onUpdateNode }: DocumentViewProps) {
   const interactive = !readOnly
   const update = onUpdateNode ?? (() => {})
   const messageMap = useMemo(() => new Map(messages.map(m => [m.id, m])), [messages])
@@ -127,6 +128,7 @@ export default function DocumentView({ nodes, messages, insetLeft = 0, readOnly 
     const msg = node.messageId ? messageMap.get(node.messageId) : undefined
     const content = node.content ?? msg?.content ?? ''
     const { imgSrc, text } = parseBlockContent(content, msg?.type ?? 'text')
+    const trade = msg?.tradeRef ? tradeMeta?.[msg.tradeRef] : undefined
     const hintKey = `${listKey}:${index}`
     return (
       <div
@@ -150,6 +152,7 @@ export default function DocumentView({ nodes, messages, insetLeft = 0, readOnly 
           <GripVertical size={14} className="flex-shrink-0 mt-0.5 opacity-0 group-hover/row:opacity-60 transition-opacity" style={{ color: 'var(--node-meta)' }} />
         )}
         <div className="flex-1 min-w-0">
+          {trade && <div className="mb-2"><TradeBadge meta={trade} /></div>}
           {imgSrc && (
             // eslint-disable-next-line @next/next/no-img-element
             <img
