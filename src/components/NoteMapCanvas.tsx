@@ -728,9 +728,10 @@ interface NoteMapCanvasProps {
   canvas: CanvasData
   user?: { email: string; name: string; avatarUrl?: string }
   title?: string
+  dueCount?: number
 }
 
-function NoteMapCanvasInner({ notes, canvas, user, title }: NoteMapCanvasProps) {
+function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCanvasProps) {
   const pathname = usePathname()
   const activeMode = MODES.find(m => m.match(pathname)) ?? MODES[0]
   const displayTitle = title ?? activeMode.label
@@ -1088,6 +1089,17 @@ function NoteMapCanvasInner({ notes, canvas, user, title }: NoteMapCanvasProps) 
           <div className="canvas-float-pill" style={{ display: 'flex', alignItems: 'center', gap: 2, padding: '4px 8px' }}>
             <ThemeToggleInline />
             <div style={{ width: 1, height: 16, background: 'var(--float-border)', margin: '0 4px' }} />
+            <Link href="/review"
+              title="Relire tes jugements A/B/C échus"
+              style={{ fontSize: 12, color: dueCount ? 'var(--node-title)' : 'var(--node-meta)', padding: '4px 8px', borderRadius: 6, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 5 }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--node-title)'; (e.currentTarget as HTMLElement).style.background = 'var(--canvas-bg)' }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = dueCount ? 'var(--node-title)' : 'var(--node-meta)'; (e.currentTarget as HTMLElement).style.background = 'none' }}
+            >
+              Relire
+              {!!dueCount && dueCount > 0 && (
+                <span style={{ fontSize: 10, fontWeight: 600, color: '#fff', background: '#ef4444', borderRadius: 999, padding: '0 6px', lineHeight: '15px' }}>{dueCount}</span>
+              )}
+            </Link>
             {[
               { href: '/notes',    label: 'Notes' },
               { href: '/concepts', label: 'Concepts' },

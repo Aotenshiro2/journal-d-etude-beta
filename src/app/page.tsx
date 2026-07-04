@@ -28,6 +28,11 @@ export default async function HomePage() {
     },
   })
 
+  // Jugements A/B/C échus (file de relecture) — pour le badge « Relire »
+  const dueCount = await prisma.annotation.count({
+    where: { userId: user.id, reviewedAt: null, reviewDueAt: { lte: new Date() } },
+  })
+
   let canvas = await prisma.canvas.findFirst({
     where: { userId: user.id, type: 'note-map', noteId: null },
     include: { nodes: true, edges: true },
@@ -68,6 +73,7 @@ export default async function HomePage() {
           avatarUrl: user.user_metadata?.avatar_url ?? undefined,
         }}
         title="Journal d'Études"
+        dueCount={dueCount}
       />
     </div>
   )
