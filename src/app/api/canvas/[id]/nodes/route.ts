@@ -17,20 +17,22 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   try {
     const body = await req.json()
-    const isGroup = body.kind === 'group'
+    const kind = body.kind === 'group' ? 'group' : body.kind === 'text' ? 'text' : 'message'
+    const isGroup = kind === 'group'
     const node = await prisma.canvasNode.create({
       data: {
         canvasId: id,
         messageId: body.messageId ?? null,
         noteId: body.noteId ?? null,
-        kind: isGroup ? 'group' : 'message',
+        kind,
+        content: typeof body.content === 'string' ? body.content : null,
         label: typeof body.label === 'string' ? body.label : null,
         color: typeof body.color === 'string' ? body.color : null,
         parentId: typeof body.parentId === 'string' ? body.parentId : null,
         x: body.x ?? 100,
         y: body.y ?? 100,
-        width: body.width ?? (isGroup ? 360 : 280),
-        height: body.height ?? (isGroup ? 260 : 120),
+        width: body.width ?? (isGroup ? 360 : kind === 'text' ? 220 : 280),
+        height: body.height ?? (isGroup ? 260 : kind === 'text' ? 100 : 120),
       },
     })
 

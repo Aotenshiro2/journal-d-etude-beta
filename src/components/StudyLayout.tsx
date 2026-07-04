@@ -104,6 +104,22 @@ export default function StudyLayout({ note, canvas: initialCanvas, isDiverged }:
     [canvas.id]
   )
 
+  // Bloc de texte libre (kind 'text') — une pensée à soi sur le canvas
+  const handleCreateText = useCallback(
+    async (pos: { x: number; y: number }): Promise<CanvasNodeData | null> => {
+      const res = await fetch(`/api/canvas/${canvas.id}/nodes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: 'text', content: '', x: pos.x, y: pos.y }),
+      })
+      if (!res.ok) return null
+      const node: CanvasNodeData = await res.json()
+      setCanvas((prev) => ({ ...prev, nodes: [...prev.nodes, node] }))
+      return node
+    },
+    [canvas.id]
+  )
+
   // Promouvoir le nom d'un groupe en tag de la taxonomie (proto-concept → concept)
   const handlePromoteGroupTag = useCallback(async (label: string): Promise<boolean> => {
     const res = await fetch('/api/tags', {
@@ -163,6 +179,7 @@ export default function StudyLayout({ note, canvas: initialCanvas, isDiverged }:
           onConnect={handleConnect}
           onDeleteEdge={handleDeleteEdge}
           onCreateGroup={handleCreateGroup}
+          onCreateText={handleCreateText}
           onUpdateNode={handleUpdateNode}
           onPromoteGroupTag={handlePromoteGroupTag}
         />

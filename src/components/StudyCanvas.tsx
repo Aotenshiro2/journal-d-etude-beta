@@ -19,9 +19,11 @@ import {
   useViewport,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { FolderPlus, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react'
+import { FolderPlus, ZoomIn, ZoomOut, Maximize2, MousePointer2, Square, Hand, Type, Combine } from 'lucide-react'
 import { MessageData, CanvasNodeData, CanvasEdgeData } from '@/types'
 import { stripHtml, truncateText, extractImageSrc } from '@/lib/utils'
+
+type CanvasTool = 'select' | 'mark' | 'pan'
 
 interface StudyCanvasProps {
   canvasId: string
@@ -34,7 +36,8 @@ interface StudyCanvasProps {
   onConnect: (fromId: string, toId: string) => void
   onDeleteEdge: (edgeId: string) => void
   onCreateGroup: (group: { label: string; color: string; x: number; y: number; width?: number; height?: number }) => Promise<CanvasNodeData | null>
-  onUpdateNode: (nodeId: string, patch: Partial<Pick<CanvasNodeData, 'x' | 'y' | 'width' | 'height' | 'label' | 'color' | 'parentId' | 'orderInParent'>>) => Promise<void> | void
+  onCreateText: (pos: { x: number; y: number }) => Promise<CanvasNodeData | null>
+  onUpdateNode: (nodeId: string, patch: Partial<Pick<CanvasNodeData, 'x' | 'y' | 'width' | 'height' | 'label' | 'color' | 'parentId' | 'orderInParent' | 'content'>>) => Promise<void> | void
   onPromoteGroupTag: (label: string) => Promise<boolean>
 }
 
@@ -75,16 +78,38 @@ export function parseBlockContent(content: string, type: string): { imgSrc: stri
 }
 
 function MessageNode({ data, selected }: NodeProps) {
-  const d = data as { content: string; type: string; onRemove: () => void; onResizeEnd: (p: { width: number; height: number; x: number; y: number }) => void }
+  const d = data as {
+    content: string
+    type: string
+    kind: string // 'message' | 'text'
+    edited: boolean // une surcharge locale existe (copie de travail)
+    autoEdit?: boolean
+    onRemove: () => void
+    onResizeEnd: (p: { width: number; height: number; x: number; y: number }) => void
+    onSaveContent: (content: string) => void
+  }
   const { imgSrc, text } = useMemo(() => parseBlockContent(d.content, d.type), [d.content, d.type])
   const isImageOnly = !!imgSrc && !text
+  const [editing, setEditing] = useState(!!d.autoEdit)
+  const [draft, setDraft] = useState(text)
+
+  const startEdit = () => { setDraft(text); setEditing(true) }
+  const save = () => {
+    setEditing(false)
+    const v = draft.trim()
+    if (v === text) return
+    // On préserve l'image du bloc ; le texte édité devient la copie de travail
+    const html = (imgSrc ? `<img src="${imgSrc}"/>` : '') + v.split('\n').filter(Boolean).map(l => `<p>${l}</p>`).join('')
+    d.onSaveContent(html)
+  }
 
   return (
     <div
+      onDoubleClick={(e) => { e.stopPropagation(); if (!editing) startEdit() }}
       className="relative rounded-xl w-full h-full text-xs group"
-      style={isImageOnly
+      style={isImageOnly && !editing
         ? { border: '1px solid var(--node-border)', overflow: 'hidden', background: 'transparent' }
-        : { background: 'var(--node-bg)', border: '1px solid var(--node-border)', boxShadow: 'var(--node-shadow)', color: 'var(--node-preview)', padding: imgSrc ? 8 : 12, display: 'flex', flexDirection: 'column', gap: 6, overflow: 'hidden' }
+        : { background: 'var(--node-bg)', border: `1px solid ${editing ? 'rgba(59,130,246,0.6)' : 'var(--node-border)'}`, boxShadow: 'var(--node-shadow)', color: 'var(--node-preview)', padding: imgSrc && !editing ? 8 : 10, display: 'flex', flexDirection: 'column', gap: 6, overflow: 'hidden' }
       }
     >
       <NodeResizer
@@ -97,7 +122,21 @@ function MessageNode({ data, selected }: NodeProps) {
       />
       <Handle type="target" position={Position.Top} className="!bg-blue-500" />
       <Handle type="source" position={Position.Bottom} className="!bg-blue-500" />
-      {imgSrc ? (
+      {editing ? (
+        <textarea
+          autoFocus
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          onBlur={save}
+          onKeyDown={e => {
+            if (e.key === 'Escape') { e.preventDefault(); setDraft(text); setEditing(false) }
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); save() }
+          }}
+          placeholder="Écris ta pensée…"
+          className="nodrag nowheel w-full flex-1 bg-transparent resize-none outline-none leading-relaxed"
+          style={{ color: 'var(--node-title)', minHeight: 40 }}
+        />
+      ) : imgSrc ? (
         <>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
@@ -119,12 +158,21 @@ function MessageNode({ data, selected }: NodeProps) {
         </p>
       ) : (
         <div className="w-full h-full flex items-center justify-center text-sm" style={{ color: 'var(--node-meta)' }}>
-          (bloc vide)
+          {d.kind === 'text' ? 'Double-clic pour écrire' : '(bloc vide)'}
         </div>
+      )}
+      {d.edited && !editing && (
+        <span
+          className="absolute bottom-1 right-1.5 text-[9px] font-medium z-10"
+          style={{ color: '#3b82f6', opacity: 0.75 }}
+          title="Copie de travail — la note d'origine est intacte"
+        >
+          ✎
+        </span>
       )}
       <button
         onClick={d.onRemove}
-        title="Retirer du canvas (le bloc revient dans la liste du bas)"
+        title={d.kind === 'text' ? 'Supprimer ce bloc' : 'Retirer du canvas (le bloc revient dans la liste du bas)'}
         className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-red-500/85 text-white transition-opacity flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 z-10"
       >
         ✕
@@ -225,10 +273,15 @@ function sortParentsFirst(nds: Node[]): Node[] {
 }
 
 // Pill d'outils à droite — même vocabulaire visuel que la RightToolbar du canvas home
-function CanvasToolbar({ selectedCount, onGroupSelection, onNewGroup }: {
+function CanvasToolbar({ activeTool, setActiveTool, selectedCount, mergeableCount, onGroupSelection, onMergeSelection, onNewGroup, onNewText }: {
+  activeTool: CanvasTool
+  setActiveTool: (t: CanvasTool) => void
   selectedCount: number
+  mergeableCount: number
   onGroupSelection: () => void
+  onMergeSelection: () => void
   onNewGroup: (pos: { x: number; y: number }) => void
+  onNewText: (pos: { x: number; y: number }) => void
 }) {
   const { screenToFlowPosition, zoomIn, zoomOut, fitView } = useReactFlow()
 
@@ -240,21 +293,55 @@ function CanvasToolbar({ selectedCount, onGroupSelection, onNewGroup }: {
   }
   const divider = <div style={{ height: 1, background: 'var(--float-border)', margin: '2px 0' }} />
 
+  const tools: { id: CanvasTool; Icon: React.ElementType; label: string }[] = [
+    { id: 'select', Icon: MousePointer2, label: 'Sélectionner (glisser = déplacer la vue)' },
+    { id: 'mark', Icon: Square, label: 'Sélection groupée (glisser = rectangle de sélection)' },
+    { id: 'pan', Icon: Hand, label: 'Déplacer le canvas' },
+  ]
+
   return (
     <>
-      {selectedCount >= 2 && (
-        <Panel position="top-center">
-          <button
-            onClick={onGroupSelection}
-            className="canvas-float-pill"
-            style={{ padding: '7px 14px', fontSize: 12, fontWeight: 600, color: '#3b82f6', cursor: 'pointer' }}
-          >
-            Grouper la sélection ({selectedCount})
-          </button>
+      {(selectedCount >= 2 || mergeableCount === 2) && (
+        <Panel position="top-center" className="flex items-center gap-2">
+          {selectedCount >= 2 && (
+            <button
+              onClick={onGroupSelection}
+              className="canvas-float-pill"
+              style={{ padding: '7px 14px', fontSize: 12, fontWeight: 600, color: '#3b82f6', cursor: 'pointer' }}
+            >
+              Grouper la sélection ({selectedCount})
+            </button>
+          )}
+          {mergeableCount === 2 && (
+            <button
+              onClick={onMergeSelection}
+              className="canvas-float-pill"
+              title="Fusionner les deux blocs en un seul (copie de travail — les originaux restent intacts)"
+              style={{ padding: '7px 14px', fontSize: 12, fontWeight: 600, color: '#a78bfa', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+            >
+              <Combine size={13} /> Fusionner
+            </button>
+          )}
         </Panel>
       )}
       <div style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', zIndex: 20 }}>
         <div className="canvas-float-pill" style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '6px 4px' }}>
+          {tools.map(tool => (
+            <button
+              key={tool.id}
+              onClick={() => setActiveTool(tool.id)}
+              title={tool.label}
+              style={{
+                ...btnBase,
+                background: activeTool === tool.id ? 'rgba(59,130,246,0.15)' : 'none',
+                border: activeTool === tool.id ? '1px solid rgba(59,130,246,0.4)' : '1px solid transparent',
+                color: activeTool === tool.id ? '#3b82f6' : 'var(--node-meta)',
+              }}
+            >
+              <tool.Icon size={14} />
+            </button>
+          ))}
+          {divider}
           <button
             title="Nouveau groupe — une zone nommée, puis glisse des blocs dedans"
             style={btnBase}
@@ -263,6 +350,15 @@ function CanvasToolbar({ selectedCount, onGroupSelection, onNewGroup }: {
             onMouseLeave={e => { e.currentTarget.style.color = 'var(--node-meta)' }}
           >
             <FolderPlus size={14} />
+          </button>
+          <button
+            title="Bloc de texte libre — une pensée à toi sur le canvas"
+            style={btnBase}
+            onClick={(e) => onNewText(screenToFlowPosition({ x: e.clientX - 380, y: e.clientY }))}
+            onMouseEnter={e => { e.currentTarget.style.color = '#3b82f6' }}
+            onMouseLeave={e => { e.currentTarget.style.color = 'var(--node-meta)' }}
+          >
+            <Type size={14} />
           </button>
           {divider}
           {([
@@ -302,9 +398,11 @@ function StudyCanvasInner({
   onConnect: onConnectCallback,
   onDeleteEdge,
   onCreateGroup,
+  onCreateText,
   onUpdateNode,
   onPromoteGroupTag,
 }: StudyCanvasProps) {
+  const [activeTool, setActiveTool] = useState<CanvasTool>('select')
   const messageMap = useMemo(
     () => new Map(messages.map((m) => [m.id, m])),
     [messages]
@@ -361,8 +459,10 @@ function StudyCanvasInner({
     },
   }), [])
 
-  const buildMessageNode = useCallback((n: CanvasNodeData): Node => {
-    const msg = messageMap.get(n.messageId!)
+  const buildMessageNode = useCallback((n: CanvasNodeData, autoEdit = false): Node => {
+    const msg = n.messageId ? messageMap.get(n.messageId) : undefined
+    // La surcharge locale (copie de travail) prime sur le contenu du message d'origine
+    const displayContent = n.content ?? msg?.content ?? ''
     return {
       id: n.id,
       type: 'message',
@@ -370,19 +470,29 @@ function StudyCanvasInner({
       ...(n.parentId ? { parentId: n.parentId } : {}),
       style: { width: n.width, height: n.height },
       data: {
-        content: msg?.content ?? '',
+        content: displayContent,
         type: msg?.type ?? 'text',
+        kind: n.kind === 'text' ? 'text' : 'message',
+        edited: n.content != null && !!msg,
+        autoEdit,
         onRemove: () => onRemoveNode(n.id),
         onResizeEnd: (p: { width: number; height: number; x: number; y: number }) =>
           onUpdateNode(n.id, { width: p.width, height: p.height, x: p.x, y: p.y }),
+        onSaveContent: (content: string) => {
+          onUpdateNode(n.id, { content })
+          setNodes(nds => nds.map(node => node.id === n.id
+            ? { ...node, data: { ...node.data, content, edited: !!msg } }
+            : node))
+        },
       },
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messageMap, onRemoveNode, onUpdateNode])
 
   const rfNodes: Node[] = useMemo(
     () => sortParentsFirst([
       ...initialNodes.filter((n) => n.kind === 'group').map((g) => buildGroupNode(g)),
-      ...initialNodes.filter((n) => n.kind !== 'group' && n.messageId).map(buildMessageNode),
+      ...initialNodes.filter((n) => n.kind !== 'group' && (n.messageId || n.kind === 'text')).map((n) => buildMessageNode(n)),
     ]),
     [initialNodes, buildGroupNode, buildMessageNode]
   )
@@ -480,6 +590,38 @@ function StudyCanvasInner({
       creatingGroupRef.current = false
     }
   }, [onCreateGroup, nextColor, buildGroupNode, setNodes])
+
+  // Bloc de texte libre — édition immédiate à la création
+  const handleNewText = useCallback(async (pos: { x: number; y: number }) => {
+    const created = await onCreateText({ x: pos.x, y: pos.y })
+    if (!created) return
+    setNodes(nds => sortParentsFirst([...nds.filter(n => n.id !== created.id), buildMessageNode(created, true)]))
+  }, [onCreateText, buildMessageNode, setNodes])
+
+  // Fusionner exactement deux blocs sélectionnés : la copie de travail du bloc
+  // du haut absorbe le contenu affiché de l'autre ; les originaux restent intacts.
+  const selectedBlocks = nodes.filter(n => n.selected && n.type === 'message')
+  const handleMergeSelection = useCallback(() => {
+    const selected = nodes.filter(n => n.selected && n.type === 'message')
+    if (selected.length !== 2) return
+    const absY = (n: Node) => {
+      const parent = n.parentId ? nodes.find(p => p.id === n.parentId) : undefined
+      return parent ? parent.position.y + n.position.y : n.position.y
+    }
+    const [a, b] = [...selected].sort((n1, n2) => absY(n1) - absY(n2))
+    const contentOf = (n: Node) => (n.data as { content?: string }).content ?? ''
+    const merged = `${contentOf(a)}${contentOf(b)}`
+    ;(a.data as { onSaveContent: (c: string) => void }).onSaveContent(merged)
+    // Le bloc absorbé quitte le canvas (son message redevient disponible dans la liste)
+    onRemoveNode(b.id)
+    setNodes(nds => nds
+      .filter(n => n.id !== b.id)
+      .map(n => n.id === a.id
+        ? { ...n, selected: false, style: { ...n.style, height: Math.min(((a.style?.height as number) ?? 120) + ((b.style?.height as number) ?? 120) * 0.7, 520) } }
+        : n))
+    const newHeight = Math.min(((a.style?.height as number) ?? 120) + ((b.style?.height as number) ?? 120) * 0.7, 520)
+    onUpdateNode(a.id, { height: newHeight })
+  }, [nodes, onRemoveNode, onUpdateNode, setNodes])
 
   // Grouper la sélection (blocs libres uniquement)
   const selectedFree = nodes.filter(n => n.selected && n.type === 'message' && !n.parentId)
@@ -607,12 +749,21 @@ function StudyCanvasInner({
         deleteKeyCode={null}
         fitView
         fitViewOptions={{ padding: 0.12, maxZoom: 1 }}
+        selectionOnDrag={activeTool === 'mark'}
+        panOnDrag={activeTool === 'mark' ? [1, 2] : true}
+        nodesDraggable={activeTool !== 'pan'}
+        elementsSelectable={activeTool !== 'pan'}
         style={{ background: 'transparent' }}
       >
         <CanvasToolbar
+          activeTool={activeTool}
+          setActiveTool={setActiveTool}
           selectedCount={selectedFree.length}
+          mergeableCount={selectedBlocks.length}
           onGroupSelection={handleGroupSelection}
+          onMergeSelection={handleMergeSelection}
           onNewGroup={handleNewGroup}
+          onNewText={handleNewText}
         />
       </ReactFlow>
       </div>

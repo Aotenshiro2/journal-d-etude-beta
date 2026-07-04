@@ -73,6 +73,7 @@ export default async function StudyNotePage({ params }: { params: Promise<{ note
       messageId: n.messageId,
       noteId: n.noteId,
       kind: n.kind,
+      content: n.content,
       label: n.label,
       color: n.color,
       parentId: n.parentId,

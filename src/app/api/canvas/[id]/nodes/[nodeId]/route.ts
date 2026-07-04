@@ -24,6 +24,8 @@ export async function PATCH(
       height: body.height ?? undefined,
       label: typeof body.label === 'string' ? body.label : undefined,
       color: typeof body.color === 'string' ? body.color : undefined,
+      // Surcharge de contenu (copie de travail) — null explicite = revenir à l'original
+      ...(body.content !== undefined ? { content: body.content } : {}),
       // parentId : null explicite = detacher du groupe
       ...(body.parentId !== undefined ? { parentId: body.parentId } : {}),
       ...(body.orderInParent !== undefined ? { orderInParent: body.orderInParent } : {}),

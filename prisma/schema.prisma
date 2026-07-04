@@ -73,7 +73,8 @@ model CanvasNode {
   canvasId  String
   messageId String?
   noteId    String?
-  kind      String       @default("message") // 'message' | 'group' ('text' au lot 3.4)
+  kind      String       @default("message") // 'message' | 'group' | 'text' (bloc libre)
+  content   String?      // surcharge locale (copie de travail) ou contenu du bloc libre — l'original reste intact
   label     String?      // nom du groupe (proto-concept)
   color     String?      // clé de palette du groupe
   parentId  String?      // groupe parent — x/y alors RELATIFS au parent (convention React Flow)
