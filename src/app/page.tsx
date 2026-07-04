@@ -58,6 +58,8 @@ export default async function HomePage() {
     updatedAt: canvas.updatedAt,
     nodes: canvas.nodes.map(n => ({
       id: n.id, canvasId: n.canvasId, messageId: n.messageId, noteId: n.noteId,
+      kind: n.kind, content: n.content, label: n.label, color: n.color,
+      parentId: n.parentId, orderInParent: n.orderInParent,
       x: n.x, y: n.y, width: n.width, height: n.height,
     })),
     edges: canvas.edges.map(e => ({

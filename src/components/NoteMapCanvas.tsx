@@ -21,15 +21,17 @@ import {
   PanOnScrollMode,
   SelectionMode,
   useViewport,
+  Panel,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import {
   Sun, Moon, Map as MapIcon, Grid3x3, ChevronDown, ChevronLeft, ChevronRight,
   BookOpen, Lightbulb, TrendingUp, BookMarked, BarChart2, FileText,
   MousePointer2, Hand, Pencil, Square, ZoomIn, ZoomOut, Maximize2,
-  Star,
+  Star, FolderPlus,
 } from 'lucide-react'
 import { NoteData, CanvasData, MessageData } from '@/types'
+import { GroupNode, GROUP_COLORS, sortParentsFirst, type GroupHandlers } from './StudyCanvas'
 import CaptureBar from '@/components/CaptureBar'
 import { stripHtml, formatRelativeTime, extractImageSrc } from '@/lib/utils'
 import { useTheme } from '@/contexts/ThemeContext'
@@ -216,7 +218,8 @@ const NoteMapNode = React.memo(function NoteMapNode({ id, data }: NodeProps) {
   )
 })
 
-const nodeTypes = { noteMap: NoteMapNode }
+const nodeTypes = { noteMap: NoteMapNode, group: GroupNode }
+const GROUP_COLOR_KEYS = Object.keys(GROUP_COLORS)
 
 function autoPosition(index: number): { x: number; y: number } {
   const cols = 4
@@ -834,8 +837,21 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
     return map
   }, [canvas.nodes])
 
-  const initialNodes: Node[] = useMemo(() =>
-    canvas.nodes
+  // Groupes de notes (proto-dossiers / concepts) — même mécanique que les groupes de blocs
+  const groupHandlersRef = useRef<GroupHandlers>({
+    rename: () => {}, recolor: () => {}, promote: async () => false, dissolve: () => {}, resize: () => {},
+  })
+
+  const initialNodes: Node[] = useMemo(() => {
+    const groupNodes: Node[] = canvas.nodes
+      .filter(n => n.kind === 'group')
+      .map(g => ({
+        id: g.id, type: 'group',
+        position: { x: g.x, y: g.y },
+        style: { width: g.width, height: g.height, zIndex: -1 },
+        data: { label: g.label ?? 'Groupe', color: g.color ?? 'blue', handlers: groupHandlersRef },
+      }))
+    const noteNodes: Node[] = canvas.nodes
       .filter(n => n.noteId != null)
       .flatMap(n => {
         const note = notes.find(note => note.id === n.noteId)
@@ -843,10 +859,13 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
         return [{
           id: note.id, type: 'noteMap',
           position: { x: n.x, y: n.y },
+          ...(n.parentId ? { parentId: n.parentId } : {}),
           style: { width: 260, height: 152 },
           data: { note, isExpanded: false, dbNodeId: n.id, canvasId: canvas.id },
         }]
-      }),
+      })
+    return sortParentsFirst([...groupNodes, ...noteNodes])
+  },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     []
   )
@@ -891,29 +910,72 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
   }, [handleExpandNode])
 
   const handleNodeDragStop: OnNodeDrag = useCallback(async (_, node) => {
-    const { x, y } = node.position
-    const dbNodeId = savedNodeRef.current.get(node.id)
-    if (dbNodeId) {
-      await fetch(`/api/canvas/${canvas.id}/nodes/${dbNodeId}`, {
+    // Groupe déplacé : on persiste juste sa position (id RF = id DB du groupe)
+    if (node.type === 'group') {
+      await fetch(`/api/canvas/${canvas.id}/nodes/${node.id}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ x, y }),
+        body: JSON.stringify({ x: node.position.x, y: node.position.y }),
       })
-    } else {
+      return
+    }
+
+    // Carte de note : s'assurer qu'elle est persistée en base
+    let dbNodeId = savedNodeRef.current.get(node.id)
+    if (!dbNodeId) {
       const res = await fetch(`/api/canvas/${canvas.id}/nodes`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ noteId: node.id, x, y }),
+        body: JSON.stringify({ noteId: node.id, x: node.position.x, y: node.position.y }),
       })
-      if (res.ok) {
-        const data = await res.json()
-        savedNodeRef.current.set(node.id, data.id)
-        // Backfill dbNodeId + canvasId into node data
-        setNodes(nds => nds.map(n => n.id === node.id
-          ? { ...n, data: { ...n.data, dbNodeId: data.id, canvasId: canvas.id } }
-          : n
-        ))
-      }
+      if (!res.ok) return
+      const data = await res.json()
+      dbNodeId = data.id as string
+      savedNodeRef.current.set(node.id, data.id)
+      setNodes(nds => nds.map(n => n.id === node.id
+        ? { ...n, data: { ...n.data, dbNodeId: data.id, canvasId: canvas.id } } : n))
     }
-  }, [canvas.id])
+
+    // Rattachement/détachement à un groupe selon la zone survolée (« ça va avec ça » macro)
+    const parent = node.parentId ? nodes.find(n => n.id === node.parentId) : undefined
+    const abs = parent ? { x: parent.position.x + node.position.x, y: parent.position.y + node.position.y } : node.position
+    const w = 260, h = 152
+    const cx = abs.x + w / 2, cy = abs.y + h / 2
+    const area = w * h
+    let target: Node | undefined
+    let best = 0
+    for (const g of nodes) {
+      if (g.type !== 'group') continue
+      const gw = (g.style?.width as number) ?? 360
+      const gh = (g.style?.height as number) ?? 260
+      const ox = Math.max(0, Math.min(abs.x + w, g.position.x + gw) - Math.max(abs.x, g.position.x))
+      const oy = Math.max(0, Math.min(abs.y + h, g.position.y + gh) - Math.max(abs.y, g.position.y))
+      const overlap = ox * oy
+      const inside = cx >= g.position.x && cx <= g.position.x + gw && cy >= g.position.y && cy <= g.position.y + gh
+      if (overlap < area * 0.35 && !inside) continue
+      const score = overlap + (inside ? area : 0)
+      if (score > best) { best = score; target = g }
+    }
+
+    if (target && target.id !== node.parentId) {
+      const tgt = target
+      const rel = { x: abs.x - tgt.position.x, y: abs.y - tgt.position.y }
+      setNodes(nds => sortParentsFirst(nds.map(n => n.id === node.id ? { ...n, parentId: tgt.id, position: rel } : n)))
+      await fetch(`/api/canvas/${canvas.id}/nodes/${dbNodeId}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parentId: tgt.id, x: rel.x, y: rel.y }),
+      })
+    } else if (!target && node.parentId) {
+      setNodes(nds => nds.map(n => n.id === node.id ? { ...n, parentId: undefined, position: abs } : n))
+      await fetch(`/api/canvas/${canvas.id}/nodes/${dbNodeId}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parentId: null, x: abs.x, y: abs.y }),
+      })
+    } else {
+      await fetch(`/api/canvas/${canvas.id}/nodes/${dbNodeId}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ x: node.position.x, y: node.position.y }),
+      })
+    }
+  }, [canvas.id, nodes, setNodes])
 
   const onConnect = useCallback(async (params: Connection) => {
     setEdges(eds => addEdge({ ...params, type: 'smoothstep', style: { stroke: '#3b82f6', strokeWidth: 1.5, opacity: 0.5 } }, eds))
@@ -962,6 +1024,93 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
     }])
     setDropCounter(c => c + 1)
   }, [nodes, notes, canvas.id, screenToFlowPosition, setNodes])
+
+  // ── Groupes de notes : renommer / recolorer / promouvoir / dissoudre / redimensionner ──
+  const patchNode = useCallback((id: string, body: Record<string, unknown>) =>
+    fetch(`/api/canvas/${canvas.id}/nodes/${id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    }), [canvas.id])
+
+  const renameGroup = useCallback((id: string, label: string) => {
+    patchNode(id, { label })
+    setNodes(nds => nds.map(n => n.id === id ? { ...n, data: { ...n.data, label } } : n))
+  }, [patchNode, setNodes])
+
+  const recolorGroup = useCallback((id: string, color: string) => {
+    patchNode(id, { color })
+    setNodes(nds => nds.map(n => n.id === id ? { ...n, data: { ...n.data, color } } : n))
+  }, [patchNode, setNodes])
+
+  const dissolveGroup = useCallback((id: string) => {
+    const group = nodes.find(n => n.id === id)
+    if (!group) return
+    const children = nodes.filter(n => n.parentId === id)
+    for (const child of children) {
+      const abs = { x: group.position.x + child.position.x, y: group.position.y + child.position.y }
+      const childDbId = savedNodeRef.current.get(child.id)
+      if (childDbId) patchNode(childDbId, { parentId: null, x: abs.x, y: abs.y })
+    }
+    setNodes(nds => nds.filter(n => n.id !== id).map(n => {
+      if (n.parentId !== id) return n
+      const abs = { x: group.position.x + n.position.x, y: group.position.y + n.position.y }
+      return { ...n, parentId: undefined, position: abs }
+    }))
+    fetch(`/api/canvas/${canvas.id}/nodes/${id}`, { method: 'DELETE' })
+  }, [nodes, patchNode, setNodes, canvas.id])
+
+  const promoteGroupTag = useCallback(async (label: string) => {
+    const res = await fetch('/api/tags', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: label }),
+    })
+    return res.ok
+  }, [])
+
+  groupHandlersRef.current = {
+    rename: renameGroup,
+    recolor: recolorGroup,
+    promote: promoteGroupTag,
+    dissolve: dissolveGroup,
+    resize: (id, p) => {
+      patchNode(id, { width: p.width, height: p.height, x: p.x, y: p.y })
+      setNodes(nds => nds.map(n => n.id === id ? { ...n, position: { x: p.x, y: p.y }, style: { ...n.style, width: p.width, height: p.height } } : n))
+    },
+  }
+
+  // Grouper les cartes de notes sélectionnées (le pendant macro des groupes de blocs)
+  const creatingGroupRef = useRef(false)
+  const selectedFreeNotes = nodes.filter(n => n.selected && n.type === 'noteMap' && !n.parentId)
+
+  const handleGroupSelection = useCallback(async () => {
+    if (creatingGroupRef.current) return
+    creatingGroupRef.current = true
+    try {
+      const selected = nodes.filter(n => n.selected && n.type === 'noteMap' && !n.parentId)
+      if (selected.length < 2) return
+      const boxes = selected.map(n => ({ x: n.position.x, y: n.position.y, w: (n.style?.width as number) ?? 260, h: (n.style?.height as number) ?? 152 }))
+      const minX = Math.min(...boxes.map(b => b.x)) - 28
+      const minY = Math.min(...boxes.map(b => b.y)) - 52
+      const maxX = Math.max(...boxes.map(b => b.x + b.w)) + 28
+      const maxY = Math.max(...boxes.map(b => b.y + b.h)) + 28
+      const color = GROUP_COLOR_KEYS[nodes.filter(n => n.type === 'group').length % GROUP_COLOR_KEYS.length]
+      const res = await fetch(`/api/canvas/${canvas.id}/nodes`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: 'group', label: 'Groupe', color, x: minX, y: minY, width: maxX - minX, height: maxY - minY }),
+      })
+      if (!res.ok) return
+      const g = await res.json()
+      const selectedIds = new Set(selected.map(n => n.id))
+      setNodes(nds => sortParentsFirst([
+        { id: g.id, type: 'group', position: { x: g.x, y: g.y }, style: { width: g.width, height: g.height, zIndex: -1 }, data: { label: g.label ?? 'Groupe', color: g.color ?? color, autoEdit: true, handlers: groupHandlersRef } },
+        ...nds.map(n => selectedIds.has(n.id) ? { ...n, selected: false, parentId: g.id, position: { x: n.position.x - minX, y: n.position.y - minY } } : n),
+      ]))
+      for (const n of selected) {
+        const dbId = savedNodeRef.current.get(n.id)
+        if (dbId) patchNode(dbId, { parentId: g.id, x: n.position.x - minX, y: n.position.y - minY })
+      }
+    } finally {
+      creatingGroupRef.current = false
+    }
+  }, [nodes, canvas.id, patchNode, setNodes])
 
   // Tool → ReactFlow props mapping
   const toolProps = {
@@ -1150,6 +1299,17 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
             style={{ background: 'transparent', position: 'relative', zIndex: 2 }}
             {...toolProps[activeTool]}
           >
+            {selectedFreeNotes.length >= 2 && (
+              <Panel position="top-center">
+                <button
+                  onClick={handleGroupSelection}
+                  className="canvas-float-pill"
+                  style={{ padding: '7px 14px', fontSize: 12, fontWeight: 600, color: '#3b82f6', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+                >
+                  <FolderPlus size={13} /> Grouper la sélection ({selectedFreeNotes.length})
+                </button>
+              </Panel>
+            )}
             {showMiniMap && (
               <MiniMap nodeColor="var(--node-border)" maskColor="rgba(0,0,0,0.12)"
                 style={{ background: 'var(--float-bg)', border: '1px solid var(--float-border)', borderRadius: 12, backdropFilter: 'blur(12px)' }}

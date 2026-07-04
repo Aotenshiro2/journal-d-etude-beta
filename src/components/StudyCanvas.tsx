@@ -76,7 +76,7 @@ export function TradeBadge({ meta }: { meta: TradeMeta }) {
   )
 }
 
-interface GroupHandlers {
+export interface GroupHandlers {
   rename: (id: string, label: string) => void
   recolor: (id: string, color: string) => void
   promote: (label: string) => Promise<boolean>
@@ -236,7 +236,7 @@ function MessageNode({ data, selected }: NodeProps) {
 }
 
 // Zone englobante nommée — le geste « ça va avec ça »
-function GroupNode({ id, data, selected }: NodeProps) {
+export function GroupNode({ id, data, selected }: NodeProps) {
   const d = data as { label: string; color: string; autoEdit?: boolean; handlers: React.MutableRefObject<GroupHandlers> }
   const [editing, setEditing] = useState(!!d.autoEdit)
   const [draft, setDraft] = useState(d.label)
@@ -322,7 +322,7 @@ function GroupNode({ id, data, selected }: NodeProps) {
 const nodeTypes = { message: MessageNode, group: GroupNode }
 
 // React Flow exige les parents AVANT leurs enfants dans le tableau
-function sortParentsFirst(nds: Node[]): Node[] {
+export function sortParentsFirst(nds: Node[]): Node[] {
   return [...nds.filter(n => n.type === 'group'), ...nds.filter(n => n.type !== 'group')]
 }
 
