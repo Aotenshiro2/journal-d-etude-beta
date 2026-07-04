@@ -21,7 +21,8 @@ import {
 import '@xyflow/react/dist/style.css'
 import { FolderPlus, ZoomIn, ZoomOut, Maximize2, MousePointer2, Square, Hand, Type, Combine } from 'lucide-react'
 import { MessageData, CanvasNodeData, CanvasEdgeData } from '@/types'
-import { stripHtml, truncateText, extractImageSrc } from '@/lib/utils'
+import { htmlToText, truncateText, extractImageSrc } from '@/lib/utils'
+import ImageLightbox from './ImageLightbox'
 
 type CanvasTool = 'select' | 'mark' | 'pan'
 
@@ -73,7 +74,7 @@ export function parseBlockContent(content: string, type: string): { imgSrc: stri
   } else if (IMAGE_TYPES.has(type)) {
     imgSrc = extractImageSrc(content)
   }
-  const text = stripHtml(content.replace(/<img[^>]*>/gi, '')).trim()
+  const text = htmlToText(content.replace(/<img[^>]*>/gi, ''))
   return { imgSrc, text }
 }
 
@@ -88,6 +89,7 @@ function MessageNode({ data, selected }: NodeProps) {
     onResizeEnd: (p: { width: number; height: number; x: number; y: number }) => void
     onSaveContent: (content: string) => void
     onResetContent: () => void
+    onZoom: (src: string) => void
   }
   const { imgSrc, text } = useMemo(() => parseBlockContent(d.content, d.type), [d.content, d.type])
   const isImageOnly = !!imgSrc && !text
@@ -151,13 +153,13 @@ function MessageNode({ data, selected }: NodeProps) {
             draggable={false}
           />
           {text && (
-            <p className="leading-snug overflow-hidden flex-shrink-0" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+            <p className="leading-snug overflow-hidden flex-shrink-0" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', whiteSpace: 'pre-line' }}>
               {truncateText(text, 90)}
             </p>
           )}
         </>
       ) : text ? (
-        <p className="leading-relaxed overflow-hidden" style={{ display: '-webkit-box', WebkitLineClamp: 6, WebkitBoxOrient: 'vertical' }}>
+        <p className="leading-relaxed overflow-hidden" style={{ display: '-webkit-box', WebkitLineClamp: 6, WebkitBoxOrient: 'vertical', whiteSpace: 'pre-line' }}>
           {truncateText(text, 220)}
         </p>
       ) : (
@@ -182,6 +184,15 @@ function MessageNode({ data, selected }: NodeProps) {
             ↺
           </button>
         </>
+      )}
+      {imgSrc && !editing && (
+        <button
+          onClick={(e) => { e.stopPropagation(); d.onZoom(imgSrc) }}
+          title="Agrandir l'image"
+          className="nodrag absolute top-1.5 left-1.5 w-5 h-5 rounded-full bg-black/55 text-white transition-opacity flex items-center justify-center text-[11px] opacity-0 group-hover:opacity-100 z-10"
+        >
+          ⤢
+        </button>
       )}
       <button
         onClick={d.onRemove}
@@ -416,6 +427,7 @@ function StudyCanvasInner({
   onPromoteGroupTag,
 }: StudyCanvasProps) {
   const [activeTool, setActiveTool] = useState<CanvasTool>('select')
+  const [zoomSrc, setZoomSrc] = useState<string | null>(null)
   const messageMap = useMemo(
     () => new Map(messages.map((m) => [m.id, m])),
     [messages]
@@ -488,7 +500,12 @@ function StudyCanvasInner({
         kind: n.kind === 'text' ? 'text' : 'message',
         edited: n.content != null && !!msg,
         autoEdit,
-        onRemove: () => onRemoveNode(n.id),
+        onRemove: () => {
+          onRemoveNode(n.id)
+          // Retrait local immédiat — sinon le bloc restait sur le canvas ET revenait dans la liste du bas (doublon)
+          setNodes(nds => nds.filter(node => node.id !== n.id))
+        },
+        onZoom: (src: string) => setZoomSrc(src),
         onResizeEnd: (p: { width: number; height: number; x: number; y: number }) =>
           onUpdateNode(n.id, { width: p.width, height: p.height, x: p.x, y: p.y }),
         onSaveContent: (content: string) => {
@@ -631,7 +648,8 @@ function StudyCanvasInner({
     }
     const [a, b] = [...selected].sort((n1, n2) => absY(n1) - absY(n2))
     const contentOf = (n: Node) => (n.data as { content?: string }).content ?? ''
-    const merged = `${contentOf(a)}${contentOf(b)}`
+    // Séparateur discret entre les deux blocs fusionnés (rendu « ⸻ » sur sa propre ligne)
+    const merged = `${contentOf(a)}<hr/>${contentOf(b)}`
     ;(a.data as { onSaveContent: (c: string) => void }).onSaveContent(merged)
     // Le bloc absorbé quitte le canvas (son message redevient disponible dans la liste)
     onRemoveNode(b.id)
@@ -705,12 +723,23 @@ function StudyCanvasInner({
       const h = (node.style?.height as number) ?? 120
       const cx = abs.x + w / 2
       const cy = abs.y + h / 2
-      const target = nodes.find(g => {
-        if (g.type !== 'group') return false
+      const blockArea = w * h
+      // Rattachement au groupe le plus RECOUVERT (≥35 % du bloc) ou dont il contient le centre.
+      // Plus tolérant que le simple test « centre dedans » : évite les blocs « posés dessus » mais non pris.
+      let target: Node | undefined
+      let bestScore = 0
+      for (const g of nodes) {
+        if (g.type !== 'group') continue
         const gw = (g.style?.width as number) ?? 360
         const gh = (g.style?.height as number) ?? 260
-        return cx >= g.position.x && cx <= g.position.x + gw && cy >= g.position.y && cy <= g.position.y + gh
-      })
+        const ox = Math.max(0, Math.min(abs.x + w, g.position.x + gw) - Math.max(abs.x, g.position.x))
+        const oy = Math.max(0, Math.min(abs.y + h, g.position.y + gh) - Math.max(abs.y, g.position.y))
+        const overlap = ox * oy
+        const centerIn = cx >= g.position.x && cx <= g.position.x + gw && cy >= g.position.y && cy <= g.position.y + gh
+        if (overlap < blockArea * 0.35 && !centerIn) continue
+        const score = overlap + (centerIn ? blockArea : 0)
+        if (score > bestScore) { bestScore = score; target = g }
+      }
       if (target && target.id !== node.parentId) {
         const rel = { x: abs.x - target.position.x, y: abs.y - target.position.y }
         setNodes(nds => sortParentsFirst(nds.map(n => n.id === node.id ? { ...n, parentId: target.id, position: rel } : n)))
@@ -798,6 +827,8 @@ function StudyCanvasInner({
           </div>
         </div>
       )}
+
+      <ImageLightbox src={zoomSrc} onClose={() => setZoomSrc(null)} />
     </div>
   )
 }

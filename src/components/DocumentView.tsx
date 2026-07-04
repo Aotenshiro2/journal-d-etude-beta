@@ -4,6 +4,7 @@ import { useMemo, useRef, useState } from 'react'
 import { GripVertical } from 'lucide-react'
 import { MessageData, CanvasNodeData } from '@/types'
 import { parseBlockContent, GROUP_COLORS } from './StudyCanvas'
+import ImageLightbox from './ImageLightbox'
 
 // La vue document — l'AUTRE projection du même modèle : les groupes du canvas
 // deviennent des sections, les blocs une liste réordonnable. Rien de nouveau
@@ -25,6 +26,7 @@ const byOrder = (a: CanvasNodeData, b: CanvasNodeData) =>
 export default function DocumentView({ nodes, messages, insetLeft, onUpdateNode }: DocumentViewProps) {
   const messageMap = useMemo(() => new Map(messages.map(m => [m.id, m])), [messages])
   const nodeById = useMemo(() => new Map(nodes.map(n => [n.id, n])), [nodes])
+  const [zoom, setZoom] = useState<string | null>(null)
 
   // Ordre local, instancié à l'ouverture de la vue (le composant est remonté à chaque bascule)
   const [sectionIds, setSectionIds] = useState<string[]>(() =>
@@ -140,7 +142,15 @@ export default function DocumentView({ nodes, messages, insetLeft, onUpdateNode 
         <div className="flex-1 min-w-0">
           {imgSrc && (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={imgSrc} alt="" className="rounded-lg object-contain" style={{ maxHeight: 340, maxWidth: '100%', marginBottom: text ? 8 : 0 }} draggable={false} />
+            <img
+              src={imgSrc}
+              alt=""
+              className="rounded-lg object-contain"
+              style={{ maxHeight: 340, maxWidth: '100%', marginBottom: text ? 8 : 0, cursor: 'zoom-in' }}
+              draggable={false}
+              title="Cliquer pour agrandir"
+              onClick={(e) => { e.stopPropagation(); setZoom(imgSrc) }}
+            />
           )}
           {text && (
             <p className="text-[13px] leading-relaxed whitespace-pre-wrap" style={{ color: 'var(--node-preview)' }}>{text}</p>
@@ -242,6 +252,7 @@ export default function DocumentView({ nodes, messages, insetLeft, onUpdateNode 
           </>
         )}
       </div>
+      <ImageLightbox src={zoom} onClose={() => setZoom(null)} />
     </div>
   )
 }
