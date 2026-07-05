@@ -26,9 +26,9 @@ import {
 import '@xyflow/react/dist/style.css'
 import {
   Sun, Moon, Map as MapIcon, Grid3x3, ChevronDown, ChevronLeft, ChevronRight,
-  BookOpen, Lightbulb, TrendingUp, BookMarked, BarChart2, FileText,
+  BookOpen, Lightbulb, BookMarked, BarChart2, FileText,
   MousePointer2, Hand, Pencil, Square, ZoomIn, ZoomOut, Maximize2,
-  Star, FolderPlus,
+  Star, FolderPlus, Compass,
 } from 'lucide-react'
 import { NoteData, CanvasData, MessageData } from '@/types'
 import { GroupNode, GROUP_COLORS, sortParentsFirst, type GroupHandlers } from './StudyCanvas'
@@ -56,12 +56,14 @@ type Tool = 'select' | 'mark' | 'connect' | 'pan'
 
 // ─── Modes ────────────────────────────────────────────────────────────────────
 
+// Le menu dépliant = les ESPACES (pour garder l'écran épuré). Les actions rapides du
+// flux (Relire, Notes, Guide) vivent en bas-droite, pas ici.
 const MODES = [
-  { label: 'Étudier mes notes',       href: '/',          Icon: BookOpen,   match: (p: string) => p === '/' || p.startsWith('/study') || p.startsWith('/notes') },
-  { label: 'Observer les concepts',   href: '/concepts',  Icon: Lightbulb,  match: (p: string) => p === '/concepts' },
-  { label: 'Étudier le Price Action', href: '/review',    Icon: TrendingUp, match: (p: string) => p === '/review' },
-  { label: 'Documenter mes trades',   href: '/journal',   Icon: BookMarked, match: (p: string) => p === '/journal' },
-  { label: 'Analyser mes données',    href: '/analytics', Icon: BarChart2,  match: (p: string) => p === '/analytics' },
+  { label: 'Étudier mes notes',     href: '/',          Icon: BookOpen,   match: (p: string) => p === '/' || p.startsWith('/study') || p.startsWith('/notes') },
+  { label: 'Observer les concepts', href: '/concepts',  Icon: Lightbulb,  match: (p: string) => p === '/concepts' },
+  { label: 'Analyser mes données',  href: '/analytics', Icon: BarChart2,  match: (p: string) => p === '/analytics' },
+  { label: 'Pattern Maps',          href: '/patterns',  Icon: Compass,    match: (p: string) => p === '/patterns' },
+  { label: 'Documenter mes trades', href: '/journal',   Icon: BookMarked, match: (p: string) => p === '/journal' },
 ]
 
 // ─── Source badge ─────────────────────────────────────────────────────────────
@@ -1260,11 +1262,8 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
               )}
             </Link>
             {[
-              { href: '/notes',     label: 'Notes' },
-              { href: '/concepts',  label: 'Concepts' },
-              { href: '/patterns',  label: 'Patterns' },
-              { href: '/analytics', label: 'Analyse' },
-              { href: '/guide',     label: 'Guide' },
+              { href: '/notes', label: 'Notes' },
+              { href: '/guide', label: 'Guide' },
             ].map(({ href, label }) => (
               <Link key={href} href={href}
                 style={{ fontSize: 12, color: 'var(--node-meta)', padding: '4px 8px', borderRadius: 6, textDecoration: 'none', display: 'block' }}
