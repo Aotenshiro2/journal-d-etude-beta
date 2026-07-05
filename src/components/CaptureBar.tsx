@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useState, useRef, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import { ArrowUp, Plus } from 'lucide-react'
 
 interface CaptureBarProps {
@@ -9,7 +10,17 @@ interface CaptureBarProps {
   onMessageAdded: () => void
 }
 
+// Commandes lançables depuis la capture box (toujours à portée, même sans note sélectionnée)
+const COMMANDS = [
+  { cmd: '/guide', label: 'Le parcours (aide)', href: '/guide' },
+  { cmd: '/relire', label: 'Relecture', href: '/review' },
+  { cmd: '/concepts', label: 'Concepts', href: '/concepts' },
+  { cmd: '/analyse', label: 'Analyse', href: '/analytics' },
+  { cmd: '/patterns', label: 'Pattern Maps', href: '/patterns' },
+]
+
 export default function CaptureBar({ noteId, noteTitle, onMessageAdded }: CaptureBarProps) {
+  const router = useRouter()
   const [text, setText] = useState('')
   const [isSending, setIsSending] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
@@ -18,9 +29,17 @@ export default function CaptureBar({ noteId, noteTitle, onMessageAdded }: Captur
 
   const MAX_HEIGHT = 160 // 8 lignes × ~20px
 
-  const disabled = !noteId
+  const disabled = !noteId // pas de note → on ne peut pas ÉCRIRE, mais on peut lancer une commande
   const busy = isSending || isUploading
   const hasText = text.trim().length > 0
+
+  const trimmed = text.trim()
+  const isCommand = trimmed.startsWith('/')
+  const cmdQuery = trimmed.toLowerCase().split(/\s/)[0]
+  const filtered = isCommand ? COMMANDS.filter(c => c.cmd.startsWith(cmdQuery) || c.label.toLowerCase().includes(cmdQuery.slice(1))) : []
+
+  const resetInput = () => { setText(''); if (textareaRef.current) textareaRef.current.style.height = 'auto' }
+  const runCommand = (href: string) => { resetInput(); router.push(href) }
 
   const handleSubmit = useCallback(async () => {
     if (!noteId || !hasText || busy) return
@@ -44,10 +63,13 @@ export default function CaptureBar({ noteId, noteTitle, onMessageAdded }: Captur
     }
   }, [noteId, hasText, text, busy, onMessageAdded])
 
+  const canSend = hasText && !busy && (!disabled || isCommand)
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      handleSubmit()
+      if (isCommand && filtered[0]) runCommand(filtered[0].href)
+      else handleSubmit()
     }
   }
 
@@ -113,6 +135,30 @@ export default function CaptureBar({ noteId, noteTitle, onMessageAdded }: Captur
 
   return (
     <div style={containerStyle}>
+      {/* Menu de commandes (au-dessus de la box) */}
+      {filtered.length > 0 && (
+        <div style={{
+          position: 'absolute', bottom: 'calc(100% + 8px)', left: 0, right: 0,
+          background: 'var(--surface-match)', border: '1.5px solid var(--surface-match-border)',
+          borderRadius: 16, boxShadow: '0 4px 24px rgba(0,0,0,0.25)', padding: 4, overflow: 'hidden',
+        }}>
+          {filtered.map((c, i) => (
+            <button
+              key={c.cmd}
+              onMouseDown={e => { e.preventDefault(); runCommand(c.href) }}
+              style={{
+                display: 'flex', width: '100%', alignItems: 'center', gap: 8,
+                padding: '8px 10px', border: 'none', borderRadius: 10, cursor: 'pointer', textAlign: 'left',
+                background: i === 0 ? 'rgba(59,130,246,0.12)' : 'none', color: 'var(--surface-match-fg)',
+              }}
+            >
+              <span style={{ fontSize: 12, fontWeight: 600 }}>{c.cmd}</span>
+              <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>{c.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
       <input
         ref={fileInputRef}
         type="file"
@@ -138,10 +184,10 @@ export default function CaptureBar({ noteId, noteTitle, onMessageAdded }: Captur
             el.style.height = Math.min(el.scrollHeight, MAX_HEIGHT) + 'px'
           }}
           onKeyDown={handleKeyDown}
-          disabled={disabled || busy}
+          disabled={busy}
           placeholder={disabled
-            ? 'Sélectionne une note pour écrire...'
-            : `Écrire dans « ${noteTitle ?? ''} »...`
+            ? 'Tape /guide pour l’aide — ou choisis une note pour écrire'
+            : `Écrire dans « ${noteTitle ?? ''} » — ou tape / pour une commande`
           }
           style={{
             width: '100%',
@@ -153,7 +199,7 @@ export default function CaptureBar({ noteId, noteTitle, onMessageAdded }: Captur
             lineHeight: '20px',
             overflowY: 'auto',
             maxHeight: MAX_HEIGHT,
-            color: disabled ? 'var(--muted-foreground)' : 'var(--surface-match-fg)',
+            color: 'var(--surface-match-fg)',
             caretColor: 'var(--surface-match-fg)',
             fontFamily: 'inherit',
           }}
@@ -182,22 +228,23 @@ export default function CaptureBar({ noteId, noteTitle, onMessageAdded }: Captur
           }
         </button>
 
-        {/* ↑ send button */}
+        {/* ↑ send / run command button */}
         <button
           style={{
             ...iconBtnStyle,
-            background: hasText && !disabled ? '#3b82f6' : 'rgba(0,0,0,0.08)',
-            color: hasText && !disabled ? '#fff' : 'var(--muted-foreground)',
+            background: canSend ? '#3b82f6' : 'rgba(0,0,0,0.08)',
+            color: canSend ? '#fff' : 'var(--muted-foreground)',
             borderRadius: '50%',
             width: 32,
             height: 32,
-            opacity: disabled ? 0.4 : 1,
+            cursor: canSend ? 'pointer' : 'not-allowed',
+            opacity: 1,
           }}
-          onClick={handleSubmit}
-          disabled={disabled || !hasText || busy}
-          title="Envoyer (Entrée)"
-          onMouseEnter={e => { if (hasText && !disabled) (e.currentTarget as HTMLElement).style.background = '#2563eb' }}
-          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = hasText && !disabled ? '#3b82f6' : 'rgba(0,0,0,0.08)' }}
+          onClick={() => { if (isCommand && filtered[0]) runCommand(filtered[0].href); else handleSubmit() }}
+          disabled={!canSend}
+          title={isCommand ? 'Lancer la commande (Entrée)' : 'Envoyer (Entrée)'}
+          onMouseEnter={e => { if (canSend) (e.currentTarget as HTMLElement).style.background = '#2563eb' }}
+          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = canSend ? '#3b82f6' : 'rgba(0,0,0,0.08)' }}
         >
           {isSending
             ? <span style={{ fontSize: 10 }}>…</span>
