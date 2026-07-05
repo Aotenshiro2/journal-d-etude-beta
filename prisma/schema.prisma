@@ -173,3 +173,24 @@ model Annotation {
   @@index([userId, reviewDueAt])
   @@index([noteId])
 }
+
+// Fiche « Pattern Map » (Tendler) : l'escalade d'un problème récurrent + la correction
+model Pattern {
+  id              String   @id @default(uuid())
+  userId          String
+  name            String   @default("Nouveau pattern")
+  area            String?  // avidité | peur | tilt | confiance | discipline
+  trigger         String?
+  thoughts        String?
+  emotions        String?
+  behaviors       String?
+  actions         String?
+  decisionShift   String?
+  perceptionShift String?
+  mistake         String?
+  correction      String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([userId])
+}
