@@ -1,52 +1,101 @@
 import Link from 'next/link'
+import { createClient } from '@/lib/supabase/server'
+import { redirect } from 'next/navigation'
+import AppHeader from '@/components/AppHeader'
+import { Camera, LayoutGrid, BookOpen, Lightbulb, PenLine, BarChart2, Compass, ArrowRight } from 'lucide-react'
 
-export default function GuidePage() {
+type Step = {
+  icon: React.ElementType
+  title: string
+  desc: string
+  href?: string
+  hrefLabel?: string
+  hint?: string // action hors app (extension)
+}
+type Track = { key: string; label: string; tint: string; steps: Step[] }
+
+const TRACKS: Track[] = [
+  {
+    key: 'apprendre', label: 'Apprendre — ancrer la connaissance', tint: '#3b82f6',
+    steps: [
+      { icon: Camera, title: 'Capturer', desc: 'Avec l’extension « Le Carnet du Trader », capture tes cours et tes séances sans friction, pendant que tu regardes ou que tu trades. La mémoire s’étiole vite : capture tout de suite.', hint: 'Extension Chrome' },
+      { icon: LayoutGrid, title: 'Réorganiser', desc: 'Ouvre une note depuis la carte, trie ses blocs en groupes (« ça va avec ça »), bascule en vue document. C’est ce tri qui ancre vraiment la connaissance — ta note d’origine n’est jamais touchée.', href: '/', hrefLabel: 'Ouvrir la carte' },
+      { icon: BookOpen, title: 'Relire', desc: 'Reviens sur tes notes réorganisées pour les mémoriser. Une note relue est considérée acquise et sort de la file ; tu peux te la reproposer plus tard.', href: '/review', hrefLabel: 'Relecture' },
+      { icon: Lightbulb, title: 'Observer les concepts', desc: 'Les contextes et variantes qui reviennent dans tes notes émergent ici, avec leurs liens (« va avec »).', href: '/concepts', hrefLabel: 'Concepts' },
+    ],
+  },
+  {
+    key: 'edge', label: 'Trouver ton edge — juger et analyser', tint: '#f59e0b',
+    steps: [
+      { icon: PenLine, title: 'Noter A/B/C', desc: 'Sur tes trades et tes journées : une lettre (A/B/C), une phrase. Découplé du résultat — un A peut être une perte bien jouée. « 30 trades, une lettre, une phrase », puis relis et élimine les C.', hint: 'Depuis l’extension et la relecture' },
+      { icon: BarChart2, title: 'Analyser', desc: 'Où tu perds (causes), calibration (ta note face au résultat), progression dans le temps. L’objectif n’est pas de multiplier les A, mais de faire fondre tes C — remonter ton plancher.', href: '/analytics', hrefLabel: 'Analyse' },
+    ],
+  },
+  {
+    key: 'mental', label: 'Le mental game — ta psychologie', tint: '#a78bfa',
+    steps: [
+      { icon: Compass, title: 'Pattern Maps', desc: 'Cartographie tes problèmes récurrents (tilt, revenge, FOMO) : l’escalade du déclencheur à l’erreur, pour repérer ton point de bascule avant qu’il n’explose. Relis-les à ton warmup.', href: '/patterns', hrefLabel: 'Pattern Maps' },
+    ],
+  },
+]
+
+export default async function GuidePage() {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/auth')
+
+  let n = 0
   return (
-    <div className="min-h-screen bg-gray-950 text-white">
-      <header className="flex items-center px-6 py-4 border-b border-white/10">
-        <Link href="/" className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors">
-          <span>←</span>
-          <span className="text-sm">Retour</span>
-        </Link>
-      </header>
-      <main className="max-w-2xl mx-auto px-6 py-12">
-        <h1 className="text-2xl font-bold mb-2">Guide d&apos;utilisation</h1>
-        <p className="text-gray-400 mb-10">Comment tirer le maximum de l&apos;AOKnowledge Journal</p>
+    <div className="flex flex-col h-screen" style={{ background: 'var(--canvas-bg)' }}>
+      <AppHeader user={{ email: user.email ?? '', name: user.user_metadata?.full_name ?? '' }} backHref="/" backLabel="Accueil" title="Guide" />
+      <div className="flex-1 overflow-y-auto">
+        <div className="max-w-2xl mx-auto px-6 py-8">
+          <h1 className="text-xl font-bold mb-1" style={{ color: 'var(--node-title)' }}>Le parcours</h1>
+          <p className="text-sm mb-8" style={{ color: 'var(--node-meta)' }}>
+            De la capture d’un cours à la lecture de tes propres patterns. Suis le chemin dans l’ordre — chaque étape prépare la suivante.
+          </p>
 
-        <div className="space-y-8">
-          <section>
-            <h2 className="text-lg font-semibold mb-3 text-yellow-300">📘 Étudier mes notes</h2>
-            <ol className="space-y-2 text-sm text-gray-300 list-decimal list-inside">
-              <li>Installe l&apos;extension Chrome AOKnowledge et capture tes notes de cours.</li>
-              <li>Tes notes apparaissent automatiquement dans <strong>Étudier mes notes</strong>.</li>
-              <li>Clique sur <strong>Étudier</strong> pour ouvrir le mode d&apos;étude.</li>
-              <li>Glisse les blocs du panneau bas sur le canvas pour organiser les idées.</li>
-              <li>Connecte les blocs entre eux pour créer des liens conceptuels.</li>
-              <li>Clique sur un bloc pour lui ajouter des tags/concepts.</li>
-              <li>Utilise <strong>Lier les notes</strong> pour une carte inter-notes.</li>
-            </ol>
-          </section>
+          <div className="space-y-8">
+            {TRACKS.map(track => (
+              <section key={track.key}>
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="w-2 h-2 rounded-full" style={{ background: track.tint }} />
+                  <h2 className="text-xs font-semibold uppercase tracking-wide" style={{ color: track.tint }}>{track.label}</h2>
+                </div>
+                <div className="space-y-2.5">
+                  {track.steps.map(step => {
+                    n += 1
+                    return (
+                      <div key={step.title} className="flex gap-3 rounded-2xl p-4" style={{ background: 'var(--node-bg)', border: '1px solid var(--node-border)', boxShadow: 'var(--node-shadow)' }}>
+                        <div className="flex flex-col items-center flex-shrink-0">
+                          <span className="flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold" style={{ background: 'var(--canvas-bg)', color: track.tint, border: `1px solid ${track.tint}55` }}>{n}</span>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <step.icon size={15} style={{ color: track.tint }} />
+                            <h3 className="text-sm font-semibold" style={{ color: 'var(--node-title)' }}>{step.title}</h3>
+                            {step.hint && <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: 'var(--canvas-bg)', color: 'var(--node-meta)' }}>{step.hint}</span>}
+                          </div>
+                          <p className="text-[13px] leading-relaxed" style={{ color: 'var(--node-preview)' }}>{step.desc}</p>
+                          {step.href && (
+                            <Link href={step.href} className="inline-flex items-center gap-1 text-xs font-medium mt-2" style={{ color: track.tint }}>
+                              {step.hrefLabel} <ArrowRight size={12} />
+                            </Link>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </section>
+            ))}
+          </div>
 
-          <section>
-            <h2 className="text-lg font-semibold mb-3 text-blue-400">💡 Bonnes pratiques</h2>
-            <ul className="space-y-2 text-sm text-gray-300 list-disc list-inside">
-              <li>Capture immédiatement après lecture — la mémoire s&apos;étiole vite.</li>
-              <li>1 canvas = 1 note : ne mélange pas plusieurs sources.</li>
-              <li>Utilise des tags cohérents entre notes pour retrouver facilement.</li>
-              <li>La page <strong>Concepts</strong> regroupe tous tes blocs taggés.</li>
-            </ul>
-          </section>
-
-          <section>
-            <h2 className="text-lg font-semibold mb-3 text-gray-400">🚀 À venir</h2>
-            <ul className="space-y-2 text-sm text-gray-500 list-disc list-inside">
-              <li>Observer le marché — flux + analyse technique</li>
-              <li>Journal de trading — suivi émotionnel et stats</li>
-              <li>Analyser mes données — edge identification</li>
-            </ul>
-          </section>
+          <p className="text-center text-[11px] mt-10" style={{ color: 'var(--node-meta)', opacity: 0.7 }}>
+            Simple en apparence, puissant en profondeur. Reviens ici quand tu veux resituer une étape.
+          </p>
         </div>
-      </main>
+      </div>
     </div>
   )
 }
