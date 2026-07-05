@@ -1260,10 +1260,11 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
               )}
             </Link>
             {[
-              { href: '/notes',    label: 'Notes' },
-              { href: '/concepts', label: 'Concepts' },
-              { href: '/patterns', label: 'Patterns' },
-              { href: '/guide',    label: 'Guide' },
+              { href: '/notes',     label: 'Notes' },
+              { href: '/concepts',  label: 'Concepts' },
+              { href: '/patterns',  label: 'Patterns' },
+              { href: '/analytics', label: 'Analyse' },
+              { href: '/guide',     label: 'Guide' },
             ].map(({ href, label }) => (
               <Link key={href} href={href}
                 style={{ fontSize: 12, color: 'var(--node-meta)', padding: '4px 8px', borderRadius: 6, textDecoration: 'none', display: 'block' }}
