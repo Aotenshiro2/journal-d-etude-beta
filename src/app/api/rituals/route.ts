@@ -1,31 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { createClient } from '@/lib/supabase/server'
+import { getUserId } from '@/lib/api-auth' // Bearer (extension) + cookies (journal)
 
 const TEXT_FIELDS = ['physical', 'emotional', 'dominantThought', 'objective', 'errors', 'lesson', 'recenter'] as const
 
-async function uid() {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  return user?.id ?? null
-}
-
-export async function GET() {
-  const userId = await uid()
+export async function GET(req: NextRequest) {
+  const userId = await getUserId(req)
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const rituals = await prisma.ritual.findMany({ where: { userId }, orderBy: { createdAt: 'desc' } })
   return NextResponse.json(rituals)
 }
 
-export async function POST() {
-  const userId = await uid()
+export async function POST(req: NextRequest) {
+  const userId = await getUserId(req)
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  const ritual = await prisma.ritual.create({ data: { userId } })
+  // Body optionnel : l'extension peut créer une séance déjà remplie (warmup)
+  let seed: Record<string, unknown> = {}
+  try { seed = await req.json() } catch { /* pas de body */ }
+  const data: Record<string, string | number | boolean> = {}
+  for (const f of TEXT_FIELDS) if (typeof seed[f] === 'string') data[f] = seed[f] as string
+  if (typeof seed.emotionLevel === 'number') data.emotionLevel = Math.max(0, Math.min(100, Math.round(seed.emotionLevel)))
+  const ritual = await prisma.ritual.create({ data: { userId, ...data } })
   return NextResponse.json(ritual, { status: 201 })
 }
 
 export async function PATCH(req: NextRequest) {
-  const userId = await uid()
+  const userId = await getUserId(req)
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const body = await req.json()
   if (typeof body.id !== 'string') return NextResponse.json({ error: 'id requis' }, { status: 400 })
@@ -47,7 +47,7 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const userId = await uid()
+  const userId = await getUserId(req)
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const id = new URL(req.url).searchParams.get('id')
   if (!id) return NextResponse.json({ error: 'id requis' }, { status: 400 })
