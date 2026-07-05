@@ -193,6 +193,20 @@ model Ritual {
   @@index([userId])
 }
 
+// Carte A/B/C-game (Tendler) : la réflexion vivante de l'élève sur ses niveaux de jeu,
+// nourrie par ses trades notés A/B/C. 1 ligne par user. `focus` = le chantier du moment
+// (le C-game à remonter, inchworm) — destiné à s'afficher en rappel dans le warmup.
+model AbcGame {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  aGame     String   @default("")
+  bGame     String   @default("")
+  cGame     String   @default("")
+  focus     String   @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 // Fiche « Pattern Map » (Tendler) : l'escalade d'un problème récurrent + la correction
 model Pattern {
   id              String   @id @default(uuid())

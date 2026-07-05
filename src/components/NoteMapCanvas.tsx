@@ -28,7 +28,7 @@ import {
   Sun, Moon, Map as MapIcon, Grid3x3, ChevronDown, ChevronLeft, ChevronRight,
   BookOpen, Lightbulb, BookMarked, BarChart2, FileText,
   MousePointer2, Hand, Pencil, Square, ZoomIn, ZoomOut, Maximize2,
-  Star, FolderPlus, Compass, Sunrise,
+  Star, FolderPlus, Compass, Sunrise, Layers,
 } from 'lucide-react'
 import { NoteData, CanvasData, MessageData } from '@/types'
 import { GroupNode, GROUP_COLORS, sortParentsFirst, type GroupHandlers } from './StudyCanvas'
@@ -63,6 +63,7 @@ const MODES = [
   { label: 'Observer les concepts', href: '/concepts',  Icon: Lightbulb,  match: (p: string) => p === '/concepts' },
   { label: 'Analyser mes données',  href: '/analytics', Icon: BarChart2,  match: (p: string) => p === '/analytics' },
   { label: 'Pattern Maps',          href: '/patterns',  Icon: Compass,    match: (p: string) => p === '/patterns' },
+  { label: 'Carte A/B/C-game',      href: '/game',      Icon: Layers,     match: (p: string) => p === '/game' },
   { label: 'Rituel de séance',      href: '/session',   Icon: Sunrise,    match: (p: string) => p === '/session' },
   { label: 'Documenter mes trades', href: '/journal',   Icon: BookMarked, match: (p: string) => p === '/journal' },
 ]
