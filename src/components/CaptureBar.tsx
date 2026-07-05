@@ -17,6 +17,7 @@ const COMMANDS = [
   { cmd: '/concepts', label: 'Concepts', href: '/concepts' },
   { cmd: '/analyse', label: 'Analyse', href: '/analytics' },
   { cmd: '/patterns', label: 'Pattern Maps', href: '/patterns' },
+  { cmd: '/seance', label: 'Rituel de séance', href: '/session' },
 ]
 
 export default function CaptureBar({ noteId, noteTitle, onMessageAdded }: CaptureBarProps) {

@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import AppHeader from '@/components/AppHeader'
-import { Camera, LayoutGrid, BookOpen, Lightbulb, PenLine, BarChart2, Compass, ArrowRight, ExternalLink } from 'lucide-react'
+import { Camera, LayoutGrid, BookOpen, Lightbulb, PenLine, BarChart2, Compass, Sunrise, ArrowRight, ExternalLink } from 'lucide-react'
 
 const CWS = 'https://chromewebstore.google.com/detail/trading-notes-by-aoknowle/phajegonlmgnjkkfdooedoddnmgpheic'
 const EXT_PAGE = 'https://aoknowledge.com/library/extension'
@@ -43,6 +43,7 @@ const TRACKS: Track[] = [
   {
     key: 'mental', label: 'Le mental game — ta psychologie', tint: '#a78bfa',
     steps: [
+      { icon: Sunrise, title: 'Rituel de séance', desc: 'Un warmup avant (ton état, ta pensée dominante, ton objectif du jour) et un cooldown après (erreurs, leçon, comment tu te recentres). Il cadre ta journée et décharge ton émotion accumulée.', links: [{ label: 'Rituel de séance', href: '/session' }] },
       { icon: Compass, title: 'Pattern Maps', desc: 'Cartographie tes problèmes récurrents (tilt, revenge, FOMO) : l’escalade du déclencheur à l’erreur, pour repérer ton point de bascule avant qu’il n’explose. Relis-les à ton warmup.', links: [{ label: 'Pattern Maps', href: '/patterns' }] },
     ],
   },
