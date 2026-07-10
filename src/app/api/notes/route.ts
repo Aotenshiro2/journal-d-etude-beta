@@ -38,6 +38,7 @@ export async function GET(req: NextRequest) {
       userId: true,
       concepts: true,
       trades: true,
+      warmups: true,
       folderId: true,
       tags: { select: { tag: { select: { name: true } } } },
     },
@@ -77,7 +78,7 @@ export async function POST(req: NextRequest) {
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await req.json()
-  const { title, content, sourceUrl, favicon, source, lastSyncAt, messages, createdAt, extensionVersion, extensionNoteId, tags, concepts, trades, folderId, folderName } = body
+  const { title, content, sourceUrl, favicon, source, lastSyncAt, messages, createdAt, extensionVersion, extensionNoteId, tags, concepts, trades, warmups, folderId, folderName } = body
 
   // Dossier extension : upsert du nom pour que le pull puisse tout restaurer
   if (typeof folderId === 'string' && folderId && typeof folderName === 'string' && folderName.trim()) {
@@ -93,6 +94,9 @@ export async function POST(req: NextRequest) {
     : null
 
   const cleanTrades = Array.isArray(trades) ? trades.filter((t: unknown) => t != null && typeof t === 'object') : null
+
+  // Warmups de séance (multi-séances) — JSON, source de vérité extension, comme trades
+  const cleanWarmups = Array.isArray(warmups) ? warmups.filter((w: unknown) => w != null && typeof w === 'object') : null
 
   const contentHash = content ? crypto.createHash('sha256').update(content).digest('hex') : null
 
@@ -135,6 +139,7 @@ export async function POST(req: NextRequest) {
         ...(extensionNoteId && !existing.extensionNoteId ? { extensionNoteId } : {}),
         ...(cleanConcepts !== null ? { concepts: cleanConcepts } : {}),
         ...(cleanTrades !== null ? { trades: cleanTrades } : {}),
+        ...(cleanWarmups !== null ? { warmups: cleanWarmups } : {}),
         ...(folderId !== undefined ? { folderId: folderId ?? null } : {}),
         lastModifiedAt: new Date(),
       },
@@ -155,6 +160,7 @@ export async function POST(req: NextRequest) {
         extensionNoteId: extensionNoteId ?? null,
         concepts: cleanConcepts ?? [],
         ...(cleanTrades !== null ? { trades: cleanTrades } : {}),
+        ...(cleanWarmups !== null ? { warmups: cleanWarmups } : {}),
         folderId: folderId ?? null,
       },
     })
