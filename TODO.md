@@ -75,7 +75,12 @@ NEXTAUTH_URL = https://[VERCEL-URL]
 
 ## 🆕 Mise à jour du 10 juillet 2026 — évolutions à venir
 
-### Concepts — compteur de journalisation
+Ordre de priorité global validé par Brice (extension + journal confondus) :
+1. fix warmup extension → **2. homogénéisation UI (ici)** → 3. DOL extension
+→ **4. compteur de concepts (ici)**. Le pont Edgyx passe devant tout
+(dossier envoyé, en attente du retour de Geoffrey).
+
+### Concepts — compteur de journalisation (priorité 4)
 - [ ] Afficher pour chaque concept le nombre de fois qu'il a été journalé
       (ex. « Breaker ×47 »), lisible d'un coup d'œil sur /concepts.
 - But pédagogique : l'élève voit immédiatement où il en est sur chaque concept.
