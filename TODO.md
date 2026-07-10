@@ -73,6 +73,25 @@ NEXTAUTH_URL = https://[VERCEL-URL]
 - [ ] Déploiement Vercel réussi
 - [ ] Tests en production passent
 
+## 🆕 Mise à jour du 10 juillet 2026 — évolutions à venir
+
+### Concepts — compteur de journalisation
+- [ ] Afficher pour chaque concept le nombre de fois qu'il a été journalé
+      (ex. « Breaker ×47 »), lisible d'un coup d'œil sur /concepts.
+- But pédagogique : l'élève voit immédiatement où il en est sur chaque concept.
+- (option) Rappeler ce compteur dans le picker de tags/concepts.
+
+### Homogénéisation de l'esthétique (à noter — pas à faire tout de suite)
+- [ ] /concepts (et les autres écrans) doivent donner l'impression d'être la
+      même application que l'accueil : même shell — canvas, dropdown de
+      navigation en haut à gauche, même header. Aujourd'hui, cliquer sur
+      Concepts donne l'impression de changer d'application.
+- [ ] Audit de tous les écrans (concepts, patterns, analytics, review, game…)
+      pour aligner header + navigation sur l'accueil.
+
+> Côté extension, voir aussi `apps/carnet-du-trader-extension/TODO.md`
+> (DOL — Draw on Liquidity, warmup multi-séances) — à faire avant le zip v1.6.0.
+
 ---
-**Dernière mise à jour :** 15 octobre 2025  
-**Prochaine étape :** Vérification post-restructuration
+**Dernière mise à jour :** 10 juillet 2026
+**Prochaine étape :** compteur de concepts + DOL/warmup côté extension
