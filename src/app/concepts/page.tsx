@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/db'
-import AppHeader from '@/components/AppHeader'
+import CanvasShell from '@/components/CanvasShell'
 import ConceptsEmergence, { ConceptStat } from '@/components/ConceptsEmergence'
 
 // Toujours frais : les concepts émergent à mesure que tu tagues et juges.
@@ -70,9 +70,8 @@ export default async function ConceptsPage() {
   const totalJudged = annotations.length
 
   return (
-    <div className="flex flex-col h-screen" style={{ background: 'var(--canvas-bg)' }}>
-      <AppHeader user={{ email: user.email ?? '', name: user.user_metadata?.full_name ?? '' }} backHref="/" backLabel="Accueil" title="Concepts" />
+    <CanvasShell user={{ email: user.email ?? '', name: user.user_metadata?.full_name ?? '' }}>
       <ConceptsEmergence concepts={stats} totalJudged={totalJudged} />
-    </div>
+    </CanvasShell>
   )
 }
