@@ -39,6 +39,7 @@ export async function GET(req: NextRequest) {
       concepts: true,
       trades: true,
       warmups: true,
+      dols: true,
       folderId: true,
       tags: { select: { tag: { select: { name: true } } } },
     },
@@ -78,7 +79,7 @@ export async function POST(req: NextRequest) {
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await req.json()
-  const { title, content, sourceUrl, favicon, source, lastSyncAt, messages, createdAt, extensionVersion, extensionNoteId, tags, concepts, trades, warmups, folderId, folderName } = body
+  const { title, content, sourceUrl, favicon, source, lastSyncAt, messages, createdAt, extensionVersion, extensionNoteId, tags, concepts, trades, warmups, dols, folderId, folderName } = body
 
   // Dossier extension : upsert du nom pour que le pull puisse tout restaurer
   if (typeof folderId === 'string' && folderId && typeof folderName === 'string' && folderName.trim()) {
@@ -97,6 +98,9 @@ export async function POST(req: NextRequest) {
 
   // Warmups de séance (multi-séances) — JSON, source de vérité extension, comme trades
   const cleanWarmups = Array.isArray(warmups) ? warmups.filter((w: unknown) => w != null && typeof w === 'object') : null
+
+  // Niveaux DOL (Draw on Liquidity) — JSON, source de vérité extension, comme trades
+  const cleanDols = Array.isArray(dols) ? dols.filter((d: unknown) => d != null && typeof d === 'object') : null
 
   const contentHash = content ? crypto.createHash('sha256').update(content).digest('hex') : null
 
@@ -140,6 +144,7 @@ export async function POST(req: NextRequest) {
         ...(cleanConcepts !== null ? { concepts: cleanConcepts } : {}),
         ...(cleanTrades !== null ? { trades: cleanTrades } : {}),
         ...(cleanWarmups !== null ? { warmups: cleanWarmups } : {}),
+        ...(cleanDols !== null ? { dols: cleanDols } : {}),
         ...(folderId !== undefined ? { folderId: folderId ?? null } : {}),
         lastModifiedAt: new Date(),
       },
@@ -161,6 +166,7 @@ export async function POST(req: NextRequest) {
         concepts: cleanConcepts ?? [],
         ...(cleanTrades !== null ? { trades: cleanTrades } : {}),
         ...(cleanWarmups !== null ? { warmups: cleanWarmups } : {}),
+        ...(cleanDols !== null ? { dols: cleanDols } : {}),
         folderId: folderId ?? null,
       },
     })

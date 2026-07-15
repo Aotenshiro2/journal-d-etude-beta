@@ -27,6 +27,7 @@ model Note {
   concepts    String[]  @default([])  // concepts extraits par la smart capture (pas la taxonomie user)
   trades      Json?     // segments de trade [{id, startedAt, closedAt?, outcome?}] — source de vérité extension
   warmups     Json?     // warmups de séance [{id, startedAt, physical?, ...}] — source de vérité extension
+  dols        Json?     // niveaux DOL (Draw on Liquidity) [{id, price, bias, status, ...}] — source de vérité extension
   folderId    String?   // dossier extension (couplage lâche, cf. model Folder)
   messages    Message[]
   canvas      Canvas?
