@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/db'
-import AppHeader from '@/components/AppHeader'
+import CanvasShell from '@/components/CanvasShell'
 import ReviewDeck, { ReviewNote, ReorganizeItem, SimpleNote } from '@/components/ReviewDeck'
 import { MessageData, AnnotationData, CanvasNodeData } from '@/types'
 
@@ -66,10 +66,9 @@ export default async function ReviewPage({ searchParams }: { searchParams: Promi
     })
     const items = c && c.note && c.nodes.length > 0 ? [buildItem(c as CanvasWithNote)] : []
     return (
-      <div className="flex flex-col h-screen" style={{ background: 'var(--canvas-bg)' }}>
-        <AppHeader user={{ email: user.email ?? '', name: user.user_metadata?.full_name ?? '' }} backHref="/review" backLabel="Relecture" title="Relire" />
+      <CanvasShell user={{ email: user.email ?? '', name: user.user_metadata?.full_name ?? '' }}>
         <ReviewDeck toRelire={items} toReorganize={[]} reviewedNotes={[]} focus />
-      </div>
+      </CanvasShell>
     )
   }
 
@@ -125,10 +124,13 @@ export default async function ReviewPage({ searchParams }: { searchParams: Promi
     .filter(c => c.note && c.nodes.length > 0)
     .map(c => ({ id: c.note!.id, title: c.note!.title ?? 'Sans titre', favicon: c.note!.favicon }))
 
+  // Même définition que le badge « Relire » de l'accueil (canvas d'étude non relus),
+  // recalculée depuis les canvas déjà chargés plutôt qu'avec une requête de plus.
+  const dueCount = canvases.filter(c => c.reviewedAt == null && c.nodes.length > 0).length
+
   return (
-    <div className="flex flex-col h-screen" style={{ background: 'var(--canvas-bg)' }}>
-      <AppHeader user={{ email: user.email ?? '', name: user.user_metadata?.full_name ?? '' }} backHref="/" backLabel="Accueil" title="Relecture" />
+    <CanvasShell user={{ email: user.email ?? '', name: user.user_metadata?.full_name ?? '' }} dueCount={dueCount}>
       <ReviewDeck toRelire={toRelire} toReorganize={toReorganize} reviewedNotes={reviewedNotes} />
-    </div>
+    </CanvasShell>
   )
 }

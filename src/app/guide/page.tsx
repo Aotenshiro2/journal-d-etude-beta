@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import AppHeader from '@/components/AppHeader'
+import CanvasShell from '@/components/CanvasShell'
 import { Camera, LayoutGrid, BookOpen, Lightbulb, PenLine, BarChart2, Compass, Sunrise, ArrowRight, ExternalLink } from 'lucide-react'
 
 const CWS = 'https://chromewebstore.google.com/detail/trading-notes-by-aoknowle/phajegonlmgnjkkfdooedoddnmgpheic'
@@ -56,8 +56,7 @@ export default async function GuidePage() {
 
   let n = 0
   return (
-    <div className="flex flex-col h-screen" style={{ background: 'var(--canvas-bg)' }}>
-      <AppHeader user={{ email: user.email ?? '', name: user.user_metadata?.full_name ?? '' }} backHref="/" backLabel="Accueil" title="Guide" />
+    <CanvasShell user={{ email: user.email ?? '', name: user.user_metadata?.full_name ?? '' }}>
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-2xl mx-auto px-6 py-8">
           <h1 className="text-xl font-bold mb-1" style={{ color: 'var(--node-title)' }}>Le parcours</h1>
@@ -114,6 +113,6 @@ export default async function GuidePage() {
           </p>
         </div>
       </div>
-    </div>
+    </CanvasShell>
   )
 }

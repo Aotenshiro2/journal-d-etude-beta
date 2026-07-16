@@ -21,7 +21,7 @@ import Link from 'next/link'
 import { useRouter, usePathname } from 'next/navigation'
 import {
   BookOpen, Lightbulb, BarChart2, Compass, Layers, Sunrise, BookMarked,
-  ChevronDown, Sun, Moon,
+  ChevronDown, Sun, Moon, History, HelpCircle, Search,
 } from 'lucide-react'
 import { useTheme } from '@/contexts/ThemeContext'
 import UserMenu from './UserMenu'
@@ -37,11 +37,21 @@ const MODES = [
   { label: 'Documenter mes trades', href: '/journal',   Icon: BookMarked, match: (p: string) => p === '/journal' },
 ]
 
+// Les écrans hors dropdown : Relecture et Guide vivent en bas à droite (choix de
+// Brice), /market est un placeholder orphelin. Ils n'entrent PAS dans la liste
+// des modules, mais le bouton doit quand même dire où tu es : sans ça, /review
+// afficherait « Étudier mes notes » (le mode par défaut), ce qui est faux.
+const OFF_MENU_PAGES = [
+  { label: 'Relecture',         href: '/review', Icon: History,     match: (p: string) => p.startsWith('/review') },
+  { label: 'Guide',             href: '/guide',  Icon: HelpCircle,  match: (p: string) => p.startsWith('/guide') },
+  { label: 'Observer le marché', href: '/market', Icon: Search,     match: (p: string) => p === '/market' },
+]
+
 function SpacesDropdown() {
   const [open, setOpen] = useState(false)
   const pathname = usePathname()
   const router = useRouter()
-  const activeMode = MODES.find(m => m.match(pathname)) ?? MODES[0]
+  const activeMode = MODES.find(m => m.match(pathname)) ?? OFF_MENU_PAGES.find(m => m.match(pathname)) ?? MODES[0]
 
   return (
     <div style={{ position: 'relative' }}>

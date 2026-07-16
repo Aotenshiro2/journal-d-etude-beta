@@ -1,9 +1,9 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/db'
-import Link from 'next/link'
+import { BookOpen } from 'lucide-react'
 import NoteCard from '@/components/NoteCard'
-import AppHeader from '@/components/AppHeader'
+import CanvasShell from '@/components/CanvasShell'
 import EmptyNotesState from '@/components/EmptyNotesState'
 
 export default async function StudyPage() {
@@ -11,7 +11,7 @@ export default async function StudyPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/auth')
 
-  const [rawNotes, folders] = await Promise.all([
+  const [rawNotes, folders, dueCount] = await Promise.all([
     prisma.note.findMany({
       where: { userId: user.id },
       orderBy: { lastModifiedAt: 'desc' },
@@ -42,6 +42,8 @@ export default async function StudyPage() {
       },
     }),
     prisma.folder.findMany({ where: { userId: user.id }, select: { id: true, name: true } }),
+    // Notes réorganisées mais pas encore relues — même badge « Relire » que l'accueil
+    prisma.canvas.count({ where: { userId: user.id, type: 'note-study', reviewedAt: null, nodes: { some: {} } } }),
   ])
 
   const folderNames = new Map(folders.map(f => [f.id, f.name]))
@@ -53,37 +55,33 @@ export default async function StudyPage() {
   }))
 
   return (
-    <div className="min-h-screen flex flex-col" style={{ background: 'var(--canvas-bg)', color: 'var(--node-title)' }}>
-      <AppHeader
-        user={{ email: user.email ?? '', name: user.user_metadata?.full_name ?? '' }}
-        backHref="/"
-        backLabel="Carte"
-        title="Notes"
-      />
-
-      <main className="flex-1 max-w-5xl mx-auto w-full px-6 py-8">
-        <div className="flex items-center justify-between mb-8">
-          <div>
-            <h1 className="text-2xl font-bold" style={{ color: 'var(--node-title)' }}>Mes notes</h1>
-            <p className="text-sm mt-1" style={{ color: 'var(--node-meta)' }}>
-              {notes.length} note{notes.length !== 1 ? 's' : ''} capturée{notes.length !== 1 ? 's' : ''}
+    <CanvasShell user={{ email: user.email ?? '', name: user.user_metadata?.full_name ?? '' }} dueCount={dueCount}>
+      <div className="flex-1 overflow-y-auto">
+        <div className="max-w-5xl mx-auto w-full px-6 py-8">
+          <div className="mb-6">
+            <div className="flex items-center gap-2 mb-1">
+              <BookOpen size={18} style={{ color: 'var(--node-title)' }} />
+              <h1 className="text-xl font-bold" style={{ color: 'var(--node-title)' }}>Tout ce que tu as capturé</h1>
+            </div>
+            <p className="text-sm" style={{ color: 'var(--node-meta)' }}>
+              {notes.length} note{notes.length !== 1 ? 's' : ''} capturée{notes.length !== 1 ? 's' : ''}. La carte les met en relation ; ici tu les retrouves à plat.
             </p>
           </div>
-        </div>
 
-        {notes.length === 0 ? (
-          <EmptyNotesState />
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {notes.map((note) => (
-              <NoteCard
-                key={note.id}
-                note={note}
-              />
-            ))}
-          </div>
-        )}
-      </main>
-    </div>
+          {notes.length === 0 ? (
+            <EmptyNotesState />
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {notes.map((note) => (
+                <NoteCard
+                  key={note.id}
+                  note={note}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </CanvasShell>
   )
 }
