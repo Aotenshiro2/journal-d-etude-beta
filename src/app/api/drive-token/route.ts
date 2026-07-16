@@ -23,10 +23,21 @@ export async function POST(req: NextRequest) {
     }
 
     const clientId = process.env.GOOGLE_DRIVE_CLIENT_ID || DEFAULT_CLIENT_ID
-    const clientSecret = process.env.GOOGLE_DRIVE_CLIENT_SECRET
+    // Tolère les deux noms : le .env de l'extension nomme la variable
+    // VITE_GOOGLE_DRIVE_CLIENT_SECRET, et c'est ce nom qui est souvent recopié
+    // tel quel dans Vercel. Même valeur, on accepte l'un ou l'autre.
+    const clientSecret =
+      process.env.GOOGLE_DRIVE_CLIENT_SECRET || process.env.VITE_GOOGLE_DRIVE_CLIENT_SECRET
     if (!clientSecret) {
       return NextResponse.json(
-        { error: 'GOOGLE_DRIVE_CLIENT_SECRET absent côté serveur' },
+        {
+          error: 'Secret Drive absent côté serveur',
+          // Aide au diagnostic : présence uniquement, jamais les valeurs
+          checked: {
+            GOOGLE_DRIVE_CLIENT_SECRET: Boolean(process.env.GOOGLE_DRIVE_CLIENT_SECRET),
+            VITE_GOOGLE_DRIVE_CLIENT_SECRET: Boolean(process.env.VITE_GOOGLE_DRIVE_CLIENT_SECRET),
+          },
+        },
         { status: 500 },
       )
     }
