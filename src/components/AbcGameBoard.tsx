@@ -1,6 +1,6 @@
 'use client'
 import { useRef, useState } from 'react'
-import { Target, Quote } from 'lucide-react'
+import { Target, Quote, Layers } from 'lucide-react'
 
 type Level = { count: number; causes: Record<string, number>; phrases: string[]; signals: string[] }
 export type GameData = {
@@ -36,9 +36,12 @@ export default function AbcGameBoard({ data }: { data: GameData }) {
     <div className="flex-1 overflow-y-auto">
       <div className="max-w-5xl mx-auto px-6 py-8 space-y-5">
         <div>
-          <h1 className="text-xl font-bold mb-1" style={{ color: 'var(--node-title)' }}>Ma carte A/B/C-game</h1>
+          <div className="flex items-center gap-2 mb-1">
+            <Layers size={18} style={{ color: 'var(--node-title)' }} />
+            <h1 className="text-xl font-bold" style={{ color: 'var(--node-title)' }}>Le plancher à remonter</h1>
+          </div>
           <p className="text-sm" style={{ color: 'var(--node-meta)' }}>
-            Tes trois niveaux de jeu (Tendler). Ce qui revient à chacun — nourri par tes trades notés. En cartographiant ton <span style={{ color: '#ef4444' }}>C-game</span>, tu vois ton chantier : le plancher à remonter.
+            Tes trois niveaux de jeu (Tendler). Ce qui revient à chacun — nourri par tes trades notés. En cartographiant ton <span style={{ color: '#ef4444' }}>C-game</span>, tu vois ton chantier.
           </p>
         </div>
 

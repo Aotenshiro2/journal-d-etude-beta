@@ -151,9 +151,12 @@ export default function RitualBoard({ initial }: { initial: RitualData[] }) {
     <div className="flex-1 overflow-y-auto">
       <div className="max-w-2xl mx-auto px-5 py-8">
         <div className="mb-6">
-          <h1 className="text-xl font-bold mb-1" style={{ color: 'var(--node-title)' }}>Rituel de séance</h1>
+          <div className="flex items-center gap-2 mb-1">
+            <Sunrise size={18} style={{ color: 'var(--node-title)' }} />
+            <h1 className="text-xl font-bold" style={{ color: 'var(--node-title)' }}>Ta performance dépend de ton état</h1>
+          </div>
           <p className="text-sm" style={{ color: 'var(--node-meta)' }}>
-            Un <span style={{ color: '#3b82f6' }}>warmup</span> avant (ton état, ta pensée dominante, ton objectif du jour) et un <span style={{ color: '#f59e0b' }}>cooldown</span> après (tes erreurs, ta leçon, comment tu te recentres). Le trading est un métier de performance, et cette performance dépend de ton état.
+            Un <span style={{ color: '#3b82f6' }}>warmup</span> avant (ton état, ta pensée dominante, ton objectif du jour) et un <span style={{ color: '#f59e0b' }}>cooldown</span> après (tes erreurs, ta leçon, comment tu te recentres). Le trading est un métier de performance.
           </p>
         </div>
 

@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/db'
-import AppHeader from '@/components/AppHeader'
+import CanvasShell from '@/components/CanvasShell'
 import AbcGameBoard, { GameData } from '@/components/AbcGameBoard'
 
 export const dynamic = 'force-dynamic'
@@ -16,7 +16,7 @@ export default async function GamePage() {
   if (!user) redirect('/auth')
   const userId = user.id
 
-  const [annotations, notes, row] = await Promise.all([
+  const [annotations, notes, row, dueCount] = await Promise.all([
     prisma.annotation.findMany({
       where: { userId },
       select: { grade: true, phrase: true, causeCategory: true, tradeRef: true, createdAt: true },
@@ -24,6 +24,8 @@ export default async function GamePage() {
     }),
     prisma.note.findMany({ where: { userId, deletedAt: null }, select: { trades: true } }),
     prisma.abcGame.findUnique({ where: { userId } }),
+    // Notes réorganisées mais pas encore relues — même badge « Relire » que l'accueil
+    prisma.canvas.count({ where: { userId, type: 'note-study', reviewedAt: null, nodes: { some: {} } } }),
   ])
 
   // tradeId → cooldown (émotion / erreur), depuis Note.trades JSON (préservé par la sync)
@@ -69,9 +71,8 @@ export default async function GamePage() {
   }
 
   return (
-    <div className="flex flex-col h-screen" style={{ background: 'var(--canvas-bg)' }}>
-      <AppHeader user={{ email: user.email ?? '', name: user.user_metadata?.full_name ?? '' }} backHref="/" backLabel="Accueil" title="Carte A/B/C-game" />
+    <CanvasShell user={{ email: user.email ?? '', name: user.user_metadata?.full_name ?? '' }} dueCount={dueCount}>
       <AbcGameBoard data={data} />
-    </div>
+    </CanvasShell>
   )
 }
