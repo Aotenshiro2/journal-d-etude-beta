@@ -96,18 +96,41 @@ si besoin. Pas d'animations de transition. Chaque page garde SES besoins.
 DÉJÀ ALIGNÉES — NE PAS TOUCHER :
 - `/` (accueil, `NoteMapCanvas.tsx`) → **la référence**
 - `/study/*` (`StudyCanvas.tsx`) → l'écran où on relie les notes entre elles
-- `/concepts` (utilise `CanvasShell`)
+- `/concepts` (utilise `CanvasShell`) — le doublon de titre a disparu avec le
+  retrait du slot `title` (2026-07-16) ; son contenu n'a pas été touché.
 
 Outil en place : `src/components/CanvasShell.tsx` (commit `6bb6aae`) reproduit le
-langage de l'accueil (dot grid + top gradient, dropdown MODES identique, titre,
+langage de l'accueil (dot grid + top gradient, dropdown MODES identique,
 UserMenu haut-droite, pill bas-droite thème/Relire+badge/Notes/Guide). Slots :
-`title`, `dueCount`, `extraActions`, `children`. Le faire évoluer si un écran a
-besoin de plus (barre centrale, lecteur de notes à gauche…).
+`dueCount`, `extraActions`, `children`. Le faire évoluer si un écran a besoin de
+plus (barre centrale, lecteur de notes à gauche…).
+
+DÉCIDÉ le 2026-07-16 (Brice) — **pas de titre hors accueil** : le dropdown dit à
+lui seul où tu es ; le nom de l'app (« Journal d'Études ») ne vit que sur
+l'accueil. Le slot `title` a donc été retiré du shell (il affichait par défaut le
+label du mode → le même texte écrit deux fois à côté du dropdown, ce que faisait
+`/concepts`). Corollaire pour chaque écran migré : le `<h1>` de la vue doit être
+**éditorial** (ce que l'écran révèle), pas le nom de l'espace — cf. `/concepts`
+(« Ce qui revient dans tes notes ») et `/analytics` (« Ce que tes jugements
+révèlent »).
+
+COMMENT VÉRIFIER À L'ÉCRAN sans session Supabase (débloqué le 2026-07-16 — avant,
+la validation visuelle devait attendre un deploy) : le middleware laisse passer
+tout chemin commençant par `/guide`, donc une page jetable
+`src/app/guide-ui-preview/page.tsx` qui monte `CanvasShell` + la vue avec des
+données bidon s'affiche sans login. `npx next dev -p 3007` dans WSL (⚠️ 3000 peut
+être pris par Codex — et ne JAMAIS faire `pkill -f "next dev"`, ça tue son
+serveur : tuer par port avec `fuser -k 3007/tcp`). Le port est joignable depuis
+Windows. Penser à supprimer la page jetable + `rm -rf .next/types/app/<page>`
+avant de committer.
 
 RESTE À HOMOGÉNÉISER (ancienne génération du site — `AppHeader.tsx` = simple fil
 d'Ariane, d'où l'impression de changer d'app). Un écran à la fois, en respectant
 les besoins propres de chacun :
-- [ ] `/analytics` (ses lentilles)
+- [x] `/analytics` (ses lentilles) — commit `b6c6b63`. Migration directe : les 3
+      lentilles (Où je perds · Calibration · Progression) restent telles quelles
+      dans le scroll central ; badge « Relire » branché sur le même compte que
+      l'accueil. Vérifié à l'écran (clair + sombre).
 - [ ] `/patterns` (fiche Pattern Map)
 - [ ] `/game` (le board A/B/C)
 - [ ] `/session` (le rituel warmup/cooldown)
