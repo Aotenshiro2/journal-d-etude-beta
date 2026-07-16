@@ -16,7 +16,7 @@
 // modes évolue là-bas, répercuter ici (classes partagées dans globals.css :
 // .canvas-grid, .canvas-top-gradient, .canvas-float-pill).
 
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter, usePathname } from 'next/navigation'
 import {
@@ -139,11 +139,41 @@ interface CanvasShellProps {
   children: React.ReactNode
 }
 
+// Le halo de l'accueil : les points s'illuminent autour du curseur. Le CSS fait
+// tout le travail (masque radial sur --mx/--my) ; ici on ne fait que suivre la
+// souris. Mêmes background-size/position que la grille, sinon les points allumés
+// seraient décalés par rapport aux points éteints.
+const DOT_BG = { backgroundSize: '24px 24px', backgroundPosition: '0px 0px' }
+
 export default function CanvasShell({ user, dueCount, extraActions, children }: CanvasShellProps) {
+  const canvasRef = useRef<HTMLDivElement>(null)
+  const spotlightRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const el = canvasRef.current
+    if (!el) return
+    const spotlight = spotlightRef.current
+    const onMove = (e: MouseEvent) => {
+      if (!spotlight) return
+      const rect = el.getBoundingClientRect()
+      spotlight.style.setProperty('--mx', `${e.clientX - rect.left}px`)
+      spotlight.style.setProperty('--my', `${e.clientY - rect.top}px`)
+      spotlight.style.opacity = '1'
+    }
+    const onLeave = () => { if (spotlight) spotlight.style.opacity = '0' }
+    el.addEventListener('mousemove', onMove)
+    el.addEventListener('mouseleave', onLeave)
+    return () => {
+      el.removeEventListener('mousemove', onMove)
+      el.removeEventListener('mouseleave', onLeave)
+    }
+  }, [])
+
   return (
-    <div style={{ position: 'relative', width: '100%', height: '100vh', overflow: 'hidden', background: 'var(--canvas-bg)' }}>
+    <div ref={canvasRef} style={{ position: 'relative', width: '100%', height: '100vh', overflow: 'hidden', background: 'var(--canvas-bg)' }}>
       {/* Toile de fond — même dot grid que l'accueil (statique : pas de zoom ici) */}
-      <div className="canvas-grid" style={{ backgroundSize: '24px 24px', backgroundPosition: '0px 0px' }} />
+      <div className="canvas-grid" style={DOT_BG} />
+      <div ref={spotlightRef} className="canvas-dot-spotlight" style={DOT_BG} />
       <div className="canvas-top-gradient" />
 
       {/* ── Haut-gauche — dropdown des espaces ── */}
