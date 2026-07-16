@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Plus, Trash2, Shield, ChevronDown } from 'lucide-react'
+import { Plus, Trash2, Shield, ChevronDown, Compass } from 'lucide-react'
 
 export type PatternData = {
   id: string
@@ -146,9 +146,12 @@ export default function PatternBoard({ initial }: { initial: PatternData[] }) {
       <div className="max-w-2xl mx-auto px-5 py-8">
         {/* Intention */}
         <div className="mb-6">
-          <h1 className="text-xl font-bold mb-1" style={{ color: 'var(--node-title)' }}>Pattern Maps</h1>
+          <div className="flex items-center gap-2 mb-1">
+            <Compass size={18} style={{ color: 'var(--node-title)' }} />
+            <h1 className="text-xl font-bold" style={{ color: 'var(--node-title)' }}>Ton point de bascule, avant qu&apos;il n&apos;explose</h1>
+          </div>
           <p className="text-sm" style={{ color: 'var(--node-meta)' }}>
-            Une fiche par problème récurrent (tilt, FOMO, revenge…). Cartographie l&apos;escalade — du <span style={{ color: '#3b82f6' }}>déclencheur</span> à <span style={{ color: '#dc2626' }}>l&apos;erreur</span> — pour repérer ton <span style={{ color: 'var(--node-title)' }}>point de bascule avant qu&apos;il n&apos;explose</span>. Relis-les à ton warmup. <span className="italic">Le déclencheur est le détonateur ; la vraie faille est la bombe.</span>
+            Une fiche par problème récurrent (tilt, FOMO, revenge…). Cartographie l&apos;escalade — du <span style={{ color: '#3b82f6' }}>déclencheur</span> à <span style={{ color: '#dc2626' }}>l&apos;erreur</span>. Relis-les à ton warmup. <span className="italic">Le déclencheur est le détonateur ; la vraie faille est la bombe.</span>
           </p>
         </div>
 

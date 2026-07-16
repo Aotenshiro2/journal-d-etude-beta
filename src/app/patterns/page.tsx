@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/db'
-import AppHeader from '@/components/AppHeader'
+import CanvasShell from '@/components/CanvasShell'
 import PatternBoard, { PatternData } from '@/components/PatternBoard'
 
 export const dynamic = 'force-dynamic'
@@ -11,16 +11,17 @@ export default async function PatternsPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/auth')
+  const userId = user.id
 
-  const patterns = await prisma.pattern.findMany({
-    where: { userId: user.id },
-    orderBy: { updatedAt: 'desc' },
-  })
+  const [patterns, dueCount] = await Promise.all([
+    prisma.pattern.findMany({ where: { userId }, orderBy: { updatedAt: 'desc' } }),
+    // Notes réorganisées mais pas encore relues — même badge « Relire » que l'accueil
+    prisma.canvas.count({ where: { userId, type: 'note-study', reviewedAt: null, nodes: { some: {} } } }),
+  ])
 
   return (
-    <div className="flex flex-col h-screen" style={{ background: 'var(--canvas-bg)' }}>
-      <AppHeader user={{ email: user.email ?? '', name: user.user_metadata?.full_name ?? '' }} backHref="/" backLabel="Accueil" title="Pattern Maps" />
+    <CanvasShell user={{ email: user.email ?? '', name: user.user_metadata?.full_name ?? '' }} dueCount={dueCount}>
       <PatternBoard initial={patterns as unknown as PatternData[]} />
-    </div>
+    </CanvasShell>
   )
 }
