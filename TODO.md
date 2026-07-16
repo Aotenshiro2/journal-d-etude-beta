@@ -86,7 +86,7 @@ Ordre de priorité global validé par Brice (extension + journal confondus) :
 - But pédagogique : l'élève voit immédiatement où il en est sur chaque concept.
 - (option) Rappeler ce compteur dans le picker de tags/concepts.
 
-### Homogénéisation de l'esthétique (EN COURS — 2026-07-11)
+### Homogénéisation de l'esthétique (TERMINÉE — 2026-07-16)
 Direction artistique (Brice) : quand on change de page, la page d'accueil doit
 sembler « se métamorphoser » — pas de sensation de changer d'app. Le langage
 commun : canvas en toile de fond, dropdown des espaces haut-gauche, actions
@@ -124,21 +124,33 @@ serveur : tuer par port avec `fuser -k 3007/tcp`). Le port est joignable depuis
 Windows. Penser à supprimer la page jetable + `rm -rf .next/types/app/<page>`
 avant de committer.
 
-RESTE À HOMOGÉNÉISER (ancienne génération du site — `AppHeader.tsx` = simple fil
-d'Ariane, d'où l'impression de changer d'app). Un écran à la fois, en respectant
-les besoins propres de chacun :
-- [x] `/analytics` (ses lentilles) — commit `b6c6b63`. Migration directe : les 3
-      lentilles (Où je perds · Calibration · Progression) restent telles quelles
-      dans le scroll central ; badge « Relire » branché sur le même compte que
-      l'accueil. Vérifié à l'écran (clair + sombre).
-- [ ] `/patterns` (fiche Pattern Map)
-- [ ] `/game` (le board A/B/C)
-- [ ] `/session` (le rituel warmup/cooldown)
-- [ ] `/review` (le deck de relecture)
-- [ ] `/notes` (la liste des notes)
-- [ ] `/guide` (le parcours d'onboarding)
-- [ ] `/journal` (placeholder ComingSoon — bientôt disponible)
-- [ ] Puis supprimer `AppHeader.tsx` quand plus aucune page ne l'utilise.
+FAIT — tous les écrans sont passés sur `CanvasShell`, `AppHeader.tsx` est
+supprimé (ainsi que `ThemeToggle.tsx`, dont il était le seul consommateur) :
+- [x] `/analytics` (`b6c6b63`) — les 3 lentilles inchangées dans le scroll central.
+- [x] `/patterns` (`8bfb797`) — CTA + échelle d'escalade + tags inchangés.
+- [x] `/game` (`e388449`) — les 3 colonnes A/B/C + « Mon chantier du moment ».
+- [x] `/session` (`e388449`) — CTA + volets avant/après + curseur d'émotion.
+- [x] `/review` (`400c9c6`) — deck + mode focus ; badge « Relire » recalculé
+      depuis les canvas déjà chargés (pas de requête en plus).
+- [x] `/notes` (`400c9c6`) — passait par `min-h-screen`, désormais dans la zone
+      scrollable du shell.
+- [x] `/guide` (`400c9c6`) — « Le parcours » était déjà éditorial.
+- [x] `/journal` + `/market` (`400c9c6`) — `ComingSoon` thématisé (il était en
+      `bg-gray-950` en dur, donc sombre même en mode clair).
+- [x] `AppHeader.tsx` supprimé.
+
+À SAVOIR pour la suite :
+- **Écrans hors dropdown** : `OFF_MENU_PAGES` dans `CanvasShell`. Sans lui, le
+  bouton retombait sur le 1er mode et affichait « Étudier mes notes » sur
+  `/review` — faux. Tout nouvel écran hors dropdown doit y déclarer son libellé.
+- **`/market` est orphelin** : aucun lien n'y mène, il n'est pas dans le
+  dropdown. Migré seulement parce qu'il partage `ComingSoon`. À supprimer si
+  l'écran « Observer le marché » n'est plus au programme.
+- **Le shell ne reproduit pas encore tout l'accueil** : il manque la barre de
+  capture centrale, le « Notes · N » en bas à gauche et la barre d'outils
+  verticale à droite. Aucun des écrans migrés n'en avait besoin (lecture ou
+  formulaire), mais un futur écran de saisie voudra probablement la barre de
+  capture — c'est là que le slot central se justifiera.
 
 > Côté extension, voir aussi `apps/carnet-du-trader-extension/TODO.md`
 > (DOL — Draw on Liquidity, warmup multi-séances) — à faire avant le zip v1.6.0.
