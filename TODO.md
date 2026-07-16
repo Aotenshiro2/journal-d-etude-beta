@@ -86,13 +86,36 @@ Ordre de priorité global validé par Brice (extension + journal confondus) :
 - But pédagogique : l'élève voit immédiatement où il en est sur chaque concept.
 - (option) Rappeler ce compteur dans le picker de tags/concepts.
 
-### Homogénéisation de l'esthétique (à noter — pas à faire tout de suite)
-- [ ] /concepts (et les autres écrans) doivent donner l'impression d'être la
-      même application que l'accueil : même shell — canvas, dropdown de
-      navigation en haut à gauche, même header. Aujourd'hui, cliquer sur
-      Concepts donne l'impression de changer d'application.
-- [ ] Audit de tous les écrans (concepts, patterns, analytics, review, game…)
-      pour aligner header + navigation sur l'accueil.
+### Homogénéisation de l'esthétique (EN COURS — 2026-07-11)
+Direction artistique (Brice) : quand on change de page, la page d'accueil doit
+sembler « se métamorphoser » — pas de sensation de changer d'app. Le langage
+commun : canvas en toile de fond, dropdown des espaces haut-gauche, actions
+rapides bas-droite, capture bar centrale quand utile, lecteur de notes à gauche
+si besoin. Pas d'animations de transition. Chaque page garde SES besoins.
+
+DÉJÀ ALIGNÉES — NE PAS TOUCHER :
+- `/` (accueil, `NoteMapCanvas.tsx`) → **la référence**
+- `/study/*` (`StudyCanvas.tsx`) → l'écran où on relie les notes entre elles
+- `/concepts` (utilise `CanvasShell`)
+
+Outil en place : `src/components/CanvasShell.tsx` (commit `6bb6aae`) reproduit le
+langage de l'accueil (dot grid + top gradient, dropdown MODES identique, titre,
+UserMenu haut-droite, pill bas-droite thème/Relire+badge/Notes/Guide). Slots :
+`title`, `dueCount`, `extraActions`, `children`. Le faire évoluer si un écran a
+besoin de plus (barre centrale, lecteur de notes à gauche…).
+
+RESTE À HOMOGÉNÉISER (ancienne génération du site — `AppHeader.tsx` = simple fil
+d'Ariane, d'où l'impression de changer d'app). Un écran à la fois, en respectant
+les besoins propres de chacun :
+- [ ] `/analytics` (ses lentilles)
+- [ ] `/patterns` (fiche Pattern Map)
+- [ ] `/game` (le board A/B/C)
+- [ ] `/session` (le rituel warmup/cooldown)
+- [ ] `/review` (le deck de relecture)
+- [ ] `/notes` (la liste des notes)
+- [ ] `/guide` (le parcours d'onboarding)
+- [ ] `/journal` (placeholder ComingSoon — bientôt disponible)
+- [ ] Puis supprimer `AppHeader.tsx` quand plus aucune page ne l'utilise.
 
 > Côté extension, voir aussi `apps/carnet-du-trader-extension/TODO.md`
 > (DOL — Draw on Liquidity, warmup multi-séances) — à faire avant le zip v1.6.0.
