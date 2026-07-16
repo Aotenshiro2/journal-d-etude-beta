@@ -1,4 +1,4 @@
-import { TrendingDown, Crosshair, LineChart } from 'lucide-react'
+import { TrendingDown, Crosshair, LineChart, BarChart2 } from 'lucide-react'
 
 const GRADES = ['A', 'B', 'C'] as const
 const GRADE_COLOR: Record<string, string> = { A: '#22c55e', B: '#f59e0b', C: '#ef4444' }
@@ -46,9 +46,12 @@ export default function AnalyticsView({ stats }: { stats: AnalyticsStats }) {
     <div className="flex-1 overflow-y-auto">
       <div className="max-w-3xl mx-auto px-6 py-8 space-y-4">
         <div>
-          <h1 className="text-xl font-bold mb-1" style={{ color: 'var(--node-title)' }}>Analyser mes données</h1>
+          <div className="flex items-center gap-2 mb-1">
+            <BarChart2 size={18} style={{ color: 'var(--node-title)' }} />
+            <h1 className="text-xl font-bold" style={{ color: 'var(--node-title)' }}>Ce que tes jugements révèlent</h1>
+          </div>
           <p className="text-sm" style={{ color: 'var(--node-meta)' }}>
-            Ce que tes jugements révèlent. L&apos;objectif n&apos;est pas de multiplier les A, mais de <span style={{ color: '#ef4444' }}>faire fondre tes C</span> — remonter ton plancher (inchworm).
+            L&apos;objectif n&apos;est pas de multiplier les A, mais de <span style={{ color: '#ef4444' }}>faire fondre tes C</span> — remonter ton plancher (inchworm).
           </p>
         </div>
 

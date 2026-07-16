@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/db'
-import AppHeader from '@/components/AppHeader'
+import CanvasShell from '@/components/CanvasShell'
 import AnalyticsView, { AnalyticsStats } from '@/components/AnalyticsView'
 
 export const dynamic = 'force-dynamic'
@@ -14,9 +14,11 @@ export default async function AnalyticsPage() {
   if (!user) redirect('/auth')
   const userId = user.id
 
-  const [annotations, notes] = await Promise.all([
+  const [annotations, notes, dueCount] = await Promise.all([
     prisma.annotation.findMany({ where: { userId }, select: { grade: true, causeCategory: true, tradeRef: true, createdAt: true } }),
     prisma.note.findMany({ where: { userId, deletedAt: null }, select: { trades: true } }),
+    // Notes réorganisées mais pas encore relues — même badge « Relire » que l'accueil
+    prisma.canvas.count({ where: { userId, type: 'note-study', reviewedAt: null, nodes: { some: {} } } }),
   ])
 
   // tradeId → résultat (depuis Note.trades)
@@ -54,9 +56,8 @@ export default async function AnalyticsPage() {
   const stats: AnalyticsStats = { total: annotations.length, grades, causes, calibration, tradeVerdicts, timeline }
 
   return (
-    <div className="flex flex-col h-screen" style={{ background: 'var(--canvas-bg)' }}>
-      <AppHeader user={{ email: user.email ?? '', name: user.user_metadata?.full_name ?? '' }} backHref="/" backLabel="Accueil" title="Analyse" />
+    <CanvasShell user={{ email: user.email ?? '', name: user.user_metadata?.full_name ?? '' }} dueCount={dueCount}>
       <AnalyticsView stats={stats} />
-    </div>
+    </CanvasShell>
   )
 }

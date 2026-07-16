@@ -6,7 +6,8 @@
 // pas avoir l'impression de quitter l'app — la page d'accueil « se métamorphose »
 // en ce dont le nouvel écran a besoin. Le langage commun :
 //   • le canvas en toile de fond (dot grid + top gradient),
-//   • le dropdown des espaces en haut à gauche (mêmes MODES que l'accueil),
+//   • le dropdown des espaces en haut à gauche (mêmes MODES que l'accueil) — il
+//     suffit à dire où tu es : pas de titre à côté (le nom de l'app reste à l'accueil),
 //   • les actions rapides du flux en bas à droite (thème · Relire · Notes · Guide),
 //   • chaque page pose SON contenu au centre (slot children), avec ses besoins.
 //
@@ -121,8 +122,6 @@ function ThemeToggleInline() {
 
 interface CanvasShellProps {
   user: { email: string; name: string }
-  /** Titre affiché à côté du dropdown (défaut : le label de l'espace actif). */
-  title?: string
   /** Badge « Relire » (jugements échus) — même signal que l'accueil. */
   dueCount?: number
   /** Actions propres à la page, injectées dans la pill bas-droite (optionnel). */
@@ -130,23 +129,18 @@ interface CanvasShellProps {
   children: React.ReactNode
 }
 
-export default function CanvasShell({ user, title, dueCount, extraActions, children }: CanvasShellProps) {
-  const pathname = usePathname()
-  const activeMode = MODES.find(m => m.match(pathname)) ?? MODES[0]
-  const displayTitle = title ?? activeMode.label
-
+export default function CanvasShell({ user, dueCount, extraActions, children }: CanvasShellProps) {
   return (
     <div style={{ position: 'relative', width: '100%', height: '100vh', overflow: 'hidden', background: 'var(--canvas-bg)' }}>
       {/* Toile de fond — même dot grid que l'accueil (statique : pas de zoom ici) */}
       <div className="canvas-grid" style={{ backgroundSize: '24px 24px', backgroundPosition: '0px 0px' }} />
       <div className="canvas-top-gradient" />
 
-      {/* ── Haut-gauche — dropdown des espaces + titre ── */}
+      {/* ── Haut-gauche — dropdown des espaces ── */}
+      {/* Le dropdown dit à lui seul où tu es : hors accueil, pas de titre en plus
+          (le nom de l'app n'est affiché que sur l'accueil). Choix de Brice, 2026-07-16. */}
       <div style={{ position: 'absolute', top: 14, left: 14, zIndex: 20, display: 'flex', alignItems: 'center', gap: 8 }}>
         <SpacesDropdown />
-        <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--node-title)', letterSpacing: '-0.02em', textShadow: '0 1px 3px rgba(0,0,0,0.12)' }}>
-          {displayTitle}
-        </span>
       </div>
 
       {/* ── Haut-droite — menu utilisateur ── */}
