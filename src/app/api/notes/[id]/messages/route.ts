@@ -45,6 +45,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const { content, type } = await req.json()
   if (!content) return NextResponse.json({ error: 'content required' }, { status: 400 })
+  // Contrat 0.1.2 : un bloc texte vide (HTML sans texte) n'entre jamais en base
+  if ((type ?? 'text') === 'text' && !content.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim()) {
+    return NextResponse.json({ error: 'empty text block rejected' }, { status: 400 })
+  }
 
   const lastMessage = await prisma.message.findFirst({
     where: { noteId: id }, orderBy: { order: 'desc' },

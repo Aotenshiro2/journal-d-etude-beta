@@ -38,11 +38,12 @@ export default function StudyLayout({ note, canvas: initialCanvas, isDiverged }:
     return map
   }, [note.trades, note.annotations])
 
-  // Messages not yet placed on canvas
+  // Messages not yet placed on canvas — les blocs 'meta' (date/titre/URL de
+  // capture) sont exclus : une métadonnée ne se travaille pas sur le canvas
   const placedMessageIds = new Set(
     canvas.nodes.filter((n) => n.messageId).map((n) => n.messageId as string)
   )
-  const availableMessages = note.messages?.filter((m) => !placedMessageIds.has(m.id)) ?? []
+  const availableMessages = note.messages?.filter((m) => m.type !== 'meta' && !placedMessageIds.has(m.id)) ?? []
 
   const handleDropMessage = useCallback(
     async (messageId: string, x: number, y: number) => {

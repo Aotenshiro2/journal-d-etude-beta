@@ -57,15 +57,26 @@ La note d'origine = ce que l'élève a écrit pendant sa séance. Elle est
   depuis le journal avant/hors exploration peuvent remonter ; jamais celles
   issues du travail d'exploration.
 
-### 0.1.2 — Le contrat de données extension → journal
+### 0.1.2 — Le contrat de données extension → journal ✅ LIVRÉ le 17/07/2026
 
-- [ ] **Fini les métadonnées déguisées en messages** (ex. « NQ1 » = titre
-      d'onglet capturé comme bloc). Trancher : soit l'extension ne les envoie
-      plus comme messages, soit le journal les range en métadonnées de note
-      (en-tête) et jamais en blocs. À faire tôt — chaque semaine de capture
-      accumule du bruit en base qu'il faudrait migrer plus tard.
-- [ ] Audit rapide des types de blocs reçus réellement en base (SELECT sur
-      Message.type/content) pour lister ce qui est du contenu vs du bruit.
+Contrat acté : **une métadonnée n'est jamais du contenu** — c'est un bloc
+type `meta`, l'info est toujours en base mais masquée par défaut.
+
+- [x] Audit fait (`scripts/audit-messages-0.1.2.mjs`) : 1031 blocs, 59 vides
+      (supprimés — `scripts/cleanup-empty-messages-0.1.2.mjs`), bruit
+      identifié (titres d'onglet, « Prix : », « RPNL : », « 💬 53 »).
+- [x] **Type de bloc `meta`** (extension v1.6.7 + journal) : screenshot avec
+      note ouverte → image + bloc meta directement dans la note (la capture
+      bar de l'extension reste propre) ; jamais recopié dans `content` ;
+      exclu des « Blocs disponibles » du canvas.
+- [x] **Toggle œil** « afficher les métadonnées » dans les deux visualisateurs
+      (`useShowMeta`, localStorage, masqué par défaut).
+- [x] **Blocs texte vides** : filtrés à la sync, refusés par l'API
+      (`POST /api/notes/[id]/messages`), purgés en base.
+- [x] Bonus extension : 🐛 popup de suppression image/texte replié réparé
+      (ConfirmDialog manquant hors branche texte).
+- ⏭️ Reporté au chantier « capture intelligente » (TODO extension) : les
+      métadonnées que la smart capture injecte encore dans le contenu.
 
 ### 0.1.3 — Groupes et liens : finir le geste
 
@@ -144,5 +155,5 @@ le versionnage : lot 2 (wikilinks) → 0.1.4 ; lot 1 (page concept + référence
 
 ---
 **Dernière mise à jour :** 17 juillet 2026
-**Chantier en cours :** 0.1.2 — le contrat de données extension → journal
-(0.1.1 livré le 17/07, à committer)
+**Chantier en cours :** 0.1.3 — groupes et liens : finir le geste
+(0.1.1 et 0.1.2 livrés le 17/07 ; extension v1.6.7 zippée)

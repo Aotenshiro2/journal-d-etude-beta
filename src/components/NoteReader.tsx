@@ -1,9 +1,11 @@
 'use client'
 
 import { useState } from 'react'
+import { Eye, EyeOff } from 'lucide-react'
 import { NoteData, MessageData, AnnotationData, TradeSegmentData } from '@/types'
 import { extractImageSrc } from '@/lib/utils'
 import ImageLightbox from './ImageLightbox'
+import { useShowMeta } from '@/hooks/useShowMeta'
 
 interface NoteReaderProps {
   note: NoteData
@@ -35,6 +37,8 @@ function latestBy(annotations: AnnotationData[], predicate: (a: AnnotationData) 
 
 export default function NoteReader({ note }: NoteReaderProps) {
   const [zoomSrc, setZoomSrc] = useState<string | null>(null)
+  const [showMeta, toggleShowMeta] = useShowMeta()
+  const metaMessages = (note.messages ?? []).filter((m: MessageData) => m.type === 'meta')
   const annotations = note.annotations ?? []
   const noteAnnotation = latestBy(annotations, a => !a.messageRef && !a.tradeRef)
   const tags = (note.tags ?? []).map(t => t.tag)
@@ -48,6 +52,16 @@ export default function NoteReader({ note }: NoteReaderProps) {
           <img src={note.favicon} alt="" className="w-4 h-4 rounded flex-shrink-0" />
         )}
         <h2 className="flex-1 text-sm font-semibold leading-tight" style={{ color: 'var(--node-title)' }}>{note.title}</h2>
+        {metaMessages.length > 0 && (
+          <button
+            onClick={toggleShowMeta}
+            title={showMeta ? 'Masquer les métadonnées de capture' : 'Afficher les métadonnées de capture (date, page, URL)'}
+            className="flex items-center justify-center w-5 h-5 rounded flex-shrink-0 transition-colors"
+            style={{ color: showMeta ? '#3b82f6' : 'var(--node-meta)', background: showMeta ? 'rgba(59,130,246,0.12)' : 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+          >
+            {showMeta ? <Eye size={12} /> : <EyeOff size={12} />}
+          </button>
+        )}
         {noteAnnotation && (
           <span
             className={`flex items-center justify-center w-5 h-5 rounded-full text-[11px] font-semibold flex-shrink-0 ${GRADE_CLASS[noteAnnotation.grade] ?? ''}`}
@@ -118,6 +132,15 @@ export default function NoteReader({ note }: NoteReaderProps) {
         >
           ↗ {note.sourceUrl}
         </a>
+      )}
+      {showMeta && metaMessages.length > 0 && (
+        <div className="mb-3 space-y-1">
+          {metaMessages.map((m: MessageData) => (
+            <p key={m.id} className="text-[10px] italic break-all" style={{ color: 'var(--node-meta)', opacity: 0.7 }}>
+              {m.content}
+            </p>
+          ))}
+        </div>
       )}
       <div
         className="note-preview-content text-sm leading-relaxed"

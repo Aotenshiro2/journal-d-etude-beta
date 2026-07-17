@@ -28,7 +28,7 @@ import {
   Sun, Moon, Map as MapIcon, Grid3x3, ChevronDown, ChevronLeft, ChevronRight,
   BookOpen, Lightbulb, BookMarked, BarChart2, FileText,
   MousePointer2, Hand, Pencil, Square, ZoomIn, ZoomOut, Maximize2,
-  Star, FolderPlus, Compass, Sunrise, Layers,
+  Star, FolderPlus, Compass, Sunrise, Layers, Eye, EyeOff,
 } from 'lucide-react'
 import { NoteData, CanvasData, MessageData } from '@/types'
 import { GroupNode, GROUP_COLORS, sortParentsFirst, type GroupHandlers } from './StudyCanvas'
@@ -36,6 +36,7 @@ import CaptureBar from '@/components/CaptureBar'
 import ImageLightbox from '@/components/ImageLightbox'
 import { stripHtml, formatRelativeTime, extractImageSrc } from '@/lib/utils'
 import { useTheme } from '@/contexts/ThemeContext'
+import { useShowMeta } from '@/hooks/useShowMeta'
 import { createClient } from '@/lib/supabase/client'
 import {
   Tooltip,
@@ -410,7 +411,7 @@ function NotesBubble({ notes, pinnedNoteIds, onFocus, onPreview, dropCounter }: 
 
 const IMAGE_TYPES = new Set(['image', 'screenshot', 'capture'])
 
-function NoteContentRenderer({ note, className, onImageClick }: { note: NoteData; className: string; onImageClick?: (src: string) => void }) {
+function NoteContentRenderer({ note, className, onImageClick, showMeta = false }: { note: NoteData; className: string; onImageClick?: (src: string) => void; showMeta?: boolean }) {
   // Délégation : toute image du HTML (dangerouslySetInnerHTML compris) devient zoomable
   const handleClick = onImageClick
     ? (e: React.MouseEvent) => {
@@ -421,11 +422,19 @@ function NoteContentRenderer({ note, className, onImageClick }: { note: NoteData
   if (note.messages && note.messages.length > 0) {
     return (
       <div className={className} onClick={handleClick}>
-        {note.messages.map(msg =>
-          IMAGE_TYPES.has(msg.type)
+        {note.messages.map(msg => {
+          // Bloc 'meta' (date/titre/URL de capture) : masqué par défaut, jamais du contenu
+          if (msg.type === 'meta') {
+            return showMeta ? (
+              <p key={msg.id} style={{ fontSize: 10, fontStyle: 'italic', color: 'var(--node-meta)', opacity: 0.7, margin: '4px 0', wordBreak: 'break-all' }}>
+                {msg.content}
+              </p>
+            ) : null
+          }
+          return IMAGE_TYPES.has(msg.type)
             ? <img key={msg.id} src={extractImageSrc(msg.content) ?? msg.content} alt="" style={{ maxWidth: '100%', borderRadius: 6, margin: '6px 0', display: 'block', cursor: onImageClick ? 'zoom-in' : undefined }} />
             : <div key={msg.id} dangerouslySetInnerHTML={{ __html: msg.content }} />
-        )}
+        })}
       </div>
     )
   }
@@ -442,6 +451,7 @@ interface NotePreviewPanelProps {
 function NotePreviewPanel({ note, refreshTrigger }: NotePreviewPanelProps) {
   const [fetchedMessages, setFetchedMessages] = useState<MessageData[] | null>(null)
   const [zoomSrc, setZoomSrc] = useState<string | null>(null)
+  const [showMeta, toggleShowMeta] = useShowMeta()
 
   useEffect(() => {
     if (!note) { setFetchedMessages(null); return }
@@ -488,12 +498,26 @@ function NotePreviewPanel({ note, refreshTrigger }: NotePreviewPanelProps) {
           <span style={{ fontSize: 10, color: 'var(--node-meta)' }}>
             {formatRelativeTime(new Date(note.lastModifiedAt))}
           </span>
+          <span style={{ flex: 1 }} />
+          <button
+            onClick={toggleShowMeta}
+            title={showMeta ? 'Masquer les métadonnées de capture' : 'Afficher les métadonnées de capture (date, page, URL)'}
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              width: 22, height: 22, borderRadius: 6, cursor: 'pointer', padding: 0,
+              background: showMeta ? 'rgba(59,130,246,0.12)' : 'none',
+              border: showMeta ? '1px solid rgba(59,130,246,0.35)' : '1px solid transparent',
+              color: showMeta ? '#3b82f6' : 'var(--node-meta)',
+            }}
+          >
+            {showMeta ? <Eye size={12} /> : <EyeOff size={12} />}
+          </button>
         </div>
       </div>
 
       {/* Content */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '12px 14px' }}>
-        <NoteContentRenderer note={displayNote} className="note-preview-content" onImageClick={setZoomSrc} />
+        <NoteContentRenderer note={displayNote} className="note-preview-content" onImageClick={setZoomSrc} showMeta={showMeta} />
       </div>
       <ImageLightbox src={zoomSrc} onClose={() => setZoomSrc(null)} />
 
