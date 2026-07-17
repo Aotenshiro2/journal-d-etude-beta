@@ -814,6 +814,21 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
   const canvasRef = useRef<HTMLDivElement>(null)
   const spotlightRef = useRef<HTMLDivElement>(null)
 
+  // Fraîcheur des notes sans recharger la page : une note qui vient d'être
+  // synchronisée depuis l'extension apparaît dans la liste (et se résout au
+  // drop) via un refresh au retour sur l'onglet + toutes les 60 s.
+  useEffect(() => {
+    const onFocus = () => router.refresh()
+    window.addEventListener('focus', onFocus)
+    const interval = setInterval(() => {
+      if (!document.hidden) router.refresh()
+    }, 60_000)
+    return () => {
+      window.removeEventListener('focus', onFocus)
+      clearInterval(interval)
+    }
+  }, [router])
+
   useEffect(() => {
     const el = canvasRef.current
     if (!el) return
@@ -1022,14 +1037,34 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
     setIsDragOver(false)
 
     let noteId = e.dataTransfer.getData('noteId')
+    let freshNote: NoteData | undefined
     // Pont extension → journal : la note glissée depuis le sidepanel arrive via text/plain
     // (« carnet-note:<extensionNoteId> », seul format qui survit à la frontière extension ↔ page).
     if (!noteId) {
       const ext = e.dataTransfer.getData('application/x-carnet-note') || e.dataTransfer.getData('text/plain')
       const m = ext.match(/^carnet-note:(.+)$/)
       if (m) {
-        const match = notes.find(n => n.extensionNoteId === m[1].trim())
-        if (match) noteId = match.id
+        const extId = m[1].trim()
+        const match = notes.find(n => n.extensionNoteId === extId)
+        if (match) {
+          noteId = match.id
+        } else {
+          // La note vient d'être synchronisée : la page ne la connaît pas encore.
+          // Avant : échec SILENCIEUX tant qu'on ne rechargeait pas (bug Brice 17/07).
+          // On résout en direct contre l'API, puis router.refresh() aligne le reste.
+          try {
+            const res = await fetch('/api/notes')
+            if (res.ok) {
+              const fresh: (NoteData & { tags?: unknown })[] = await res.json()
+              const found = fresh.find(n => n.extensionNoteId === extId)
+              if (found) {
+                freshNote = { ...found, tags: [] }
+                noteId = found.id
+                router.refresh()
+              }
+            }
+          } catch { /* réseau — on abandonne ce drop */ }
+        }
       }
     }
     if (!noteId) return
@@ -1037,7 +1072,7 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
 
     // Center the node on the drop cursor position
     const position = screenToFlowPosition({ x: e.clientX - 130, y: e.clientY - 76 })
-    const note = notes.find(n => n.id === noteId)
+    const note = notes.find(n => n.id === noteId) ?? freshNote
     if (!note) return
 
     const res = await fetch(`/api/canvas/${canvas.id}/nodes`, {
@@ -1055,7 +1090,7 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
       data: { note, dbNodeId: dbNode.id, canvasId: canvas.id },
     }])
     setDropCounter(c => c + 1)
-  }, [nodes, notes, canvas.id, screenToFlowPosition, setNodes])
+  }, [nodes, notes, canvas.id, screenToFlowPosition, setNodes, router])
 
   // ── Groupes de notes : renommer / recolorer / promouvoir / dissoudre / redimensionner ──
   const patchNode = useCallback((id: string, body: Record<string, unknown>) =>

@@ -36,6 +36,7 @@ export async function GET(req: NextRequest) {
       firstSyncAt: true,
       lastModifiedAt: true,
       userId: true,
+      extensionNoteId: true, // résolution des drops extension → canvas (pont capture → étude)
       concepts: true,
       trades: true,
       warmups: true,
