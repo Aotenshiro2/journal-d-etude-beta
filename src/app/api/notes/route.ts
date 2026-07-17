@@ -205,17 +205,40 @@ export async function POST(req: NextRequest) {
     if (source === 'extension') {
       // Extension → remplace toujours tous les messages pour capturer les images
       // Filtrer les éléments null/undefined qui causent des erreurs de validation Prisma
+      // Normalisation contrat 0.1.2 : les blocs texte qui ne sont QUE de la
+      // métadonnée de capture (« 📅 … • … », sans image) deviennent type 'meta'
+      // — sinon une resync d'anciennes notes (< v1.6.7) réécraserait la
+      // migration migrate-legacy-meta-0.1.2 en les repassant en 'text'.
+      const stripHtmlText = (html: string) =>
+        html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim()
+      const normalizeType = (content: string, type: string) => {
+        if (type !== 'text' || content.includes('<img')) return { content, type }
+        const t = stripHtmlText(content)
+        if (/^📅 .+ • /.test(t) && t.length < 300) return { content: t, type: 'meta' }
+        return { content, type }
+      }
       const validMessages = (messages as unknown[])
         .filter((msg) => msg != null)
-        .map((msg: { content?: string; type?: string; id?: string; tradeRef?: string }, i: number) => ({
-          noteId: note.id,
-          content: typeof msg === 'string' ? msg : (msg.content ?? ''),
-          order: i,
-          type: (msg as { type?: string }).type ?? detectType(typeof msg === 'string' ? msg : (msg.content ?? '')),
-          // ID stable côté extension — les annotations de messages s'y réfèrent (messageRef)
-          extensionMessageId: typeof msg === 'string' ? null : (msg.id ?? null),
-          tradeRef: typeof msg === 'string' ? null : (msg.tradeRef ?? null),
-        }))
+        // Blocs texte vides : jamais en base (ceinture serveur du filtre sync)
+        .filter((msg) => {
+          const c = typeof msg === 'string' ? msg : ((msg as { content?: string }).content ?? '')
+          const ty = typeof msg === 'string' ? 'text' : ((msg as { type?: string }).type ?? detectType(c))
+          return ty !== 'text' || stripHtmlText(c).length > 0
+        })
+        .map((msg: { content?: string; type?: string; id?: string; tradeRef?: string }, i: number) => {
+          const rawContent = typeof msg === 'string' ? msg : (msg.content ?? '')
+          const rawType = (msg as { type?: string }).type ?? detectType(rawContent)
+          const { content, type } = normalizeType(rawContent, rawType)
+          return {
+            noteId: note.id,
+            content,
+            order: i,
+            type,
+            // ID stable côté extension — les annotations de messages s'y réfèrent (messageRef)
+            extensionMessageId: typeof msg === 'string' ? null : (msg.id ?? null),
+            tradeRef: typeof msg === 'string' ? null : (msg.tradeRef ?? null),
+          }
+        })
       // Upsert par extensionMessageId pour PRÉSERVER Message.id d'une sync à l'autre.
       // ⚠️ Avant : deleteMany + createMany régénérait tous les id → les nœuds du canvas
       // d'étude (CanvasNode.messageId → Message.id) devenaient orphelins à CHAQUE sync,

@@ -46,16 +46,14 @@ canvas sert à organiser.
 
 La note d'origine = ce que l'élève a écrit pendant sa séance. Elle est
 **précieuse et ne doit pas être polluée par le travail d'exploration**.
-- **Accueil** : la note affichée EST la note d'origine → l'édition peut aller
-  dans les deux sens (corrections de fautes, etc.), sync bidirectionnelle
-  envisageable avec l'extension.
-- **Dès que le travail d'exploration commence** (`/study`, mapping, groupes) :
-  on travaille sur la **copie de travail** — plus AUCUNE modification de la
-  note d'origine. (Le modèle le permet déjà : `CanvasNode.content` = surcharge
-  locale, « l'original reste intact ».)
-- Zone grise à trancher en codant : les corrections type orthographe faites
-  depuis le journal avant/hors exploration peuvent remonter ; jamais celles
-  issues du travail d'exploration.
+Règle SIMPLE (clarifiée par Brice le 17/07, pas de zone grise) :
+- **Accueil (le premier canvas)** : on travaille sur la **note d'origine** —
+  la même que celle de l'extension. Édition dans les deux sens (capture bar,
+  corrections), sync bidirectionnelle avec l'extension à terme.
+- **`/notes/[id]` (l'exploration — ex-`/study`)** : on travaille sur la
+  **copie de travail**, point. Plus AUCUNE modification de la note d'origine
+  depuis cet écran. (Le modèle le permet déjà : `CanvasNode.content` =
+  surcharge locale, « l'original reste intact ».)
 
 ### 0.1.2 — Le contrat de données extension → journal ✅ LIVRÉ le 17/07/2026
 
