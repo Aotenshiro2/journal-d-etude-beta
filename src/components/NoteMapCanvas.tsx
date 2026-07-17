@@ -799,6 +799,8 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
   const [showGrid, setShowGrid] = useState(true)
   const [isDragOver, setIsDragOver] = useState(false)
   const [dropCounter, setDropCounter] = useState(0)
+  // Message éphémère du drop extension (résolution en cours / note introuvable)
+  const [dropNotice, setDropNotice] = useState<string | null>(null)
   const dragEnterCounterRef = useRef(0)
   const { setCenter, screenToFlowPosition } = useReactFlow()
   const { x: vpX, y: vpY, zoom } = useViewport()
@@ -1051,10 +1053,14 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
         } else {
           // La note vient d'être synchronisée : la page ne la connaît pas encore.
           // Avant : échec SILENCIEUX tant qu'on ne rechargeait pas (bug Brice 17/07).
-          // On résout en direct contre l'API, puis router.refresh() aligne le reste.
-          try {
-            const res = await fetch('/api/notes')
-            if (res.ok) {
+          // On résout en direct contre l'API — avec retries (une sync peut être en
+          // vol) — et si elle n'existe vraiment pas, on le DIT au lieu de mourir.
+          setDropNotice('Note en cours de synchronisation…')
+          for (let attempt = 0; attempt < 3 && !noteId; attempt++) {
+            if (attempt > 0) await new Promise(r => setTimeout(r, 1500))
+            try {
+              const res = await fetch('/api/notes')
+              if (!res.ok) continue
               const fresh: (NoteData & { tags?: unknown })[] = await res.json()
               const found = fresh.find(n => n.extensionNoteId === extId)
               if (found) {
@@ -1062,8 +1068,15 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
                 noteId = found.id
                 router.refresh()
               }
-            }
-          } catch { /* réseau — on abandonne ce drop */ }
+            } catch { /* réseau — on retentera */ }
+          }
+          if (!noteId) {
+            setDropNotice('Cette note n\'est pas encore dans le journal — vérifie « ✓ sync » dans l\'extension, puis re-glisse-la.')
+            setTimeout(() => setDropNotice(null), 6000)
+            router.refresh()
+            return
+          }
+          setDropNotice(null)
         }
       }
     }
@@ -1216,6 +1229,15 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
             borderRadius: 12,
             boxShadow: 'inset 0 0 40px rgba(59,130,246,0.06)',
           }} />
+        )}
+
+        {/* Message du drop extension — résolution en cours ou note introuvable */}
+        {dropNotice && (
+          <div style={{ position: 'absolute', top: 14, left: '50%', transform: 'translateX(-50%)', zIndex: 110 }}>
+            <div className="canvas-float-pill" style={{ padding: '8px 14px', fontSize: 12, color: 'var(--node-title)', maxWidth: 420, textAlign: 'center' }}>
+              {dropNotice}
+            </div>
+          </div>
         )}
 
         {/* Top gradient */}
