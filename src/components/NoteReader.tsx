@@ -1,5 +1,9 @@
+'use client'
+
+import { useState } from 'react'
 import { NoteData, MessageData, AnnotationData, TradeSegmentData } from '@/types'
 import { extractImageSrc } from '@/lib/utils'
+import ImageLightbox from './ImageLightbox'
 
 interface NoteReaderProps {
   note: NoteData
@@ -30,6 +34,7 @@ function latestBy(annotations: AnnotationData[], predicate: (a: AnnotationData) 
 }
 
 export default function NoteReader({ note }: NoteReaderProps) {
+  const [zoomSrc, setZoomSrc] = useState<string | null>(null)
   const annotations = note.annotations ?? []
   const noteAnnotation = latestBy(annotations, a => !a.messageRef && !a.tradeRef)
   const tags = (note.tags ?? []).map(t => t.tag)
@@ -117,6 +122,10 @@ export default function NoteReader({ note }: NoteReaderProps) {
       <div
         className="note-preview-content text-sm leading-relaxed"
         style={{ color: 'var(--node-preview)' }}
+        onClick={(e) => {
+          const target = e.target as HTMLElement
+          if (target instanceof HTMLImageElement && target.src) setZoomSrc(target.src)
+        }}
         dangerouslySetInnerHTML={{ __html: note.content }}
       />
       {(() => {
@@ -135,14 +144,16 @@ export default function NoteReader({ note }: NoteReaderProps) {
                   src={src}
                   alt=""
                   className="w-full rounded-lg"
-                  style={{ border: '1px solid var(--node-border)' }}
+                  style={{ border: '1px solid var(--node-border)', cursor: 'zoom-in' }}
                   loading="lazy"
+                  onClick={() => setZoomSrc(src)}
                 />
               ) : null
             })}
           </div>
         )
       })()}
+      <ImageLightbox src={zoomSrc} onClose={() => setZoomSrc(null)} />
     </div>
   )
 }

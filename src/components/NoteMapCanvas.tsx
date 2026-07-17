@@ -33,6 +33,7 @@ import {
 import { NoteData, CanvasData, MessageData } from '@/types'
 import { GroupNode, GROUP_COLORS, sortParentsFirst, type GroupHandlers } from './StudyCanvas'
 import CaptureBar from '@/components/CaptureBar'
+import ImageLightbox from '@/components/ImageLightbox'
 import { stripHtml, formatRelativeTime, extractImageSrc } from '@/lib/utils'
 import { useTheme } from '@/contexts/ThemeContext'
 import { createClient } from '@/lib/supabase/client'
@@ -85,7 +86,7 @@ function getSourceBadge(sourceUrl?: string | null): { label: string; color: stri
 const NoteMapNode = React.memo(function NoteMapNode({ id, data }: NodeProps) {
   const router = useRouter()
   const { setNodes } = useReactFlow()
-  const { note, isExpanded, dbNodeId, canvasId } = data as { note: NoteData; isExpanded?: boolean; dbNodeId?: string; canvasId?: string }
+  const { note, dbNodeId, canvasId } = data as { note: NoteData; dbNodeId?: string; canvasId?: string }
   const [hovered, setHovered] = useState(false)
 
   const handleRemove = useCallback(async (e: React.MouseEvent) => {
@@ -163,21 +164,13 @@ const NoteMapNode = React.memo(function NoteMapNode({ id, data }: NodeProps) {
             </TooltipProvider>
           </div>
 
-          {/* Body — compact or expanded */}
-          {isExpanded ? (
-            /* nowheel : la molette scrolle le contenu au lieu de zoomer le canvas
-               (le zoom canvas faisait « disparaître » la carte) */
-            <div className="nowheel" style={{ flex: 1, overflowY: 'auto', padding: '0 14px 14px' }}>
-              <NoteContentRenderer note={note} className="note-content-preview" />
-            </div>
-          ) : (
-            preview && (
-              <p style={{
-                padding: '0 14px', fontSize: 11, color: 'var(--node-preview)',
-                lineHeight: '1.6', flex: 1,
-                display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden',
-              }}>{preview}</p>
-            )
+          {/* Body — aperçu compact (le double-clic OUVRE la note, il ne déplie plus) */}
+          {preview && (
+            <p style={{
+              padding: '0 14px', fontSize: 11, color: 'var(--node-preview)',
+              lineHeight: '1.6', flex: 1,
+              display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+            }}>{preview}</p>
           )}
 
           {/* Footer */}
@@ -192,7 +185,7 @@ const NoteMapNode = React.memo(function NoteMapNode({ id, data }: NodeProps) {
             </div>
             <button
               onClick={(e) => { e.stopPropagation(); router.push(`/notes/${note.id}`) }}
-              title="Ouvrir la note (double-clic sur la carte : agrandir/réduire ici)"
+              title="Ouvrir la note (ou double-clic sur la carte)"
               style={{
                 fontSize: 10, color: 'var(--node-meta)', background: 'none',
                 border: '1px solid transparent', borderRadius: 6, padding: '2px 6px',
@@ -417,19 +410,26 @@ function NotesBubble({ notes, pinnedNoteIds, onFocus, onPreview, dropCounter }: 
 
 const IMAGE_TYPES = new Set(['image', 'screenshot', 'capture'])
 
-function NoteContentRenderer({ note, className }: { note: NoteData; className: string }) {
+function NoteContentRenderer({ note, className, onImageClick }: { note: NoteData; className: string; onImageClick?: (src: string) => void }) {
+  // Délégation : toute image du HTML (dangerouslySetInnerHTML compris) devient zoomable
+  const handleClick = onImageClick
+    ? (e: React.MouseEvent) => {
+        const target = e.target as HTMLElement
+        if (target instanceof HTMLImageElement && target.src) onImageClick(target.src)
+      }
+    : undefined
   if (note.messages && note.messages.length > 0) {
     return (
-      <div className={className}>
+      <div className={className} onClick={handleClick}>
         {note.messages.map(msg =>
           IMAGE_TYPES.has(msg.type)
-            ? <img key={msg.id} src={extractImageSrc(msg.content) ?? msg.content} alt="" style={{ maxWidth: '100%', borderRadius: 6, margin: '6px 0', display: 'block' }} />
+            ? <img key={msg.id} src={extractImageSrc(msg.content) ?? msg.content} alt="" style={{ maxWidth: '100%', borderRadius: 6, margin: '6px 0', display: 'block', cursor: onImageClick ? 'zoom-in' : undefined }} />
             : <div key={msg.id} dangerouslySetInnerHTML={{ __html: msg.content }} />
         )}
       </div>
     )
   }
-  return <div className={className} dangerouslySetInnerHTML={{ __html: note.content || '<p>Aucun contenu</p>' }} />
+  return <div className={className} onClick={handleClick} dangerouslySetInnerHTML={{ __html: note.content || '<p>Aucun contenu</p>' }} />
 }
 
 // ─── Note preview panel (left overlay) ───────────────────────────────────────
@@ -441,6 +441,7 @@ interface NotePreviewPanelProps {
 
 function NotePreviewPanel({ note, refreshTrigger }: NotePreviewPanelProps) {
   const [fetchedMessages, setFetchedMessages] = useState<MessageData[] | null>(null)
+  const [zoomSrc, setZoomSrc] = useState<string | null>(null)
 
   useEffect(() => {
     if (!note) { setFetchedMessages(null); return }
@@ -492,8 +493,9 @@ function NotePreviewPanel({ note, refreshTrigger }: NotePreviewPanelProps) {
 
       {/* Content */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '12px 14px' }}>
-        <NoteContentRenderer note={displayNote} className="note-preview-content" />
+        <NoteContentRenderer note={displayNote} className="note-preview-content" onImageClick={setZoomSrc} />
       </div>
+      <ImageLightbox src={zoomSrc} onClose={() => setZoomSrc(null)} />
 
       {/* Footer */}
       {note.sourceUrl && (
@@ -739,6 +741,7 @@ interface NoteMapCanvasProps {
 }
 
 function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCanvasProps) {
+  const router = useRouter()
   const pathname = usePathname()
   const activeMode = MODES.find(m => m.match(pathname)) ?? MODES[0]
   const displayTitle = title ?? activeMode.label
@@ -865,7 +868,7 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
           position: { x: n.x, y: n.y },
           ...(n.parentId ? { parentId: n.parentId } : {}),
           style: { width: 260, height: 152 },
-          data: { note, isExpanded: false, dbNodeId: n.id, canvasId: canvas.id },
+          data: { note, dbNodeId: n.id, canvasId: canvas.id },
         }]
       })
     return sortParentsFirst([...groupNodes, ...noteNodes])
@@ -886,18 +889,6 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
 
-  const handleExpandNode = useCallback((nodeId: string) => {
-    setNodes(nds => nds.map(n => {
-      if (n.id !== nodeId) return n
-      const wasExpanded = !!(n.data as { isExpanded?: boolean }).isExpanded
-      return {
-        ...n,
-        style: wasExpanded ? { width: 260, height: 152 } : { width: 400, height: 580 },
-        data: { ...n.data, isExpanded: !wasExpanded },
-      }
-    }))
-  }, [setNodes])
-
   const handleNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
     if (singleClickTimerRef.current) clearTimeout(singleClickTimerRef.current)
     singleClickTimerRef.current = setTimeout(() => {
@@ -905,13 +896,16 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
     }, 220)
   }, [])
 
+  // Double-clic = OUVRIR le poste de travail de la note (décision Brice 17/07 —
+  // remplace l'ancien dépliage sur place, jugé inexploitables)
   const handleNodeDoubleClick = useCallback((_: React.MouseEvent, node: Node) => {
     if (singleClickTimerRef.current) {
       clearTimeout(singleClickTimerRef.current)
       singleClickTimerRef.current = null
     }
-    handleExpandNode(node.id)
-  }, [handleExpandNode])
+    if (node.type !== 'noteMap') return
+    router.push(`/notes/${node.id}`)
+  }, [router])
 
   const handleNodeDragStop: OnNodeDrag = useCallback(async (_, node) => {
     // Groupe déplacé : on persiste juste sa position (id RF = id DB du groupe)
@@ -1034,7 +1028,7 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
       id: noteId, type: 'noteMap',
       position,
       style: { width: 260, height: 152 },
-      data: { note, isExpanded: false, dbNodeId: dbNode.id, canvasId: canvas.id },
+      data: { note, dbNodeId: dbNode.id, canvasId: canvas.id },
     }])
     setDropCounter(c => c + 1)
   }, [nodes, notes, canvas.id, screenToFlowPosition, setNodes])

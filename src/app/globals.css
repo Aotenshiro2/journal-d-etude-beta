@@ -421,6 +421,8 @@ input[type="search"]::-moz-selection {
   .note-content-preview ul, .note-content-preview ol  { padding-left: 16px; margin: 4px 0; }
   .note-preview-content a, .note-content-preview a { color: #3b82f6; text-decoration: none; }
   .note-preview-content img, .note-content-preview img { max-width: 100%; border-radius: 6px; margin: 6px 0; }
+  /* Les images des panneaux de lecture s'agrandissent au clic (ImageLightbox) */
+  .note-preview-content img { cursor: zoom-in; }
 
   /* Note styles */
   .note-card {
