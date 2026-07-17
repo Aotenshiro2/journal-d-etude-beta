@@ -1,160 +1,148 @@
-# ✅ Todo List - Journal d'Études
+# ✅ TODO — Journal d'Études
 
-## État des tâches au 15 octobre 2025
+> Nettoyé le 17/07/2026 : sections d'octobre 2025 retirées (setup fait — l'app
+> est en prod sur journal-d-etude-beta.vercel.app), `NEXT_STEPS.md` et
+> `RESUME.md` supprimés (obsolètes). **Décisions Brice du 17/07** :
+> - Le secret Railway dans l'historique git est **assumé jusqu'à la
+>   pré-publication** — pas de chantier maintenant. → inscrit dans la
+>   checklist pré-bêta ci-dessous.
+> - **Supabase = données de compte uniquement** (auth). Tout le reste vit hors
+>   Supabase (Railway PostgreSQL via Prisma) — éviter les goulots inter-apps.
+> - **Une conversation Claude par version** (0.1, 0.2…) pour économiser le
+>   contexte : ROADMAP.md + TODO.md + la mémoire persistante de Claude sont la
+>   source de continuité. Tenir ce TODO à jour à chaque tâche finie.
 
-### 🎉 **Terminées (High Priority)**
-- [x] Créer compte Railway avec GitHub
-- [x] Déployer PostgreSQL sur Railway  
-- [x] Configurer .env avec URL Railway
-- [x] Tester connexion et push schema
-- [x] Supprimer ancienne base SQLite et nettoyer
-- [x] Vérifier que Railway fonctionne parfaitement
-- [x] Démarrer app et tester création de données
-- [x] Tester toutes les APIs principales
-
-### 📋 **En cours/À faire**
-
-#### **High Priority (Critique)**
-- [ ] **Vérifier Railway après restructuration**
-  - Tester `npm run dev` dans nouveau dossier
-  - Vérifier que DATABASE_URL fonctionne
-  - Valider APIs : Notes, Courses, Instructors
-
-#### **Medium Priority (Important)**  
-- [ ] **Initialiser Git avec structure propre**
-  - `git init` dans `aoknowledge/apps/journal-d-etude/`
-  - `git add .`
-  - `git commit -m "Initial commit: Journal d'Études with Railway"`
-
-- [ ] **Premier commit et push GitHub**
-  - Créer repository `aoknowledge` sur GitHub
-  - Ajouter remote origin
-  - Push initial
-
-- [ ] **Import Vercel avec bon nom de projet**
-  - Créer compte Vercel + GitHub
-  - Import repository `aoknowledge`
-  - Root directory : `apps/journal-d-etude`
-
-- [ ] **Configuration variables d'environnement production**
-  - DATABASE_URL Railway
-  - NEXTAUTH_SECRET généré
-  - NEXTAUTH_URL avec domaine Vercel
-
-#### **Low Priority (Finition)**
-- [ ] **Premier déploiement et tests production**
-  - Build Vercel
-  - Tests APIs en production
-  - Validation fonctionnement complet
-
-## 🔧 **Configuration critique à préserver :**
-
-### **Railway PostgreSQL :**
-```
-DATABASE_URL="postgresql://postgres:dFDBpuKRWmxiJMcdHKfayFxzfjRLbyMy@caboose.proxy.rlwy.net:14621/railway"
-```
-
-### **Variables d'environnement Vercel :**
-```
-DATABASE_URL = postgresql://postgres:dFDBpuKRWmxiJMcdHKfayFxzfjRLbyMy@caboose.proxy.rlwy.net:14621/railway
-NEXTAUTH_SECRET = your-secret-key-here  
-NEXTAUTH_URL = https://[VERCEL-URL]
-```
-
-## ⚠️ **Points d'attention :**
-1. **Vérifier Railway** après déplacement fichiers
-2. **Root directory Vercel** = `apps/journal-d-etude`
-3. **DATABASE_URL** doit être exactement la même
-4. **Tester APIs** avant et après chaque étape
-
-## 📊 **Métriques de succès :**
-- [ ] App démarre sans erreur
-- [ ] APIs répondent correctement
-- [ ] Déploiement Vercel réussi
-- [ ] Tests en production passent
-
-## 🆕 Mise à jour du 10 juillet 2026 — évolutions à venir
-
-Ordre de priorité global validé par Brice (extension + journal confondus) :
-1. fix warmup extension → **2. homogénéisation UI (ici)** → 3. DOL extension
-→ **4. compteur de concepts (ici)**. Le pont Edgyx passe devant tout
-(dossier envoyé, en attente du retour de Geoffrey).
-
-### Concepts — compteur de journalisation (priorité 4)
-- [ ] Afficher pour chaque concept le nombre de fois qu'il a été journalé
-      (ex. « Breaker ×47 »), lisible d'un coup d'œil sur /concepts.
-- But pédagogique : l'élève voit immédiatement où il en est sur chaque concept.
-- (option) Rappeler ce compteur dans le picker de tags/concepts.
-
-### Homogénéisation de l'esthétique (TERMINÉE — 2026-07-16)
-Direction artistique (Brice) : quand on change de page, la page d'accueil doit
-sembler « se métamorphoser » — pas de sensation de changer d'app. Le langage
-commun : canvas en toile de fond, dropdown des espaces haut-gauche, actions
-rapides bas-droite, capture bar centrale quand utile, lecteur de notes à gauche
-si besoin. Pas d'animations de transition. Chaque page garde SES besoins.
-
-DÉJÀ ALIGNÉES — NE PAS TOUCHER :
-- `/` (accueil, `NoteMapCanvas.tsx`) → **la référence**
-- `/study/*` (`StudyCanvas.tsx`) → l'écran où on relie les notes entre elles
-- `/concepts` (utilise `CanvasShell`) — le doublon de titre a disparu avec le
-  retrait du slot `title` (2026-07-16) ; son contenu n'a pas été touché.
-
-Outil en place : `src/components/CanvasShell.tsx` (commit `6bb6aae`) reproduit le
-langage de l'accueil (dot grid + top gradient, dropdown MODES identique,
-UserMenu haut-droite, pill bas-droite thème/Relire+badge/Notes/Guide). Slots :
-`dueCount`, `extraActions`, `children`. Le faire évoluer si un écran a besoin de
-plus (barre centrale, lecteur de notes à gauche…).
-
-DÉCIDÉ le 2026-07-16 (Brice) — **pas de titre hors accueil** : le dropdown dit à
-lui seul où tu es ; le nom de l'app (« Journal d'Études ») ne vit que sur
-l'accueil. Le slot `title` a donc été retiré du shell (il affichait par défaut le
-label du mode → le même texte écrit deux fois à côté du dropdown, ce que faisait
-`/concepts`). Corollaire pour chaque écran migré : le `<h1>` de la vue doit être
-**éditorial** (ce que l'écran révèle), pas le nom de l'espace — cf. `/concepts`
-(« Ce qui revient dans tes notes ») et `/analytics` (« Ce que tes jugements
-révèlent »).
-
-COMMENT VÉRIFIER À L'ÉCRAN sans session Supabase (débloqué le 2026-07-16 — avant,
-la validation visuelle devait attendre un deploy) : le middleware laisse passer
-tout chemin commençant par `/guide`, donc une page jetable
-`src/app/guide-ui-preview/page.tsx` qui monte `CanvasShell` + la vue avec des
-données bidon s'affiche sans login. `npx next dev -p 3007` dans WSL (⚠️ 3000 peut
-être pris par Codex — et ne JAMAIS faire `pkill -f "next dev"`, ça tue son
-serveur : tuer par port avec `fuser -k 3007/tcp`). Le port est joignable depuis
-Windows. Penser à supprimer la page jetable + `rm -rf .next/types/app/<page>`
-avant de committer.
-
-FAIT — tous les écrans sont passés sur `CanvasShell`, `AppHeader.tsx` est
-supprimé (ainsi que `ThemeToggle.tsx`, dont il était le seul consommateur) :
-- [x] `/analytics` (`b6c6b63`) — les 3 lentilles inchangées dans le scroll central.
-- [x] `/patterns` (`8bfb797`) — CTA + échelle d'escalade + tags inchangés.
-- [x] `/game` (`e388449`) — les 3 colonnes A/B/C + « Mon chantier du moment ».
-- [x] `/session` (`e388449`) — CTA + volets avant/après + curseur d'émotion.
-- [x] `/review` (`400c9c6`) — deck + mode focus ; badge « Relire » recalculé
-      depuis les canvas déjà chargés (pas de requête en plus).
-- [x] `/notes` (`400c9c6`) — passait par `min-h-screen`, désormais dans la zone
-      scrollable du shell.
-- [x] `/guide` (`400c9c6`) — « Le parcours » était déjà éditorial.
-- [x] `/journal` + `/market` (`400c9c6`) — `ComingSoon` thématisé (il était en
-      `bg-gray-950` en dur, donc sombre même en mode clair).
-- [x] `AppHeader.tsx` supprimé.
-
-À SAVOIR pour la suite :
-- **Écrans hors dropdown** : `OFF_MENU_PAGES` dans `CanvasShell`. Sans lui, le
-  bouton retombait sur le 1er mode et affichait « Étudier mes notes » sur
-  `/review` — faux. Tout nouvel écran hors dropdown doit y déclarer son libellé.
-- **`/market` est orphelin** : aucun lien n'y mène, il n'est pas dans le
-  dropdown. Migré seulement parce qu'il partage `ComingSoon`. À supprimer si
-  l'écran « Observer le marché » n'est plus au programme.
-- **Le shell ne reproduit pas encore tout l'accueil** : il manque la barre de
-  capture centrale, le « Notes · N » en bas à gauche et la barre d'outils
-  verticale à droite. Aucun des écrans migrés n'en avait besoin (lecture ou
-  formulaire), mais un futur écran de saisie voudra probablement la barre de
-  capture — c'est là que le slot central se justifiera.
-
-> Côté extension, voir aussi `apps/carnet-du-trader-extension/TODO.md`
-> (DOL — Draw on Liquidity, warmup multi-séances) — à faire avant le zip v1.6.0.
+**Versionnage et carte des modules : voir `ROADMAP.md`** (un module du dropdown =
+une version mineure ; patch = une tâche finie et visible à l'écran).
 
 ---
-**Dernière mise à jour :** 10 juillet 2026
-**Prochaine étape :** compteur de concepts + DOL/warmup côté extension
+
+## 🔨 CHANTIER EN COURS — 0.1.x « Étudier mes notes »
+
+Objectif : le poste de travail note devient exploitable — « je le montre à un
+élève sans m'excuser ». Le panneau de gauche est LA surface de travail ; le
+canvas sert à organiser.
+
+### 0.1.1 — Le poste de travail note ✅ LIVRÉ le 17/07/2026 (non commité)
+
+- [x] **Double-clic sur une card de l'accueil → OUVRE la note** (`/notes/[id]`,
+      le vrai poste de travail — `/study/[id]` n'est qu'une redirection).
+      L'ancien dépliage sur place (`isExpanded`, 260×152 → 400×580) est
+      supprimé de `NoteMapCanvas.tsx`. Le simple clic (preview, timer 220 ms)
+      est inchangé. Vérifié à l'écran (page jetable, port 3007).
+- [x] **Images cliquables** : `ImageLightbox` branché sur les DEUX panneaux
+      gauches — `NotePreviewPanel` (accueil, via prop `onImageClick` de
+      `NoteContentRenderer`) et `NoteReader` (/notes/[id], liste d'images +
+      délégation sur le HTML de `note.content`). Curseur `zoom-in`
+      (globals.css), fermeture clic ou Escape. Vérifié à l'écran.
+- [x] **Édition via la capture bar** : EXISTAIT DÉJÀ sur l'accueil et
+      c'est le bon endroit selon la doctrine — `CaptureBar` écrit texte
+      et images dans la note sélectionnée (`POST /api/notes/[id]/messages`),
+      le panneau gauche se rafraîchit (`refreshTrigger`). Sur `/notes/[id]`
+      (exploration), PAS de capture bar : la note d'origine y est figée
+      (doctrine ci-dessous). Rien à coder.
+
+#### ⚖️ Doctrine « note d'origine vs copie de travail » (Brice, 17/07/2026)
+
+La note d'origine = ce que l'élève a écrit pendant sa séance. Elle est
+**précieuse et ne doit pas être polluée par le travail d'exploration**.
+- **Accueil** : la note affichée EST la note d'origine → l'édition peut aller
+  dans les deux sens (corrections de fautes, etc.), sync bidirectionnelle
+  envisageable avec l'extension.
+- **Dès que le travail d'exploration commence** (`/study`, mapping, groupes) :
+  on travaille sur la **copie de travail** — plus AUCUNE modification de la
+  note d'origine. (Le modèle le permet déjà : `CanvasNode.content` = surcharge
+  locale, « l'original reste intact ».)
+- Zone grise à trancher en codant : les corrections type orthographe faites
+  depuis le journal avant/hors exploration peuvent remonter ; jamais celles
+  issues du travail d'exploration.
+
+### 0.1.2 — Le contrat de données extension → journal
+
+- [ ] **Fini les métadonnées déguisées en messages** (ex. « NQ1 » = titre
+      d'onglet capturé comme bloc). Trancher : soit l'extension ne les envoie
+      plus comme messages, soit le journal les range en métadonnées de note
+      (en-tête) et jamais en blocs. À faire tôt — chaque semaine de capture
+      accumule du bruit en base qu'il faudrait migrer plus tard.
+- [ ] Audit rapide des types de blocs reçus réellement en base (SELECT sur
+      Message.type/content) pour lister ce qui est du contenu vs du bruit.
+
+### 0.1.3 — Groupes et liens : finir le geste
+
+- [ ] Le geste complet : sélectionner des notes → grouper (« ces notes
+      expriment une même idée ») → nommer le groupe → **le nom sert** :
+      c'est un proto-concept (`CanvasNode.label` existe déjà). Définir ce qui
+      se passe après le regroupement (promotion en concept ? filtre ?).
+- [ ] Liens entre notes sur le canvas d'accueil (aujourd'hui le mode connexion
+      n'existe que dans `/study`).
+
+### 0.1.4 — Connectivité second cerveau (la saisie)
+
+- [ ] Syntaxe `[[concept]]` dans la barre de capture + rendu pastille cliquable
+      — **lot 2 de `SPEC-second-cerveau.md`** (le lot 1, page concept avec
+      références, part en 0.2).
+
+---
+
+## 📦 File d'attente (ne pas ouvrir avant la fin du 0.1.x)
+
+- **0.2.x Observer les concepts** : compteur de journalisation (« Breaker ×47 »)
+  MAIS avec l'usage derrière — tuile cliquable → exploration du concept (notes,
+  blocs, screenshots, grades). = lot 1 de `SPEC-second-cerveau.md`. La même
+  donnée nourrit l'agrégation du mode mentorat de l'extension (moins cosmétique
+  qu'il n'y paraît).
+- **Pont Edgyx** : événementiel, en attente du retour de Geoffrey (dossier
+  envoyé). Hors numérotation — extension d'abord, journal peut-être ensuite.
+- `/market` est orphelin (aucun lien n'y mène) — supprimer si « Observer le
+  marché » n'est plus au programme.
+
+### 🔐 Checklist pré-bêta (à faire AVANT d'ouvrir au public, 0.9)
+
+- [ ] **Roter le mot de passe Railway** (exposé en clair dans l'historique git
+      du repo GitHub — anciens TODO/NEXT_STEPS/RESUME) ou fermer le service
+      s'il ne sert plus. Décision Brice 17/07 : assumé d'ici là, rien à faire
+      avant.
+- [ ] Purge/vérification générale des secrets dans l'historique avant toute
+      distribution.
+
+---
+
+## 📚 Acquis récents (référence, ne pas retoucher)
+
+### Homogénéisation UI (TERMINÉE — 2026-07-16)
+
+Direction artistique (Brice) : changer de page = la page d'accueil « se
+métamorphose », pas de sensation de changer d'app. Outil : `CanvasShell.tsx`
+(commit `6bb6aae`) — dot grid + top gradient, dropdown MODES, UserMenu,
+pill bas-droite. Tous les écrans migrés (`/analytics`, `/patterns`, `/game`,
+`/session`, `/review`, `/notes`, `/guide`, `/journal`, `/market`) ;
+`AppHeader.tsx` et `ThemeToggle.tsx` supprimés.
+
+À SAVOIR pour la suite :
+- **Pas de titre hors accueil** (décision Brice 16/07) : le dropdown dit où tu
+  es ; le `<h1>` de chaque vue est **éditorial** (« Ce qui revient dans tes
+  notes »), jamais le nom de l'espace.
+- **Écrans hors dropdown** : les déclarer dans `OFF_MENU_PAGES` de
+  `CanvasShell`, sinon le bouton affiche un libellé faux.
+- **Le shell ne reproduit pas tout l'accueil** : il manque la barre de capture
+  centrale, « Notes · N » bas-gauche, la barre d'outils verticale droite — à
+  ajouter en slots quand un écran en aura besoin.
+- **Vérifier à l'écran sans session Supabase** : page jetable sous `/guide-*`
+  (le middleware laisse passer `/guide`), `npx next dev -p 3007` dans WSL
+  (⚠️ ne JAMAIS `pkill -f "next dev"` — ça tue le serveur de Codex ; tuer par
+  port : `fuser -k 3007/tcp`). Supprimer la page jetable +
+  `rm -rf .next/types/app/<page>` avant de committer.
+
+### 🧠 Backlog — couche « second cerveau »
+
+Spec complète : `SPEC-second-cerveau.md` (backlinks à la Logseq). Répartie dans
+le versionnage : lot 2 (wikilinks) → 0.1.4 ; lot 1 (page concept + références)
+→ 0.2 ; lots 3-4 (mentions non liées, graphe global) → 0.2+.
+
+> Côté extension, voir `apps/carnet-du-trader-extension/TODO.md`
+> (Edgyx, prompts IA, doctrine, mode mentorat).
+
+---
+**Dernière mise à jour :** 17 juillet 2026
+**Chantier en cours :** 0.1.2 — le contrat de données extension → journal
+(0.1.1 livré le 17/07, à committer)
