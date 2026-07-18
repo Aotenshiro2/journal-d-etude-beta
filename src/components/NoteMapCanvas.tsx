@@ -1138,12 +1138,18 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
     fetch(`/api/canvas/${canvas.id}/nodes/${id}`, { method: 'DELETE' })
   }, [nodes, patchNode, setNodes, canvas.id])
 
-  const promoteGroupTag = useCallback(async (label: string) => {
+  // 0.1.3 « le nom sert » : les NOTES du groupe portent le concept (NoteTag) —
+  // « ces notes expriment une même idée » devient de la donnée pour /concepts.
+  const promoteGroupTag = useCallback(async (label: string, groupId: string) => {
+    const noteIds = nodes
+      .filter(n => n.parentId === groupId && n.type === 'noteMap')
+      .map(n => n.id)
     const res = await fetch('/api/tags', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: label }),
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: label, noteIds }),
     })
     return res.ok
-  }, [])
+  }, [nodes])
 
   groupHandlersRef.current = {
     rename: renameGroup,

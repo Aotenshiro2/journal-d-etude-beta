@@ -138,15 +138,20 @@ export default function StudyLayout({ note, canvas: initialCanvas, isDiverged }:
     [canvas.id]
   )
 
-  // Promouvoir le nom d'un groupe en tag de la taxonomie (proto-concept → concept)
-  const handlePromoteGroupTag = useCallback(async (label: string): Promise<boolean> => {
+  // Promouvoir le nom d'un groupe en tag de la taxonomie (proto-concept → concept).
+  // 0.1.3 « le nom sert » : les blocs du groupe portent le concept (MessageTag) —
+  // le regroupement spatial devient de la donnée pour /concepts.
+  const handlePromoteGroupTag = useCallback(async (label: string, groupId: string): Promise<boolean> => {
+    const messageIds = canvas.nodes
+      .filter((n) => n.parentId === groupId && n.messageId)
+      .map((n) => n.messageId as string)
     const res = await fetch('/api/tags', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: label }),
+      body: JSON.stringify({ name: label, messageIds }),
     })
     return res.ok
-  }, [])
+  }, [canvas.nodes])
 
   const handleConnect = useCallback(
     async (fromId: string, toId: string, fromHandle?: string, toHandle?: string) => {

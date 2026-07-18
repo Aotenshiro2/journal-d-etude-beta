@@ -78,12 +78,20 @@ type `meta`, l'info est toujours en base mais masquée par défaut.
 
 ### 0.1.3 — Groupes et liens : finir le geste
 
-- [ ] Le geste complet : sélectionner des notes → grouper (« ces notes
-      expriment une même idée ») → nommer le groupe → **le nom sert** :
-      c'est un proto-concept (`CanvasNode.label` existe déjà). Définir ce qui
-      se passe après le regroupement (promotion en concept ? filtre ?).
-- [ ] Liens entre notes sur le canvas d'accueil (aujourd'hui le mode connexion
-      n'existe que dans `/study`).
+- [x] **« Le nom sert »** (17/07) : promouvoir un groupe (bouton `#`) crée le
+      tag ET tague tout le contenu du groupe — les notes (accueil → `NoteTag`)
+      ou les blocs (exploration → `MessageTag`). Le regroupement spatial
+      devient de la donnée : /concepts compte, croise et note ces concepts.
+      API : `POST /api/tags` accepte `noteIds[]` / `messageIds[]` (idempotent,
+      ceinture d'appartenance). ⚠️ à vérifier à l'écran par Brice.
+- [x] ~~Liens entre notes sur le canvas d'accueil~~ — existaient DÉJÀ (outil
+      crayon `E` de la barre droite + persistance `/api/canvas/[id]/edges`).
+      L'inventaire du 16/07 était faux sur ce point.
+- [ ] Reste à trancher (produit, avec Brice) : que devient le groupe APRÈS la
+      promotion — badge « concept ✓ » permanent sur le groupe ? les nouvelles
+      notes/blocs ajoutés au groupe héritent-ils du tag automatiquement ?
+- [ ] UX à valider : feedback visuel après promotion (aujourd'hui juste ✓ sur
+      le bouton) — afficher « N notes taguées » ?
 
 ### 0.1.4 — Connectivité second cerveau (la saisie)
 

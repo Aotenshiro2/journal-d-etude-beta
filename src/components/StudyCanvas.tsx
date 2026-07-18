@@ -39,7 +39,7 @@ interface StudyCanvasProps {
   onCreateGroup: (group: { label: string; color: string; x: number; y: number; width?: number; height?: number }) => Promise<CanvasNodeData | null>
   onCreateText: (pos: { x: number; y: number }) => Promise<CanvasNodeData | null>
   onUpdateNode: (nodeId: string, patch: Partial<Pick<CanvasNodeData, 'x' | 'y' | 'width' | 'height' | 'label' | 'color' | 'parentId' | 'orderInParent' | 'content'>>) => Promise<void> | void
-  onPromoteGroupTag: (label: string) => Promise<boolean>
+  onPromoteGroupTag: (label: string, groupId: string) => Promise<boolean>
   tradeMeta?: Record<string, TradeMeta>
 }
 
@@ -79,7 +79,8 @@ export function TradeBadge({ meta }: { meta: TradeMeta }) {
 export interface GroupHandlers {
   rename: (id: string, label: string) => void
   recolor: (id: string, color: string) => void
-  promote: (label: string) => Promise<boolean>
+  // groupId : la promotion tague aussi le CONTENU du groupe (0.1.3, « le nom sert »)
+  promote: (label: string, groupId: string) => Promise<boolean>
   dissolve: (id: string) => void
   resize: (id: string, p: { width: number; height: number; x: number; y: number }) => void
 }
@@ -299,10 +300,10 @@ export function GroupNode({ id, data, selected }: NodeProps) {
             />
           ))}
           <button
-            onClick={async () => { if (await d.handlers.current.promote(d.label)) setPromoted(true) }}
+            onClick={async () => { if (await d.handlers.current.promote(d.label, id)) setPromoted(true) }}
             className="ml-1 px-1 rounded text-[10px] font-semibold hover:bg-white/10"
             style={{ color: palette.border }}
-            title={promoted ? 'Tag créé ✓' : 'Créer un tag depuis ce nom (proto-concept → taxonomie)'}
+            title={promoted ? 'Concept créé, contenu du groupe tagué ✓' : 'Promouvoir en concept : crée le tag ET tague tout le contenu du groupe'}
           >
             {promoted ? '✓' : '#'}
           </button>
