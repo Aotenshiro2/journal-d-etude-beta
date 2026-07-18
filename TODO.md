@@ -193,7 +193,41 @@ le versionnage : lot 2 (wikilinks) → 0.1.4 ; lot 1 (page concept + référence
 > (Edgyx, prompts IA, doctrine, mode mentorat).
 
 ---
-**Dernière mise à jour :** 17 juillet 2026
-**Chantier en cours :** 0.1.x livré en entier (0.1.1 → 0.1.4, extension
-v1.6.8). Prochain : **0.2 — Observer les concepts** (compteur + exploration,
-lot 1 de la spec), après validation des tests 0.1.4 par Brice.
+### 0.1.5+ — Le canvas d'étude n'est PAS fini (recadrage Brice 19/07)
+
+⚠️ Le 0.1 n'est pas terminé : 0.1.1 → 0.1.4 = la plomberie et la donnée, mais
+le CŒUR visuel de « Étudier mes notes » (le canvas de mind map) reste immature.
+**On reste en 0.1 tant que l'étude de notes n'est pas mûre — comportement ET
+esthétique.** Un élève doit pouvoir la montrer sans s'excuser.
+
+**Le modèle décidé (discussion Brice 19/07) — « C dehors, B dedans »** :
+- Séparer deux objets aujourd'hui confondus dans le « groupe » :
+  - **Collection** = conteneur qui embarque N notes et ouvre SON canvas de
+    mapping multi-notes (une note peut être dans plusieurs collections). C'est
+    le besoin « grouper mes 5 séances FVG pour mapper leurs blocs ensemble ».
+  - **Concept** = transverse, une carte en porte plusieurs, vit dans /concepts
+    (déjà branché : tags, groupe vivant, `[[ ]]`).
+- La multi-appartenance ne se règle PAS par la boîte (parentId unique React
+  Flow) mais par les **liens** à l'intérieur du canvas de mapping.
+
+Découpage (ordre indicatif, le 0.1 ne ferme qu'à maturité) :
+- [ ] **0.1.5 — La collection** : grouper des notes → ouvrir un canvas de
+      mapping qui embarque les blocs de PLUSIEURS notes. Chantier structurel :
+      aujourd'hui `Canvas.noteId @unique` = 1 canvas d'étude par note ; il faut
+      délier pour un canvas multi-notes. (métaphore C : le conteneur)
+- [ ] **0.1.6 — La connectique dedans** : liens typés bloc↔bloc et
+      bloc↔concept dans le canvas de mapping (esprit B / Obsidian) — le bond
+      visuel Miro/Obsidian, et là que vit la multi-appartenance.
+- [ ] **0.1.7+ — Passe esthétique** (Brice : « n'imagine pas que le 0.1.6 soit
+      la fin »). Revoir le look du canvas et de l'étude de notes jusqu'à
+      maturité. À détailler le moment venu.
+
+Réf : `SPEC-second-cerveau.md` + section « connectique second cerveau » plus
+haut (limite de la carte à mi-chemin entre deux concepts = résolue par les
+liens du 0.1.6, pas par la boîte).
+
+---
+**Dernière mise à jour :** 19 juillet 2026
+**Chantier en cours :** 0.1.5 — la collection (canvas de mapping multi-notes).
+Le 0.1 reste OUVERT jusqu'à maturité (fonctionnel 0.1.5/0.1.6 + esthétique
+0.1.7+). Le 0.2 « Observer les concepts » attend la fin du 0.1.
