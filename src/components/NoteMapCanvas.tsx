@@ -37,6 +37,7 @@ import ImageLightbox from '@/components/ImageLightbox'
 import { stripHtml, formatRelativeTime, extractImageSrc } from '@/lib/utils'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useShowMeta } from '@/hooks/useShowMeta'
+import { renderWikilinks } from '@/lib/wikilinks'
 import { createClient } from '@/lib/supabase/client'
 import {
   Tooltip,
@@ -412,13 +413,12 @@ function NotesBubble({ notes, pinnedNoteIds, onFocus, onPreview, dropCounter }: 
 const IMAGE_TYPES = new Set(['image', 'screenshot', 'capture'])
 
 function NoteContentRenderer({ note, className, onImageClick, showMeta = false }: { note: NoteData; className: string; onImageClick?: (src: string) => void; showMeta?: boolean }) {
-  // Délégation : toute image du HTML (dangerouslySetInnerHTML compris) devient zoomable
-  const handleClick = onImageClick
-    ? (e: React.MouseEvent) => {
-        const target = e.target as HTMLElement
-        if (target instanceof HTMLImageElement && target.src) onImageClick(target.src)
-      }
-    : undefined
+  // Délégation : images → lightbox, pastilles [[concept]] → /concepts
+  const handleClick = (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement
+    if (onImageClick && target instanceof HTMLImageElement && target.src) { onImageClick(target.src); return }
+    if (target.classList.contains('wikilink')) window.location.assign('/concepts')
+  }
   if (note.messages && note.messages.length > 0) {
     return (
       <div className={className} onClick={handleClick}>
@@ -433,12 +433,12 @@ function NoteContentRenderer({ note, className, onImageClick, showMeta = false }
           }
           return IMAGE_TYPES.has(msg.type)
             ? <img key={msg.id} src={extractImageSrc(msg.content) ?? msg.content} alt="" style={{ maxWidth: '100%', borderRadius: 6, margin: '6px 0', display: 'block', cursor: onImageClick ? 'zoom-in' : undefined }} />
-            : <div key={msg.id} dangerouslySetInnerHTML={{ __html: msg.content }} />
+            : <div key={msg.id} dangerouslySetInnerHTML={{ __html: renderWikilinks(msg.content) }} />
         })}
       </div>
     )
   }
-  return <div className={className} onClick={handleClick} dangerouslySetInnerHTML={{ __html: note.content || '<p>Aucun contenu</p>' }} />
+  return <div className={className} onClick={handleClick} dangerouslySetInnerHTML={{ __html: renderWikilinks(note.content || '<p>Aucun contenu</p>') }} />
 }
 
 // ─── Note preview panel (left overlay) ───────────────────────────────────────

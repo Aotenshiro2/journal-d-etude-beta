@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db'
 import { getUserId } from '@/lib/api-auth'
+import { extractWikilinks } from '@/lib/wikilinks'
 import crypto from 'crypto'
 
 export async function GET(req: NextRequest) {
@@ -267,13 +268,46 @@ export async function POST(req: NextRequest) {
           ops.push(prisma.message.create({ data: m }))
         }
       }
-      // Messages disparus de l'extension (et legacy sans extid) : on les retire.
-      const toDelete = existingMsgs.filter((m) => !keptIds.has(m.id)).map((m) => m.id)
+      // Messages disparus de l'extension : on les retire. ⚠️ MAIS les blocs SANS
+      // extensionMessageId sont des ajouts faits DEPUIS le journal (capture bar
+      // de l'accueil — doctrine : édition bidirectionnelle de la note d'origine) :
+      // on les PRÉSERVE. (Avant, chaque resync les effaçait en silence.)
+      const toDelete = existingMsgs
+        .filter((m) => m.extensionMessageId && !keptIds.has(m.id))
+        .map((m) => m.id)
       if (toDelete.length > 0) {
         ops.unshift(prisma.message.deleteMany({ where: { id: { in: toDelete } } }))
       }
       // Transaction batch (compatible PgBouncer transaction mode)
       await prisma.$transaction(ops)
+
+      // 0.1.4 — [[concept]] tapés dans l'extension : liés à la sync (mêmes
+      // règles que la capture bar — concepts existants uniquement)
+      const wikiMsgs = await prisma.message.findMany({
+        where: { noteId: note.id, type: 'text', content: { contains: '[[' } },
+        select: { id: true, content: true },
+      })
+      if (wikiMsgs.length > 0) {
+        const allNames = new Set<string>()
+        const namesByMsg = wikiMsgs.map(m => {
+          const names = extractWikilinks(m.content)
+          names.forEach(n => allNames.add(n))
+          return { id: m.id, names }
+        })
+        if (allNames.size > 0) {
+          const wikiTags = await prisma.tag.findMany({
+            where: { userId, name: { in: [...allNames] } },
+            select: { id: true, name: true },
+          })
+          const tagByName = new Map(wikiTags.map(t => [t.name, t.id]))
+          const links = namesByMsg.flatMap(m =>
+            m.names.filter(n => tagByName.has(n)).map(n => ({ messageId: m.id, tagId: tagByName.get(n)! }))
+          )
+          if (links.length > 0) {
+            await prisma.messageTag.createMany({ data: links, skipDuplicates: true })
+          }
+        }
+      }
 
       // Process message-level tags (MessageTag upsert)
       const messagesWithTags = (messages as Array<{ tags?: string[]; content?: string }>)

@@ -114,11 +114,23 @@ modèle actuel (un seul `parentId`, appartenance exclusive) ne le permet pas.
 typé card↔concept plutôt que la boîte ? Le groupe vivant reste effectif en
 attendant.
 
-### 0.1.4 — Connectivité second cerveau (la saisie)
+### 0.1.4 — Connectivité second cerveau (la saisie) ✅ LIVRÉ le 17/07/2026
 
-- [ ] Syntaxe `[[concept]]` dans la barre de capture + rendu pastille cliquable
-      — **lot 2 de `SPEC-second-cerveau.md`** (le lot 1, page concept avec
-      références, part en 0.2).
+- [x] **Syntaxe `[[concept]]`** (lot 2 de `SPEC-second-cerveau.md`) :
+      - Capture bar : taper `[[` ouvre l'autocomplete sur la taxonomie
+        (Entrée/Tab/clic insère, option « Créer le concept » à la volée).
+      - Serveur : chaque `[[nom]]` relie le bloc au concept (`MessageTag`) —
+        dans la route capture bar ET dans la sync (les `[[...]]` tapés dans
+        l'extension marchent aussi). Concepts EXISTANTS uniquement (pas de
+        tags-typos), utilitaire partagé `src/lib/wikilinks.ts`.
+      - Rendu : pastille bleue cliquable dans les deux panneaux de lecture
+        (→ `/concepts` en attendant les pages concept du 0.2).
+      Vérifié à l'écran (menu + pastilles). ⚠️ à tester connecté par Brice.
+- [x] **Fix doctrine au passage** : la sync ne supprime PLUS les blocs ajoutés
+      depuis la capture bar du journal (ils n'ont pas d'extensionMessageId et
+      le replace-all les effaçait en silence à chaque resync). Ils restent
+      côté journal ; les pousser vers l'extension = chantier sync
+      bidirectionnelle, plus tard.
 
 ---
 

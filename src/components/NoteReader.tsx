@@ -6,6 +6,7 @@ import { NoteData, MessageData, AnnotationData, TradeSegmentData } from '@/types
 import { extractImageSrc } from '@/lib/utils'
 import ImageLightbox from './ImageLightbox'
 import { useShowMeta } from '@/hooks/useShowMeta'
+import { renderWikilinks } from '@/lib/wikilinks'
 
 interface NoteReaderProps {
   note: NoteData
@@ -147,9 +148,10 @@ export default function NoteReader({ note }: NoteReaderProps) {
         style={{ color: 'var(--node-preview)' }}
         onClick={(e) => {
           const target = e.target as HTMLElement
-          if (target instanceof HTMLImageElement && target.src) setZoomSrc(target.src)
+          if (target instanceof HTMLImageElement && target.src) { setZoomSrc(target.src); return }
+          if (target.classList.contains('wikilink')) window.location.assign('/concepts')
         }}
-        dangerouslySetInnerHTML={{ __html: note.content }}
+        dangerouslySetInnerHTML={{ __html: renderWikilinks(note.content) }}
       />
       {(() => {
         const imageMessages = (note.messages ?? []).filter(

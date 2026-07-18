@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { extractWikilinks } from '@/lib/wikilinks'
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createBrowserClient } from '@supabase/supabase-js'
 
@@ -58,6 +59,20 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const message = await prisma.message.create({
     data: { noteId: id, content, order: nextOrder, type: type ?? 'text' },
   })
+
+  // 0.1.4 — [[concept]] : chaque wikilink relie le bloc au concept (MessageTag).
+  // Seuls les concepts EXISTANTS sont liés (la création explicite passe par
+  // l'autocomplete de la capture bar → POST /api/tags) : pas de tags-typos.
+  const linkNames = extractWikilinks(content)
+  if (linkNames.length > 0) {
+    const tags = await prisma.tag.findMany({ where: { userId, name: { in: linkNames } }, select: { id: true } })
+    if (tags.length > 0) {
+      await prisma.messageTag.createMany({
+        data: tags.map(t => ({ messageId: message.id, tagId: t.id })),
+        skipDuplicates: true,
+      })
+    }
+  }
 
   return NextResponse.json(message, { status: 201 })
 }
