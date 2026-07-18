@@ -194,5 +194,6 @@ le versionnage : lot 2 (wikilinks) → 0.1.4 ; lot 1 (page concept + référence
 
 ---
 **Dernière mise à jour :** 17 juillet 2026
-**Chantier en cours :** 0.1.3 — groupes et liens : finir le geste
-(0.1.1 et 0.1.2 livrés le 17/07 ; extension v1.6.7 zippée)
+**Chantier en cours :** 0.1.x livré en entier (0.1.1 → 0.1.4, extension
+v1.6.8). Prochain : **0.2 — Observer les concepts** (compteur + exploration,
+lot 1 de la spec), après validation des tests 0.1.4 par Brice.
