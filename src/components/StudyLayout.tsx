@@ -106,7 +106,7 @@ export default function StudyLayout({ note, canvas: initialCanvas, isDiverged }:
 
   // Mise à jour générique d'un node (position, appartenance, label, couleur…)
   const handleUpdateNode = useCallback(
-    async (nodeId: string, patch: Partial<Pick<CanvasNodeData, 'x' | 'y' | 'width' | 'height' | 'label' | 'color' | 'parentId' | 'orderInParent'>>) => {
+    async (nodeId: string, patch: Partial<Pick<CanvasNodeData, 'x' | 'y' | 'width' | 'height' | 'label' | 'color' | 'parentId' | 'orderInParent' | 'tagId'>>) => {
       const res = await fetch(`/api/canvas/${canvas.id}/nodes/${nodeId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -150,8 +150,13 @@ export default function StudyLayout({ note, canvas: initialCanvas, isDiverged }:
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: label, messageIds }),
     })
-    return res.ok
-  }, [canvas.nodes])
+    if (!res.ok) return false
+    // Groupe VIVANT : mémoriser le concept sur le groupe — désormais y déposer
+    // un bloc le tague, l'en sortir le détague (côté serveur, route PATCH nodes)
+    const tag = await res.json()
+    if (tag?.id) await handleUpdateNode(groupId, { tagId: tag.id })
+    return true
+  }, [canvas.nodes, handleUpdateNode])
 
   const handleConnect = useCallback(
     async (fromId: string, toId: string, fromHandle?: string, toHandle?: string) => {

@@ -87,11 +87,25 @@ type `meta`, l'info est toujours en base mais masquée par défaut.
 - [x] ~~Liens entre notes sur le canvas d'accueil~~ — existaient DÉJÀ (outil
       crayon `E` de la barre droite + persistance `/api/canvas/[id]/edges`).
       L'inventaire du 16/07 était faux sur ce point.
-- [ ] Reste à trancher (produit, avec Brice) : que devient le groupe APRÈS la
-      promotion — badge « concept ✓ » permanent sur le groupe ? les nouvelles
-      notes/blocs ajoutés au groupe héritent-ils du tag automatiquement ?
-- [ ] UX à valider : feedback visuel après promotion (aujourd'hui juste ✓ sur
-      le bouton) — afficher « N notes taguées » ?
+- [x] **Groupe VIVANT** (option A choisie par Brice le 17/07) : un groupe
+      promu garde le lien vers son concept (`CanvasNode.tagId`, migration
+      manuelle `2026-07-17-group-vivant-tagid.sql` APPLIQUÉE en base).
+      Y déposer une note/un bloc applique le tag, l'en sortir retire CELUI du
+      groupe (jamais les tags posés ailleurs). Effets de bord centralisés dans
+      la route PATCH `/api/canvas/[id]/nodes/[nodeId]`. Badge « ◆ concept »
+      permanent sur le groupe. ⚠️ à vérifier à l'écran par Brice.
+- [ ] Sous-cas à observer à l'usage : la DISSOLUTION d'un groupe vivant
+      détague ses membres (symétrie appliquée partout) — si à l'usage ça
+      surprend, faire de la dissolution une exception qui préserve les tags.
+
+### 🧠 À approfondir (Brice, 17/07) — connectique « second cerveau » du canvas
+
+Le canvas est limité pour le mind map comparé à Miro/Obsidian. Pas copier,
+mais répondre au même besoin : des interactions riches entre cards — types de
+liens nommés/orientés, liens qui portent du sens (donnée, pas dessin), peut-être
+transclusion de blocs. Le groupe vivant est la 1re brique (le rangement spatial
+EST de la donnée) ; les liens (edges) devraient suivre la même logique.
+À traiter après les tests du 0.1.x — nourrira aussi `SPEC-second-cerveau.md`.
 
 ### 0.1.4 — Connectivité second cerveau (la saisie)
 

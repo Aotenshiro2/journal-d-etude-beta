@@ -897,7 +897,7 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
         id: g.id, type: 'group',
         position: { x: g.x, y: g.y },
         style: { width: g.width, height: g.height, zIndex: -1 },
-        data: { label: g.label ?? 'Groupe', color: g.color ?? 'blue', handlers: groupHandlersRef },
+        data: { label: g.label ?? 'Groupe', color: g.color ?? 'blue', tagId: g.tagId ?? null, handlers: groupHandlersRef },
       }))
     const noteNodes: Node[] = canvas.nodes
       .filter(n => n.noteId != null)
@@ -1148,8 +1148,16 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: label, noteIds }),
     })
-    return res.ok
-  }, [nodes])
+    if (!res.ok) return false
+    // Groupe VIVANT : mémoriser le concept sur le groupe — désormais y déposer
+    // une note la tague, l'en sortir la détague (côté serveur, route PATCH nodes)
+    const tag = await res.json()
+    if (tag?.id) {
+      await patchNode(groupId, { tagId: tag.id })
+      setNodes(nds => nds.map(n => n.id === groupId ? { ...n, data: { ...n.data, tagId: tag.id } } : n))
+    }
+    return true
+  }, [nodes, patchNode, setNodes])
 
   groupHandlersRef.current = {
     rename: renameGroup,

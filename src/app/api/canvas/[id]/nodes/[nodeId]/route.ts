@@ -15,6 +15,22 @@ export async function PATCH(
   if (!canvas) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
   const body = await req.json()
+
+  // tagId : lier un groupe à un concept (groupe VIVANT, 0.1.3). Ceinture : le tag
+  // doit appartenir à l'utilisateur. null explicite = délier le groupe.
+  if (body.tagId !== undefined && body.tagId !== null) {
+    const tag = await prisma.tag.findFirst({ where: { id: body.tagId, userId: user.id } })
+    if (!tag) return NextResponse.json({ error: 'tag inconnu' }, { status: 400 })
+  }
+
+  // L'état AVANT update — nécessaire pour la symétrie du groupe vivant
+  const before = body.parentId !== undefined
+    ? await prisma.canvasNode.findUnique({
+        where: { id: nodeId },
+        select: { parentId: true, noteId: true, messageId: true },
+      })
+    : null
+
   const node = await prisma.canvasNode.update({
     where: { id: nodeId },
     data: {
@@ -29,8 +45,29 @@ export async function PATCH(
       // parentId : null explicite = detacher du groupe
       ...(body.parentId !== undefined ? { parentId: body.parentId } : {}),
       ...(body.orderInParent !== undefined ? { orderInParent: body.orderInParent } : {}),
+      ...(body.tagId !== undefined ? { tagId: body.tagId } : {}),
     },
   })
+
+  // ── Groupe VIVANT (0.1.3, option A validée par Brice le 17/07) ──────────────
+  // Déposer dans un groupe promu applique son tag ; en sortir retire CE tag
+  // (uniquement celui du groupe — les tags posés ailleurs ne bougent pas).
+  if (before && body.parentId !== before.parentId) {
+    const applyGroupTag = async (groupId: string | null, attach: boolean) => {
+      if (!groupId) return
+      const group = await prisma.canvasNode.findUnique({ where: { id: groupId }, select: { tagId: true } })
+      if (!group?.tagId) return
+      if (before.noteId) {
+        if (attach) await prisma.noteTag.createMany({ data: [{ noteId: before.noteId, tagId: group.tagId }], skipDuplicates: true })
+        else await prisma.noteTag.deleteMany({ where: { noteId: before.noteId, tagId: group.tagId } })
+      } else if (before.messageId) {
+        if (attach) await prisma.messageTag.createMany({ data: [{ messageId: before.messageId, tagId: group.tagId }], skipDuplicates: true })
+        else await prisma.messageTag.deleteMany({ where: { messageId: before.messageId, tagId: group.tagId } })
+      }
+    }
+    await applyGroupTag(before.parentId, false)      // sortie de l'ancien groupe
+    await applyGroupTag(body.parentId ?? null, true) // entrée dans le nouveau
+  }
 
   return NextResponse.json(node)
 }

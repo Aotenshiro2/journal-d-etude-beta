@@ -238,10 +238,12 @@ function MessageNode({ data, selected }: NodeProps) {
 
 // Zone englobante nommée — le geste « ça va avec ça »
 export function GroupNode({ id, data, selected }: NodeProps) {
-  const d = data as { label: string; color: string; autoEdit?: boolean; handlers: React.MutableRefObject<GroupHandlers> }
+  const d = data as { label: string; color: string; tagId?: string | null; autoEdit?: boolean; handlers: React.MutableRefObject<GroupHandlers> }
   const [editing, setEditing] = useState(!!d.autoEdit)
   const [draft, setDraft] = useState(d.label)
-  const [promoted, setPromoted] = useState(false)
+  // Un groupe déjà relié à un concept (tagId persisté) arrive « promu »
+  const [promoted, setPromoted] = useState(!!d.tagId)
+  const isLive = promoted || !!d.tagId
   const palette = GROUP_COLORS[d.color] ?? GROUP_COLORS.blue
 
   const save = () => {
@@ -287,6 +289,16 @@ export function GroupNode({ id, data, selected }: NodeProps) {
           >
             {d.label || 'Groupe'}
           </p>
+        )}
+        {/* Groupe VIVANT : relié à un concept — déposer dedans tague, sortir détague */}
+        {isLive && !editing && (
+          <span
+            className="flex-shrink-0 text-[9px] font-semibold px-1 rounded"
+            style={{ color: palette.border, background: 'rgba(255,255,255,0.08)' }}
+            title="Groupe vivant — relié au concept : y déposer tague automatiquement, en sortir détague"
+          >
+            ◆ concept
+          </span>
         )}
         <span className="hidden group-hover/gz:flex items-center gap-1 nodrag flex-shrink-0">
           {COLOR_KEYS.map(k => (
@@ -511,6 +523,7 @@ function StudyCanvasInner({
     data: {
       label: g.label ?? 'Groupe',
       color: g.color ?? 'blue',
+      tagId: g.tagId ?? null,
       autoEdit,
       handlers: groupHandlersRef,
     },

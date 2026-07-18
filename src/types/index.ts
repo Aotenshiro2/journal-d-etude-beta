@@ -77,6 +77,7 @@ export interface CanvasNodeData {
   color?: string | null // clé de palette du groupe
   parentId?: string | null // groupe parent — x/y relatifs au parent
   orderInParent?: number | null
+  tagId?: string | null // groupe vivant (0.1.3) : concept lié — déposer tague, sortir détague
   x: number
   y: number
   width: number

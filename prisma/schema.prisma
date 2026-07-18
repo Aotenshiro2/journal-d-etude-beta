@@ -83,6 +83,7 @@ model CanvasNode {
   color     String?      // clé de palette du groupe
   parentId  String?      // groupe parent — x/y alors RELATIFS au parent (convention React Flow)
   orderInParent Int?     // ordre manuel dans le groupe (projection document, lot 3.5)
+  tagId     String?      // groupe VIVANT (0.1.3) : concept lié — déposer dedans tague, sortir détague (couplage lâche)
   x         Float
   y         Float
   width     Float        @default(280)
