@@ -1038,15 +1038,23 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
     dragEnterCounterRef.current = 0
     setIsDragOver(false)
 
-    let noteId = e.dataTransfer.getData('noteId')
+    // ── Résolution de la note glissée ────────────────────────────────────────
+    // Deux origines : drag interne (type 'noteId' = id JOURNAL) et drag depuis
+    // l'extension ('noteId' = id LOCAL extension + text/plain « carnet-note:id »).
+    // ⚠️ Bug corrigé le 17/07 : on prenait 'noteId' tel quel — pour un drag
+    // extension c'était son id local, inconnu du journal → abandon silencieux
+    // AVANT même la branche pont. On vérifie désormais chaque candidat.
+    const rawId = e.dataTransfer.getData('noteId')
+    const extRaw = e.dataTransfer.getData('application/x-carnet-note') || e.dataTransfer.getData('text/plain')
+    const extParsed = extRaw.match(/^carnet-note:(.+)$/)?.[1]?.trim()
+
+    let noteId = rawId && notes.some(n => n.id === rawId) ? rawId : ''
     let freshNote: NoteData | undefined
-    // Pont extension → journal : la note glissée depuis le sidepanel arrive via text/plain
-    // (« carnet-note:<extensionNoteId> », seul format qui survit à la frontière extension ↔ page).
-    if (!noteId) {
-      const ext = e.dataTransfer.getData('application/x-carnet-note') || e.dataTransfer.getData('text/plain')
-      const m = ext.match(/^carnet-note:(.+)$/)
-      if (m) {
-        const extId = m[1].trim()
+    // Candidat extension : le format explicite d'abord, sinon le rawId inconnu
+    // du journal (c'est alors très probablement un id local extension)
+    const extId = extParsed || (rawId && !noteId ? rawId : '')
+    if (!noteId && extId) {
+      {
         const match = notes.find(n => n.extensionNoteId === extId)
         if (match) {
           noteId = match.id
@@ -1081,7 +1089,11 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
       }
     }
     if (!noteId) return
-    if (nodes.some(n => n.id === noteId)) return
+    if (nodes.some(n => n.id === noteId)) {
+      setDropNotice('Cette note est déjà sur le canvas.')
+      setTimeout(() => setDropNotice(null), 3000)
+      return
+    }
 
     // Center the node on the drop cursor position
     const position = screenToFlowPosition({ x: e.clientX - 130, y: e.clientY - 76 })

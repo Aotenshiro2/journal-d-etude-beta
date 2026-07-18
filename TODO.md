@@ -107,6 +107,13 @@ transclusion de blocs. Le groupe vivant est la 1re brique (le rangement spatial
 EST de la donnée) ; les liens (edges) devraient suivre la même logique.
 À traiter après les tests du 0.1.x — nourrira aussi `SPEC-second-cerveau.md`.
 
+Limite identifiée par Brice (17/07, après test du groupe vivant) : une card
+peut être **à mi-chemin entre deux groupes / deux idées de concept** — le
+modèle actuel (un seul `parentId`, appartenance exclusive) ne le permet pas.
+À repenser avec les outils de connectique : appartenance multiple ? le lien
+typé card↔concept plutôt que la boîte ? Le groupe vivant reste effectif en
+attendant.
+
 ### 0.1.4 — Connectivité second cerveau (la saisie)
 
 - [ ] Syntaxe `[[concept]]` dans la barre de capture + rendu pastille cliquable
