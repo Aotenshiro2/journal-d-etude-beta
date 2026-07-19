@@ -60,6 +60,7 @@ model Canvas {
   type            String
   userId          String
   noteId          String?      @unique
+  sourceGroupId   String?      @unique // 0.1.5 : canvas de COLLECTION — mappe les blocs de plusieurs notes réunies dans un groupe de l'accueil (le CanvasNode kind='group' source). noteId reste null.
   noteContentHash String?
   reviewedAt       DateTime?   // note réorganisée relue le (null = pas encore) → sort de la file
   reviewReminderAt DateTime?   // rappel fixé par l'élève : la reproposer à cette date

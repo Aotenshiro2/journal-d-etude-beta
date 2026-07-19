@@ -83,6 +83,9 @@ export interface GroupHandlers {
   promote: (label: string, groupId: string) => Promise<boolean>
   dissolve: (id: string) => void
   resize: (id: string, p: { width: number; height: number; x: number; y: number }) => void
+  // 0.1.5 : ouvrir la collection (groupe de NOTES de l'accueil) dans un canvas
+  // de mapping commun. Absent dans l'exploration (groupes de blocs) → pas de bouton.
+  openCollection?: (groupId: string) => void
 }
 
 const IMAGE_TYPES = new Set(['image', 'screenshot', 'capture'])
@@ -311,6 +314,17 @@ export function GroupNode({ id, data, selected }: NodeProps) {
               aria-label={`Couleur ${k}`}
             />
           ))}
+          {d.handlers.current.openCollection && (
+            <button
+              onMouseDown={e => { e.stopPropagation(); e.preventDefault() }}
+              onClick={() => d.handlers.current.openCollection!(id)}
+              className="ml-1 px-1.5 rounded text-[10px] font-semibold hover:bg-white/10 flex items-center gap-1"
+              style={{ color: palette.border }}
+              title="Mapper ensemble : ouvrir ces notes dans un canvas de travail commun"
+            >
+              ⤢ Mapper
+            </button>
+          )}
           <button
             onClick={async () => { if (await d.handlers.current.promote(d.label, id)) setPromoted(true) }}
             className="ml-1 px-1 rounded text-[10px] font-semibold hover:bg-white/10"

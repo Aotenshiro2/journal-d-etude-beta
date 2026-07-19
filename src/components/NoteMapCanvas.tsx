@@ -1180,6 +1180,8 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
       patchNode(id, { width: p.width, height: p.height, x: p.x, y: p.y })
       setNodes(nds => nds.map(n => n.id === id ? { ...n, position: { x: p.x, y: p.y }, style: { ...n.style, width: p.width, height: p.height } } : n))
     },
+    // 0.1.5 : ouvrir la collection (groupe de notes) dans son canvas de mapping
+    openCollection: (groupId) => router.push(`/collection/${groupId}`),
   }
 
   // Grouper les cartes de notes sélectionnées (le pendant macro des groupes de blocs)

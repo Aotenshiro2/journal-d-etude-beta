@@ -211,10 +211,18 @@ esthétique.** Un élève doit pouvoir la montrer sans s'excuser.
   Flow) mais par les **liens** à l'intérieur du canvas de mapping.
 
 Découpage (ordre indicatif, le 0.1 ne ferme qu'à maturité) :
-- [ ] **0.1.5 — La collection** : grouper des notes → ouvrir un canvas de
-      mapping qui embarque les blocs de PLUSIEURS notes. Chantier structurel :
-      aujourd'hui `Canvas.noteId @unique` = 1 canvas d'étude par note ; il faut
-      délier pour un canvas multi-notes. (métaphore C : le conteneur)
+- [x] **0.1.5 — La collection** (LIVRÉ 19/07, à tester connecté) : sur
+      l'accueil, grouper des notes → bouton « ⤢ Mapper » sur le groupe →
+      `/collection/[groupId]` : canvas de mapping commun qui embarque les
+      blocs de TOUTES les notes du groupe (réutilise `StudyCanvas` +
+      `MessagePanel`). Modèle : `Canvas.sourceGroupId` (noteId reste null,
+      migration `2026-07-19-canvas-collection.sql` APPLIQUÉE). Composants :
+      `src/app/collection/[groupId]/page.tsx` + `CollectionLayout.tsx`.
+      Reste (itérations) : afficher l'origine (séance) sur chaque bloc du
+      panneau ; tiroir gauche listant les notes membres.
+- [x] **Geste #2 (lien « idée commune » sans retravail)** : existait déjà —
+      l'outil crayon `E` de l'accueil relie deux notes (edge persisté). À
+      rendre plus « parlant » (nommer le lien) dans une passe esthétique.
 - [ ] **0.1.6 — La connectique dedans** : liens typés bloc↔bloc et
       bloc↔concept dans le canvas de mapping (esprit B / Obsidian) — le bond
       visuel Miro/Obsidian, et là que vit la multi-appartenance.
