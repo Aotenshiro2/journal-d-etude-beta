@@ -36,6 +36,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       },
     })
 
+    // Fix relecture (Brice 19/07) : réorganiser une note DÉJÀ relue la fait
+    // re-rentrer dans « À relire ». La réorganisation nourrit la relecture —
+    // c'est tout le sens de la vue document (l'ordre de l'élève, pas du prof).
+    // Vaut pour l'étude d'une note ET les collections (même route).
+    if (canvas.reviewedAt != null && (canvas.type === 'note-study' || canvas.type === 'collection')) {
+      await prisma.canvas.update({
+        where: { id },
+        data: { reviewedAt: null, reviewReminderAt: null },
+      })
+    }
+
     return NextResponse.json(node, { status: 201 })
   } catch (err) {
     console.error('[API /canvas/nodes POST]', err)

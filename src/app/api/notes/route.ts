@@ -198,7 +198,9 @@ export async function POST(req: NextRequest) {
         create: { name: tagName, userId },
         update: {},
       })
-      await prisma.noteTag.create({ data: { noteId: note.id, tagId: tag.id } })
+      // createMany+skipDuplicates : la resync d'une note déjà taguée ne doit pas
+      // jeter P2002 (erreur vue en prod le 19/07)
+      await prisma.noteTag.createMany({ data: [{ noteId: note.id, tagId: tag.id }], skipDuplicates: true })
     }
   }
 

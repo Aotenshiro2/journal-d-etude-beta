@@ -98,16 +98,20 @@ type `meta`, l'info est toujours en base mais masquée par défaut.
       détague ses membres (symétrie appliquée partout) — si à l'usage ça
       surprend, faire de la dissolution une exception qui préserve les tags.
 
-### 🐛 URGENT au retour — la relecture est cassée (signalé par Brice 19/07)
+### ✅ Bug relecture — DIAGNOSTIQUÉ et CORRIGÉ le 19/07
 
-Depuis les changements du 19/07, dans /review : les « Déjà relues » s'affichent
-mais **impossible de les relire** (le bouton « Relire » / mode focus ne donne
-pas accès à la lecture). À débugger EN PREMIER à la prochaine session de code :
-reproduire connecté, vérifier le mode focus `/review?note=<id>` (il exige
-canvas type 'note-study' + nodes > 0 + note jointe — un de ces filtres ne passe
-probablement plus), et vérifier que le deck « À relire » se remplit encore
-après une réorganisation. Suspects récents : modifs `review/page.tsx` +
-`ReviewDeck.tsx` (section collections, 19/07).
+Diagnostic (repro avec vraies données + logs Vercel : aucun crash) : le mode
+focus et la carte-document fonctionnaient. Le vrai trou : **`reviewedAt`
+n'était JAMAIS remis à zéro en réorganisant** — une note relue une fois ne
+revenait plus jamais dans « À relire », même retravaillée sur le canvas. La
+réorganisation ne nourrissait plus la relecture (contraire à la vision
+consignée ci-dessous). FIX : poser un bloc/groupe/texte sur un canvas
+`note-study` ou `collection` déjà relu remet `reviewedAt=null` → la note
+re-rentre dans la file (route POST `/api/canvas/[id]/nodes`).
+Rappel du chemin existant pour relire une note DÉJÀ relue sans la modifier :
+/review → section « Déjà relues » (repliée) → bouton « Relire » (mode focus).
+Si ce chemin ne suffit pas à l'usage (trop caché), le remonter en 0.3.
+Bonus : fix P2002 NoteTag à la resync (createMany+skipDuplicates).
 
 ### 📌 VISION à consigner (Brice, 19/07) — la relecture EST la vue document
 
