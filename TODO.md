@@ -98,6 +98,30 @@ type `meta`, l'info est toujours en base mais masquée par défaut.
       détague ses membres (symétrie appliquée partout) — si à l'usage ça
       surprend, faire de la dissolution une exception qui préserve les tags.
 
+### 🐛 URGENT au retour — la relecture est cassée (signalé par Brice 19/07)
+
+Depuis les changements du 19/07, dans /review : les « Déjà relues » s'affichent
+mais **impossible de les relire** (le bouton « Relire » / mode focus ne donne
+pas accès à la lecture). À débugger EN PREMIER à la prochaine session de code :
+reproduire connecté, vérifier le mode focus `/review?note=<id>` (il exige
+canvas type 'note-study' + nodes > 0 + note jointe — un de ces filtres ne passe
+probablement plus), et vérifier que le deck « À relire » se remplit encore
+après une réorganisation. Suspects récents : modifs `review/page.tsx` +
+`ReviewDeck.tsx` (section collections, 19/07).
+
+### 📌 VISION à consigner (Brice, 19/07) — la relecture EST la vue document
+
+Rappel du sens profond de la fonctionnalité, à garder devant les yeux pour le
+débug ci-dessus et pour le 0.3 :
+- En cours, l'élève prend ses notes dans **l'ordre du professeur** — pensé pour
+  transmettre, pas forcément pour apprendre.
+- Le tri sur le canvas sert à construire **l'ordre de l'élève** : la version
+  réorganisée qui suit la manière dont LUI a besoin de relire son cours.
+- La **vue document** de ce tri = la « version améliorée » de la note (ou du
+  groupe de notes) — et c'est CETTE version qu'on doit pouvoir relire dans
+  Relire. La relecture n'est pas rouvrir la note brute : c'est relire la
+  réorganisation. (Vaut pour une note unique ET pour une collection.)
+
 ### 🧠 À approfondir (Brice, 17/07) — connectique « second cerveau » du canvas
 
 Le canvas est limité pour le mind map comparé à Miro/Obsidian. Pas copier,
