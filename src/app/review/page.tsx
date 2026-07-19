@@ -115,6 +115,26 @@ export default async function ReviewPage({ searchParams }: { searchParams: Promi
     }),
   ])
 
+  // 0.1.5c — collections mappées (groupes de notes travaillés ensemble) :
+  // visibles dans la relecture même si le groupe de l'accueil a été dissous
+  const collectionCanvases = await prisma.canvas.findMany({
+    where: { userId, type: 'collection' },
+    select: {
+      id: true, sourceGroupId: true, title: true, reviewedAt: true,
+      _count: { select: { nodes: true, memberNotes: true } },
+    },
+    orderBy: { updatedAt: 'desc' },
+  })
+  const collections = collectionCanvases
+    .filter(c => c._count.nodes > 0 || c._count.memberNotes > 0)
+    .map(c => ({
+      canvasId: c.id,
+      sourceGroupId: c.sourceGroupId as string,
+      title: c.title ?? 'Collection',
+      noteCount: c._count.memberNotes,
+      reviewed: c.reviewedAt != null,
+    }))
+
   const folderName = new Map(folders.map(f => [f.id, f.name]))
   const toReorganize: ReorganizeItem[] = unorganized.map(n => ({
     id: n.id, title: n.title ?? 'Sans titre', favicon: n.favicon,
@@ -130,7 +150,7 @@ export default async function ReviewPage({ searchParams }: { searchParams: Promi
 
   return (
     <CanvasShell user={{ email: user.email ?? '', name: user.user_metadata?.full_name ?? '' }} dueCount={dueCount}>
-      <ReviewDeck toRelire={toRelire} toReorganize={toReorganize} reviewedNotes={reviewedNotes} />
+      <ReviewDeck toRelire={toRelire} toReorganize={toReorganize} reviewedNotes={reviewedNotes} collections={collections} />
     </CanvasShell>
   )
 }

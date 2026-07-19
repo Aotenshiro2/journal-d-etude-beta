@@ -33,6 +33,7 @@ model Note {
   canvas      Canvas?
   tags        NoteTag[]
   annotations Annotation[]
+  collections CollectionNote[]
 
   // Note: @@unique([userId, sourceUrl]) replaced by a partial DB index (see SQL migration):
   // CREATE UNIQUE INDEX "Note_userId_sourceUrl_legacy_idx" ON "Note" ("userId","sourceUrl") WHERE "extensionNoteId" IS NULL
@@ -61,6 +62,7 @@ model Canvas {
   userId          String
   noteId          String?      @unique
   sourceGroupId   String?      @unique // 0.1.5 : canvas de COLLECTION — mappe les blocs de plusieurs notes réunies dans un groupe de l'accueil (le CanvasNode kind='group' source). noteId reste null.
+  title           String?      // 0.1.5b : nom de la collection (figé depuis le label du groupe au Mapper, maj au rename) — survit à la dissolution du groupe
   noteContentHash String?
   reviewedAt       DateTime?   // note réorganisée relue le (null = pas encore) → sort de la file
   reviewReminderAt DateTime?   // rappel fixé par l'élève : la reproposer à cette date
@@ -69,6 +71,7 @@ model Canvas {
   note            Note?        @relation(fields: [noteId], references: [id], onDelete: Cascade)
   nodes           CanvasNode[]
   edges           CanvasEdge[]
+  memberNotes     CollectionNote[]
 
   @@index([userId])
 }
@@ -147,6 +150,18 @@ model Folder {
 }
 
 // Tag au niveau note (grouper les cours par thème) — même taxonomie Tag que les messages
+// 0.1.5b — Membership des collections : une note peut appartenir à N collections
+// (le parentId spatial de l'accueil reste une boîte visuelle ; CETTE table porte
+// la vérité). Additive : on n'enlève jamais automatiquement un membre.
+model CollectionNote {
+  canvasId String
+  noteId   String
+  canvas   Canvas @relation(fields: [canvasId], references: [id], onDelete: Cascade)
+  note     Note   @relation(fields: [noteId], references: [id], onDelete: Cascade)
+
+  @@id([canvasId, noteId])
+}
+
 model NoteTag {
   noteId String
   tagId  String

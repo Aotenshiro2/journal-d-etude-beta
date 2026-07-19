@@ -12,19 +12,41 @@ export default async function CollectionPage({ params }: { params: Promise<{ gro
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/auth')
 
-  // Le groupe est un CanvasNode (kind='group') du canvas d'accueil de l'utilisateur
-  const group = await prisma.canvasNode.findFirst({
-    where: { id: groupId, kind: 'group', canvas: { userId: user.id } },
-    select: { id: true, label: true },
-  })
-  if (!group) notFound()
+  // Get-or-create le canvas de collection. La vérité de la membership est la
+  // table CollectionNote (0.1.5b) — le groupe de l'accueil peut avoir été
+  // dissous, la collection vit sa vie.
+  let canvasRow = await prisma.canvas.findFirst({ where: { sourceGroupId: groupId, userId: user.id } })
+  if (!canvasRow) {
+    // Premier accès sans passage par « Mapper » : le groupe doit exister
+    const group = await prisma.canvasNode.findFirst({
+      where: { id: groupId, kind: 'group', canvas: { userId: user.id } },
+      select: { id: true, label: true },
+    })
+    if (!group) notFound()
+    canvasRow = await prisma.canvas.create({
+      data: { type: 'collection', userId: user.id, sourceGroupId: groupId, title: group.label ?? 'Collection' },
+    })
+  }
 
-  // Notes membres du groupe = les cartes-notes rattachées (parentId = groupId)
-  const memberNodes = await prisma.canvasNode.findMany({
+  // Sync de secours (additive) : si le groupe vit encore, ses membres actuels
+  // rejoignent la collection — même logique que la route /sync
+  const liveMembers = await prisma.canvasNode.findMany({
     where: { parentId: groupId, noteId: { not: null } },
     select: { noteId: true },
   })
-  const noteIds = memberNodes.map((n) => n.noteId as string)
+  if (liveMembers.length > 0) {
+    await prisma.collectionNote.createMany({
+      data: liveMembers.map((n) => ({ canvasId: canvasRow!.id, noteId: n.noteId as string })),
+      skipDuplicates: true,
+    })
+  }
+
+  // Membres = la table CollectionNote (survit à la dissolution du groupe)
+  const members = await prisma.collectionNote.findMany({
+    where: { canvasId: canvasRow.id },
+    select: { noteId: true },
+  })
+  const noteIds = members.map((m) => m.noteId)
 
   const notes = noteIds.length
     ? await prisma.note.findMany({
@@ -41,17 +63,10 @@ export default async function CollectionPage({ params }: { params: Promise<{ gro
       .map((m) => ({ ...m, sourceNoteTitle: noteTitleById.get(n.id) ?? '' }))
   )
 
-  // Get-or-create le canvas de collection (noteId=null, rattaché au groupe)
-  let canvas = await prisma.canvas.findFirst({
-    where: { sourceGroupId: groupId },
+  const canvas = await prisma.canvas.findUniqueOrThrow({
+    where: { id: canvasRow.id },
     include: { nodes: true, edges: true },
   })
-  if (!canvas) {
-    canvas = await prisma.canvas.create({
-      data: { type: 'collection', userId: user.id, sourceGroupId: groupId },
-      include: { nodes: true, edges: true },
-    })
-  }
 
   const canvasData: CanvasData = {
     id: canvas.id,
@@ -75,8 +90,9 @@ export default async function CollectionPage({ params }: { params: Promise<{ gro
 
   return (
     <CollectionLayout
-      title={group.label || 'Collection'}
+      title={canvas.title || 'Collection'}
       noteCount={notes.length}
+      memberNotes={notes.map((n) => ({ id: n.id, title: n.title, favicon: n.favicon }))}
       messages={messages}
       canvas={canvasData}
     />

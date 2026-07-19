@@ -218,8 +218,23 @@ Découpage (ordre indicatif, le 0.1 ne ferme qu'à maturité) :
       `MessagePanel`). Modèle : `Canvas.sourceGroupId` (noteId reste null,
       migration `2026-07-19-canvas-collection.sql` APPLIQUÉE). Composants :
       `src/app/collection/[groupId]/page.tsx` + `CollectionLayout.tsx`.
-      Reste (itérations) : afficher l'origine (séance) sur chaque bloc du
-      panneau ; tiroir gauche listant les notes membres.
+- [x] **0.1.5b — Collection autonome et flexible** (LIVRÉ 19/07, plan validé) :
+      - Table `CollectionNote` (canvasId, noteId) = LA vérité de la membership
+        (une note peut être dans N collections ; le parentId spatial n'est
+        qu'une boîte visuelle). `Canvas.title` persistant. Migration
+        `2026-07-19b-collection-note.sql` APPLIQUÉE.
+      - « Mapper » → `POST /api/collection/[groupId]/sync` (upsert ADDITIF des
+        membres — on n'enlève jamais automatiquement).
+      - **Dissolution d'un groupe avec mapping** (décision Brice) : avertit
+        mais GARDE le travail — le canvas survit, retrouvable dans Relire.
+      - UI : tiroir gauche « Notes de la collection », origine (titre de
+        séance) sur chaque chip du panneau de blocs.
+- [x] **0.1.5c — Relecture des collections** (LIVRÉ 19/07) : toggle vue
+      canvas ⇄ document dans la collection (DocumentView réutilisé — la base
+      de la note de relecture existe pour un groupe comme pour une note) ;
+      section « Collections mappées » dans /review (survit à la dissolution).
+      Reste pour 0.3 : gestion complète des relectures (supprimer orphelines,
+      rebrancher à des concepts) — vision Brice consignée au plan.
 - [x] **Geste #2 (lien « idée commune » sans retravail)** : existait déjà —
       l'outil crayon `E` de l'accueil relie deux notes (edge persisté). À
       rendre plus « parlant » (nommer le lien) dans une passe esthétique.

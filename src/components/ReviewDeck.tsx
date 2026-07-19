@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Check, SkipForward, ArrowRight, ExternalLink, TrendingUp, BookOpen, CalendarDays, Plus, FolderPlus, ChevronRight, ChevronDown, RotateCcw } from 'lucide-react'
+import { Check, SkipForward, ArrowRight, ExternalLink, TrendingUp, BookOpen, CalendarDays, Plus, FolderPlus, ChevronRight, ChevronDown, RotateCcw, Layers } from 'lucide-react'
 import { AnnotationData, MessageData, CanvasNodeData } from '@/types'
 import DocumentView from './DocumentView'
 import { TradeMeta } from './StudyCanvas'
@@ -352,8 +352,37 @@ function ReviewedSection({ items }: { items: SimpleNote[] }) {
   )
 }
 
-export default function ReviewDeck({ toRelire, toReorganize, reviewedNotes = [], focus = false }: {
-  toRelire: ReviewNote[]; toReorganize: ReorganizeItem[]; reviewedNotes?: SimpleNote[]; focus?: boolean
+// 0.1.5c — collections mappées (groupes de notes travaillés ensemble) : elles
+// entrent dans le flux de relecture, avec leur propre porte d'entrée.
+export type CollectionItem = { canvasId: string; sourceGroupId: string; title: string; noteCount: number; reviewed: boolean }
+
+function CollectionsSection({ items }: { items: CollectionItem[] }) {
+  return (
+    <section className="mt-8">
+      <div className="flex items-center gap-2 px-1 mb-2">
+        <Layers size={15} style={{ color: 'var(--node-meta)' }} />
+        <span className="text-sm font-semibold" style={{ color: 'var(--node-title)' }}>Collections mappées</span>
+        <span className="text-[11px] px-1.5 rounded-full" style={{ background: 'var(--node-bg)', color: 'var(--node-meta)' }}>{items.length}</span>
+      </div>
+      <div className="space-y-1.5 pr-1">
+        {items.map(c => (
+          <div key={c.canvasId} className="flex items-center gap-2.5 rounded-xl px-3.5 py-2" style={{ background: 'var(--node-bg)', border: '1px solid var(--node-border)' }}>
+            <Layers size={13} style={{ color: 'var(--node-meta)', flexShrink: 0 }} />
+            <span className="flex-1 min-w-0 text-sm truncate" style={{ color: 'var(--node-title)' }}>{c.title}</span>
+            <span className="text-[11px] flex-shrink-0" style={{ color: 'var(--node-meta)' }}>{c.noteCount} note{c.noteCount > 1 ? 's' : ''}</span>
+            {c.reviewed && <span className="text-[11px] flex-shrink-0 text-green-500">relue ✓</span>}
+            <Link href={`/collection/${c.sourceGroupId}`} className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg flex-shrink-0" style={{ border: '1px solid var(--node-border)', color: 'var(--node-title)' }}>
+              <RotateCcw size={12} /> Ouvrir
+            </Link>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+export default function ReviewDeck({ toRelire, toReorganize, reviewedNotes = [], collections = [], focus = false }: {
+  toRelire: ReviewNote[]; toReorganize: ReorganizeItem[]; reviewedNotes?: SimpleNote[]; collections?: CollectionItem[]; focus?: boolean
 }) {
   const router = useRouter()
   // On fige la file à l'ouverture : un router.refresh() (pour rafraîchir le badge home
@@ -442,6 +471,7 @@ export default function ReviewDeck({ toRelire, toReorganize, reviewedNotes = [],
             </p>
           </>
         )}
+        {!focus && collections.length > 0 && <CollectionsSection items={collections} />}
         {!focus && reviewedNotes.length > 0 && <ReviewedSection items={reviewedNotes} />}
       </div>
     </div>

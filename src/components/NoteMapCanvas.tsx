@@ -1133,9 +1133,22 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
     setNodes(nds => nds.map(n => n.id === id ? { ...n, data: { ...n.data, color } } : n))
   }, [patchNode, setNodes])
 
-  const dissolveGroup = useCallback((id: string) => {
+  const dissolveGroup = useCallback(async (id: string) => {
     const group = nodes.find(n => n.id === id)
     if (!group) return
+    // 0.1.5b — décision Brice : dissoudre AVERTIT mais GARDE le mapping.
+    // Si ce groupe a un canvas de collection, il survit (retrouvable via Relire).
+    try {
+      const res = await fetch(`/api/collection/${id}/exists`)
+      if (res.ok) {
+        const { exists, title } = await res.json()
+        if (exists && !window.confirm(
+          `Ce groupe a un mapping en cours (« ${title} »).\n\n` +
+          `Le groupe disparaît de l'accueil, mais ton mapping est CONSERVÉ — ` +
+          `tu le retrouveras dans « Relire ».\n\nDissoudre le groupe ?`
+        )) return
+      }
+    } catch { /* pas bloquant */ }
     const children = nodes.filter(n => n.parentId === id)
     for (const child of children) {
       const abs = { x: group.position.x + child.position.x, y: group.position.y + child.position.y }
@@ -1180,8 +1193,12 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
       patchNode(id, { width: p.width, height: p.height, x: p.x, y: p.y })
       setNodes(nds => nds.map(n => n.id === id ? { ...n, position: { x: p.x, y: p.y }, style: { ...n.style, width: p.width, height: p.height } } : n))
     },
-    // 0.1.5 : ouvrir la collection (groupe de notes) dans son canvas de mapping
-    openCollection: (groupId) => router.push(`/collection/${groupId}`),
+    // 0.1.5 : ouvrir la collection (groupe de notes) dans son canvas de mapping.
+    // La sync (membership additive + titre) se fait AVANT la navigation.
+    openCollection: async (groupId) => {
+      try { await fetch(`/api/collection/${groupId}/sync`, { method: 'POST' }) } catch { /* la page retentera */ }
+      router.push(`/collection/${groupId}`)
+    },
   }
 
   // Grouper les cartes de notes sélectionnées (le pendant macro des groupes de blocs)

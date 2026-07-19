@@ -76,6 +76,8 @@ function MessageChip({
 }) {
   const { imgSrc, text } = parseBlockContent(message.content, message.type)
   const trade = message.tradeRef ? tradeMeta?.[message.tradeRef] : undefined
+  // Collection (0.1.5b) : blocs de plusieurs notes mélangés → afficher l'origine
+  const sourceNoteTitle = (message as MessageData & { sourceNoteTitle?: string }).sourceNoteTitle
 
   return (
     <div
@@ -84,6 +86,11 @@ function MessageChip({
       className="flex-shrink-0 w-48 p-2.5 rounded-lg cursor-grab active:cursor-grabbing transition-all text-xs leading-relaxed"
       style={{ background: 'var(--node-bg)', border: '1px solid var(--node-border)', color: 'var(--node-preview)' }}
     >
+      {sourceNoteTitle && (
+        <p className="mb-1 text-[9px] font-semibold uppercase tracking-wide truncate" style={{ color: 'var(--node-meta)', opacity: 0.75 }} title={sourceNoteTitle}>
+          {sourceNoteTitle}
+        </p>
+      )}
       {trade && <div className="mb-1.5"><TradeBadge meta={trade} /></div>}
       {imgSrc ? (
         <>

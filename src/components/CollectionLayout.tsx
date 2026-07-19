@@ -2,14 +2,16 @@
 
 import { useState, useCallback } from 'react'
 import Link from 'next/link'
-import { ChevronLeft, RotateCcw, Layers } from 'lucide-react'
+import { ChevronLeft, ChevronRight, RotateCcw, Layers, Network, AlignLeft } from 'lucide-react'
 import StudyCanvas from './StudyCanvas'
+import DocumentView from './DocumentView'
 import MessagePanel from './MessagePanel'
 import { MessageData, CanvasData, CanvasNodeData, CanvasEdgeData } from '@/types'
 
 interface CollectionLayoutProps {
   title: string
   noteCount: number
+  memberNotes: { id: string; title: string; favicon: string | null }[]
   messages: (MessageData & { sourceNoteTitle?: string })[]
   canvas: CanvasData
 }
@@ -17,8 +19,12 @@ interface CollectionLayoutProps {
 // 0.1.5 — Espace de mapping d'une COLLECTION : les blocs de PLUSIEURS notes
 // réunies dans un groupe de l'accueil, posables et reliables ensemble. Même
 // décor que le canvas d'étude d'une note, mais alimenté par plusieurs séances.
-export default function CollectionLayout({ title, noteCount, messages, canvas: initialCanvas }: CollectionLayoutProps) {
+export default function CollectionLayout({ title, noteCount, memberNotes, messages, canvas: initialCanvas }: CollectionLayoutProps) {
   const [canvas, setCanvas] = useState<CanvasData>(initialCanvas)
+  const [drawerOpen, setDrawerOpen] = useState(true)
+  // Deux projections du même modèle (comme l'étude d'une note) :
+  // tri spatial (canvas) ⇄ document linéaire — base de la note de relecture
+  const [view, setView] = useState<'canvas' | 'document'>('canvas')
 
   const placedMessageIds = new Set(
     canvas.nodes.filter((n) => n.messageId).map((n) => n.messageId as string)
@@ -120,21 +126,30 @@ export default function CollectionLayout({ title, noteCount, messages, canvas: i
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'var(--canvas-bg)', overflow: 'hidden' }}>
       <div style={{ position: 'absolute', inset: 0, zIndex: 2, display: 'flex' }}>
-        <StudyCanvas
-          canvasId={canvas.id}
-          nodes={canvas.nodes}
-          edges={canvas.edges}
-          messages={messages}
-          onDropMessage={handleDropMessage}
-          onMoveNode={handleMoveNode}
-          onRemoveNode={handleRemoveNode}
-          onConnect={handleConnect}
-          onDeleteEdge={handleDeleteEdge}
-          onCreateGroup={handleCreateGroup}
-          onCreateText={handleCreateText}
-          onUpdateNode={handleUpdateNode}
-          onPromoteGroupTag={handlePromoteGroupTag}
-        />
+        {view === 'canvas' ? (
+          <StudyCanvas
+            canvasId={canvas.id}
+            nodes={canvas.nodes}
+            edges={canvas.edges}
+            messages={messages}
+            onDropMessage={handleDropMessage}
+            onMoveNode={handleMoveNode}
+            onRemoveNode={handleRemoveNode}
+            onConnect={handleConnect}
+            onDeleteEdge={handleDeleteEdge}
+            onCreateGroup={handleCreateGroup}
+            onCreateText={handleCreateText}
+            onUpdateNode={handleUpdateNode}
+            onPromoteGroupTag={handlePromoteGroupTag}
+          />
+        ) : (
+          <DocumentView
+            nodes={canvas.nodes}
+            messages={messages}
+            insetLeft={drawerOpen ? 284 : 64}
+            onUpdateNode={handleUpdateNode}
+          />
+        )}
       </div>
 
       {/* Haut-gauche : retour à la carte + titre de la collection */}
@@ -150,6 +165,26 @@ export default function CollectionLayout({ title, noteCount, messages, canvas: i
           </span>
           <span style={{ fontSize: 11, color: 'var(--node-meta)', flexShrink: 0 }}>· {noteCount} note{noteCount > 1 ? 's' : ''}</span>
           <div style={{ width: 1, height: 16, background: 'var(--float-border)', flexShrink: 0 }} />
+          {([
+            { id: 'canvas' as const, Icon: Network, label: 'Canvas — tri spatial' },
+            { id: 'document' as const, Icon: AlignLeft, label: 'Document — la collection triée, base de la relecture' },
+          ]).map(({ id, Icon, label }) => (
+            <button
+              key={id}
+              onClick={() => setView(id)}
+              title={label}
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                width: 26, height: 26, borderRadius: 6, cursor: 'pointer', flexShrink: 0,
+                background: view === id ? 'rgba(59,130,246,0.15)' : 'none',
+                border: view === id ? '1px solid rgba(59,130,246,0.4)' : '1px solid transparent',
+                color: view === id ? '#3b82f6' : 'var(--node-meta)',
+              }}
+            >
+              <Icon size={13} />
+            </button>
+          ))}
+          <div style={{ width: 1, height: 16, background: 'var(--float-border)', flexShrink: 0 }} />
           <button
             onClick={handleResetCanvas}
             title="Remettre ce canvas de collection à zéro"
@@ -162,8 +197,71 @@ export default function CollectionLayout({ title, noteCount, messages, canvas: i
         </div>
       </div>
 
-      {/* Blocs disponibles — pill flottante en bas (tous les blocs des notes membres) */}
-      <MessagePanel canvasId={canvas.id} messages={availableMessages as MessageData[]} />
+      {/* ── Tiroir gauche : les notes membres de la collection ── */}
+      {drawerOpen && (
+        <div
+          className="canvas-float-pill"
+          style={{
+            position: 'absolute', left: 14, top: 56, bottom: 96, zIndex: 30,
+            width: 240, display: 'flex', flexDirection: 'column',
+            overflow: 'hidden', padding: 0,
+          }}
+        >
+          <p style={{ padding: '12px 14px 8px', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--node-meta)', borderBottom: '1px solid var(--float-border)' }}>
+            Notes de la collection
+          </p>
+          <div style={{ flex: 1, overflowY: 'auto', padding: '8px 8px' }}>
+            {memberNotes.map((n) => (
+              <Link
+                key={n.id}
+                href={`/notes/${n.id}`}
+                title="Ouvrir cette note seule"
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8, padding: '7px 8px',
+                  borderRadius: 8, textDecoration: 'none',
+                }}
+                className="hover:bg-black/5 dark:hover:bg-white/5"
+              >
+                {n.favicon
+                  // eslint-disable-next-line @next/next/no-img-element
+                  ? <img src={n.favicon} alt="" style={{ width: 14, height: 14, borderRadius: 3, flexShrink: 0 }} />
+                  : <span style={{ width: 14, height: 14, borderRadius: 3, background: 'var(--node-border)', flexShrink: 0 }} />
+                }
+                <span style={{ fontSize: 12, color: 'var(--node-title)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {n.title}
+                </span>
+              </Link>
+            ))}
+            {memberNotes.length === 0 && (
+              <p style={{ padding: 12, fontSize: 11, color: 'var(--node-meta)', textAlign: 'center' }}>
+                Aucune note — regroupe des notes sur l'accueil puis « Mapper ».
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+      <button
+        onClick={() => setDrawerOpen(v => !v)}
+        title={drawerOpen ? 'Réduire la liste des notes' : 'Rouvrir la liste des notes'}
+        style={{
+          position: 'absolute', left: drawerOpen ? 254 : 14, top: 100, zIndex: 35,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          width: 20, height: 36, padding: 0, cursor: 'pointer',
+          background: 'var(--drawer-bg)', border: '1px solid var(--drawer-border)',
+          borderLeft: drawerOpen ? 'none' : '1px solid var(--drawer-border)',
+          borderRadius: drawerOpen ? '0 8px 8px 0' : '8px',
+          boxShadow: 'var(--float-shadow)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
+          transition: 'left 0.25s ease',
+        }}
+      >
+        {drawerOpen
+          ? <ChevronLeft size={12} style={{ color: 'var(--drawer-icon)' }} />
+          : <ChevronRight size={12} style={{ color: 'var(--drawer-icon)' }} />
+        }
+      </button>
+
+      {/* Blocs disponibles — pill flottante en bas (tri spatial uniquement) */}
+      {view === 'canvas' && <MessagePanel canvasId={canvas.id} messages={availableMessages as MessageData[]} />}
     </div>
   )
 }
