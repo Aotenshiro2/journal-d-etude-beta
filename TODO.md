@@ -108,10 +108,16 @@ réorganisation ne nourrissait plus la relecture (contraire à la vision
 consignée ci-dessous). FIX : poser un bloc/groupe/texte sur un canvas
 `note-study` ou `collection` déjà relu remet `reviewedAt=null` → la note
 re-rentre dans la file (route POST `/api/canvas/[id]/nodes`).
-Rappel du chemin existant pour relire une note DÉJÀ relue sans la modifier :
-/review → section « Déjà relues » (repliée) → bouton « Relire » (mode focus).
-Si ce chemin ne suffit pas à l'usage (trop caché), le remonter en 0.3.
 Bonus : fix P2002 NoteTag à la resync (createMany+skipDuplicates).
+
+**+ Bibliothèque (décision Brice 19/07, plan validé, LIVRÉ)** : dans /review,
+la section « Bibliothèque — notes travaillées » remplace « Déjà relues » et
+« Collections mappées » : l'inventaire PERMANENT de tout ce qui a un canvas
+travaillé (notes relues OU non + collections), toujours visible, filtre texte,
+badge d'état, « Revoir » (lecture document sans rien marquer — mode focus) et
+accès canvas. La file « À relire » = à faire ; la bibliothèque = consulter à
+volonté sans réorganiser pour retrouver. La recherche THÉMATIQUE viendra de
+/concepts (0.2).
 
 ### 📌 VISION à consigner (Brice, 19/07) — la relecture EST la vue document
 

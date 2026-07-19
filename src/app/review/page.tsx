@@ -2,7 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/db'
 import CanvasShell from '@/components/CanvasShell'
-import ReviewDeck, { ReviewNote, ReorganizeItem, SimpleNote } from '@/components/ReviewDeck'
+import ReviewDeck, { ReviewNote, ReorganizeItem, LibraryItem } from '@/components/ReviewDeck'
 import { MessageData, AnnotationData, CanvasNodeData } from '@/types'
 
 const mapNode = (n: {
@@ -67,7 +67,7 @@ export default async function ReviewPage({ searchParams }: { searchParams: Promi
     const items = c && c.note && c.nodes.length > 0 ? [buildItem(c as CanvasWithNote)] : []
     return (
       <CanvasShell user={{ email: user.email ?? '', name: user.user_metadata?.full_name ?? '' }}>
-        <ReviewDeck toRelire={items} toReorganize={[]} reviewedNotes={[]} focus />
+        <ReviewDeck toRelire={items} toReorganize={[]} focus />
       </CanvasShell>
     )
   }
@@ -94,8 +94,7 @@ export default async function ReviewPage({ searchParams }: { searchParams: Promi
   const toRelire = toRelireBuilt.map(b => b.item)
 
   // ── À réorganiser : notes de cours (aucune note A/B/C) avec du contenu mais pas triées ──
-  // ── Déjà relues : pour pouvoir en rouvrir une à la demande ──
-  const [unorganized, folders, reviewedCanvases] = await Promise.all([
+  const [unorganized, folders] = await Promise.all([
     prisma.note.findMany({
       where: {
         userId, deletedAt: null,
@@ -107,42 +106,51 @@ export default async function ReviewPage({ searchParams }: { searchParams: Promi
       orderBy: { lastModifiedAt: 'desc' },
     }),
     prisma.folder.findMany({ where: { userId }, select: { id: true, name: true } }),
-    prisma.canvas.findMany({
-      where: { userId, type: 'note-study', reviewedAt: { not: null } },
-      include: { nodes: { select: { id: true } }, note: { select: { id: true, title: true, favicon: true } } },
-      orderBy: { reviewedAt: 'desc' },
-      take: 40,
-    }),
   ])
 
-  // 0.1.5c — collections mappées (groupes de notes travaillés ensemble) :
-  // visibles dans la relecture même si le groupe de l'accueil a été dissous
+  // ── Bibliothèque (décision Brice 19/07) : l'inventaire PERMANENT de tout ce
+  // qui a un canvas travaillé — notes (relues OU non) + collections — pour
+  // voir/revoir à volonté sans devoir réorganiser pour retrouver.
   const collectionCanvases = await prisma.canvas.findMany({
     where: { userId, type: 'collection' },
     select: {
-      id: true, sourceGroupId: true, title: true, reviewedAt: true,
+      id: true, sourceGroupId: true, title: true, reviewedAt: true, updatedAt: true,
       _count: { select: { nodes: true, memberNotes: true } },
     },
     orderBy: { updatedAt: 'desc' },
   })
-  const collections = collectionCanvases
-    .filter(c => c._count.nodes > 0 || c._count.memberNotes > 0)
-    .map(c => ({
-      canvasId: c.id,
-      sourceGroupId: c.sourceGroupId as string,
-      title: c.title ?? 'Collection',
-      noteCount: c._count.memberNotes,
-      reviewed: c.reviewedAt != null,
-    }))
+  const library: LibraryItem[] = [
+    // Notes travaillées — depuis les canvases déjà chargés pour la file
+    ...canvases
+      .filter(c => c.note && c.nodes.length > 0)
+      .map(c => ({
+        kind: 'note' as const,
+        targetId: c.note!.id,
+        title: c.note!.title ?? 'Sans titre',
+        favicon: c.note!.favicon,
+        reviewed: c.reviewedAt != null,
+        updatedAt: c.updatedAt,
+      })),
+    // Collections mappées — même dissoutes de l'accueil
+    ...collectionCanvases
+      .filter(c => c._count.nodes > 0 || c._count.memberNotes > 0)
+      .map(c => ({
+        kind: 'collection' as const,
+        targetId: c.sourceGroupId as string,
+        title: c.title ?? 'Collection',
+        noteCount: c._count.memberNotes,
+        reviewed: c.reviewedAt != null,
+        updatedAt: c.updatedAt,
+      })),
+  ]
+    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+    .map(({ updatedAt: _u, ...item }) => item)
 
   const folderName = new Map(folders.map(f => [f.id, f.name]))
   const toReorganize: ReorganizeItem[] = unorganized.map(n => ({
     id: n.id, title: n.title ?? 'Sans titre', favicon: n.favicon,
     folder: n.folderId ? folderName.get(n.folderId) ?? null : null,
   }))
-  const reviewedNotes: SimpleNote[] = reviewedCanvases
-    .filter(c => c.note && c.nodes.length > 0)
-    .map(c => ({ id: c.note!.id, title: c.note!.title ?? 'Sans titre', favicon: c.note!.favicon }))
 
   // Même définition que le badge « Relire » de l'accueil (canvas d'étude non relus),
   // recalculée depuis les canvas déjà chargés plutôt qu'avec une requête de plus.
@@ -150,7 +158,7 @@ export default async function ReviewPage({ searchParams }: { searchParams: Promi
 
   return (
     <CanvasShell user={{ email: user.email ?? '', name: user.user_metadata?.full_name ?? '' }} dueCount={dueCount}>
-      <ReviewDeck toRelire={toRelire} toReorganize={toReorganize} reviewedNotes={reviewedNotes} collections={collections} />
+      <ReviewDeck toRelire={toRelire} toReorganize={toReorganize} library={library} />
     </CanvasShell>
   )
 }

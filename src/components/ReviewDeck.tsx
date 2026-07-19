@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Check, SkipForward, ArrowRight, ExternalLink, TrendingUp, BookOpen, CalendarDays, Plus, FolderPlus, ChevronRight, ChevronDown, RotateCcw, Layers } from 'lucide-react'
+import { Check, SkipForward, ArrowRight, ExternalLink, TrendingUp, BookOpen, CalendarDays, Plus, FolderPlus, ChevronRight, ChevronDown, Layers } from 'lucide-react'
 import { AnnotationData, MessageData, CanvasNodeData } from '@/types'
 import DocumentView from './DocumentView'
 import { TradeMeta } from './StudyCanvas'
@@ -23,9 +23,6 @@ export type ReviewNote = {
 
 // Une note de cours pas encore triée : on rappelle à l'élève de faire ce travail.
 export type ReorganizeItem = { id: string; title: string; favicon: string | null; folder: string | null }
-
-// Note minimale (déjà relue) — pour la rouvrir à la demande.
-export type SimpleNote = { id: string; title: string; favicon: string | null }
 
 const GRADE_CLASS: Record<string, string> = {
   A: 'bg-green-400/10 text-green-500 border-green-500/30',
@@ -319,70 +316,81 @@ function ReorganizeSection({ items }: { items: ReorganizeItem[] }) {
   )
 }
 
-// Repliable : les notes déjà relues, pour en rouvrir une à la demande (mode focus ?note=).
-function ReviewedSection({ items }: { items: SimpleNote[] }) {
-  const [open, setOpen] = useState(false)
-  return (
-    <section className="mt-8">
-      <button onClick={() => setOpen(o => !o)} className="w-full flex items-center gap-2 rounded-xl px-3.5 py-2.5"
-        style={{ background: 'var(--node-bg)', border: '1px solid var(--node-border)' }}>
-        <BookOpen size={15} style={{ color: 'var(--node-meta)' }} />
-        <span className="text-sm font-semibold" style={{ color: 'var(--node-title)' }}>Déjà relues</span>
-        <span className="text-[11px] px-1.5 rounded-full" style={{ background: 'var(--canvas-bg)', color: 'var(--node-meta)' }}>{items.length}</span>
-        <span className="flex-1" />
-        {open ? <ChevronDown size={15} style={{ color: 'var(--node-meta)' }} /> : <ChevronRight size={15} style={{ color: 'var(--node-meta)' }} />}
-      </button>
-      {open && (
-        <div className="space-y-1.5 mt-2 pr-1" style={{ maxHeight: 300, overflowY: 'auto' }}>
-          {items.map(n => (
-            <div key={n.id} className="flex items-center gap-2.5 rounded-xl px-3.5 py-2" style={{ background: 'var(--node-bg)', border: '1px solid var(--node-border)' }}>
-              {n.favicon && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={n.favicon} alt="" style={{ width: 14, height: 14, borderRadius: 3, flexShrink: 0 }} />
-              )}
-              <span className="flex-1 min-w-0 text-sm truncate" style={{ color: 'var(--node-title)' }}>{n.title}</span>
-              <Link href={`/review?note=${n.id}`} className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg flex-shrink-0" style={{ border: '1px solid var(--node-border)', color: 'var(--node-title)' }}>
-                <RotateCcw size={12} /> Relire
-              </Link>
-            </div>
-          ))}
-        </div>
-      )}
-    </section>
-  )
+// Bibliothèque des notes travaillées (décision Brice 19/07) : l'inventaire
+// PERMANENT de tout ce qui a un canvas travaillé — notes ET collections,
+// relues ou non — consultable à volonté sans toucher à la file « À relire ».
+// (La recherche thématique viendra de /concepts ; ici c'est le tiroir de rangement.)
+export type LibraryItem = {
+  kind: 'note' | 'collection'
+  targetId: string // noteId (note) ou sourceGroupId (collection)
+  title: string
+  favicon?: string | null
+  noteCount?: number
+  reviewed: boolean
 }
 
-// 0.1.5c — collections mappées (groupes de notes travaillés ensemble) : elles
-// entrent dans le flux de relecture, avec leur propre porte d'entrée.
-export type CollectionItem = { canvasId: string; sourceGroupId: string; title: string; noteCount: number; reviewed: boolean }
-
-function CollectionsSection({ items }: { items: CollectionItem[] }) {
+function LibrarySection({ items }: { items: LibraryItem[] }) {
+  const [query, setQuery] = useState('')
+  const q = query.trim().toLowerCase()
+  const filtered = q ? items.filter(i => i.title.toLowerCase().includes(q)) : items
   return (
-    <section className="mt-8">
+    <section className="mt-10">
       <div className="flex items-center gap-2 px-1 mb-2">
-        <Layers size={15} style={{ color: 'var(--node-meta)' }} />
-        <span className="text-sm font-semibold" style={{ color: 'var(--node-title)' }}>Collections mappées</span>
+        <BookOpen size={15} style={{ color: 'var(--node-meta)' }} />
+        <span className="text-sm font-semibold" style={{ color: 'var(--node-title)' }}>Bibliothèque — notes travaillées</span>
         <span className="text-[11px] px-1.5 rounded-full" style={{ background: 'var(--node-bg)', color: 'var(--node-meta)' }}>{items.length}</span>
       </div>
-      <div className="space-y-1.5 pr-1">
-        {items.map(c => (
-          <div key={c.canvasId} className="flex items-center gap-2.5 rounded-xl px-3.5 py-2" style={{ background: 'var(--node-bg)', border: '1px solid var(--node-border)' }}>
-            <Layers size={13} style={{ color: 'var(--node-meta)', flexShrink: 0 }} />
-            <span className="flex-1 min-w-0 text-sm truncate" style={{ color: 'var(--node-title)' }}>{c.title}</span>
-            <span className="text-[11px] flex-shrink-0" style={{ color: 'var(--node-meta)' }}>{c.noteCount} note{c.noteCount > 1 ? 's' : ''}</span>
-            {c.reviewed && <span className="text-[11px] flex-shrink-0 text-green-500">relue ✓</span>}
-            <Link href={`/collection/${c.sourceGroupId}`} className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg flex-shrink-0" style={{ border: '1px solid var(--node-border)', color: 'var(--node-title)' }}>
-              <RotateCcw size={12} /> Ouvrir
+      {items.length > 6 && (
+        <input
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          placeholder="Filtrer…"
+          className="w-full rounded-lg px-3 py-2 text-[13px] outline-none mb-2"
+          style={{ background: 'var(--node-bg)', border: '1px solid var(--node-border)', color: 'var(--node-title)' }}
+        />
+      )}
+      <div className="space-y-1.5 pr-1" style={{ maxHeight: 380, overflowY: 'auto' }}>
+        {filtered.map(item => (
+          <div key={`${item.kind}-${item.targetId}`} className="flex items-center gap-2.5 rounded-xl px-3.5 py-2" style={{ background: 'var(--node-bg)', border: '1px solid var(--node-border)' }}>
+            {item.kind === 'collection'
+              ? <Layers size={13} style={{ color: 'var(--node-meta)', flexShrink: 0 }} />
+              : item.favicon
+                // eslint-disable-next-line @next/next/no-img-element
+                ? <img src={item.favicon} alt="" style={{ width: 14, height: 14, borderRadius: 3, flexShrink: 0 }} />
+                : <span style={{ width: 14, height: 14, borderRadius: 3, background: 'var(--node-border)', flexShrink: 0 }} />
+            }
+            <span className="flex-1 min-w-0 text-sm truncate" style={{ color: 'var(--node-title)' }}>{item.title}</span>
+            {item.kind === 'collection' && item.noteCount != null && (
+              <span className="text-[11px] flex-shrink-0" style={{ color: 'var(--node-meta)' }}>{item.noteCount} note{item.noteCount > 1 ? 's' : ''}</span>
+            )}
+            <span className={`text-[11px] flex-shrink-0 ${item.reviewed ? 'text-green-500' : 'text-blue-400'}`}>
+              {item.reviewed ? 'relue ✓' : 'à relire'}
+            </span>
+            <Link
+              href={item.kind === 'collection' ? `/collection/${item.targetId}` : `/review?note=${item.targetId}`}
+              title={item.kind === 'collection' ? 'Ouvrir la collection' : 'Revoir la version réorganisée (ne change rien à son état)'}
+              className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg flex-shrink-0"
+              style={{ border: '1px solid var(--node-border)', color: 'var(--node-title)' }}
+            >
+              <BookOpen size={12} /> Revoir
             </Link>
+            {item.kind === 'note' && (
+              <Link href={`/notes/${item.targetId}`} title="Ouvrir le canvas pour ré-organiser" className="flex-shrink-0 p-1.5 rounded-md" style={{ color: 'var(--node-meta)' }}>
+                <ExternalLink size={13} />
+              </Link>
+            )}
           </div>
         ))}
+        {filtered.length === 0 && (
+          <p className="text-xs text-center py-4" style={{ color: 'var(--node-meta)' }}>Aucune note ne correspond.</p>
+        )}
       </div>
     </section>
   )
 }
 
-export default function ReviewDeck({ toRelire, toReorganize, reviewedNotes = [], collections = [], focus = false }: {
-  toRelire: ReviewNote[]; toReorganize: ReorganizeItem[]; reviewedNotes?: SimpleNote[]; collections?: CollectionItem[]; focus?: boolean
+export default function ReviewDeck({ toRelire, toReorganize, library = [], focus = false }: {
+  toRelire: ReviewNote[]; toReorganize: ReorganizeItem[]; library?: LibraryItem[]; focus?: boolean
 }) {
   const router = useRouter()
   // On fige la file à l'ouverture : un router.refresh() (pour rafraîchir le badge home
@@ -471,8 +479,7 @@ export default function ReviewDeck({ toRelire, toReorganize, reviewedNotes = [],
             </p>
           </>
         )}
-        {!focus && collections.length > 0 && <CollectionsSection items={collections} />}
-        {!focus && reviewedNotes.length > 0 && <ReviewedSection items={reviewedNotes} />}
+        {!focus && library.length > 0 && <LibrarySection items={library} />}
       </div>
     </div>
   )
