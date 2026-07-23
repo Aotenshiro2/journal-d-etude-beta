@@ -302,9 +302,26 @@ Découpage (ordre indicatif, le 0.1 ne ferme qu'à maturité) :
         pousse, Brice teste en ligne (Vercel = env de dev vivant).
       - Reste (plus tard, avec l'esthétique) : liens typés bloc↔concept DANS
         le canvas de mapping (esprit B/Obsidian, multi-appartenance).
+### 📋 File PRÉ-0.1.7 (demandé par Brice le 19/07 — « avant d'attaquer la 0.1.7 »)
+
+À faire dans cet ordre logique AVANT la passe esthétique, pas dans l'immédiat :
+- [ ] **Écrans de première connexion** (onboarding) sur le journal ET sur
+      pilotage — l'élève qui arrive pour la 1re fois doit être accueilli/guidé,
+      pas lâché sur un canvas vide.
+- [ ] **Connexion aux comptes AOK** depuis le site aoknowledge.com ET depuis
+      masterclass.aoknowledge.com (même auth Supabase partagée — les wildcards
+      redirect sont déjà en place, `https://*.aoknowledge.com/**`).
+- [ ] **Requalifier « masterclass semble down »** : le serveur répond 200
+      (vérifié 19/07) — le souci vu par Brice est donc dans la page (JS,
+      rendu ou auth). Diagnostiquer au moment de brancher la connexion AOK.
+- [ ] **Adapter le canvas à l'usage mobile** (journal) — aujourd'hui pensé
+      desktop ; définir ce qu'un élève peut faire au téléphone (consulter ?
+      capturer ? le mapping complet est-il réaliste en tactile ?).
+
 - [ ] **0.1.7+ — Passe esthétique** (Brice : « n'imagine pas que le 0.1.6 soit
       la fin »). Revoir le look du canvas et de l'étude de notes jusqu'à
-      maturité. À détailler le moment venu.
+      maturité. À détailler le moment venu. **Après la file pré-0.1.7
+      ci-dessus.**
 
 Réf : `SPEC-second-cerveau.md` + section « connectique second cerveau » plus
 haut (limite de la carte à mi-chemin entre deux concepts = résolue par les
