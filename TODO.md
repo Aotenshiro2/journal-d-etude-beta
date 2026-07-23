@@ -287,7 +287,9 @@ Découpage (ordre indicatif, le 0.1 ne ferme qu'à maturité) :
 - [x] **Geste #2 (lien « idée commune » sans retravail)** : existait déjà —
       l'outil crayon `E` de l'accueil relie deux notes (edge persisté). À
       rendre plus « parlant » (nommer le lien) dans une passe esthétique.
-- [x] **0.1.6 — Connectique accueil → concepts** (LIVRÉ 19/07, à tester) :
+- [x] **0.1.6 — Connectique accueil → concepts** ✅ **VALIDÉ EN PROD PAR BRICE
+      LE 24/07** (traits visibles + survivent au rechargement, double-clic =
+      nommer, nœud-concept relié → note taguée dans /concepts). Module clos.
       - Nœud-concept posable sur l'accueil (bouton `#` barre droite, picker +
         création à la volée) : `CanvasNode kind='concept'` + `tagId`.
       - Relier une note au nœud (crayon `E`) → `NoteTag` ; délier / supprimer
@@ -360,7 +362,11 @@ haut (limite de la carte à mi-chemin entre deux concepts = résolue par les
 liens du 0.1.6, pas par la boîte).
 
 ---
-**Dernière mise à jour :** 19 juillet 2026
+**Dernière mise à jour :** 24 juillet 2026
+**Chantier en cours :** 0.1.6 CLOS (validé en prod). Prochain = file PRÉ-0.1.7
+ci-dessus, en commençant par les **écrans de première connexion** (onboarding
+journal + pilotage). Puis connexion AOK sites, canvas mobile, puis 0.1.7
+esthétique (dont repositionnement Verdict/Trades notés — ⚠️ avant le 0.2).
 **Chantier en cours :** 0.1.5 — la collection (canvas de mapping multi-notes).
 Le 0.1 reste OUVERT jusqu'à maturité (fonctionnel 0.1.5/0.1.6 + esthétique
 0.1.7+). Le 0.2 « Observer les concepts » attend la fin du 0.1.
