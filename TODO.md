@@ -345,9 +345,31 @@ Découpage (ordre indicatif, le 0.1 ne ferme qu'à maturité) :
 - [ ] **Connexion aux comptes AOK** depuis le site aoknowledge.com ET depuis
       masterclass.aoknowledge.com (même auth Supabase partagée — les wildcards
       redirect sont déjà en place, `https://*.aoknowledge.com/**`).
-- [ ] **Requalifier « masterclass semble down »** : le serveur répond 200
-      (vérifié 19/07) — le souci vu par Brice est donc dans la page (JS,
-      rendu ou auth). Diagnostiquer au moment de brancher la connexion AOK.
+- [x] **Requalifier « masterclass semble down »** — RÉSOLU le 24/07, validé en
+      ligne. Le serveur répondait bien 200 : le bug était dans la page.
+      `sites/Masterclass/src/lib/supabase.ts` appelait `createClient()` au
+      niveau module avec `import.meta.env.VITE_SUPABASE_URL` / `_ANON_KEY`.
+      Vite inline ces valeurs AU BUILD ; elles n'étaient pas configurées sur le
+      projet Vercel `masterclass-aoknowledge`, donc `createClient` jetait
+      « supabaseUrl is required. » avant le montage de React → `#root` vide,
+      page entièrement noire, rien en console pour le visiteur. Preuve : zéro
+      occurrence de `*.supabase.co` dans le bundle déployé.
+      Écarté au passage : ni l'hébergement (tous les déploiements `READY`), ni
+      le quota Supabase (le projet visé `ujdqrtjanmmwidnfhkxg` est
+      `ACTIVE_HEALTHY`, et la page mourait avant tout appel réseau).
+      Correctif : client Supabase nullable + `isSupabaseConfigured`, garde dans
+      `EmailGate`, et filet de sécurité dans `index.html` (si `#root` est encore
+      vide 5 s après le `load`, on affiche un message lisible et l'erreur réelle
+      au lieu d'une page noire muette — vaut pour toute panne future).
+      Variables posées sur Vercel par Brice + redéploiement : vérifié, l'URL et
+      la clé anon sont bien inlinées, les leads repartent en base.
+      ⚠️ Deux dettes découvertes pendant le diagnostic, à traiter à part :
+      · `aoknowledge.com` (site vivant) charge des images depuis le Storage du
+        projet Supabase EN PAUSE `vjhztbqzpmsccltcwvdd` → HTTP 000, images
+        mortes en prod, dans 9 fichiers (newsletter, équipe, quickstart, cours).
+      · `EmailGate.tsx` embarque une clé API Kit en dur, donc **en clair dans le
+        bundle public** — à révoquer si elle est secrète, et à déplacer côté
+        serverless.
 - [ ] **Adapter le canvas à l'usage mobile** (journal) — aujourd'hui pensé
       desktop ; définir ce qu'un élève peut faire au téléphone (consulter ?
       capturer ? le mapping complet est-il réaliste en tactile ?).
