@@ -272,9 +272,21 @@ Découpage (ordre indicatif, le 0.1 ne ferme qu'à maturité) :
 - [x] **Geste #2 (lien « idée commune » sans retravail)** : existait déjà —
       l'outil crayon `E` de l'accueil relie deux notes (edge persisté). À
       rendre plus « parlant » (nommer le lien) dans une passe esthétique.
-- [ ] **0.1.6 — La connectique dedans** : liens typés bloc↔bloc et
-      bloc↔concept dans le canvas de mapping (esprit B / Obsidian) — le bond
-      visuel Miro/Obsidian, et là que vit la multi-appartenance.
+- [x] **0.1.6 — Connectique accueil → concepts** (LIVRÉ 19/07, à tester) :
+      - Nœud-concept posable sur l'accueil (bouton `#` barre droite, picker +
+        création à la volée) : `CanvasNode kind='concept'` + `tagId`.
+      - Relier une note au nœud (crayon `E`) → `NoteTag` ; délier / supprimer
+        le nœud retire CE tag (symétrie). Nourrit /concepts, zéro impact /notes.
+      - Liens nommables : double-clic sur un trait = nommer (vide = supprimer).
+      - 🐛 découvert en route : les traits de l'accueil n'ont JAMAIS été
+        rendus (bug préexistant — le crayon écrivait en base, rien à l'écran).
+        2 fixes candidats poussés : xyflow 12.8.6→12.11.2 + retrait de
+        `onlyRenderVisibleElements`. ⚠️ Si les traits manquent toujours en
+        prod, reprendre le debug ICI.
+      - Règle de travail actée (Brice) : PLUS de vérif locale du rendu — on
+        pousse, Brice teste en ligne (Vercel = env de dev vivant).
+      - Reste (plus tard, avec l'esthétique) : liens typés bloc↔concept DANS
+        le canvas de mapping (esprit B/Obsidian, multi-appartenance).
 - [ ] **0.1.7+ — Passe esthétique** (Brice : « n'imagine pas que le 0.1.6 soit
       la fin »). Revoir le look du canvas et de l'étude de notes jusqu'à
       maturité. À détailler le moment venu.
