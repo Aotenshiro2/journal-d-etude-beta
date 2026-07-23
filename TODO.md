@@ -293,11 +293,28 @@ Découpage (ordre indicatif, le 0.1 ne ferme qu'à maturité) :
       - Relier une note au nœud (crayon `E`) → `NoteTag` ; délier / supprimer
         le nœud retire CE tag (symétrie). Nourrit /concepts, zéro impact /notes.
       - Liens nommables : double-clic sur un trait = nommer (vide = supprimer).
-      - 🐛 découvert en route : les traits de l'accueil n'ont JAMAIS été
-        rendus (bug préexistant — le crayon écrivait en base, rien à l'écran).
-        2 fixes candidats poussés : xyflow 12.8.6→12.11.2 + retrait de
-        `onlyRenderVisibleElements`. ⚠️ Si les traits manquent toujours en
-        prod, reprendre le debug ICI.
+      - 🐛 **TEST PROD 19/07 (Brice) : ÉCHEC — les traits ne s'affichent
+        TOUJOURS PAS** malgré les 2 fixes (upgrade xyflow 12.11.2 + retrait
+        `onlyRenderVisibleElements`). À REPRENDRE EN PRIORITÉ à la prochaine
+        session de code. Symptômes précis :
+        · crayon `E` entre deux notes → aucun trait visible (mais écrit en base) ;
+        · nœud-concept : se POSE bien sur le canvas, bouton supprimer (×) OK,
+          mais IMPOSSIBLE de le déplacer ni de lui relier un trait — indice
+          possiblement distinct du bug des traits (drag qui ne marche pas =
+          peut-être interactions/pointer-events sur le node custom, pas le
+          rendu SVG des edges).
+        État du débug déjà fait (ne pas refaire) : reproduit en local même sur
+        une page React Flow MINIMALE (2 nodes défaut + 1 edge smoothstep,
+        provider + style.css importés, conteneur dimensionné) → edges dans les
+        props du composant ReactFlow (vérifié via fibre React) mais SVG
+        `.react-flow__edges` VIDE, zéro erreur console, nodes rendus et
+        mesurés, handles présents. Pistes restantes : double instance React
+        (npm ls react → vérifier duplication via le bundle), interaction
+        Next 15.5/React 19.1 avec xyflow, tester la même page minimale dans
+        un projet Vite vierge pour isoler Next, ou downgrade React.
+        NB : StudyCanvas (/notes) utilise le même moteur — vérifier si les
+        traits s'affichent LÀ-BAS en prod (si oui, comparer ; si non, le bug
+        est global à l'app et personne ne l'a jamais vu).
       - Règle de travail actée (Brice) : PLUS de vérif locale du rendu — on
         pousse, Brice teste en ligne (Vercel = env de dev vivant).
       - Reste (plus tard, avec l'esthétique) : liens typés bloc↔concept DANS
