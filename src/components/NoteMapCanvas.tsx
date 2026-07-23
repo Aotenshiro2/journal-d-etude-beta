@@ -28,7 +28,7 @@ import {
   Sun, Moon, Map as MapIcon, Grid3x3, ChevronDown, ChevronLeft, ChevronRight,
   BookOpen, Lightbulb, BookMarked, BarChart2, FileText,
   MousePointer2, Hand, Pencil, Square, ZoomIn, ZoomOut, Maximize2,
-  Star, FolderPlus, Compass, Sunrise, Layers, Eye, EyeOff,
+  Star, FolderPlus, Compass, Sunrise, Layers, Eye, EyeOff, Hash,
 } from 'lucide-react'
 import { NoteData, CanvasData, MessageData } from '@/types'
 import { GroupNode, GROUP_COLORS, sortParentsFirst, type GroupHandlers } from './StudyCanvas'
@@ -217,7 +217,63 @@ const NoteMapNode = React.memo(function NoteMapNode({ id, data }: NodeProps) {
   )
 })
 
-const nodeTypes = { noteMap: NoteMapNode, group: GroupNode }
+// 0.1.6 — Nœud-CONCEPT : un tag incarné sur le canvas. Relier une note à ce
+// nœud (outil crayon) = la note porte le concept (NoteTag, côté serveur).
+// C'est la multi-appartenance : une note peut tirer des liens vers N concepts.
+const ConceptNode = React.memo(function ConceptNode({ id, data }: NodeProps) {
+  const { setNodes, setEdges } = useReactFlow()
+  const d = data as { label: string; color?: string | null; canvasId: string }
+  const [hovered, setHovered] = useState(false)
+  const color = d.color || '#3b82f6'
+
+  const handleRemove = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!window.confirm(`Retirer le nœud « ${d.label} » du canvas ?\n\nLes notes reliées par un trait perdent CE concept (les tags posés autrement ne bougent pas).`)) return
+    await fetch(`/api/canvas/${d.canvasId}/nodes/${id}`, { method: 'DELETE' })
+    setEdges(eds => eds.filter(e2 => e2.source !== id && e2.target !== id))
+    setNodes(nds => nds.filter(n => n.id !== id))
+  }, [id, d.canvasId, d.label, setNodes, setEdges])
+
+  return (
+    <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        position: 'relative',
+        display: 'flex', alignItems: 'center', gap: 6,
+        padding: '10px 16px', borderRadius: 100,
+        background: `${color}1f`, border: `1.5px solid ${color}`,
+        boxShadow: 'var(--node-shadow)',
+      }}
+    >
+      <Handle type="target" position={Position.Top}
+        style={{ background: color, opacity: 0, width: 8, height: 8, minWidth: 0, border: 'none' }}
+        className="!transition-opacity group-hover:!opacity-100"
+      />
+      <Handle type="source" position={Position.Bottom}
+        style={{ background: color, opacity: 0, width: 8, height: 8, minWidth: 0, border: 'none' }}
+        className="!transition-opacity group-hover:!opacity-100"
+      />
+      <span style={{ fontSize: 13, fontWeight: 700, color }}>#</span>
+      <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--node-title)', whiteSpace: 'nowrap' }}>{d.label}</span>
+      {hovered && (
+        <button
+          onClick={handleRemove}
+          title="Retirer ce concept du canvas"
+          style={{
+            position: 'absolute', top: -7, right: -7,
+            width: 18, height: 18, borderRadius: '50%',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'rgba(239,68,68,0.85)', border: 'none',
+            cursor: 'pointer', color: '#fff', fontSize: 12, lineHeight: 1, padding: 0,
+          }}
+        >×</button>
+      )}
+    </div>
+  )
+})
+
+const nodeTypes = { noteMap: NoteMapNode, group: GroupNode, concept: ConceptNode }
 const GROUP_COLOR_KEYS = Object.keys(GROUP_COLORS)
 
 function autoPosition(index: number): { x: number; y: number } {
@@ -543,9 +599,10 @@ interface RightToolbarProps {
   setActiveTool: (t: Tool) => void
   isFav: boolean
   onToggleFav: () => void
+  onAddConcept?: () => void
 }
 
-function RightToolbar({ activeTool, setActiveTool, isFav, onToggleFav }: RightToolbarProps) {
+function RightToolbar({ activeTool, setActiveTool, isFav, onToggleFav, onAddConcept }: RightToolbarProps) {
   const { zoomIn, zoomOut, fitView } = useReactFlow()
 
   const tools: { id: Tool; Icon: React.ElementType; label: string }[] = [
@@ -584,6 +641,19 @@ function RightToolbar({ activeTool, setActiveTool, isFav, onToggleFav }: RightTo
             <tool.Icon size={14} />
           </button>
         ))}
+
+        {/* 0.1.6 — poser un nœud-concept sur le canvas */}
+        {onAddConcept && (
+          <button
+            onClick={onAddConcept}
+            title="Poser un concept sur le canvas — relie-lui des notes avec le crayon (E)"
+            style={btnBase}
+            onMouseEnter={e => { e.currentTarget.style.color = '#3b82f6'; e.currentTarget.style.background = 'var(--canvas-bg)' }}
+            onMouseLeave={e => { e.currentTarget.style.color = 'var(--node-meta)'; e.currentTarget.style.background = 'none' }}
+          >
+            <Hash size={14} />
+          </button>
+        )}
 
         {divider}
 
@@ -801,6 +871,11 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
   const [dropCounter, setDropCounter] = useState(0)
   // Message éphémère du drop extension (résolution en cours / note introuvable)
   const [dropNotice, setDropNotice] = useState<string | null>(null)
+
+  // ── Picker de concepts (0.1.6) ──────────────────────────────────────────────
+  const [conceptPickerOpen, setConceptPickerOpen] = useState(false)
+  const [conceptQuery, setConceptQuery] = useState('')
+  const [conceptTags, setConceptTags] = useState<{ id: string; name: string; color: string }[] | null>(null)
   const dragEnterCounterRef = useRef(0)
   const { setCenter, screenToFlowPosition } = useReactFlow()
   const { x: vpX, y: vpY, zoom } = useViewport()
@@ -899,8 +974,16 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
         style: { width: g.width, height: g.height, zIndex: -1 },
         data: { label: g.label ?? 'Groupe', color: g.color ?? 'blue', tagId: g.tagId ?? null, handlers: groupHandlersRef },
       }))
+    // Nœuds-concept (0.1.6) — id RF = id DB
+    const conceptNodes: Node[] = canvas.nodes
+      .filter(n => n.kind === 'concept')
+      .map(c => ({
+        id: c.id, type: 'concept',
+        position: { x: c.x, y: c.y },
+        data: { label: c.label ?? 'concept', color: c.color, canvasId: canvas.id },
+      }))
     const noteNodes: Node[] = canvas.nodes
-      .filter(n => n.noteId != null)
+      .filter(n => n.noteId != null && n.kind !== 'concept')
       .flatMap(n => {
         const note = notes.find(note => note.id === n.noteId)
         if (!note) return []
@@ -912,7 +995,7 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
           data: { note, dbNodeId: n.id, canvasId: canvas.id },
         }]
       })
-    return sortParentsFirst([...groupNodes, ...noteNodes])
+    return sortParentsFirst([...groupNodes, ...conceptNodes, ...noteNodes])
   },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     []
@@ -921,6 +1004,9 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
   const initialEdges: Edge[] = useMemo(() =>
     canvas.edges.map(e => ({
       id: e.id, source: e.fromId, target: e.toId, type: 'smoothstep',
+      label: e.label ?? undefined,
+      labelStyle: { fontSize: 10, fill: 'var(--node-meta)' },
+      labelBgStyle: { fill: 'var(--node-bg)', fillOpacity: 0.9 },
       style: { stroke: '#3b82f6', strokeWidth: 1.5, opacity: 0.5 },
     })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -949,6 +1035,14 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
   }, [router])
 
   const handleNodeDragStop: OnNodeDrag = useCallback(async (_, node) => {
+    // Nœud-concept déplacé : position seulement (id RF = id DB)
+    if (node.type === 'concept') {
+      await fetch(`/api/canvas/${canvas.id}/nodes/${node.id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ x: node.position.x, y: node.position.y }),
+      })
+      return
+    }
     // Groupe déplacé : on persiste juste sa position (id RF = id DB du groupe)
     if (node.type === 'group') {
       await fetch(`/api/canvas/${canvas.id}/nodes/${node.id}`, {
@@ -1017,14 +1111,80 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
   }, [canvas.id, nodes, setNodes])
 
   const onConnect = useCallback(async (params: Connection) => {
-    setEdges(eds => addEdge({ ...params, type: 'smoothstep', style: { stroke: '#3b82f6', strokeWidth: 1.5, opacity: 0.5 } }, eds))
-    if (params.source && params.target) {
-      await fetch(`/api/canvas/${canvas.id}/edges`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fromId: params.source, toId: params.target }),
-      })
-    }
+    if (!params.source || !params.target) return
+    // POST d'abord : l'edge local porte l'ID DB → nommable/supprimable sans reload
+    const res = await fetch(`/api/canvas/${canvas.id}/edges`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fromId: params.source, toId: params.target }),
+    })
+    if (!res.ok) return
+    const dbEdge = await res.json()
+    setEdges(eds => addEdge({
+      ...params, id: dbEdge.id, type: 'smoothstep',
+      style: { stroke: '#3b82f6', strokeWidth: 1.5, opacity: 0.5 },
+    }, eds))
   }, [setEdges, canvas.id])
+
+  // 0.1.6 — double-clic sur un lien : le nommer (le sens du lien devient de la
+  // donnée) ; laisser vide supprime le lien (parité avec le canvas d'étude).
+  const onEdgeDoubleClick = useCallback(async (_: React.MouseEvent, edge: Edge) => {
+    const current = typeof edge.label === 'string' ? edge.label : ''
+    const input = window.prompt('Nommer ce lien (laisser vide pour le supprimer) :', current)
+    if (input === null) return // annulé
+    const label = input.trim()
+    if (!label) {
+      await fetch(`/api/canvas/${canvas.id}/edges/${edge.id}`, { method: 'DELETE' })
+      setEdges(eds => eds.filter(e => e.id !== edge.id))
+      return
+    }
+    const res = await fetch(`/api/canvas/${canvas.id}/edges/${edge.id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label }),
+    })
+    if (res.ok) {
+      setEdges(eds => eds.map(e => e.id === edge.id
+        ? { ...e, label, labelStyle: { fontSize: 10, fill: 'var(--node-meta)' }, labelBgStyle: { fill: 'var(--node-bg)', fillOpacity: 0.9 } }
+        : e))
+    }
+  }, [canvas.id, setEdges])
+
+  const openConceptPicker = useCallback(() => {
+    setConceptPickerOpen(o => !o)
+    setConceptQuery('')
+    if (!conceptTags) {
+      fetch('/api/tags').then(r => r.ok ? r.json() : []).then(setConceptTags).catch(() => setConceptTags([]))
+    }
+  }, [conceptTags])
+
+  // Pose le nœud-concept au centre de la vue actuelle
+  const addConceptNode = useCallback(async (tag: { id: string; name: string; color: string }) => {
+    const center = screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 })
+    const res = await fetch(`/api/canvas/${canvas.id}/nodes`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'concept', tagId: tag.id, label: tag.name, color: tag.color, x: center.x - 80, y: center.y - 22 }),
+    })
+    if (!res.ok) return
+    const dbNode = await res.json()
+    setNodes(nds => [...nds, {
+      id: dbNode.id, type: 'concept',
+      position: { x: dbNode.x, y: dbNode.y },
+      data: { label: tag.name, color: tag.color, canvasId: canvas.id },
+    }])
+    setConceptPickerOpen(false)
+  }, [canvas.id, screenToFlowPosition, setNodes])
+
+  const createConceptAndAdd = useCallback(async () => {
+    const name = conceptQuery.trim()
+    if (!name) return
+    const res = await fetch('/api/tags', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    })
+    if (!res.ok) return
+    const tag = await res.json()
+    setConceptTags(prev => prev ? [...prev.filter(t => t.id !== tag.id), tag] : [tag])
+    await addConceptNode(tag)
+  }, [conceptQuery, addConceptNode])
 
   const focusNote = useCallback((noteId: string) => {
     const node = nodes.find(n => n.id === noteId)
@@ -1353,7 +1513,72 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
               return next
             })
           }}
+          onAddConcept={openConceptPicker}
         />
+
+        {/* ── Picker de concepts (0.1.6) — choisir/créer le concept à poser ── */}
+        {conceptPickerOpen && (
+          <div
+            className="canvas-float-pill"
+            style={{
+              position: 'absolute', right: 58, top: '50%', transform: 'translateY(-50%)',
+              zIndex: 45, width: 230, padding: 8, display: 'flex', flexDirection: 'column', gap: 6,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Hash size={12} style={{ color: 'var(--node-meta)', flexShrink: 0 }} />
+              <input
+                autoFocus
+                value={conceptQuery}
+                onChange={e => setConceptQuery(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Escape') setConceptPickerOpen(false) }}
+                placeholder="Chercher ou créer un concept…"
+                style={{
+                  flex: 1, minWidth: 0, background: 'transparent', border: 'none', outline: 'none',
+                  fontSize: 12, color: 'var(--node-title)',
+                }}
+              />
+              <button onClick={() => setConceptPickerOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--node-meta)', fontSize: 13, padding: 0 }}>×</button>
+            </div>
+            <div style={{ maxHeight: 240, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
+              {(conceptTags ?? [])
+                .filter(t => t.name.toLowerCase().includes(conceptQuery.trim().toLowerCase()))
+                .slice(0, 12)
+                .map(t => (
+                  <button
+                    key={t.id}
+                    onClick={() => addConceptNode(t)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px',
+                      borderRadius: 8, border: 'none', cursor: 'pointer', textAlign: 'left',
+                      background: 'none', color: 'var(--node-title)', fontSize: 12,
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'var(--canvas-bg)' }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'none' }}
+                  >
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: t.color, flexShrink: 0 }} />
+                    {t.name}
+                  </button>
+                ))}
+              {conceptQuery.trim() && !(conceptTags ?? []).some(t => t.name.toLowerCase() === conceptQuery.trim().toLowerCase()) && (
+                <button
+                  onClick={createConceptAndAdd}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px',
+                    borderRadius: 8, border: 'none', cursor: 'pointer', textAlign: 'left',
+                    background: 'rgba(59,130,246,0.1)', color: '#3b82f6', fontSize: 12,
+                  }}
+                >
+                  <Hash size={11} style={{ flexShrink: 0 }} />
+                  Créer « {conceptQuery.trim()} »
+                </button>
+              )}
+              {conceptTags === null && (
+                <p style={{ fontSize: 11, color: 'var(--node-meta)', textAlign: 'center', padding: 8 }}>Chargement…</p>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* ── Bottom-left — notes bubble ── */}
         <div style={{ position: 'absolute', bottom: 16, left: 14, zIndex: 20 }}>
@@ -1419,7 +1644,7 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
           <ReactFlow
             nodes={nodes} edges={edges}
             onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
-            onConnect={onConnect} onNodeDragStop={handleNodeDragStop}
+            onConnect={onConnect} onEdgeDoubleClick={onEdgeDoubleClick} onNodeDragStop={handleNodeDragStop}
             onNodeClick={handleNodeClick}
             onNodeDoubleClick={handleNodeDoubleClick}
             nodeTypes={nodeTypes}
@@ -1428,7 +1653,7 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
             panOnScroll panOnScrollMode={PanOnScrollMode.Vertical}
             zoomOnScroll={false} zoomActivationKeyCode="Control"
             panActivationKeyCode="Space"
-            onlyRenderVisibleElements proOptions={{ hideAttribution: true }}
+            proOptions={{ hideAttribution: true }}
             style={{ background: 'transparent', position: 'relative', zIndex: 2 }}
             {...toolProps[activeTool]}
           >

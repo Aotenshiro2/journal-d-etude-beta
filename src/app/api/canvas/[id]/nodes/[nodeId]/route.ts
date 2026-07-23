@@ -84,6 +84,24 @@ export async function DELETE(
   const canvas = await prisma.canvas.findFirst({ where: { id, userId: user.id } })
   if (!canvas) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
+  // 0.1.6 — supprimer un nœud-CONCEPT : ses edges cascadent en base, mais les
+  // tags posés par ces liens doivent partir avec (symétrie du geste)
+  const target = await prisma.canvasNode.findUnique({
+    where: { id: nodeId },
+    select: {
+      kind: true, tagId: true,
+      fromEdges: { select: { to: { select: { noteId: true, messageId: true } } } },
+      toEdges: { select: { from: { select: { noteId: true, messageId: true } } } },
+    },
+  })
+  if (target?.kind === 'concept' && target.tagId) {
+    const linked = [...target.fromEdges.map(e => e.to), ...target.toEdges.map(e => e.from)]
+    const noteIds = linked.filter(n => n.noteId).map(n => n.noteId as string)
+    const messageIds = linked.filter(n => n.messageId).map(n => n.messageId as string)
+    if (noteIds.length) await prisma.noteTag.deleteMany({ where: { noteId: { in: noteIds }, tagId: target.tagId } })
+    if (messageIds.length) await prisma.messageTag.deleteMany({ where: { messageId: { in: messageIds }, tagId: target.tagId } })
+  }
+
   // Filet de securite : detacher les enfants d un groupe supprime
   // (le client convertit leurs positions en absolu AVANT d appeler ce DELETE)
   await prisma.canvasNode.updateMany({ where: { parentId: nodeId }, data: { parentId: null } })

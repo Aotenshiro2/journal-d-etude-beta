@@ -24,6 +24,23 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         style: body.style ?? 'curved',
       },
     })
+    // 0.1.6 — lien vers un nœud-CONCEPT : la note (ou le bloc) relié porte le
+    // concept (NoteTag/MessageTag). Même mécanique que le groupe vivant ;
+    // nourrit /concepts, aucun impact sur /notes.
+    const [a, b] = await Promise.all([
+      prisma.canvasNode.findUnique({ where: { id: body.fromId }, select: { kind: true, tagId: true, noteId: true, messageId: true } }),
+      prisma.canvasNode.findUnique({ where: { id: body.toId }, select: { kind: true, tagId: true, noteId: true, messageId: true } }),
+    ])
+    const concept = a?.kind === 'concept' && a.tagId ? a : b?.kind === 'concept' && b.tagId ? b : null
+    const content = concept === a ? b : a
+    if (concept?.tagId && content) {
+      if (content.noteId) {
+        await prisma.noteTag.createMany({ data: [{ noteId: content.noteId, tagId: concept.tagId }], skipDuplicates: true })
+      } else if (content.messageId) {
+        await prisma.messageTag.createMany({ data: [{ messageId: content.messageId, tagId: concept.tagId }], skipDuplicates: true })
+      }
+    }
+
     return NextResponse.json(edge, { status: 201 })
   } catch {
     return NextResponse.json({ error: 'Edge already exists' }, { status: 409 })
