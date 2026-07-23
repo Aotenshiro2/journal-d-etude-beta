@@ -180,6 +180,21 @@ attendant.
 - `/market` est orphelin (aucun lien n'y mène) — supprimer si « Observer le
   marché » n'est plus au programme.
 
+### 🚨 Incident 19/07 — élèves bloqués par « Log in to Vercel » (RÉSOLU côté diagnostic)
+
+Des élèves (ex. alex17310@gmail.com) tombaient sur un login VERCEL en ouvrant
+`journal-d-etude-beta-aotenshiros-projects.vercel.app`, et Brice recevait des
+mails « Access request ». Cause : Deployment Protection Vercel (« Vercel
+Authentication », défaut « Standard ») protège les URLs GÉNÉRÉES du projet —
+seuls `journal.aoknowledge.com` et `journal-d-etude-beta.vercel.app` sont
+publics. Même symptôme sur `pilotage-trader` (pilotage.aoknowledge.com).
+Fix (dashboard, Brice) : Settings → Deployment Protection → Vercel
+Authentication → **Disabled** sur `journal-d-etude-beta` ET `pilotage-trader`.
+**RÈGLE PERMANENTE : ne JAMAIS partager une URL contenant
+`-aotenshiros-projects` — lien élève = journal.aoknowledge.com /
+pilotage.aoknowledge.com.** Vérifier aussi Supabase → Auth → URL Configuration
+(Site URL = domaine public).
+
 ### 🔐 Checklist pré-bêta (à faire AVANT d'ouvrir au public, 0.9)
 
 - [ ] **Roter le mot de passe Railway** (exposé en clair dans l'historique git
