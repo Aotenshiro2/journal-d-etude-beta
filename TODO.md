@@ -319,6 +319,17 @@ Découpage (ordre indicatif, le 0.1 ne ferme qu'à maturité) :
         pousse, Brice teste en ligne (Vercel = env de dev vivant).
       - Reste (plus tard, avec l'esthétique) : liens typés bloc↔concept DANS
         le canvas de mapping (esprit B/Obsidian, multi-appartenance).
+### 📝 Relire — demandes Brice du 23/07
+
+- [ ] **Bouton « Retravailler » sur la carte de relecture** : à côté de
+      « J'ai relu », pouvoir choisir de RETRAVAILLER la note si on n'est pas
+      satisfait de sa réorganisation → ouvre le canvas (`/notes/[id]`, ou la
+      collection). La note reste « à relire » (on ne la marque pas relue).
+- [ ] **(passe esthétique 0.1.8/9/10…, PAS maintenant mais AVANT le 0.2)** :
+      revoir le positionnement des blocs « Verdict de la note » et « Trades
+      notés » dans la carte de relecture — esthétiquement pas bon aujourd'hui.
+      ⚠️ Ne pas passer aux concepts (0.2) sans l'avoir fait.
+
 ### 📋 File PRÉ-0.1.7 (demandé par Brice le 19/07 — « avant d'attaquer la 0.1.7 »)
 
 À faire dans cet ordre logique AVANT la passe esthétique, pas dans l'immédiat :
