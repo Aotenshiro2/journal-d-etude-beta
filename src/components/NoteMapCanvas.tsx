@@ -114,7 +114,7 @@ const NoteMapNode = React.memo(function NoteMapNode({ id, data }: NodeProps) {
     <ContextMenu>
       <ContextMenuTrigger>
         <div
-          className="note-map-card"
+          className="note-map-card group"
           style={{ position: 'relative' }}
           onMouseEnter={() => setHovered(true)}
           onMouseLeave={() => setHovered(false)}
@@ -134,14 +134,20 @@ const NoteMapNode = React.memo(function NoteMapNode({ id, data }: NodeProps) {
               }}
             >×</button>
           )}
-          <Handle type="target" position={Position.Top}
-            style={{ background: 'var(--node-handle)', opacity: 0, width: 8, height: 8, minWidth: 0, border: 'none' }}
-            className="!transition-opacity group-hover:!opacity-100"
-          />
-          <Handle type="source" position={Position.Bottom}
-            style={{ background: 'var(--node-handle)', opacity: 0, width: 8, height: 8, minWidth: 0, border: 'none' }}
-            className="!transition-opacity group-hover:!opacity-100"
-          />
+          {/* Handles nommes (meme convention que StudyCanvas) : leur id est
+              persiste dans CanvasEdge.fromHandle/toHandle, donc le trait
+              repart du bon cote au rechargement. */}
+          {([
+            { id: 'tt', type: 'target', position: Position.Top },
+            { id: 'tl', type: 'target', position: Position.Left },
+            { id: 'sb', type: 'source', position: Position.Bottom },
+            { id: 'sr', type: 'source', position: Position.Right },
+          ] as const).map(h => (
+            <Handle key={h.id} id={h.id} type={h.type} position={h.position}
+              style={{ background: 'var(--node-handle)', opacity: 0, width: 9, height: 9, minWidth: 0, border: 'none' }}
+              className="!transition-opacity group-hover:!opacity-100"
+            />
+          ))}
 
           {/* Header */}
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '14px 14px 8px', flexShrink: 0 }}>
@@ -236,6 +242,7 @@ const ConceptNode = React.memo(function ConceptNode({ id, data }: NodeProps) {
 
   return (
     <div
+      className="group"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
@@ -246,14 +253,17 @@ const ConceptNode = React.memo(function ConceptNode({ id, data }: NodeProps) {
         boxShadow: 'var(--node-shadow)',
       }}
     >
-      <Handle type="target" position={Position.Top}
-        style={{ background: color, opacity: 0, width: 8, height: 8, minWidth: 0, border: 'none' }}
-        className="!transition-opacity group-hover:!opacity-100"
-      />
-      <Handle type="source" position={Position.Bottom}
-        style={{ background: color, opacity: 0, width: 8, height: 8, minWidth: 0, border: 'none' }}
-        className="!transition-opacity group-hover:!opacity-100"
-      />
+      {([
+        { id: 'tt', type: 'target', position: Position.Top },
+        { id: 'tl', type: 'target', position: Position.Left },
+        { id: 'sb', type: 'source', position: Position.Bottom },
+        { id: 'sr', type: 'source', position: Position.Right },
+      ] as const).map(h => (
+        <Handle key={h.id} id={h.id} type={h.type} position={h.position}
+          style={{ background: color, opacity: 0, width: 9, height: 9, minWidth: 0, border: 'none' }}
+          className="!transition-opacity group-hover:!opacity-100"
+        />
+      ))}
       <span style={{ fontSize: 13, fontWeight: 700, color }}>#</span>
       <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--node-title)', whiteSpace: 'nowrap' }}>{d.label}</span>
       {hovered && (
@@ -877,7 +887,7 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
   const [conceptQuery, setConceptQuery] = useState('')
   const [conceptTags, setConceptTags] = useState<{ id: string; name: string; color: string }[] | null>(null)
   const dragEnterCounterRef = useRef(0)
-  const { setCenter, screenToFlowPosition } = useReactFlow()
+  const { setCenter, screenToFlowPosition, getNode } = useReactFlow()
   const { x: vpX, y: vpY, zoom } = useViewport()
 
   const dotSize = 22 * zoom
@@ -1001,20 +1011,56 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
     []
   )
 
+  // 0.1.6 — table id CanvasNode (DB) -> id React Flow. Une carte de note a pour
+  // id RF l'id de la NOTE, alors que les groupes et les concepts ont id RF = id
+  // DB ; or un CanvasEdge reference TOUJOURS des ids de CanvasNode. Sans cette
+  // traduction, source/target ne designaient aucun noeud et React Flow ignorait
+  // silencieusement l'edge : c'est la cause des traits invisibles.
+  const rfIdByDbId = useMemo(() => {
+    const m = new Map<string, string>()
+    canvas.nodes.forEach(n => m.set(n.id, n.noteId != null && n.kind !== 'concept' ? n.noteId : n.id))
+    return m
+  }, [canvas.nodes])
+
   const initialEdges: Edge[] = useMemo(() =>
-    canvas.edges.map(e => ({
-      id: e.id, source: e.fromId, target: e.toId, type: 'smoothstep',
-      label: e.label ?? undefined,
-      labelStyle: { fontSize: 10, fill: 'var(--node-meta)' },
-      labelBgStyle: { fill: 'var(--node-bg)', fillOpacity: 0.9 },
-      style: { stroke: '#3b82f6', strokeWidth: 1.5, opacity: 0.5 },
-    })),
+    canvas.edges.flatMap(e => {
+      const source = rfIdByDbId.get(e.fromId)
+      const target = rfIdByDbId.get(e.toId)
+      if (!source || !target) return []
+      return [{
+        id: e.id, source, target, type: 'smoothstep',
+        sourceHandle: e.fromHandle ?? undefined,
+        targetHandle: e.toHandle ?? undefined,
+        label: e.label ?? undefined,
+        labelStyle: { fontSize: 10, fill: 'var(--node-meta)' },
+        labelBgStyle: { fill: 'var(--node-bg)', fillOpacity: 0.9 },
+        style: { stroke: '#3b82f6', strokeWidth: 1.5, opacity: 0.5 },
+      }]
+    }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     []
   )
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
+
+  // id RF -> id CanvasNode (DB), en creant le CanvasNode si la carte n'a jamais
+  // ete persistee. Groupes et concepts ont deja id RF = id DB.
+  const ensureDbNodeId = useCallback(async (node: Node): Promise<string | null> => {
+    if (node.type !== 'noteMap') return node.id
+    const known = savedNodeRef.current.get(node.id)
+    if (known) return known
+    const res = await fetch(`/api/canvas/${canvas.id}/nodes`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ noteId: node.id, x: node.position.x, y: node.position.y }),
+    })
+    if (!res.ok) return null
+    const data = await res.json()
+    savedNodeRef.current.set(node.id, data.id as string)
+    setNodes(nds => nds.map(n => n.id === node.id
+      ? { ...n, data: { ...n.data, dbNodeId: data.id, canvasId: canvas.id } } : n))
+    return data.id as string
+  }, [canvas.id, setNodes])
 
   const handleNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
     if (singleClickTimerRef.current) clearTimeout(singleClickTimerRef.current)
@@ -1053,19 +1099,8 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
     }
 
     // Carte de note : s'assurer qu'elle est persistée en base
-    let dbNodeId = savedNodeRef.current.get(node.id)
-    if (!dbNodeId) {
-      const res = await fetch(`/api/canvas/${canvas.id}/nodes`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ noteId: node.id, x: node.position.x, y: node.position.y }),
-      })
-      if (!res.ok) return
-      const data = await res.json()
-      dbNodeId = data.id as string
-      savedNodeRef.current.set(node.id, data.id)
-      setNodes(nds => nds.map(n => n.id === node.id
-        ? { ...n, data: { ...n.data, dbNodeId: data.id, canvasId: canvas.id } } : n))
-    }
+    const dbNodeId = await ensureDbNodeId(node)
+    if (!dbNodeId) return
 
     // Rattachement/détachement à un groupe selon la zone survolée (« ça va avec ça » macro)
     const parent = node.parentId ? nodes.find(n => n.id === node.parentId) : undefined
@@ -1108,14 +1143,26 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
         body: JSON.stringify({ x: node.position.x, y: node.position.y }),
       })
     }
-  }, [canvas.id, nodes, setNodes])
+  }, [canvas.id, nodes, setNodes, ensureDbNodeId])
 
   const onConnect = useCallback(async (params: Connection) => {
     if (!params.source || !params.target) return
+    // Les ids RF ne sont pas les ids DB pour les cartes de note : on résout (et
+    // on crée au besoin) le CanvasNode de chaque extrémité, sinon le POST viole
+    // la FK CanvasEdge.from/to → CanvasNode et l'edge n'est jamais enregistré.
+    const srcNode = getNode(params.source)
+    const tgtNode = getNode(params.target)
+    if (!srcNode || !tgtNode) return
+    const [fromId, toId] = await Promise.all([ensureDbNodeId(srcNode), ensureDbNodeId(tgtNode)])
+    if (!fromId || !toId) return
     // POST d'abord : l'edge local porte l'ID DB → nommable/supprimable sans reload
     const res = await fetch(`/api/canvas/${canvas.id}/edges`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fromId: params.source, toId: params.target }),
+      body: JSON.stringify({
+        fromId, toId,
+        fromHandle: params.sourceHandle ?? null,
+        toHandle: params.targetHandle ?? null,
+      }),
     })
     if (!res.ok) return
     const dbEdge = await res.json()
@@ -1123,7 +1170,7 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
       ...params, id: dbEdge.id, type: 'smoothstep',
       style: { stroke: '#3b82f6', strokeWidth: 1.5, opacity: 0.5 },
     }, eds))
-  }, [setEdges, canvas.id])
+  }, [setEdges, canvas.id, getNode, ensureDbNodeId])
 
   // 0.1.6 — double-clic sur un lien : le nommer (le sens du lien devient de la
   // donnée) ; laisser vide supprime le lien (parité avec le canvas d'étude).

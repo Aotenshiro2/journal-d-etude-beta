@@ -293,28 +293,32 @@ Découpage (ordre indicatif, le 0.1 ne ferme qu'à maturité) :
       - Relier une note au nœud (crayon `E`) → `NoteTag` ; délier / supprimer
         le nœud retire CE tag (symétrie). Nourrit /concepts, zéro impact /notes.
       - Liens nommables : double-clic sur un trait = nommer (vide = supprimer).
-      - 🐛 **TEST PROD 19/07 (Brice) : ÉCHEC — les traits ne s'affichent
-        TOUJOURS PAS** malgré les 2 fixes (upgrade xyflow 12.11.2 + retrait
-        `onlyRenderVisibleElements`). À REPRENDRE EN PRIORITÉ à la prochaine
-        session de code. Symptômes précis :
-        · crayon `E` entre deux notes → aucun trait visible (mais écrit en base) ;
-        · nœud-concept : se POSE bien sur le canvas, bouton supprimer (×) OK,
-          mais IMPOSSIBLE de le déplacer ni de lui relier un trait — indice
-          possiblement distinct du bug des traits (drag qui ne marche pas =
-          peut-être interactions/pointer-events sur le node custom, pas le
-          rendu SVG des edges).
-        État du débug déjà fait (ne pas refaire) : reproduit en local même sur
-        une page React Flow MINIMALE (2 nodes défaut + 1 edge smoothstep,
-        provider + style.css importés, conteneur dimensionné) → edges dans les
-        props du composant ReactFlow (vérifié via fibre React) mais SVG
-        `.react-flow__edges` VIDE, zéro erreur console, nodes rendus et
-        mesurés, handles présents. Pistes restantes : double instance React
-        (npm ls react → vérifier duplication via le bundle), interaction
-        Next 15.5/React 19.1 avec xyflow, tester la même page minimale dans
-        un projet Vite vierge pour isoler Next, ou downgrade React.
-        NB : StudyCanvas (/notes) utilise le même moteur — vérifier si les
-        traits s'affichent LÀ-BAS en prod (si oui, comparer ; si non, le bug
-        est global à l'app et personne ne l'a jamais vu).
+      - 🐛→✅ **Bug « traits invisibles » : CAUSE TROUVÉE le 24/07, fix poussé,
+        à retester en prod.** Ce n'était NI xyflow, NI React 19, NI les
+        handles, NI le z-index : c'était une **collision d'identifiants**.
+        `initialNodes` donnait aux cartes de note l'id de la NOTE
+        (`id: note.id`), alors que les groupes et les nœuds-concept portent
+        l'id du `CanvasNode` DB — et un `CanvasEdge` référence TOUJOURS des
+        ids de `CanvasNode`. Conséquences en cascade :
+        · au chargement, `source`/`target` des edges ne désignaient aucun
+          nœud → React Flow jetait l'edge SANS erreur console → aucun trait ;
+        · à la création, `onConnect` postait `fromId: params.source` = un id
+          de note → violation de la FK `CanvasEdge.from → CanvasNode` →
+          `catch` → 409 « Edge already exists » → l'edge n'était même pas
+          écrit en base (contrairement à ce qu'on croyait) ;
+        · idem pour tout lien note↔concept, donc le `NoteTag` côté serveur
+          n'était jamais posé.
+        Preuve : en base, 5 `CanvasEdge` — toutes entre nœuds `kind='message'`
+        (canvas d'étude, qui marche) ; ZÉRO edge touchant une note ou un
+        concept, alors que 2 nœuds-concept existent.
+        Fix : table de traduction `rfIdByDbId` pour `initialEdges`, helper
+        `ensureDbNodeId()` (id RF → id CanvasNode, création à la volée) utilisé
+        par `onConnect` et `handleNodeDragStop`, `fromHandle`/`toHandle`
+        désormais transmis, handles nommés `tt/tl/sb/sr` sur les 4 côtés
+        (convention StudyCanvas) et visibles au survol (`group`).
+        NB : le nœud-concept ne se déplace pas avec l'outil crayon `E`, c'est
+        normal (`nodesDraggable: false` en mode connexion) — le déplacer avec
+        `V` (sélection).
       - Règle de travail actée (Brice) : PLUS de vérif locale du rendu — on
         pousse, Brice teste en ligne (Vercel = env de dev vivant).
       - Reste (plus tard, avec l'esthétique) : liens typés bloc↔concept DANS
