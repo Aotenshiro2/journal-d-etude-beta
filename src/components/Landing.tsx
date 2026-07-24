@@ -8,14 +8,21 @@
 // centre. On peut écrire dedans ; c'est en VALIDANT (Entrée / flèche) qu'on part
 // vers l'auth. Le fond canvas persiste jusqu'à /auth → transition continue.
 //
-// Fond volontairement SOMBRE (className="dark" → tokens sombres : points/texte
-// clairs, glass sombre) pour faire ressortir l'aurore, même si l'app est en clair.
+// Typo = design system des écrans d'accueil AOKnowledge (sites v3) : titres en
+// Noto Serif, corps en Space Grotesk, labels en Inter (chargées dans layout.tsx).
+// Fond volontairement SOMBRE (className="dark" → tokens sombres) pour faire
+// ressortir l'aurore, même si l'app est en clair.
 
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { ArrowRight } from 'lucide-react'
 
 const DOT_BG = { backgroundSize: '22px 22px', backgroundPosition: '0px 0px' }
+
+// Familles de marque
+const SERIF = 'var(--font-noto-serif), Georgia, serif'
+const SANS = 'var(--font-space-grotesk), system-ui, sans-serif'
+const LABEL = 'var(--font-inter), system-ui, sans-serif'
 
 export default function Landing() {
   const router = useRouter()
@@ -53,7 +60,7 @@ export default function Landing() {
       className="dark"
       style={{
         position: 'relative', width: '100%', height: '100vh', overflow: 'hidden',
-        background: 'radial-gradient(130% 120% at 50% 6%, #14161f 0%, #090a10 55%, #05060b 100%)',
+        background: 'radial-gradient(130% 120% at 50% 6%, #121214 0%, #050506 55%, #000000 100%)',
         color: 'var(--node-title)',
       }}
     >
@@ -62,14 +69,14 @@ export default function Landing() {
       <div className="canvas-grid-dots" style={DOT_BG} />
       <div ref={spotlightRef} className="canvas-dot-spotlight" style={DOT_BG} />
 
-      {/* ── Haut-gauche — nom + badge Pré-Alpha (accueil : plus grand, inset) ── */}
-      <div style={{ position: 'absolute', top: 28, left: 38, zIndex: 20, display: 'flex', alignItems: 'center', gap: 11 }}>
-        <span style={{ fontWeight: 700, fontSize: 18, color: '#f5f7fa', letterSpacing: '-0.02em' }}>
+      {/* ── Haut-gauche — wordmark (Noto Serif, capitales) + badge Pré-Alpha (Inter) ── */}
+      <div style={{ position: 'absolute', top: 28, left: 38, zIndex: 20, display: 'flex', alignItems: 'center', gap: 12 }}>
+        <span style={{ fontFamily: SERIF, fontWeight: 400, fontSize: 18, color: '#f5f7fa', letterSpacing: '-0.01em', textTransform: 'uppercase' }}>
           Journal d&rsquo;Études
         </span>
         <span
           style={{
-            fontSize: 10.5, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase',
+            fontFamily: LABEL, fontSize: 10, fontWeight: 500, letterSpacing: '0.18em', textTransform: 'uppercase',
             color: '#c2c9d4', padding: '3px 9px', borderRadius: 999,
             background: 'rgba(255, 255, 255, 0.06)', border: '1px solid rgba(255, 255, 255, 0.16)',
           }}
@@ -83,7 +90,7 @@ export default function Landing() {
         <button
           onClick={goAuth}
           style={{
-            fontSize: 14, fontWeight: 600, color: '#0a0b10', background: '#ffffff',
+            fontFamily: LABEL, fontSize: 13.5, fontWeight: 600, color: '#0a0b10', background: '#ffffff',
             padding: '9px 20px', borderRadius: 999, border: 'none', cursor: 'pointer',
             boxShadow: '0 4px 18px rgba(0, 0, 0, 0.35)',
           }}
@@ -92,7 +99,7 @@ export default function Landing() {
         </button>
       </div>
 
-      {/* ── Centre — peu de mots, grande capture bar ── */}
+      {/* ── Centre — titre Noto Serif, sous-titre Space Grotesk, grande capture bar ── */}
       <div
         style={{
           position: 'absolute', inset: 0, zIndex: 10,
@@ -102,13 +109,13 @@ export default function Landing() {
       >
         <h1
           style={{
-            fontSize: 'clamp(2.6rem, 6.2vw, 4.4rem)', fontWeight: 600, letterSpacing: '-0.03em',
-            lineHeight: 1.04, color: '#f5f7fa', maxWidth: 760, margin: 0,
+            fontFamily: SERIF, fontSize: 'clamp(2.8rem, 6.4vw, 4.8rem)', fontWeight: 400,
+            letterSpacing: '-0.035em', lineHeight: 1.02, color: '#f5f7fa', maxWidth: 820, margin: 0,
           }}
         >
           Ta connaissance,<br />vivante.
         </h1>
-        <p style={{ marginTop: 18, fontSize: 'clamp(0.98rem, 2vw, 1.18rem)', color: '#aeb6c2', maxWidth: 560, lineHeight: 1.5 }}>
+        <p style={{ fontFamily: SANS, marginTop: 20, fontSize: 'clamp(0.98rem, 2vw, 1.18rem)', color: '#aeb6c2', maxWidth: 560, lineHeight: 1.5 }}>
           Le journal d&rsquo;études du trader. Capture, réorganise et relis tes notes jusqu&rsquo;à trouver ton edge.
         </p>
 
@@ -130,7 +137,7 @@ export default function Landing() {
               onChange={(e) => setDraft(e.target.value)}
               placeholder="Capture une idée, une note, un trade…"
               aria-label="Capturer — valide pour te connecter"
-              style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', fontSize: 17, color: '#f5f7fa', padding: '14px 0' }}
+              style={{ fontFamily: SANS, flex: 1, background: 'transparent', border: 'none', outline: 'none', fontSize: 17, color: '#f5f7fa', padding: '14px 0' }}
             />
             <button
               type="submit"
@@ -149,7 +156,7 @@ export default function Landing() {
 
         <button
           onClick={() => router.push('/guide')}
-          style={{ marginTop: 20, background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: '#8b93a1' }}
+          style={{ fontFamily: LABEL, marginTop: 20, background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: '#8b93a1' }}
         >
           Découvrir le parcours →
         </button>
