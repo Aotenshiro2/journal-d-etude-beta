@@ -342,9 +342,19 @@ Découpage (ordre indicatif, le 0.1 ne ferme qu'à maturité) :
 - [ ] **Écrans de première connexion** (onboarding) sur le journal ET sur
       pilotage — l'élève qui arrive pour la 1re fois doit être accueilli/guidé,
       pas lâché sur un canvas vide.
-- [ ] **Connexion aux comptes AOK** depuis le site aoknowledge.com ET depuis
-      masterclass.aoknowledge.com (même auth Supabase partagée — les wildcards
-      redirect sont déjà en place, `https://*.aoknowledge.com/**`).
+- [x] **Connexion aux comptes AOK** — LIVRÉ en prod le 25/07/2026.
+      Site `aoknowledge.com` : `/connexion` (Google + email/mot de passe), hub
+      `/mon-espace` (n° de compte client, statut Skool, liens outils, portail
+      LiveClub, liaison identités email↔Google, emails multiples) + bouton discret
+      dans la Nav. Masterclass : compte gratuit obligatoire (remplace la capture
+      email, garde Kit + lead), bouton « Se connecter » dans le header. Migration
+      Supabase appliquée (`member_number_seq` @21214, table `profile_emails` + RLS,
+      trigger `handle_new_user` étendu). Brice = compte n° 001 (admin).
+      ⚠️ Fait dans le VRAI repo WSL — le clone `D:\...\Ao knowledge` était 150
+      commits en retard (à renommer « backup », dossier verrouillé au moment du
+      renommage). Détails cosmétiques à peaufiner plus tard. Chantiers consignés :
+      unification Stripe (Mélanie/Brice → 1 seul ID), entitlements/catalogue,
+      identités Discord/Telegram, vérification d'appartenance des emails secondaires.
 - [x] **Requalifier « masterclass semble down »** — RÉSOLU le 24/07, validé en
       ligne. Le serveur répondait bien 200 : le bug était dans la page.
       `sites/Masterclass/src/lib/supabase.ts` appelait `createClient()` au
@@ -370,9 +380,9 @@ Découpage (ordre indicatif, le 0.1 ne ferme qu'à maturité) :
       · `EmailGate.tsx` embarque une clé API Kit en dur, donc **en clair dans le
         bundle public** — à révoquer si elle est secrète, et à déplacer côté
         serverless.
-- [ ] **Adapter le canvas à l'usage mobile** (journal) — aujourd'hui pensé
-      desktop ; définir ce qu'un élève peut faire au téléphone (consulter ?
-      capturer ? le mapping complet est-il réaliste en tactile ?).
+- [ ] **⏭ PROCHAIN (26/07/2026) — Adapter le canvas à l'usage mobile** (journal) —
+      aujourd'hui pensé desktop ; définir ce qu'un élève peut faire au téléphone
+      (consulter ? capturer ? le mapping complet est-il réaliste en tactile ?).
 
 - [ ] **0.1.7+ — Passe esthétique** (Brice : « n'imagine pas que le 0.1.6 soit
       la fin »). Revoir le look du canvas et de l'étude de notes jusqu'à
@@ -384,11 +394,11 @@ haut (limite de la carte à mi-chemin entre deux concepts = résolue par les
 liens du 0.1.6, pas par la boîte).
 
 ---
-**Dernière mise à jour :** 24 juillet 2026
-**Chantier en cours :** 0.1.6 CLOS (validé en prod). Prochain = file PRÉ-0.1.7
-ci-dessus, en commençant par les **écrans de première connexion** (onboarding
-journal + pilotage). Puis connexion AOK sites, canvas mobile, puis 0.1.7
-esthétique (dont repositionnement Verdict/Trades notés — ⚠️ avant le 0.2).
+**Dernière mise à jour :** 25 juillet 2026
+**Chantier en cours :** Connexion aux comptes AOK **LIVRÉE en prod le 25/07/2026**
+(site + masterclass). Prochain (26/07) = **adapter le canvas du journal au mobile**.
+Restent dans la file pré-0.1.7 : écrans de première connexion (onboarding pilotage),
+puis 0.1.7 esthétique (dont repositionnement Verdict/Trades notés — ⚠️ avant le 0.2).
 **Chantier en cours :** 0.1.5 — la collection (canvas de mapping multi-notes).
 Le 0.1 reste OUVERT jusqu'à maturité (fonctionnel 0.1.5/0.1.6 + esthétique
 0.1.7+). Le 0.2 « Observer les concepts » attend la fin du 0.1.
