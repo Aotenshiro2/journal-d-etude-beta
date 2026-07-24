@@ -97,10 +97,11 @@ function AuthPage() {
 
   return (
     <div
+      className="dark"
       style={{
         position: 'relative', minHeight: '100vh', overflow: 'hidden',
         display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
-        background: 'var(--canvas-bg)',
+        background: 'radial-gradient(130% 120% at 50% 6%, #121214 0%, #050506 55%, #000000 100%)',
       }}
     >
       {/* Même fond canvas que la landing → l'auth « apparaît » sur le canvas, pas de rupture */}
