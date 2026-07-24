@@ -119,38 +119,41 @@ export default function Landing() {
           Le journal d&rsquo;études du trader. Capture, réorganise et relis tes notes jusqu&rsquo;à trouver ton edge.
         </p>
 
-        {/* Grande capture bar en verre dépoli — écrire puis valider → /auth */}
-        <form onSubmit={(e) => { e.preventDefault(); goAuth() }} style={{ marginTop: 38, width: 'min(720px, 94vw)' }}>
+        {/* Grande capture bar en verre dépoli — HAUTE (≈3×), écrire puis valider → /auth */}
+        <form onSubmit={(e) => { e.preventDefault(); goAuth() }} style={{ marginTop: 36, width: 'min(720px, 94vw)' }}>
           <div
             style={{
-              display: 'flex', alignItems: 'center', gap: 12,
-              padding: '8px 8px 8px 22px', borderRadius: 20,
+              display: 'flex', flexDirection: 'column', minHeight: 168,
+              padding: '20px 22px 16px', borderRadius: 22,
               background: 'rgba(255, 255, 255, 0.055)',
               border: '1px solid rgba(255, 255, 255, 0.14)',
               backdropFilter: 'blur(22px) saturate(1.5)', WebkitBackdropFilter: 'blur(22px) saturate(1.5)',
               boxShadow: '0 12px 50px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.10)',
             }}
           >
-            <input
-              type="text"
+            <textarea
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); goAuth() } }}
               placeholder="Capture une idée, une note, un trade…"
               aria-label="Capturer — valide pour te connecter"
-              style={{ fontFamily: SANS, flex: 1, background: 'transparent', border: 'none', outline: 'none', fontSize: 17, color: '#f5f7fa', padding: '14px 0' }}
+              rows={3}
+              style={{ fontFamily: SANS, flex: 1, width: '100%', background: 'transparent', border: 'none', outline: 'none', fontSize: 17, lineHeight: 1.5, color: '#f5f7fa', resize: 'none', padding: 0 }}
             />
-            <button
-              type="submit"
-              aria-label="Envoyer"
-              style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                width: 46, height: 46, borderRadius: 14, flexShrink: 0, cursor: 'pointer',
-                border: 'none', background: '#3b82f6', color: '#fff',
-                boxShadow: '0 4px 16px rgba(59, 130, 246, 0.5)',
-              }}
-            >
-              <ArrowRight size={20} />
-            </button>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
+              <button
+                type="submit"
+                aria-label="Envoyer"
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  width: 46, height: 46, borderRadius: 14, flexShrink: 0, cursor: 'pointer',
+                  border: 'none', background: '#3b82f6', color: '#fff',
+                  boxShadow: '0 4px 16px rgba(59, 130, 246, 0.5)',
+                }}
+              >
+                <ArrowRight size={20} />
+              </button>
+            </div>
           </div>
         </form>
 
