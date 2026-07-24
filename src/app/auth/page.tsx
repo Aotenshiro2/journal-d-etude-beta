@@ -6,6 +6,13 @@ import { createClient } from '@/lib/supabase/client'
 
 type AuthMode = 'signin' | 'signup'
 
+// Style partagé des champs — sur les tokens canvas (thème clair/sombre).
+const inputStyle: React.CSSProperties = {
+  background: 'var(--node-bg)',
+  border: '1px solid var(--node-border)',
+  color: 'var(--node-title)',
+}
+
 function AuthPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -89,15 +96,32 @@ function AuthPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-950">
-      <div className="w-full max-w-sm p-8 rounded-2xl border border-white/10 bg-gray-900 shadow-2xl">
+    <div
+      style={{
+        position: 'relative', minHeight: '100vh', overflow: 'hidden',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+        background: 'var(--canvas-bg)',
+      }}
+    >
+      {/* Même fond canvas que la landing → l'auth « apparaît » sur le canvas, pas de rupture */}
+      <div className="canvas-aurora"><span className="aurora-blob" /></div>
+      <div className="canvas-grid-dots" style={{ backgroundSize: '22px 22px' }} />
+      <div className="canvas-top-gradient" />
+
+      <div
+        className="canvas-float-pill"
+        style={{ position: 'relative', zIndex: 10, width: '100%', maxWidth: 380, padding: 32, borderRadius: 18 }}
+      >
         {/* Logo / titre */}
         <div className="mb-6 text-center">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-yellow-400/10 border border-yellow-400/20 mb-4">
+          <div
+            className="inline-flex items-center justify-center w-14 h-14 rounded-2xl mb-4"
+            style={{ background: 'rgba(252, 223, 62, 0.12)', border: '1px solid rgba(252, 223, 62, 0.30)' }}
+          >
             <span className="text-2xl">📚</span>
           </div>
-          <h1 className="text-xl font-semibold text-white">AOKnowledge</h1>
-          <p className="text-sm text-gray-400 mt-1">Journal d&#39;Études</p>
+          <h1 className="text-xl font-semibold" style={{ color: 'var(--node-title)' }}>AOKnowledge</h1>
+          <p className="text-sm mt-1" style={{ color: 'var(--node-meta)' }}>Journal d&#39;Études</p>
         </div>
 
         {/* Google */}
@@ -124,30 +148,30 @@ function AuthPage() {
 
         {/* Séparateur */}
         <div className="flex items-center gap-3 my-5">
-          <div className="flex-1 h-px bg-white/10" />
-          <span className="text-xs text-gray-600">ou</span>
-          <div className="flex-1 h-px bg-white/10" />
+          <div className="flex-1 h-px" style={{ background: 'var(--float-border)' }} />
+          <span className="text-xs" style={{ color: 'var(--node-meta)' }}>ou</span>
+          <div className="flex-1 h-px" style={{ background: 'var(--float-border)' }} />
         </div>
 
         {/* Onglets */}
-        <div className="flex rounded-lg overflow-hidden border border-white/10 mb-5">
+        <div className="flex rounded-lg overflow-hidden mb-5" style={{ border: '1px solid var(--float-border)' }}>
           <button
             onClick={() => switchMode('signin')}
-            className={`flex-1 py-2 text-sm font-medium transition-colors ${
-              mode === 'signin'
-                ? 'bg-white/10 text-white'
-                : 'text-gray-500 hover:text-gray-300'
-            }`}
+            className="flex-1 py-2 text-sm font-medium transition-colors"
+            style={{
+              background: mode === 'signin' ? 'var(--canvas-bg)' : 'transparent',
+              color: mode === 'signin' ? 'var(--node-title)' : 'var(--node-meta)',
+            }}
           >
             Connexion
           </button>
           <button
             onClick={() => switchMode('signup')}
-            className={`flex-1 py-2 text-sm font-medium transition-colors ${
-              mode === 'signup'
-                ? 'bg-white/10 text-white'
-                : 'text-gray-500 hover:text-gray-300'
-            }`}
+            className="flex-1 py-2 text-sm font-medium transition-colors"
+            style={{
+              background: mode === 'signup' ? 'var(--canvas-bg)' : 'transparent',
+              color: mode === 'signup' ? 'var(--node-title)' : 'var(--node-meta)',
+            }}
           >
             Inscription
           </button>
@@ -161,7 +185,8 @@ function AuthPage() {
               placeholder="Prénom ou pseudo"
               value={name}
               onChange={e => setName(e.target.value)}
-              className="w-full px-3 py-2.5 rounded-lg bg-gray-800 border border-white/10 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-white/30"
+              className="w-full px-3 py-2.5 rounded-lg text-sm placeholder-gray-400 focus:outline-none"
+              style={inputStyle}
             />
           )}
           <input
@@ -169,7 +194,8 @@ function AuthPage() {
             placeholder="Email"
             value={email}
             onChange={e => setEmail(e.target.value)}
-            className="w-full px-3 py-2.5 rounded-lg bg-gray-800 border border-white/10 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-white/30"
+            className="w-full px-3 py-2.5 rounded-lg text-sm placeholder-gray-400 focus:outline-none"
+            style={inputStyle}
           />
           <div className="relative">
             <input
@@ -178,12 +204,14 @@ function AuthPage() {
               value={password}
               onChange={e => setPassword(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && (mode === 'signin' ? handleEmailSignIn() : handleEmailSignUp())}
-              className="w-full px-3 py-2.5 pr-10 rounded-lg bg-gray-800 border border-white/10 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-white/30"
+              className="w-full px-3 py-2.5 pr-10 rounded-lg text-sm placeholder-gray-400 focus:outline-none"
+              style={inputStyle}
             />
             <button
               type="button"
               onClick={() => setShowPassword(v => !v)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300"
+              className="absolute right-3 top-1/2 -translate-y-1/2"
+              style={{ color: 'var(--node-meta)' }}
             >
               {showPassword ? (
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" /></svg>
@@ -199,34 +227,36 @@ function AuthPage() {
                 type="checkbox"
                 checked={newsletter}
                 onChange={e => setNewsletter(e.target.checked)}
-                className="mt-0.5 rounded accent-yellow-400"
+                className="mt-0.5 rounded"
+                style={{ accentColor: '#fcdf3e' }}
               />
-              <span className="text-xs text-gray-500">
+              <span className="text-xs" style={{ color: 'var(--node-meta)' }}>
                 Recevoir les nouvelles fonctionnalités et conseils AOKnowledge
               </span>
             </label>
           )}
 
           {error && <p className="text-sm text-red-400">{error}</p>}
-          {success && <p className="text-sm text-green-400">{success}</p>}
+          {success && <p className="text-sm text-green-500">{success}</p>}
 
           <button
             onClick={mode === 'signin' ? handleEmailSignIn : handleEmailSignUp}
             disabled={loading || !email || !password || (mode === 'signup' && !name)}
             className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl
-              bg-yellow-400 text-gray-900 font-medium text-sm
-              hover:bg-yellow-300 transition-colors
+              font-medium text-sm transition-opacity
               disabled:opacity-40 disabled:cursor-not-allowed"
+            style={{ background: '#fcdf3e', color: '#1a1a1a' }}
           >
             {loading && <span className="w-4 h-4 border-2 border-gray-700 border-t-transparent rounded-full animate-spin" />}
             {mode === 'signin' ? 'Se connecter' : 'Créer mon compte'}
           </button>
 
           {mode === 'signin' && (
-            <p className="text-center text-xs text-gray-600">
+            <p className="text-center text-xs">
               <a
                 href="/auth/reset-password-request"
-                className="hover:text-gray-400 transition-colors"
+                className="transition-colors"
+                style={{ color: 'var(--node-meta)' }}
               >
                 Mot de passe oublié ?
               </a>
@@ -234,7 +264,7 @@ function AuthPage() {
           )}
         </div>
 
-        <p className="mt-6 text-center text-xs text-gray-700">
+        <p className="mt-6 text-center text-xs" style={{ color: 'var(--node-meta)', opacity: 0.75 }}>
           Compte unique pour tout l&#39;écosystème AOKnowledge
         </p>
       </div>

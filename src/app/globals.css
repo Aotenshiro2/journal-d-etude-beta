@@ -382,6 +382,91 @@ input[type="search"]::-moz-selection {
     transition: opacity 0.25s ease;
   }
 
+  /* Dot grid SANS fond opaque — pour laisser voir l'aurore derrière (landing / auth).
+     Mêmes points que .canvas-grid, mais background-color transparent. */
+  .canvas-grid-dots {
+    position: absolute;
+    inset: 0;
+    background-color: transparent;
+    background-image: radial-gradient(circle, var(--canvas-dot) 1px, transparent 1px);
+    background-size: 22px 22px;
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  /* Aurore — nappe lumineuse animée DERRIÈRE la grille (accueil pré-connexion + auth).
+     Observé sur stitch.mp4 : la grille ne bouge pas ; c'est la lumière qui dérive et
+     « respire » sur les BORDS (gauche/droite/bas), le centre reste sombre pour garder
+     le texte lisible. Teinte palette Journal : bleu → violet → ambre. */
+  .canvas-aurora {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .canvas-aurora::before,
+  .canvas-aurora::after,
+  .canvas-aurora > .aurora-blob {
+    content: '';
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(80px);
+    mix-blend-mode: screen;
+    will-change: transform, opacity;
+  }
+
+  /* blob bleu — bas-gauche */
+  .canvas-aurora::before {
+    width: 55vw; height: 55vh;
+    left: -16vw; bottom: -20vh;
+    background: radial-gradient(circle, rgba(59, 130, 246, 0.9), rgba(59, 130, 246, 0) 70%);
+    animation: aurora-a 16s ease-in-out infinite alternate;
+  }
+
+  /* blob violet — bas-droite */
+  .canvas-aurora::after {
+    width: 62vw; height: 62vh;
+    right: -18vw; bottom: -22vh;
+    background: radial-gradient(circle, rgba(167, 139, 250, 0.85), rgba(167, 139, 250, 0) 70%);
+    animation: aurora-b 21s ease-in-out infinite alternate;
+  }
+
+  /* blob ambre — bord droit, discret (accent) */
+  .canvas-aurora > .aurora-blob {
+    width: 42vw; height: 42vh;
+    right: -14vw; top: 26vh;
+    background: radial-gradient(circle, rgba(245, 158, 11, 0.5), rgba(245, 158, 11, 0) 70%);
+    animation: aurora-c 26s ease-in-out infinite alternate;
+  }
+
+  @keyframes aurora-a {
+    0%   { transform: translate(0, 0) scale(1);        opacity: 0.45; }
+    50%  { transform: translate(6vw, -4vh) scale(1.15); opacity: 0.65; }
+    100% { transform: translate(2vw, 3vh) scale(1.05);  opacity: 0.5; }
+  }
+  @keyframes aurora-b {
+    0%   { transform: translate(0, 0) scale(1.05);      opacity: 0.5; }
+    50%  { transform: translate(-7vw, -3vh) scale(1);    opacity: 0.7; }
+    100% { transform: translate(-2vw, 2vh) scale(1.1);   opacity: 0.55; }
+  }
+  @keyframes aurora-c {
+    0%   { transform: translate(0, 0) scale(1);         opacity: 0.3; }
+    50%  { transform: translate(-4vw, 5vh) scale(1.2);   opacity: 0.5; }
+    100% { transform: translate(3vw, -3vh) scale(1);     opacity: 0.35; }
+  }
+
+  /* Accessibilité : on fige l'aurore si l'utilisateur réduit les animations */
+  @media (prefers-reduced-motion: reduce) {
+    .canvas-aurora::before,
+    .canvas-aurora::after,
+    .canvas-aurora > .aurora-blob {
+      animation: none !important;
+      opacity: 0.5;
+    }
+  }
+
   /* Note map node card */
   .note-map-card {
     width: 100%;

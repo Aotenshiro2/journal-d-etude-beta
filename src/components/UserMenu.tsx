@@ -41,6 +41,12 @@ export default function UserMenu({ user }: UserMenuProps) {
               <p className="text-xs text-gray-400 truncate">{user.email}</p>
             </div>
             <button
+              onClick={() => { setOpen(false); router.push('/?welcome=1') }}
+              className="w-full px-4 py-2.5 text-left text-sm text-gray-300 hover:bg-white/5 transition-colors border-b border-white/10"
+            >
+              Revoir le parcours
+            </button>
+            <button
               onClick={handleSignOut}
               className="w-full px-4 py-2.5 text-left text-sm text-red-400 hover:bg-white/5 transition-colors"
             >

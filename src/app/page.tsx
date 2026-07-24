@@ -1,16 +1,26 @@
 import { createClient } from '@/lib/supabase/server'
-import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/db'
 import NoteMapCanvas from '@/components/NoteMapCanvas'
+import Landing from '@/components/Landing'
+import OnboardingOverlay from '@/components/OnboardingOverlay'
 import { NoteData, CanvasData } from '@/types'
 
 // Badge « Relire » toujours frais (recalculé à chaque visite, jamais mis en cache)
 export const dynamic = 'force-dynamic'
 
-export default async function HomePage() {
+export default async function HomePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ welcome?: string }>
+}) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/auth')
+  // Anonyme → l'accueil pré-connexion immersif (pas de redirect sec vers /auth).
+  if (!user) return <Landing />
+
+  // Onboarding au 1er passage (flag non posé), OU forcé via « Revoir le parcours » (?welcome=1).
+  const { welcome } = await searchParams
+  const showOnboarding = user.user_metadata?.onboarding_completed !== true || welcome === '1'
 
   const notes = await prisma.note.findMany({
     where: { userId: user.id, deletedAt: null },
@@ -81,6 +91,7 @@ export default async function HomePage() {
         title="Journal d'Études"
         dueCount={dueCount}
       />
+      <OnboardingOverlay show={showOnboarding} />
     </div>
   )
 }

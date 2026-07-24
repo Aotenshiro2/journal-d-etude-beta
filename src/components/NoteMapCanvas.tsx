@@ -345,6 +345,14 @@ function AvatarBubble({ user }: { user: { email: string; name: string; avatarUrl
               <p style={{ fontSize: 11, color: 'var(--node-meta)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user.email}</p>
             </div>
             <button
+              onClick={() => { setOpen(false); router.push('/?welcome=1') }}
+              style={{ width: '100%', textAlign: 'left', padding: '9px 14px', fontSize: 13, color: 'var(--node-preview)', background: 'none', border: 'none', cursor: 'pointer', borderBottom: '1px solid var(--float-border)' }}
+              onMouseEnter={e => (e.currentTarget.style.background = 'var(--canvas-bg)')}
+              onMouseLeave={e => (e.currentTarget.style.background = 'none')}
+            >
+              Revoir le parcours
+            </button>
+            <button
               onClick={handleSignOut}
               style={{ width: '100%', textAlign: 'left', padding: '9px 14px', fontSize: 13, color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer' }}
               onMouseEnter={e => (e.currentTarget.style.background = 'rgba(239,68,68,0.08)')}
