@@ -380,7 +380,9 @@ Découpage (ordre indicatif, le 0.1 ne ferme qu'à maturité) :
       · `EmailGate.tsx` embarque une clé API Kit en dur, donc **en clair dans le
         bundle public** — à révoquer si elle est secrète, et à déplacer côté
         serverless.
-- [ ] **🔨 EN COURS (25/07/2026) — Adapter le canvas à l'usage mobile** (journal).
+- [x] **Adapter le canvas à l'usage mobile** (journal) — **LIVRÉ le 25/07/2026**,
+      testé par Brice sur son téléphone au fil des lots. Restent deux suites
+      volontairement non faites, décrites en fin de section.
 
       **Besoin cadré par Brice (25/07)** — au téléphone, trois choses et pas une
       de plus : (1) consulter ses canvas pour voir les liens déjà créés (accueil
@@ -484,13 +486,15 @@ liens du 0.1.6, pas par la boîte).
 
 ---
 **Dernière mise à jour :** 25 juillet 2026
-**Chantier en cours :** **adapter le canvas du journal au mobile** — les trois
-étapes sont livrées (fondations · consulter et corriger au doigt · relire), les
-étapes 0 et 1a validées par Brice sur son téléphone, 1b et 2 à valider. Restent
-deux chantiers tracés et volontairement non faits : **corriger un texte depuis
-le téléphone** (touche la doctrine note d'origine, à arbitrer avec Brice) et
-**placer une note sur la carte au doigt**. Connexion aux comptes AOK **LIVRÉE en
-prod le 25/07/2026** (site + masterclass).
+**Chantier terminé :** **canvas du journal au mobile** — LIVRÉ le 25/07/2026,
+testé par Brice au fil des lots. Restent deux suites tracées et volontairement
+non faites : **corriger un texte depuis le téléphone** (touche la doctrine note
+d'origine, à arbitrer avec Brice) et **placer une note sur la carte au doigt**.
+**Prochain :** deux dettes de PROD découvertes le 24/07 et jamais traitées
+(images mortes sur `aoknowledge.com` — Storage d'un projet Supabase en pause,
+9 fichiers ; clé API Kit en clair dans le bundle public de la masterclass),
+puis les **écrans de première connexion de Pilotage** (ceux du journal sont
+faits). Connexion aux comptes AOK **LIVRÉE en prod le 25/07/2026**.
 Restent dans la file pré-0.1.7 : écrans de première connexion (onboarding pilotage),
 puis 0.1.7 esthétique (dont repositionnement Verdict/Trades notés — ⚠️ avant le 0.2).
 **Chantier en cours :** 0.1.5 — la collection (canvas de mapping multi-notes).
