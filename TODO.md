@@ -339,9 +339,8 @@ Découpage (ordre indicatif, le 0.1 ne ferme qu'à maturité) :
 ### 📋 File PRÉ-0.1.7 (demandé par Brice le 19/07 — « avant d'attaquer la 0.1.7 »)
 
 À faire dans cet ordre logique AVANT la passe esthétique, pas dans l'immédiat :
-- [ ] **Écrans de première connexion** (onboarding) sur le journal ET sur
-      pilotage — l'élève qui arrive pour la 1re fois doit être accueilli/guidé,
-      pas lâché sur un canvas vide.
+- [x] **Écrans de première connexion** (onboarding) — **FAITS des deux côtés**
+      (journal ET pilotage), confirmé par Brice le 25/07/2026.
 - [x] **Connexion aux comptes AOK** — LIVRÉ en prod le 25/07/2026.
       Site `aoknowledge.com` : `/connexion` (Google + email/mot de passe), hub
       `/mon-espace` (n° de compte client, statut Skool, liens outils, portail
@@ -373,13 +372,34 @@ Découpage (ordre indicatif, le 0.1 ne ferme qu'à maturité) :
       au lieu d'une page noire muette — vaut pour toute panne future).
       Variables posées sur Vercel par Brice + redéploiement : vérifié, l'URL et
       la clé anon sont bien inlinées, les leads repartent en base.
-      ⚠️ Deux dettes découvertes pendant le diagnostic, à traiter à part :
-      · `aoknowledge.com` (site vivant) charge des images depuis le Storage du
-        projet Supabase EN PAUSE `vjhztbqzpmsccltcwvdd` → HTTP 000, images
-        mortes en prod, dans 9 fichiers (newsletter, équipe, quickstart, cours).
-      · `EmailGate.tsx` embarque une clé API Kit en dur, donc **en clair dans le
-        bundle public** — à révoquer si elle est secrète, et à déplacer côté
-        serverless.
+      ⚠️ Deux dettes découvertes pendant le diagnostic — **TRAITÉES le
+      25/07/2026** :
+      · ~~images mortes en prod, 9 fichiers~~ → **le constat était faux.**
+        `aoknowledge.com` est servi par `sites/Aoknowledgecom/v3/`, pas par
+        `src/` (le titre de la page servie correspond à `v3/index.html`, et
+        seul `v3/` a un `.vercel/`). Le balayage des assets réellement servis
+        ne trouvait **aucune** référence au projet en pause. Il en restait UNE,
+        sur une route chargée à la demande : le 3ᵉ avatar du teaser équipe de
+        `/a-propos` (`v3/src/pages/AboutPage.tsx`). Corrigée en pointant vers
+        `public-asset/Jules.jpg` du projet ACTIF `ujdqrtjanmmwidnfhkxg` —
+        l'URL que `TeamPage.tsx` utilise déjà, vérifiée HTTP 200.
+        **Reste 17 références mortes dans `sites/Aoknowledgecom/src/`**, une app
+        qui n'est PLUS déployée (v3 l'a remplacée) : à archiver dans `_legacy`
+        comme les précédentes — décision de Brice.
+      · clé API Kit en clair → la dette avait **survécu au refactor** :
+        `EmailGate.tsx` a été supprimé le 25/07 mais la clé a suivi dans
+        `AuthGate.tsx`. L'abonnement passe désormais par
+        `sites/Masterclass/api/kit-subscribe.ts` (fonction Vercel, runtime
+        edge) qui lit `KIT_API_KEY` côté serveur. Même endpoint, même corps,
+        aucun changement de comportement ; absence de la clé vérifiée sur le
+        bundle réellement produit. **Clé NON révoquée** — décision de Brice, le
+        site n'avait pas été mis en avant publiquement.
+        ⚠️ Requiert `KIT_API_KEY` dans les variables d'environnement du projet
+        Vercel `masterclass-aoknowledge`.
+      · ⏭️ Découvert au passage, non traité : l'edge function
+        `sites/Aoknowledgecom/supabase/functions/subscribe-convertkit/index.ts`
+        contient un `CONVERTKIT_API_SECRET` en clair — côté serveur donc absent
+        du bundle, mais en clair dans git.
 - [x] **Adapter le canvas à l'usage mobile** (journal) — **LIVRÉ le 25/07/2026**,
       testé par Brice sur son téléphone au fil des lots. Restent deux suites
       volontairement non faites, décrites en fin de section.
@@ -490,11 +510,11 @@ liens du 0.1.6, pas par la boîte).
 testé par Brice au fil des lots. Restent deux suites tracées et volontairement
 non faites : **corriger un texte depuis le téléphone** (touche la doctrine note
 d'origine, à arbitrer avec Brice) et **placer une note sur la carte au doigt**.
-**Prochain :** deux dettes de PROD découvertes le 24/07 et jamais traitées
-(images mortes sur `aoknowledge.com` — Storage d'un projet Supabase en pause,
-9 fichiers ; clé API Kit en clair dans le bundle public de la masterclass),
-puis les **écrans de première connexion de Pilotage** (ceux du journal sont
-faits). Connexion aux comptes AOK **LIVRÉE en prod le 25/07/2026**.
+Les deux dettes de prod du 24/07 sont **traitées** (l'une reposait sur un
+constat faux : une seule image morte, pas neuf — détail plus haut) et les
+**écrans de première connexion sont faits des deux côtés**. La file pré-0.1.7
+est donc vide : **prochain = 0.1.7, la passe esthétique**.
+Connexion aux comptes AOK **LIVRÉE en prod le 25/07/2026**.
 Restent dans la file pré-0.1.7 : écrans de première connexion (onboarding pilotage),
 puis 0.1.7 esthétique (dont repositionnement Verdict/Trades notés — ⚠️ avant le 0.2).
 **Chantier en cours :** 0.1.5 — la collection (canvas de mapping multi-notes).
