@@ -29,6 +29,7 @@ import {
   BookOpen, Lightbulb, BookMarked, BarChart2, FileText,
   MousePointer2, Hand, Pencil, Square, ZoomIn, ZoomOut, Maximize2,
   Star, FolderPlus, Compass, Sunrise, Layers, Eye, EyeOff, Hash,
+  MoreHorizontal, History, HelpCircle,
 } from 'lucide-react'
 import { NoteData, CanvasData, MessageData } from '@/types'
 import { GroupNode, GROUP_COLORS, sortParentsFirst, type GroupHandlers } from './StudyCanvas'
@@ -891,6 +892,7 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
   }, [isMobile])
   // Card de départ d'un lien en cours de tracé (outil crayon, geste tap → tap).
   const [linkSourceId, setLinkSourceId] = useState<string | null>(null)
+  const [quickOpen, setQuickOpen] = useState(false)
   const [previewNoteId, setPreviewNoteId] = useState<string | null>(null)
   const [lastPreviewNoteId, setLastPreviewNoteId] = useState<string | null>(null)
   const [favNoteIds, setFavNoteIds] = useState<Set<string>>(new Set())
@@ -1602,9 +1604,14 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
             showGrid={showGrid} setShowGrid={setShowGrid}
             showMiniMap={showMiniMap} setShowMiniMap={setShowMiniMap}
           />
-          <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--node-title)', letterSpacing: '-0.02em', textShadow: '0 1px 3px rgba(0,0,0,0.12)' }}>
-            {displayTitle}
-          </span>
+          {/* Au téléphone, le dropdown dit déjà où tu es — même règle que les
+              autres écrans, où le titre est volontairement absent. Ça rend la
+              barre du haut à l'écran plutôt qu'à la signature. */}
+          {!isMobile && (
+            <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--node-title)', letterSpacing: '-0.02em', textShadow: '0 1px 3px rgba(0,0,0,0.12)' }}>
+              {displayTitle}
+            </span>
+          )}
         </div>
 
         {/* ── Top-right — avatar ── */}
@@ -1740,8 +1747,51 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
           onMessageAdded={() => setRefreshTrigger(t => t + 1)}
         />
 
-        {/* ── Bottom-right — theme + nav ── */}
-        <div style={{ position: 'absolute', bottom: showMiniMap ? 168 : 16, right: 14, zIndex: 20 }}>
+        {/* ── Bottom-right — theme + nav ──
+            L'accueil a SA propre pill (celle de CanvasShell sert aux autres
+            écrans) : elle doit se replier pareil au téléphone, sinon quatre
+            entrées côte à côte passent sous la capture bar. */}
+        <div className="safe-bottom-offset" style={{ position: 'absolute', bottom: showMiniMap ? 168 : undefined, right: 14, zIndex: 20 }}>
+          {isMobile ? (
+            <>
+              {quickOpen && (
+                <>
+                  <div style={{ position: 'fixed', inset: 0, zIndex: 40 }} onClick={() => setQuickOpen(false)} />
+                  <div className="canvas-float-pill" style={{ position: 'absolute', bottom: 50, right: 0, zIndex: 50, minWidth: 170, padding: '6px 0', overflow: 'hidden' }}>
+                    <Link href="/review" onClick={() => setQuickOpen(false)}
+                      style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 14px', fontSize: 13, color: 'var(--node-title)', textDecoration: 'none' }}
+                    >
+                      <History size={14} style={{ color: 'var(--node-meta)', flexShrink: 0 }} />
+                      <span style={{ flex: 1 }}>Relire</span>
+                      {!!dueCount && dueCount > 0 && (
+                        <span style={{ fontSize: 10, fontWeight: 600, color: '#fff', background: '#ef4444', borderRadius: 999, padding: '0 6px', lineHeight: '15px' }}>{dueCount}</span>
+                      )}
+                    </Link>
+                    <Link href="/guide" onClick={() => setQuickOpen(false)}
+                      style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 14px', fontSize: 13, color: 'var(--node-preview)', textDecoration: 'none' }}
+                    >
+                      <HelpCircle size={14} style={{ color: 'var(--node-meta)', flexShrink: 0 }} /> Guide
+                    </Link>
+                    <div style={{ height: 1, background: 'var(--float-border)', margin: '4px 0' }} />
+                    <div style={{ display: 'flex', alignItems: 'center', padding: '4px 8px' }}>
+                      <ThemeToggleInline />
+                    </div>
+                  </div>
+                </>
+              )}
+              <button
+                onClick={() => setQuickOpen(o => !o)}
+                className="canvas-float-pill"
+                title="Actions rapides"
+                style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', width: 42, height: 42, border: 'none', cursor: 'pointer', color: 'var(--node-title)' }}
+              >
+                <MoreHorizontal size={18} />
+                {!!dueCount && dueCount > 0 && (
+                  <span style={{ position: 'absolute', top: -4, right: -4, fontSize: 10, fontWeight: 600, color: '#fff', background: '#ef4444', borderRadius: 999, padding: '0 5px', lineHeight: '16px' }}>{dueCount}</span>
+                )}
+              </button>
+            </>
+          ) : (
           <div className="canvas-float-pill" style={{ display: 'flex', alignItems: 'center', gap: 2, padding: '4px 8px' }}>
             <ThemeToggleInline />
             <div style={{ width: 1, height: 16, background: 'var(--float-border)', margin: '0 4px' }} />
@@ -1769,6 +1819,7 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
               </Link>
             ))}
           </div>
+          )}
         </div>
 
         {/* ── ReactFlow ── */}
