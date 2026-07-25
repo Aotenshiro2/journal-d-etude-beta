@@ -127,6 +127,7 @@ function MessageNode({ data, selected }: NodeProps) {
     onZoom: (src: string) => void
     trade?: TradeMeta
   }
+  const isMobile = useIsMobile()
   const { imgSrc, text } = useMemo(() => parseBlockContent(d.content, d.type), [d.content, d.type])
   const isImageOnly = !!imgSrc && !text
   const [editing, setEditing] = useState(!!d.autoEdit)
@@ -200,8 +201,20 @@ function MessageNode({ data, selected }: NodeProps) {
         </p>
       ) : (
         <div className="w-full h-full flex items-center justify-center text-sm" style={{ color: 'var(--node-meta)' }}>
-          {d.kind === 'text' ? 'Double-clic pour écrire' : '(bloc vide)'}
+          {d.kind === 'text' ? (isMobile ? 'Touche le crayon pour écrire' : 'Double-clic pour écrire') : '(bloc vide)'}
         </div>
+      )}
+      {/* Le double-clic ne parvient pas au doigt : au téléphone, l'édition du
+          bloc a son propre bouton, comme le renommage des groupes. */}
+      {isMobile && !editing && (
+        <button
+          onClick={(e) => { e.stopPropagation(); startEdit() }}
+          aria-label="Modifier ce bloc"
+          className="nodrag nopan absolute bottom-1.5 left-1.5 w-8 h-8 rounded-full flex items-center justify-center z-10"
+          style={{ background: 'var(--canvas-bg)', border: '1px solid var(--node-border)', color: 'var(--node-meta)' }}
+        >
+          <Pencil size={13} />
+        </button>
       )}
       {d.trade && !editing && (
         <div className="absolute bottom-1 left-1.5 z-10">
@@ -220,7 +233,7 @@ function MessageNode({ data, selected }: NodeProps) {
           <button
             onClick={(e) => { e.stopPropagation(); d.onResetContent() }}
             title="Rétablir l'original (annule l'édition/fusion de ce bloc)"
-            className="absolute top-1.5 right-8 w-5 h-5 rounded-full bg-blue-500/80 text-white transition-opacity flex items-center justify-center text-[11px] opacity-0 group-hover:opacity-100 z-10"
+            className={`nodrag absolute top-1.5 rounded-full bg-blue-500/80 text-white transition-opacity flex items-center justify-center z-10 ${isMobile ? `right-11 w-8 h-8 text-sm ${selected ? 'opacity-100' : 'opacity-0 pointer-events-none'}` : 'right-8 w-5 h-5 text-[11px] opacity-0 group-hover:opacity-100'}`}
           >
             ↺
           </button>
@@ -230,15 +243,18 @@ function MessageNode({ data, selected }: NodeProps) {
         <button
           onClick={(e) => { e.stopPropagation(); d.onZoom(imgSrc) }}
           title="Agrandir l'image"
-          className="nodrag absolute top-1.5 left-1.5 w-5 h-5 rounded-full bg-black/55 text-white transition-opacity flex items-center justify-center text-[11px] opacity-0 group-hover:opacity-100 z-10"
+          className={`nodrag absolute top-1.5 left-1.5 rounded-full bg-black/55 text-white transition-opacity flex items-center justify-center z-10 ${isMobile ? `w-8 h-8 text-sm ${selected ? 'opacity-100' : 'opacity-0 pointer-events-none'}` : 'w-5 h-5 text-[11px] opacity-0 group-hover:opacity-100'}`}
         >
           ⤢
         </button>
       )}
+      {/* Ces trois actions n'existaient qu'au survol : au doigt, inatteignables.
+          Sur mobile elles apparaissent quand le bloc est SÉLECTIONNÉ — visibles
+          en permanence, elles encombreraient chaque bloc du canvas. */}
       <button
         onClick={d.onRemove}
         title={d.kind === 'text' ? 'Supprimer ce bloc' : 'Retirer du canvas (le bloc revient dans la liste du bas)'}
-        className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-red-500/85 text-white transition-opacity flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 z-10"
+        className={`nodrag absolute top-1.5 right-1.5 rounded-full bg-red-500/85 text-white transition-opacity flex items-center justify-center z-10 ${isMobile ? `w-8 h-8 text-sm ${selected ? 'opacity-100' : 'opacity-0 pointer-events-none'}` : 'w-5 h-5 text-xs opacity-0 group-hover:opacity-100'}`}
       >
         ✕
       </button>
@@ -249,6 +265,7 @@ function MessageNode({ data, selected }: NodeProps) {
 // Zone englobante nommée — le geste « ça va avec ça »
 export function GroupNode({ id, data, selected }: NodeProps) {
   const d = data as { label: string; color: string; tagId?: string | null; autoEdit?: boolean; handlers: React.MutableRefObject<GroupHandlers> }
+  const isMobile = useIsMobile()
   const [editing, setEditing] = useState(!!d.autoEdit)
   const [draft, setDraft] = useState(d.label)
   // Un groupe déjà relié à un concept (tagId persisté) arrive « promu »
@@ -291,14 +308,28 @@ export function GroupNode({ id, data, selected }: NodeProps) {
             placeholder="Nom du groupe…"
           />
         ) : (
-          <p
-            className="flex-1 min-w-0 text-xs font-medium truncate cursor-text"
-            style={{ color: palette.border }}
-            onDoubleClick={() => { setDraft(d.label); setEditing(true) }}
-            title="Double-clic pour renommer"
-          >
-            {d.label || 'Groupe'}
-          </p>
+          <>
+            <p
+              className="flex-1 min-w-0 text-xs font-medium truncate cursor-text"
+              style={{ color: palette.border }}
+              onDoubleClick={() => { setDraft(d.label); setEditing(true) }}
+              title="Double-clic pour renommer"
+            >
+              {d.label || 'Groupe'}
+            </p>
+            {/* Le double-clic ne parvient pas au doigt (le navigateur en fait un
+                zoom) : au téléphone, le renommage a son propre bouton. */}
+            {isMobile && (
+              <button
+                onClick={(e) => { e.stopPropagation(); setDraft(d.label); setEditing(true) }}
+                className="nodrag nopan flex-shrink-0 p-1.5 rounded-md"
+                aria-label="Renommer le groupe"
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: palette.border }}
+              >
+                <Pencil size={13} />
+              </button>
+            )}
+          </>
         )}
         {/* Groupe VIVANT : relié à un concept — déposer dedans tague, sortir détague */}
         {isLive && !editing && (
@@ -310,12 +341,14 @@ export function GroupNode({ id, data, selected }: NodeProps) {
             ◆ concept
           </span>
         )}
-        <span className="hidden group-hover/gz:flex items-center gap-1 nodrag flex-shrink-0">
+        {/* Couleurs et « Mapper » : au survol au bureau, à la sélection du
+            groupe au téléphone (le survol n'existe pas au doigt). */}
+        <span className={`${isMobile ? (selected ? 'flex' : 'hidden') : 'hidden group-hover/gz:flex'} items-center gap-1 nodrag flex-shrink-0`}>
           {COLOR_KEYS.map(k => (
             <button
               key={k}
               onClick={() => d.handlers.current.recolor(id, k)}
-              className="w-2.5 h-2.5 rounded-full border border-black/40"
+              className={`${isMobile ? 'w-5 h-5' : 'w-2.5 h-2.5'} rounded-full border border-black/40`}
               style={{ background: GROUP_COLORS[k].border, opacity: k === d.color ? 1 : 0.45 }}
               title={`Couleur ${k}`}
               aria-label={`Couleur ${k}`}

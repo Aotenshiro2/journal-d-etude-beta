@@ -445,9 +445,21 @@ Découpage (ordre indicatif, le 0.1 ne ferme qu'à maturité) :
         borné (tableaux et blocs de code défilent dans leur boîte, images et
         iframes bornées) — sans ça une page capturée poussait tout l'écran en
         scroll horizontal.
-  - [ ] Suite laissée de côté : **réordonnancement tactile de `DocumentView`**
-        (son DnD est du HTML5, inopérant au doigt — et réordonner n'est pas un
-        « correctif rapide »).
+  - [x] **Étape 3 — Ce que le survol cachait** (25/07, signalé par Brice après
+        test). Un défaut de famille : **toute affordance en `opacity-0
+        group-hover`, ou déclenchée au double-clic, est inatteignable au doigt.**
+        - **Réordonner la vue document** en `tap → tap` (elle était passée en
+          lecture seule au lot précédent) : on touche la poignée d'un bloc ou
+          d'une section (visible sur mobile, elle était en `opacity-0`), les
+          emplacements « Poser ici » apparaissent, on touche le bon. Réutilise
+          `dropBlock`/`dropSection` tels quels — on remplit `dragRef` soi-même.
+        - **Renommer un groupe** et **éditer un bloc** : les deux tenaient au
+          `onDoubleClick`, que le navigateur mobile transforme en zoom. Bouton
+          crayon dédié au téléphone.
+        - **Actions de bloc** (rétablir ↺, agrandir ⤢, retirer ✕) et **barre du
+          groupe** (couleurs, « Mapper ») : visibles à la **sélection** du nœud
+          sur mobile, agrandies à 32 px. Pas en permanence — elles
+          encombreraient chaque bloc du canvas.
   - [ ] **Demandé par Brice le 25/07, à traiter plus tard — corriger un texte
         depuis le téléphone.** « Je relis ma note, faire une modif de texte
         rapide depuis le tel donne envie d'être possible. » ⚠️ Ce n'est pas un

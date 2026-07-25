@@ -33,9 +33,7 @@ const byOrder = (a: CanvasNodeData, b: CanvasNodeData) =>
 
 export default function DocumentView({ nodes, messages, insetLeft = 0, readOnly = false, embedded = false, tradeMeta, onUpdateNode }: DocumentViewProps) {
   const isMobile = useIsMobile()
-  // Le réordonnancement passe par du drag & drop HTML5, inopérant au doigt :
-  // au téléphone la vue document est en lecture (tracé dans TODO.md).
-  const interactive = !readOnly && !isMobile
+  const interactive = !readOnly
   const update = onUpdateNode ?? (() => {})
   const messageMap = useMemo(() => new Map(messages.map(m => [m.id, m])), [messages])
   const nodeById = useMemo(() => new Map(nodes.map(n => [n.id, n])), [nodes])
@@ -58,6 +56,23 @@ export default function DocumentView({ nodes, messages, insetLeft = 0, readOnly 
 
   const dragRef = useRef<{ type: 'block' | 'section'; id: string } | null>(null)
   const [dropHint, setDropHint] = useState<string | null>(null)
+
+  // ── Réordonner au doigt : le même tap → tap que sur les canvas ──────────────
+  // Le glisser-déposer d'ici est du HTML5, qui ne se déclenche jamais en
+  // tactile. On touche la poignée d'un bloc (il s'arme), les emplacements
+  // possibles apparaissent, on touche celui qu'on veut. Les fonctions de dépôt
+  // sont réutilisées telles quelles : on ne fait que remplir `dragRef` nous-mêmes.
+  const [armed, setArmed] = useState<{ type: 'block' | 'section'; id: string } | null>(null)
+
+  const toggleArm = (type: 'block' | 'section', id: string) =>
+    setArmed(a => (a?.id === id && a.type === type ? null : { type, id }))
+
+  const placeArmed = (run: () => void) => {
+    if (!armed) return
+    dragRef.current = armed
+    setArmed(null)
+    run()
+  }
 
   // Persistance : on réécrit orderInParent des listes touchées ; si le bloc change
   // de section, parentId + une position en cascade dans le groupe (le canvas suit)
@@ -126,6 +141,44 @@ export default function DocumentView({ nodes, messages, insetLeft = 0, readOnly 
     setDropHint(hint)
   }
 
+  /** Emplacement d'insertion tactile — n'existe que pendant qu'un bloc est armé. */
+  const TapSlot = ({ listKey, index }: { listKey: string; index: number }) => {
+    if (!interactive || armed?.type !== 'block') return null
+    return (
+      <button
+        onClick={() => placeArmed(() => dropBlock(listKey, index))}
+        aria-label="Poser le bloc ici"
+        style={{
+          display: 'block', width: '100%', height: 34, marginTop: 6,
+          border: '1px dashed rgba(59,130,246,0.55)', borderRadius: 8,
+          background: 'rgba(59,130,246,0.07)', color: '#3b82f6',
+          fontSize: 11, cursor: 'pointer',
+        }}
+      >
+        Poser ici
+      </button>
+    )
+  }
+
+  /** Idem, entre deux sections, quand c'est une section qui est armée. */
+  const SectionSlot = ({ index }: { index: number }) => {
+    if (!interactive || armed?.type !== 'section') return null
+    return (
+      <button
+        onClick={() => placeArmed(() => dropSection(index))}
+        aria-label="Déplacer la section ici"
+        style={{
+          display: 'block', width: '100%', height: 34, marginTop: 12,
+          border: '1px dashed rgba(59,130,246,0.55)', borderRadius: 8,
+          background: 'rgba(59,130,246,0.07)', color: '#3b82f6',
+          fontSize: 11, cursor: 'pointer',
+        }}
+      >
+        Déplacer la section ici
+      </button>
+    )
+  }
+
   const BlockRow = ({ id, listKey, index }: { id: string; listKey: string; index: number }) => {
     const node = nodeById.get(id)
     if (!node) return null
@@ -148,12 +201,23 @@ export default function DocumentView({ nodes, messages, insetLeft = 0, readOnly 
           padding: interactive ? '12px 14px 12px 8px' : '13px 16px',
           marginTop: 10,
           cursor: interactive ? 'grab' : 'default',
-          outline: dropHint === hintKey ? '2px solid rgba(59,130,246,0.7)' : 'none',
+          outline: dropHint === hintKey || armed?.id === id ? '2px solid rgba(59,130,246,0.7)' : 'none',
           outlineOffset: 2,
         }}
       >
         {interactive && (
-          <GripVertical size={14} className="flex-shrink-0 mt-0.5 opacity-0 group-hover/row:opacity-60 transition-opacity" style={{ color: 'var(--node-meta)' }} />
+          // La poignée était en `opacity-0` révélée au survol : au doigt, elle
+          // n'apparaissait jamais. Sur mobile elle est visible et c'est ELLE
+          // qu'on touche pour armer le bloc.
+          <button
+            onClick={(e) => { e.stopPropagation(); toggleArm('block', id) }}
+            aria-label={armed?.id === id ? 'Annuler le déplacement' : 'Déplacer ce bloc'}
+            title={isMobile ? 'Toucher, puis choisir le nouvel emplacement' : 'Glisser pour réordonner'}
+            className={`flex-shrink-0 mt-0.5 transition-opacity ${isMobile ? 'opacity-70' : 'opacity-0 group-hover/row:opacity-60'}`}
+            style={{ background: 'none', border: 'none', padding: isMobile ? '4px 2px' : 0, cursor: 'pointer', color: armed?.id === id ? '#3b82f6' : 'var(--node-meta)' }}
+          >
+            <GripVertical size={isMobile ? 18 : 14} />
+          </button>
         )}
         <div className="flex-1 min-w-0">
           {trade && <div className="mb-2"><TradeBadge meta={trade} /></div>}
@@ -212,13 +276,27 @@ export default function DocumentView({ nodes, messages, insetLeft = 0, readOnly 
           title={interactive ? 'Glisser pour réordonner les sections' : undefined}
         >
           {interactive && (
-            <GripVertical size={13} className="opacity-0 group-hover/sec:opacity-60 transition-opacity" style={{ color: 'var(--node-meta)' }} />
+            <button
+              onClick={(e) => { e.stopPropagation(); toggleArm('section', sid) }}
+              aria-label={armed?.id === sid ? 'Annuler le déplacement' : 'Déplacer cette section'}
+              className={`transition-opacity ${isMobile ? 'opacity-70' : 'opacity-0 group-hover/sec:opacity-60'}`}
+              style={{ background: 'none', border: 'none', padding: isMobile ? '4px 2px' : 0, cursor: 'pointer', color: armed?.id === sid ? '#3b82f6' : 'var(--node-meta)' }}
+            >
+              <GripVertical size={isMobile ? 18 : 13} />
+            </button>
           )}
           <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: palette.border }} />
           <h2 className="text-sm font-semibold truncate" style={{ color: palette.text }}>{g.label || 'Groupe'}</h2>
           <span className="text-[10px] flex-shrink-0" style={{ color: 'var(--node-meta)' }}>{ids.length} bloc{ids.length > 1 ? 's' : ''}</span>
         </header>
-        {ids.map((bid, bi) => <BlockRow key={bid} id={bid} listKey={sid} index={bi} />)}
+        <SectionSlot index={index} />
+        {ids.map((bid, bi) => (
+          <div key={bid}>
+            <TapSlot listKey={sid} index={bi} />
+            <BlockRow id={bid} listKey={sid} index={bi} />
+          </div>
+        ))}
+        <TapSlot listKey={sid} index={ids.length} />
         {interactive ? (
           /* Zone de dépôt en fin de section (aussi utile quand la section est vide) */
           <div
@@ -267,6 +345,7 @@ export default function DocumentView({ nodes, messages, insetLeft = 0, readOnly 
         ) : (
           <>
             {sectionIds.map((sid, si) => <Section key={sid} sid={sid} index={si} />)}
+            <SectionSlot index={sectionIds.length} />
             {freeIds.length > 0 && (
               <section style={{ marginTop: sectionIds.length === 0 ? 0 : 40 }}>
                 <header className="flex items-center gap-2.5" style={{ paddingBottom: 8, borderBottom: '1px solid var(--float-border)' }}>
@@ -274,7 +353,13 @@ export default function DocumentView({ nodes, messages, insetLeft = 0, readOnly 
                   <h2 className="text-sm font-semibold" style={{ color: 'var(--node-meta)' }}>À trier</h2>
                   <span className="text-[10px]" style={{ color: 'var(--node-meta)' }}>{freeIds.length} bloc{freeIds.length > 1 ? 's' : ''}</span>
                 </header>
-                {freeIds.map((bid, bi) => <BlockRow key={bid} id={bid} listKey={FREE} index={bi} />)}
+                {freeIds.map((bid, bi) => (
+                  <div key={bid}>
+                    <TapSlot listKey={FREE} index={bi} />
+                    <BlockRow id={bid} listKey={FREE} index={bi} />
+                  </div>
+                ))}
+                <TapSlot listKey={FREE} index={freeIds.length} />
                 {interactive && (
                   <div
                     onDragOver={allowDrop(`${FREE}:${freeIds.length}`)}
@@ -287,6 +372,19 @@ export default function DocumentView({ nodes, messages, insetLeft = 0, readOnly 
           </>
         )}
       </div>
+      {/* L'état du geste, comme sur les canvas : sans lui, on touche une
+          poignée et rien ne dit ce qu'on attend de nous. */}
+      {armed && (
+        <div style={{ position: 'fixed', bottom: 20, left: '50%', transform: 'translateX(-50%)', zIndex: 60 }}>
+          <div className="canvas-float-pill" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 14px', fontSize: 12, color: 'var(--node-title)' }}>
+            Choisis le nouvel emplacement
+            <button onClick={() => setArmed(null)} style={{ background: 'none', border: 'none', color: 'var(--node-meta)', cursor: 'pointer', fontSize: 12, textDecoration: 'underline' }}>
+              Annuler
+            </button>
+          </div>
+        </div>
+      )}
+
       <ImageLightbox src={zoom} onClose={() => setZoom(null)} />
     </div>
   )
