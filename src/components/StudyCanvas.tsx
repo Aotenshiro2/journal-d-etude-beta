@@ -23,6 +23,7 @@ import { FolderPlus, ZoomIn, ZoomOut, Maximize2, MousePointer2, Square, Hand, Ty
 import { MessageData, CanvasNodeData, CanvasEdgeData } from '@/types'
 import { htmlToText, truncateText, extractImageSrc } from '@/lib/utils'
 import ImageLightbox from './ImageLightbox'
+import { useIsMobile } from '@/hooks/useIsMobile'
 
 type CanvasTool = 'select' | 'mark' | 'pan'
 
@@ -492,6 +493,7 @@ function StudyCanvasInner({
   )
 
   // ── Grille + spotlight — EXACTEMENT les couches du canvas home ──
+  const isMobile = useIsMobile()
   const { screenToFlowPosition } = useReactFlow()
   const { x: vpX, y: vpY, zoom } = useViewport()
   const rootRef = useRef<HTMLDivElement>(null)
@@ -506,6 +508,8 @@ function StudyCanvasInner({
   }
 
   useEffect(() => {
+    // Rien à suivre au doigt — cf. le même court-circuit sur le canvas home.
+    if (isMobile) return
     const el = rootRef.current
     const spotlight = spotlightRef.current
     if (!el || !spotlight) return
@@ -522,7 +526,7 @@ function StudyCanvasInner({
       el.removeEventListener('mousemove', onMove)
       el.removeEventListener('mouseleave', onLeave)
     }
-  }, [])
+  }, [isMobile])
 
   // Handlers de groupe accessibles depuis les nodes via ref (évite les fermetures périmées)
   const groupHandlersRef = useRef<GroupHandlers>({
@@ -847,7 +851,7 @@ function StudyCanvasInner({
     <div ref={rootRef} className="canvas-root" onDrop={onDrop} onDragOver={onDragOver}>
       {/* Couches de fond identiques au canvas home */}
       <div className="canvas-grid" style={dotBgStyle} />
-      <div ref={spotlightRef} className="canvas-dot-spotlight" style={dotBgStyle} />
+      {!isMobile && <div ref={spotlightRef} className="canvas-dot-spotlight" style={dotBgStyle} />}
 
       <div style={{ position: 'absolute', inset: 0, zIndex: 2 }}>
       <ReactFlow

@@ -220,6 +220,14 @@ export default function CanvasShell({ user, dueCount, extraActions, children }: 
                   className="canvas-float-pill"
                   style={{ position: 'absolute', bottom: 50, right: 0, zIndex: 50, minWidth: 170, padding: '6px 0', overflow: 'hidden' }}
                 >
+                  {/* Le retour à la carte : sans lui, une fois dans les notes on
+                      n'a que le bouton « précédent » du navigateur pour revenir
+                      (retour Brice, 25/07/2026). */}
+                  <Link href="/" onClick={() => setQuickOpen(false)}
+                    style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 14px', fontSize: 13, color: 'var(--node-preview)', textDecoration: 'none' }}
+                  >
+                    <Compass size={14} style={{ color: 'var(--node-meta)', flexShrink: 0 }} /> Canvas
+                  </Link>
                   <Link href="/review" onClick={() => setQuickOpen(false)}
                     style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 14px', fontSize: 13, color: 'var(--node-title)', textDecoration: 'none' }}
                   >

@@ -2,9 +2,8 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/db'
 import { BookOpen } from 'lucide-react'
-import NoteCard from '@/components/NoteCard'
+import NotesBrowser from '@/components/NotesBrowser'
 import CanvasShell from '@/components/CanvasShell'
-import EmptyNotesState from '@/components/EmptyNotesState'
 
 export default async function StudyPage() {
   const supabase = await createClient()
@@ -57,8 +56,8 @@ export default async function StudyPage() {
   return (
     <CanvasShell user={{ email: user.email ?? '', name: user.user_metadata?.full_name ?? '' }} dueCount={dueCount}>
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-5xl mx-auto w-full px-6 py-8">
-          <div className="mb-6">
+        <div className="max-w-5xl mx-auto w-full px-4 sm:px-6 py-6 sm:py-8">
+          <div className="mb-4">
             <div className="flex items-center gap-2 mb-1">
               <BookOpen size={18} style={{ color: 'var(--node-title)' }} />
               <h1 className="text-xl font-bold" style={{ color: 'var(--node-title)' }}>Tout ce que tu as capturé</h1>
@@ -68,18 +67,7 @@ export default async function StudyPage() {
             </p>
           </div>
 
-          {notes.length === 0 ? (
-            <EmptyNotesState />
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {notes.map((note) => (
-                <NoteCard
-                  key={note.id}
-                  note={note}
-                />
-              ))}
-            </div>
-          )}
+          <NotesBrowser notes={notes} />
         </div>
       </div>
     </CanvasShell>

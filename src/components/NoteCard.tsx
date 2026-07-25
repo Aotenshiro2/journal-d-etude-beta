@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { BookOpen, Network } from 'lucide-react'
 import { NoteData, AnnotationData, TradeSegmentData } from '@/types'
 import { stripHtml, truncateText, formatRelativeTime, extractImageSrc } from '@/lib/utils'
 
@@ -123,17 +124,31 @@ export default function NoteCard({ note }: NoteCardProps) {
         )}
       </div>
 
-      <div className="px-4 pb-4 pt-2 flex items-center justify-between">
+      <div className="px-4 pb-4 pt-2">
         <span className="text-xs" style={{ color: 'var(--node-meta)' }}>
           {date}
           {note.worked && <span className="ml-2 text-blue-500/70" title="Déjà travaillée sur le canvas">✎ travaillée</span>}
         </span>
-        <Link
-          href={`/notes/${note.id}`}
-          className="px-3 py-1.5 rounded-lg bg-blue-500/10 border border-blue-500/25 text-blue-500 text-xs font-medium hover:bg-blue-500/20 transition-colors"
-        >
-          Étudier →
-        </Link>
+        {/* Deux intentions, deux boutons — lire la note d'origine, ou la
+            travailler. Un seul « Étudier » obligeait à passer par l'exploration
+            pour arriver à la lecture (retour Brice, 25/07/2026).
+            Fond plein plutôt que teinté : à côté des pastilles pâles de la card,
+            un bouton pâle de plus se lisait comme un tag, pas comme cliquable. */}
+        <div className="flex items-center gap-2 mt-2.5">
+          <Link
+            href={`/notes/${note.id}/lecture`}
+            className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-lg text-xs font-semibold transition-colors"
+            style={{ background: 'var(--canvas-bg)', border: '1px solid var(--node-border)', color: 'var(--node-title)' }}
+          >
+            <BookOpen size={13} /> Lire
+          </Link>
+          <Link
+            href={`/notes/${note.id}`}
+            className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-lg text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 transition-colors"
+          >
+            <Network size={13} /> Étudier
+          </Link>
+        </div>
       </div>
     </div>
   )

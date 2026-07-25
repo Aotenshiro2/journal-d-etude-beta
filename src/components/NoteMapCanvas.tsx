@@ -959,6 +959,9 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
   }, [router])
 
   useEffect(() => {
+    // Le halo suit la souris : au doigt il ne peut rien suivre, et c'est un
+    // listener + un repaint par mouvement pour rien (retour Brice, 25/07/2026).
+    if (isMobile) return
     const el = canvasRef.current
     if (!el) return
     const spotlight = spotlightRef.current
@@ -976,7 +979,7 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
       el.removeEventListener('mousemove', onMove)
       el.removeEventListener('mouseleave', onLeave)
     }
-  }, [])
+  }, [isMobile])
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -1559,7 +1562,7 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
 
         {/* Dot grid */}
         {showGrid && <div className="canvas-grid" style={dotBgStyle} />}
-        {showGrid && <div ref={spotlightRef} className="canvas-dot-spotlight" style={dotBgStyle} />}
+        {showGrid && !isMobile && <div ref={spotlightRef} className="canvas-dot-spotlight" style={dotBgStyle} />}
 
         {/* Drop zone overlay */}
         {isDragOver && (
@@ -1735,17 +1738,27 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
           </div>
         )}
 
-        {/* ── Bottom-left — notes bubble ── */}
-        <div style={{ position: 'absolute', bottom: 16, left: 14, zIndex: 20 }}>
-          <NotesBubble notes={notes} pinnedNoteIds={pinnedNoteIds} onFocus={focusNote} onPreview={openPreview} dropCounter={dropCounter} isMobile={isMobile} />
-        </div>
+        {/* ── Bottom-left — notes bubble ──
+            Au téléphone : rien ici. « Notes » vit déjà dans la pile en bas à
+            droite, et deux accès au même endroit pour la même chose, c'est de
+            la place perdue — tout est groupé d'un côté (retour Brice, 25/07). */}
+        {!isMobile && (
+          <div style={{ position: 'absolute', bottom: 16, left: 14, zIndex: 20 }}>
+            <NotesBubble notes={notes} pinnedNoteIds={pinnedNoteIds} onFocus={focusNote} onPreview={openPreview} dropCounter={dropCounter} />
+          </div>
+        )}
 
-        {/* ── Capture bar ── */}
-        <CaptureBar
-          noteId={previewNoteId}
-          noteTitle={previewNoteTitle}
-          onMessageAdded={() => setRefreshTrigger(t => t + 1)}
-        />
+        {/* ── Capture bar ──
+            Pas au téléphone : la capture se fait depuis l'extension, et depuis
+            que le tap ouvre la note, la barre n'avait plus de note cible de
+            toute façon. Un bandeau de moins sur un écran qui doit respirer. */}
+        {!isMobile && (
+          <CaptureBar
+            noteId={previewNoteId}
+            noteTitle={previewNoteTitle}
+            onMessageAdded={() => setRefreshTrigger(t => t + 1)}
+          />
+        )}
 
         {/* ── Bottom-right — theme + nav ──
             L'accueil a SA propre pill (celle de CanvasShell sert aux autres
@@ -1766,6 +1779,15 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
                       {!!dueCount && dueCount > 0 && (
                         <span style={{ fontSize: 10, fontWeight: 600, color: '#fff', background: '#ef4444', borderRadius: 999, padding: '0 6px', lineHeight: '15px' }}>{dueCount}</span>
                       )}
+                    </Link>
+                    {/* « Notes » vient ici parce qu'on a retiré la bulle en bas
+                        à gauche : un seul endroit pour la navigation. */}
+                    <Link href="/notes" onClick={() => setQuickOpen(false)}
+                      style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 14px', fontSize: 13, color: 'var(--node-preview)', textDecoration: 'none' }}
+                    >
+                      <FileText size={14} style={{ color: 'var(--node-meta)', flexShrink: 0 }} />
+                      <span style={{ flex: 1 }}>Notes</span>
+                      <span style={{ fontSize: 11, color: 'var(--node-meta)' }}>{notes.length}</span>
                     </Link>
                     <Link href="/guide" onClick={() => setQuickOpen(false)}
                       style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 14px', fontSize: 13, color: 'var(--node-preview)', textDecoration: 'none' }}
