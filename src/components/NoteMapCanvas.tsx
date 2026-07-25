@@ -37,6 +37,7 @@ import ImageLightbox from '@/components/ImageLightbox'
 import { stripHtml, formatRelativeTime, extractImageSrc } from '@/lib/utils'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useShowMeta } from '@/hooks/useShowMeta'
+import { useIsMobile } from '@/hooks/useIsMobile'
 import { renderWikilinks } from '@/lib/wikilinks'
 import { createClient } from '@/lib/supabase/client'
 import {
@@ -375,9 +376,10 @@ interface NotesBubbleProps {
   onFocus: (noteId: string) => void
   onPreview: (noteId: string) => void
   dropCounter: number
+  isMobile?: boolean
 }
 
-function NotesBubble({ notes, pinnedNoteIds, onFocus, onPreview, dropCounter }: NotesBubbleProps) {
+function NotesBubble({ notes, pinnedNoteIds, onFocus, onPreview, dropCounter, isMobile }: NotesBubbleProps) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
 
@@ -390,16 +392,32 @@ function NotesBubble({ notes, pinnedNoteIds, onFocus, onPreview, dropCounter }: 
     [notes, search]
   )
 
+  const pillStyle: React.CSSProperties = {
+    display: 'flex', alignItems: 'center', gap: 6,
+    padding: isMobile ? '9px 14px' : '5px 12px', cursor: 'pointer', border: 'none',
+    color: 'var(--node-title)', fontSize: 12, fontWeight: 500, textDecoration: 'none',
+  }
+
+  // Au téléphone, la bulle superposait une liste de 280 px à un écran déjà bien
+  // occupé (capture bar, outils, actions). On envoie plutôt vers `/notes`, qui
+  // est déjà la liste plein écran — une surcouche en moins, pas une de plus
+  // (retour Brice, 25/07/2026).
+  if (isMobile) {
+    return (
+      <Link href="/notes" className="canvas-float-pill" style={pillStyle}>
+        <FileText size={13} style={{ color: 'var(--node-meta)' }} />
+        <span>Notes · {notes.length}</span>
+        <span style={{ color: 'var(--node-meta)', fontSize: 11 }}>→</span>
+      </Link>
+    )
+  }
+
   return (
     <div style={{ position: 'relative' }}>
       <button
         onClick={() => setOpen(o => !o)}
         className="canvas-float-pill"
-        style={{
-          display: 'flex', alignItems: 'center', gap: 6,
-          padding: '5px 12px', cursor: 'pointer', border: 'none',
-          color: 'var(--node-title)', fontSize: 12, fontWeight: 500,
-        }}
+        style={pillStyle}
       >
         <FileText size={13} style={{ color: 'var(--node-meta)' }} />
         <span>Notes · {notes.length}</span>
@@ -858,7 +876,21 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
   const activeMode = MODES.find(m => m.match(pathname)) ?? MODES[0]
   const displayTitle = title ?? activeMode.label
 
+  const isMobile = useIsMobile()
   const [activeTool, setActiveTool] = useState<Tool>('select')
+  // Au téléphone, on arrive sur la carte pour la PARCOURIR : l'outil main doit
+  // être actif d'entrée, sinon le premier geste (glisser) ne fait rien de ce
+  // qu'on attend (retour Brice, 25/07/2026). `useIsMobile` rend false au premier
+  // rendu (SSR), d'où la bascule à l'effet plutôt qu'un état initial.
+  const mobileToolSetRef = useRef(false)
+  useEffect(() => {
+    if (isMobile && !mobileToolSetRef.current) {
+      mobileToolSetRef.current = true
+      setActiveTool('pan')
+    }
+  }, [isMobile])
+  // Card de départ d'un lien en cours de tracé (outil crayon, geste tap → tap).
+  const [linkSourceId, setLinkSourceId] = useState<string | null>(null)
   const [previewNoteId, setPreviewNoteId] = useState<string | null>(null)
   const [lastPreviewNoteId, setLastPreviewNoteId] = useState<string | null>(null)
   const [favNoteIds, setFavNoteIds] = useState<Set<string>>(new Set())
@@ -1052,6 +1084,18 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
 
+  // Le halo de la card armée (lien en cours) passe par la `className` du nœud
+  // React Flow — cf. `.link-armed` dans globals.css. Rien à faire remonter
+  // dans `data`, donc pas de re-rendu des cards elles-mêmes.
+  const armLink = useCallback((id: string | null) => {
+    setLinkSourceId(id)
+    setNodes(nds => nds.map(n =>
+      n.className === 'link-armed' || n.id === id
+        ? { ...n, className: n.id === id ? 'link-armed' : undefined }
+        : n
+    ))
+  }, [setNodes])
+
   // id RF -> id CanvasNode (DB), en creant le CanvasNode si la carte n'a jamais
   // ete persistee. Groupes et concepts ont deja id RF = id DB.
   const ensureDbNodeId = useCallback(async (node: Node): Promise<string | null> => {
@@ -1070,12 +1114,6 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
     return data.id as string
   }, [canvas.id, setNodes])
 
-  const handleNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
-    if (singleClickTimerRef.current) clearTimeout(singleClickTimerRef.current)
-    singleClickTimerRef.current = setTimeout(() => {
-      openPreview(node.id)
-    }, 220)
-  }, [])
 
   // Double-clic = OUVRIR le poste de travail de la note (décision Brice 17/07 —
   // remplace l'ancien dépliage sur place, jugé inexploitables)
@@ -1179,6 +1217,42 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
       style: { stroke: '#3b82f6', strokeWidth: 1.5, opacity: 0.5 },
     }, eds))
   }, [setEdges, canvas.id, getNode, ensureDbNodeId])
+
+  // Défini APRÈS onConnect : la liste de dépendances est évaluée au rendu, une
+  // référence plus haut lèverait une TDZ.
+  const handleNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
+    // ── Crayon : le lien se trace en DEUX TAPS ────────────────────────────────
+    // Tap sur la card de départ, tap sur la card d'arrivée. Remplace le tirage
+    // d'une poignée de 9 px en opacity 0 — impraticable au doigt, et de toute
+    // façon plus instinctif à la souris (retour Brice, 25/07/2026).
+    if (activeTool === 'connect') {
+      if (!linkSourceId) { armLink(node.id); return }
+      if (linkSourceId === node.id) { armLink(null); return } // re-tap = on annule
+      const source = linkSourceId
+      armLink(null)
+      onConnect({ source, target: node.id, sourceHandle: null, targetHandle: null })
+      return
+    }
+
+    // Au téléphone : un seul geste, il ouvre la note en lecture plein cadre.
+    // Ni timer de 220 ms (le double-tap est pénible au doigt), ni aperçu latéral
+    // de 300 px — c'est 80 % d'un écran de 375, illisible en dessous d'un grand
+    // iPhone (retour Brice, 25/07/2026).
+    if (isMobile) {
+      if (node.type !== 'noteMap') return
+      router.push(`/notes/${node.id}/lecture`)
+      return
+    }
+    if (singleClickTimerRef.current) clearTimeout(singleClickTimerRef.current)
+    singleClickTimerRef.current = setTimeout(() => {
+      openPreview(node.id)
+    }, 220)
+  }, [activeTool, linkSourceId, armLink, onConnect, isMobile, router, openPreview])
+
+  // Taper le vide annule le lien en cours (et referme l'aperçu au bureau).
+  const handlePaneClick = useCallback(() => {
+    if (linkSourceId) armLink(null)
+  }, [linkSourceId, armLink])
 
   // 0.1.6 — double-clic sur un lien : le nommer (le sens du lien devient de la
   // donnée) ; laisser vide supprime le lien (parité avec le canvas d'étude).
@@ -1453,10 +1527,14 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
   }, [nodes, canvas.id, patchNode, setNodes])
 
   // Tool → ReactFlow props mapping
+  // Crayon : le lien se trace en tap → tap (cf. handleNodeClick), donc les cards
+  // ne sont pas déplaçables et le glissement reste libre pour se déplacer sur la
+  // carte — indispensable au doigt, où les deux extrémités d'un lien sont
+  // rarement à l'écran en même temps.
   const toolProps = {
     select:  { panOnDrag: false as const, selectionOnDrag: true,  nodesConnectable: false, nodesDraggable: true,  selectionMode: SelectionMode.Partial },
     mark:    { panOnDrag: false as const, selectionOnDrag: true,  nodesConnectable: false, nodesDraggable: true,  selectionMode: SelectionMode.Full    },
-    connect: { panOnDrag: false as const, selectionOnDrag: false, nodesConnectable: true,  nodesDraggable: false, selectionMode: SelectionMode.Partial },
+    connect: { panOnDrag: true  as const, selectionOnDrag: false, nodesConnectable: true,  nodesDraggable: false, selectionMode: SelectionMode.Partial },
     pan:     { panOnDrag: true  as const, selectionOnDrag: false, nodesConnectable: false, nodesDraggable: false, selectionMode: SelectionMode.Partial },
   }
 
@@ -1502,6 +1580,21 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
 
         {/* Top gradient */}
         <div className="canvas-top-gradient" />
+
+        {/* ── Crayon : l'état du geste, sinon il est invisible ──
+            Le tap → tap ne s'annonce pas tout seul : sans cette ligne, on tape
+            une card et « il ne se passe rien » (retour Brice, 25/07/2026). */}
+        {activeTool === 'connect' && (
+          <div style={{ position: 'absolute', bottom: 78, left: '50%', transform: 'translateX(-50%)', zIndex: 46, pointerEvents: 'none' }}>
+            <div className="canvas-float-pill" style={{ padding: '7px 13px', fontSize: 12, color: 'var(--node-title)', display: 'flex', alignItems: 'center', gap: 7, whiteSpace: 'nowrap' }}>
+              <Pencil size={12} style={{ color: '#3b82f6', flexShrink: 0 }} />
+              {linkSourceId
+                ? <>Touche la card d&apos;<strong style={{ fontWeight: 600 }}>arrivée</strong><span style={{ color: 'var(--node-meta)' }}>· retape la même pour annuler</span></>
+                : <>Touche la card de <strong style={{ fontWeight: 600 }}>départ</strong></>
+              }
+            </div>
+          </div>
+        )}
 
         {/* ── Top-left — module switcher + titre ── */}
         <div style={{ position: 'absolute', top: 14, left: 14, zIndex: 20, display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1637,7 +1730,7 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
 
         {/* ── Bottom-left — notes bubble ── */}
         <div style={{ position: 'absolute', bottom: 16, left: 14, zIndex: 20 }}>
-          <NotesBubble notes={notes} pinnedNoteIds={pinnedNoteIds} onFocus={focusNote} onPreview={openPreview} dropCounter={dropCounter} />
+          <NotesBubble notes={notes} pinnedNoteIds={pinnedNoteIds} onFocus={focusNote} onPreview={openPreview} dropCounter={dropCounter} isMobile={isMobile} />
         </div>
 
         {/* ── Capture bar ── */}
@@ -1702,6 +1795,7 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
             onConnect={onConnect} onEdgeDoubleClick={onEdgeDoubleClick} onNodeDragStop={handleNodeDragStop}
             onNodeClick={handleNodeClick}
             onNodeDoubleClick={handleNodeDoubleClick}
+            onPaneClick={handlePaneClick}
             nodeTypes={nodeTypes}
             fitView fitViewOptions={{ padding: 0.12, maxZoom: 1 }}
             minZoom={0.08} maxZoom={2.5} deleteKeyCode={null}

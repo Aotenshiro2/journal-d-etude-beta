@@ -398,6 +398,31 @@ input[type="search"]::-moz-selection {
     bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   }
 
+  /* Card de départ d'un lien en cours (outil crayon, geste tap → tap). Le halo
+     est la seule chose qui dit « c'est parti, touche maintenant l'arrivée ». */
+  .react-flow__node.link-armed {
+    outline: 2px solid #3b82f6;
+    outline-offset: 3px;
+    border-radius: 12px;
+    box-shadow: 0 0 0 6px rgba(59, 130, 246, 0.14);
+  }
+
+  /* L'écran de lecture dédié (`/notes/[id]/lecture`). Les panneaux latéraux sont
+     des aperçus : on y survole. Ici on lit vraiment, donc le texte est plus
+     grand et respire — c'est tout l'intérêt d'avoir un écran à part. */
+  .note-reading-body .note-preview-content {
+    font-size: 15px;
+    line-height: 1.75;
+  }
+  .note-reading-body .note-preview-content p {
+    margin-bottom: 0.85em;
+  }
+  @media (max-width: 767px) {
+    .note-reading-body .note-preview-content {
+      font-size: 16px;
+    }
+  }
+
   /* Spotlight dot layer — dots s'illuminent autour du curseur */
   .canvas-dot-spotlight {
     position: absolute;

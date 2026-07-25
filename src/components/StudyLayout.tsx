@@ -2,7 +2,8 @@
 
 import { useState, useCallback, useMemo } from 'react'
 import Link from 'next/link'
-import { ChevronLeft, ChevronRight, Network, AlignLeft, RotateCcw } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Network, AlignLeft, RotateCcw, BookOpen } from 'lucide-react'
+import { useIsMobile } from '@/hooks/useIsMobile'
 import NoteReader from './NoteReader'
 import StudyCanvas, { TradeMeta } from './StudyCanvas'
 import DocumentView from './DocumentView'
@@ -19,6 +20,7 @@ interface StudyLayoutProps {
 // La note explosée — même décor que le canvas d'accueil : on zoome dans la note,
 // on ne change jamais d'espace.
 export default function StudyLayout({ note, canvas: initialCanvas, isDiverged }: StudyLayoutProps) {
+  const isMobile = useIsMobile()
   const [canvas, setCanvas] = useState<CanvasData>(initialCanvas)
   const [drawerOpen, setDrawerOpen] = useState(true)
   // Deux projections du même modèle : tri spatial (canvas) ⇄ note linéaire (document)
@@ -229,7 +231,7 @@ export default function StudyLayout({ note, canvas: initialCanvas, isDiverged }:
           <DocumentView
             nodes={canvas.nodes}
             messages={note.messages ?? []}
-            insetLeft={drawerOpen ? 344 : 64}
+            insetLeft={isMobile ? 14 : drawerOpen ? 344 : 64}
             tradeMeta={tradeMeta}
             onUpdateNode={handleUpdateNode}
           />
@@ -300,8 +302,28 @@ export default function StudyLayout({ note, canvas: initialCanvas, isDiverged }:
         </div>
       )}
 
-      {/* ── Tiroir gauche : la note d'origine (jamais modifiée) ── */}
-      {drawerOpen && (
+      {/* ── Tiroir gauche : la note d'origine (jamais modifiée) ──
+          Au téléphone, ce tiroir de 300 px prend 80 % de l'écran : la note s'y
+          lit mal. On renvoie vers l'écran de lecture dédié (retour Brice,
+          25/07/2026), et le canvas garde toute la place pour le travail. */}
+      {isMobile && (
+        <Link
+          href={`/notes/${note.id}/lecture`}
+          className="canvas-float-pill touch-target"
+          title="Lire la note d'origine en plein écran"
+          style={{
+            position: 'absolute', left: 14, top: 62, zIndex: 35,
+            display: 'flex', alignItems: 'center', gap: 6,
+            padding: '9px 13px', textDecoration: 'none',
+            color: 'var(--node-title)', fontSize: 12, fontWeight: 500,
+          }}
+        >
+          <BookOpen size={13} style={{ color: 'var(--node-meta)', flexShrink: 0 }} />
+          Lire la note
+        </Link>
+      )}
+
+      {!isMobile && drawerOpen && (
         <div
           className="canvas-float-pill"
           style={{
@@ -317,6 +339,7 @@ export default function StudyLayout({ note, canvas: initialCanvas, isDiverged }:
       )}
 
       {/* ── Poignée du tiroir — même geste que l'aperçu du canvas home ── */}
+      {!isMobile && (
       <button
         onClick={() => setDrawerOpen(v => !v)}
         title={drawerOpen ? 'Réduire la note d\'origine' : 'Rouvrir la note d\'origine'}
@@ -344,6 +367,7 @@ export default function StudyLayout({ note, canvas: initialCanvas, isDiverged }:
           : <ChevronRight size={12} style={{ color: 'var(--drawer-icon)' }} />
         }
       </button>
+      )}
 
       {/* ── Blocs disponibles — pill flottante en bas (tri spatial uniquement) ── */}
       {view === 'canvas' && <MessagePanel canvasId={canvas.id} messages={availableMessages} tradeMeta={tradeMeta} />}
