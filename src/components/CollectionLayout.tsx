@@ -22,6 +22,8 @@ interface CollectionLayoutProps {
 export default function CollectionLayout({ title, noteCount, memberNotes, messages, canvas: initialCanvas }: CollectionLayoutProps) {
   const [canvas, setCanvas] = useState<CanvasData>(initialCanvas)
   const [drawerOpen, setDrawerOpen] = useState(true)
+  // Bloc armé dans le tiroir du bas (geste tap → tap), comme dans StudyLayout.
+  const [armedMessageId, setArmedMessageId] = useState<string | null>(null)
   // Deux projections du même modèle (comme l'étude d'une note) :
   // tri spatial (canvas) ⇄ document linéaire — base de la note de relecture
   const [view, setView] = useState<'canvas' | 'document'>('canvas')
@@ -141,6 +143,8 @@ export default function CollectionLayout({ title, noteCount, memberNotes, messag
             onCreateText={handleCreateText}
             onUpdateNode={handleUpdateNode}
             onPromoteGroupTag={handlePromoteGroupTag}
+            armedMessageId={armedMessageId}
+            onArmedPlaced={() => setArmedMessageId(null)}
           />
         ) : (
           <DocumentView
@@ -261,7 +265,14 @@ export default function CollectionLayout({ title, noteCount, memberNotes, messag
       </button>
 
       {/* Blocs disponibles — pill flottante en bas (tri spatial uniquement) */}
-      {view === 'canvas' && <MessagePanel canvasId={canvas.id} messages={availableMessages as MessageData[]} />}
+      {view === 'canvas' && (
+        <MessagePanel
+          canvasId={canvas.id}
+          messages={availableMessages as MessageData[]}
+          armedId={armedMessageId}
+          onArm={setArmedMessageId}
+        />
+      )}
     </div>
   )
 }

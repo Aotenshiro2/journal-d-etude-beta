@@ -21,6 +21,9 @@ interface StudyLayoutProps {
 // on ne change jamais d'espace.
 export default function StudyLayout({ note, canvas: initialCanvas, isDiverged }: StudyLayoutProps) {
   const isMobile = useIsMobile()
+  // Bloc armé dans le tiroir du bas : état partagé entre le tiroir (qui l'arme)
+  // et le canvas (qui le pose). Les deux sont frères, il vit donc ici.
+  const [armedMessageId, setArmedMessageId] = useState<string | null>(null)
   const [canvas, setCanvas] = useState<CanvasData>(initialCanvas)
   const [drawerOpen, setDrawerOpen] = useState(true)
   // Deux projections du même modèle : tri spatial (canvas) ⇄ note linéaire (document)
@@ -226,6 +229,8 @@ export default function StudyLayout({ note, canvas: initialCanvas, isDiverged }:
             onUpdateNode={handleUpdateNode}
             onPromoteGroupTag={handlePromoteGroupTag}
             tradeMeta={tradeMeta}
+            armedMessageId={armedMessageId}
+            onArmedPlaced={() => setArmedMessageId(null)}
           />
         ) : (
           <DocumentView
@@ -370,7 +375,15 @@ export default function StudyLayout({ note, canvas: initialCanvas, isDiverged }:
       )}
 
       {/* ── Blocs disponibles — pill flottante en bas (tri spatial uniquement) ── */}
-      {view === 'canvas' && <MessagePanel canvasId={canvas.id} messages={availableMessages} tradeMeta={tradeMeta} />}
+      {view === 'canvas' && (
+        <MessagePanel
+          canvasId={canvas.id}
+          messages={availableMessages}
+          tradeMeta={tradeMeta}
+          armedId={armedMessageId}
+          onArm={setArmedMessageId}
+        />
+      )}
     </div>
   )
 }

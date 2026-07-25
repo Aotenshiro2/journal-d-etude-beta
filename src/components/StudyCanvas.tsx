@@ -19,13 +19,16 @@ import {
   useViewport,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { FolderPlus, ZoomIn, ZoomOut, Maximize2, MousePointer2, Square, Hand, Type, Combine } from 'lucide-react'
+import { FolderPlus, ZoomIn, ZoomOut, Maximize2, MousePointer2, Square, Hand, Type, Combine, Pencil } from 'lucide-react'
 import { MessageData, CanvasNodeData, CanvasEdgeData } from '@/types'
 import { htmlToText, truncateText, extractImageSrc } from '@/lib/utils'
 import ImageLightbox from './ImageLightbox'
 import { useIsMobile } from '@/hooks/useIsMobile'
 
-type CanvasTool = 'select' | 'mark' | 'pan'
+// `connect` = le crayon. Il manquait ici alors qu'il existe sur la carte
+// d'accueil : relier deux blocs demandait de tirer une poignée de 9 px, ce que
+// le doigt ne sait pas faire. Le geste est le même des deux côtés : tap → tap.
+type CanvasTool = 'select' | 'mark' | 'pan' | 'connect'
 
 interface StudyCanvasProps {
   canvasId: string
@@ -42,6 +45,9 @@ interface StudyCanvasProps {
   onUpdateNode: (nodeId: string, patch: Partial<Pick<CanvasNodeData, 'x' | 'y' | 'width' | 'height' | 'label' | 'color' | 'parentId' | 'orderInParent' | 'content'>>) => Promise<void> | void
   onPromoteGroupTag: (label: string, groupId: string) => Promise<boolean>
   tradeMeta?: Record<string, TradeMeta>
+  /** Bloc armé dans le tiroir du bas : le prochain tap sur le canvas le pose. */
+  armedMessageId?: string | null
+  onArmedPlaced?: () => void
 }
 
 // Palette sobre des groupes — « ça va avec ça »
@@ -378,6 +384,7 @@ function CanvasToolbar({ activeTool, setActiveTool, selectedCount, mergeableCoun
   const tools: { id: CanvasTool; Icon: React.ElementType; label: string }[] = [
     { id: 'select', Icon: MousePointer2, label: 'Sélectionner (glisser = déplacer la vue)' },
     { id: 'mark', Icon: Square, label: 'Sélection groupée (glisser = rectangle de sélection)' },
+    { id: 'connect', Icon: Pencil, label: 'Relier deux blocs (touche le départ, puis l\'arrivée)' },
     { id: 'pan', Icon: Hand, label: 'Déplacer le canvas' },
   ]
 
@@ -484,8 +491,12 @@ function StudyCanvasInner({
   onUpdateNode,
   onPromoteGroupTag,
   tradeMeta,
+  armedMessageId,
+  onArmedPlaced,
 }: StudyCanvasProps) {
   const [activeTool, setActiveTool] = useState<CanvasTool>('select')
+  // Bloc de départ d'un lien en cours (outil crayon).
+  const [linkSourceId, setLinkSourceId] = useState<string | null>(null)
   const [zoomSrc, setZoomSrc] = useState<string | null>(null)
   const messageMap = useMemo(
     () => new Map(messages.map((m) => [m.id, m])),
@@ -775,6 +786,37 @@ function StudyCanvasInner({
     [setEdges, onConnectCallback]
   )
 
+  // Le halo du bloc armé passe par la className du nœud (cf. `.link-armed`).
+  const armLink = useCallback((id: string | null) => {
+    setLinkSourceId(id)
+    setNodes((nds) => nds.map((n) =>
+      n.className === 'link-armed' || n.id === id
+        ? { ...n, className: n.id === id ? 'link-armed' : undefined }
+        : n
+    ))
+  }, [setNodes])
+
+  // ── Crayon : tap sur le bloc de départ, tap sur celui d'arrivée ──
+  const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
+    if (activeTool !== 'connect') return
+    if (!linkSourceId) { armLink(node.id); return }
+    if (linkSourceId === node.id) { armLink(null); return } // re-tap = on annule
+    const source = linkSourceId
+    armLink(null)
+    onConnect({ source, target: node.id, sourceHandle: null, targetHandle: null })
+  }, [activeTool, linkSourceId, armLink, onConnect])
+
+  // ── Le vide : y poser le bloc armé, ou annuler le lien en cours ──
+  const onPaneClick = useCallback((event: React.MouseEvent) => {
+    if (linkSourceId) { armLink(null); return }
+    if (!armedMessageId) return
+    // Même conversion écran → canvas que le drop souris, au même décalage près :
+    // le bloc se pose centré sous le doigt, pas coin supérieur gauche dessous.
+    const pos = screenToFlowPosition({ x: event.clientX, y: event.clientY })
+    onDropMessage(armedMessageId, pos.x - 140, pos.y - 60)
+    onArmedPlaced?.()
+  }, [linkSourceId, armLink, armedMessageId, screenToFlowPosition, onDropMessage, onArmedPlaced])
+
   // Au lâcher : rattacher/détacher selon la zone survolée (« ça va avec ça » au drag)
   const onNodeDragStop = useCallback(
     (_: React.MouseEvent, node: Node) => {
@@ -862,13 +904,17 @@ function StudyCanvasInner({
         onConnect={onConnect}
         onNodeDragStop={onNodeDragStop}
         onEdgeDoubleClick={onEdgeDoubleClick}
+        onNodeClick={onNodeClick}
+        onPaneClick={onPaneClick}
         nodeTypes={nodeTypes}
         deleteKeyCode={null}
         fitView
         fitViewOptions={{ padding: 0.12, maxZoom: 1 }}
         selectionOnDrag={activeTool === 'mark'}
         panOnDrag={activeTool === 'mark' ? [1, 2] : true}
-        nodesDraggable={activeTool !== 'pan'}
+        // Crayon : les blocs ne bougent pas, sinon le premier tap les déplace
+        // au lieu d'armer le lien. Le glissement reste libre pour se déplacer.
+        nodesDraggable={activeTool !== 'pan' && activeTool !== 'connect'}
         elementsSelectable={activeTool !== 'pan'}
         style={{ background: 'transparent' }}
       >
@@ -885,12 +931,37 @@ function StudyCanvasInner({
       </ReactFlow>
       </div>
 
+      {/* L'état du geste en cours. Sans cette ligne, on touche un bloc et « il
+          ne se passe rien » — le tap → tap ne s'annonce pas tout seul. */}
+      {(armedMessageId || activeTool === 'connect') && (
+        <div style={{ position: 'absolute', bottom: 96, left: '50%', transform: 'translateX(-50%)', zIndex: 31, pointerEvents: 'none' }}>
+          <div className="canvas-float-pill" style={{ padding: '7px 13px', fontSize: 12, color: 'var(--node-title)', display: 'flex', alignItems: 'center', gap: 7, whiteSpace: 'nowrap' }}>
+            {armedMessageId ? (
+              <>Touche le canvas pour <strong style={{ fontWeight: 600 }}>poser le bloc</strong></>
+            ) : linkSourceId ? (
+              <><Pencil size={12} style={{ color: '#3b82f6', flexShrink: 0 }} />Touche le bloc d&apos;<strong style={{ fontWeight: 600 }}>arrivée</strong></>
+            ) : (
+              <><Pencil size={12} style={{ color: '#3b82f6', flexShrink: 0 }} />Touche le bloc de <strong style={{ fontWeight: 600 }}>départ</strong></>
+            )}
+          </div>
+        </div>
+      )}
+
       {nodes.length === 0 && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none" style={{ zIndex: 3 }}>
           <div className="text-center">
             <div className="text-4xl mb-3 opacity-30">🎯</div>
-            <p className="text-sm" style={{ color: 'var(--node-meta)' }}>Glisse des blocs depuis le panneau bas</p>
-            <p className="text-xs mt-1" style={{ color: 'var(--node-meta)', opacity: 0.7 }}>Shift + glisser = sélectionner plusieurs blocs → « Grouper »</p>
+            {isMobile ? (
+              <>
+                <p className="text-sm" style={{ color: 'var(--node-meta)' }}>Touche un bloc en bas, puis touche le canvas</p>
+                <p className="text-xs mt-1" style={{ color: 'var(--node-meta)', opacity: 0.7 }}>Le crayon relie deux blocs : départ, puis arrivée</p>
+              </>
+            ) : (
+              <>
+                <p className="text-sm" style={{ color: 'var(--node-meta)' }}>Glisse des blocs depuis le panneau bas</p>
+                <p className="text-xs mt-1" style={{ color: 'var(--node-meta)', opacity: 0.7 }}>Shift + glisser = sélectionner plusieurs blocs → « Grouper »</p>
+              </>
+            )}
           </div>
         </div>
       )}

@@ -408,17 +408,48 @@ Découpage (ordre indicatif, le 0.1 ne ferme qu'à maturité) :
         débordait à 375 px) repliée derrière « ⋯ » avec le badge `dueCount`
         conservé sur le bouton. Build vert, `viewport` vérifiée dans le HTML
         servi. **À valider sur le téléphone de Brice.**
-  - [ ] **Étape 1 — Consulter et corriger au doigt** : prop `mobile` sur
-        `NoteMapCanvasInner` (pan/pinch, pas de `RightToolbar`/`SettingsPanel`/
-        aperçu latéral, pill crayon) ; `tap → tap` pour poser un bloc
-        (`MessagePanel.onArm` + `StudyCanvas.onPaneClick`, qui rebranche le
-        `screenToFlowPosition` du `onDrop`) ; `tap → tap` pour les liens dans les
-        deux canvas (rebranche les `onConnect` existants) ; tiroirs plein écran.
+  - [x] **Étape 1a — Lire, et dégager l'écran** (25/07, validé par Brice sur
+        son téléphone) : nouvel écran **`/notes/[id]/lecture`** (la note
+        d'origine plein cadre, colonne 680 px, 16 px de texte, dans
+        `CanvasShell` donc même décor) — le panneau de 300 px passait sur un
+        grand iPhone, pas en dessous. Accueil mobile : tap sur une card = on
+        ouvre la lecture (plus d'aperçu latéral ni de timer 220 ms), outil
+        **main** actif d'entrée, titre retiré (le dropdown suffit), bulle
+        « Notes » et **capture bar** retirées, pill de l'accueil repliée elle
+        aussi derrière « ⋯ » (l'étape 0 n'avait replié que celle de
+        `CanvasShell` — l'accueil a sa propre copie). Halo du curseur coupé sur
+        mobile dans les DEUX canvas. `/notes` : **recherche** (titre, dossier,
+        tags) via `NotesBrowser`, et **deux boutons** par card — « Lire » et
+        « Étudier » (un seul obligeait à passer par l'exploration ; le bouton
+        teinté se lisait comme un tag → fond plein). Entrée **« Canvas »** dans
+        la pile : le retour à la carte manquait.
+  - [x] **Étape 1b — Le geste `tap → tap`** (25/07) : **crayon** sur les deux
+        canvas — il manquait au canvas d'étude (`select | mark | pan`). Tap sur
+        le départ, tap sur l'arrivée ; halo `.link-armed` ; tap dans le vide
+        annule ; pill d'état en bas (sans elle « il ne se passe rien »).
+        Rebranche les `onConnect` existants, donc rien de réécrit côté
+        persistance. **Poser un bloc** : tap sur un chip du tiroir (il s'arme,
+        le tiroir se replie), tap sur le canvas (il se pose) — rebranche le
+        `screenToFlowPosition` du `onDrop`. État `armedMessageId` porté par
+        `StudyLayout` et `CollectionLayout`. Le drag & drop souris est intact.
+        **À valider sur le téléphone de Brice.**
   - [ ] **Étape 2 — Relire** : `ReviewDeck` (grossir les boutons A/B/C),
         `DocumentView` lisible en mobile, `NoteReader` sans débordement.
   - [ ] Suite laissée de côté : **réordonnancement tactile de `DocumentView`**
         (son DnD est du HTML5, inopérant au doigt — et réordonner n'est pas un
         « correctif rapide »).
+  - [ ] **Demandé par Brice le 25/07, à traiter plus tard — corriger un texte
+        depuis le téléphone.** « Je relis ma note, faire une modif de texte
+        rapide depuis le tel donne envie d'être possible. » ⚠️ Ce n'est pas un
+        ajustement mobile : ça touche la **doctrine note d'origine** (l'écran de
+        lecture affiche la note d'origine, aujourd'hui volontairement en lecture
+        seule) et il n'y a plus de capture bar sur mobile. À arbitrer avec Brice
+        avant de coder : édition en place sur `/notes/[id]/lecture`, ou retour
+        d'une capture bar sur cet écran ?
+  - [ ] Pas fait, connu : **placer une note sur la carte au doigt** reste
+        impossible (le drop de note vient d'un drag & drop HTML5). Piste
+        évoquée : un bouton « Placer sur la carte » sur la card de `/notes`, qui
+        renvoie à l'accueil avec la note armée.
 
 - [ ] **0.1.7+ — Passe esthétique** (Brice : « n'imagine pas que le 0.1.6 soit
       la fin »). Revoir le look du canvas et de l'étude de notes jusqu'à
