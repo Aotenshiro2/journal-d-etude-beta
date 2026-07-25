@@ -99,7 +99,7 @@ function AuthPage() {
     <div
       className="dark"
       style={{
-        position: 'relative', minHeight: '100vh', overflow: 'hidden',
+        position: 'relative', minHeight: '100dvh', overflow: 'hidden',
         display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
         background: 'radial-gradient(130% 120% at 50% 6%, #121214 0%, #050506 55%, #000000 100%)',
       }}

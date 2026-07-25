@@ -368,6 +368,36 @@ input[type="search"]::-moz-selection {
     border-radius: 10px;
   }
 
+  /* ── Mobile ────────────────────────────────────────────────────────────────
+     Le journal au téléphone : consulter ses canvas, corriger au doigt, relire.
+     Ces utilitaires sont le socle — le reste des ajustements vit dans les
+     composants, via le hook `useIsMobile`. */
+
+  /* Cible tactile confortable. Les boutons icône de l'app sont en 26–30 px :
+     assez pour la souris, trop petits pour le pouce. On agrandit la zone
+     cliquable SANS toucher au dessin du bouton (l'icône reste centrée). */
+  .touch-target {
+    position: relative;
+  }
+  .touch-target::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: max(100%, 44px);
+    height: max(100%, 44px);
+    transform: translate(-50%, -50%);
+  }
+
+  /* La marge du bas sur les téléphones à barre de geste (iPhone sans bouton) :
+     sans ça, les barres flottantes basses passent sous la barre système. */
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .safe-bottom-offset {
+    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  }
+
   /* Spotlight dot layer — dots s'illuminent autour du curseur */
   .canvas-dot-spotlight {
     position: absolute;

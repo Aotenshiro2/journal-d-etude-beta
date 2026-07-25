@@ -59,7 +59,7 @@ export default function Landing() {
       ref={rootRef}
       className="dark"
       style={{
-        position: 'relative', width: '100%', height: '100vh', overflow: 'hidden',
+        position: 'relative', width: '100%', height: '100dvh', overflow: 'hidden',
         background: 'radial-gradient(130% 120% at 50% 6%, #121214 0%, #050506 55%, #000000 100%)',
         color: 'var(--node-title)',
       }}

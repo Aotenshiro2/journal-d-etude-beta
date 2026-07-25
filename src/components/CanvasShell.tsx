@@ -21,9 +21,10 @@ import Link from 'next/link'
 import { useRouter, usePathname } from 'next/navigation'
 import {
   BookOpen, Lightbulb, BarChart2, Compass, Layers, Sunrise, BookMarked,
-  ChevronDown, Sun, Moon, History, HelpCircle, Search,
+  ChevronDown, Sun, Moon, History, HelpCircle, Search, MoreHorizontal,
 } from 'lucide-react'
 import { useTheme } from '@/contexts/ThemeContext'
+import { useIsMobile } from '@/hooks/useIsMobile'
 import UserMenu from './UserMenu'
 
 // Les ESPACES — même liste que l'accueil (NoteMapCanvas.MODES).
@@ -145,11 +146,23 @@ interface CanvasShellProps {
 // seraient décalés par rapport aux points éteints.
 const DOT_BG = { backgroundSize: '24px 24px', backgroundPosition: '0px 0px' }
 
+// Les actions rapides du flux — mêmes cibles au bureau et au téléphone, seule la
+// présentation change (rangée dépliée vs menu « ⋯ »).
+const QUICK_LINKS = [
+  { href: '/notes', label: 'Notes' },
+  { href: '/guide', label: 'Guide' },
+]
+
 export default function CanvasShell({ user, dueCount, extraActions, children }: CanvasShellProps) {
   const canvasRef = useRef<HTMLDivElement>(null)
   const spotlightRef = useRef<HTMLDivElement>(null)
+  const isMobile = useIsMobile()
+  const [quickOpen, setQuickOpen] = useState(false)
 
   useEffect(() => {
+    // Le halo suit la souris : aucun sens au doigt, et c'est un listener de moins
+    // sur des appareils qui n'en ont pas besoin.
+    if (isMobile) return
     const el = canvasRef.current
     if (!el) return
     const spotlight = spotlightRef.current
@@ -167,10 +180,10 @@ export default function CanvasShell({ user, dueCount, extraActions, children }: 
       el.removeEventListener('mousemove', onMove)
       el.removeEventListener('mouseleave', onLeave)
     }
-  }, [])
+  }, [isMobile])
 
   return (
-    <div ref={canvasRef} style={{ position: 'relative', width: '100%', height: '100vh', overflow: 'hidden', background: 'var(--canvas-bg)' }}>
+    <div ref={canvasRef} style={{ position: 'relative', width: '100%', height: '100dvh', overflow: 'hidden', background: 'var(--canvas-bg)' }}>
       {/* Toile de fond — même dot grid que l'accueil (statique : pas de zoom ici) */}
       <div className="canvas-grid" style={DOT_BG} />
       <div ref={spotlightRef} className="canvas-dot-spotlight" style={DOT_BG} />
@@ -193,32 +206,83 @@ export default function CanvasShell({ user, dueCount, extraActions, children }: 
         {children}
       </div>
 
-      {/* ── Bas-droite — thème + actions rapides du flux (comme l'accueil) ── */}
-      <div style={{ position: 'absolute', bottom: 16, right: 14, zIndex: 20 }}>
-        <div className="canvas-float-pill" style={{ display: 'flex', alignItems: 'center', gap: 2, padding: '4px 8px' }}>
-          <ThemeToggleInline />
-          <div style={{ width: 1, height: 16, background: 'var(--float-border)', margin: '0 4px' }} />
-          <Link href="/review"
-            title="Relire tes jugements A/B/C échus"
-            style={{ fontSize: 12, color: dueCount ? 'var(--node-title)' : 'var(--node-meta)', padding: '4px 8px', borderRadius: 6, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 5 }}
-          >
-            Relire
-            {!!dueCount && dueCount > 0 && (
-              <span style={{ fontSize: 10, fontWeight: 600, color: '#fff', background: '#ef4444', borderRadius: 999, padding: '0 6px', lineHeight: '15px' }}>{dueCount}</span>
+      {/* ── Bas-droite — thème + actions rapides du flux (comme l'accueil) ──
+          Les quatre entrées côte à côte débordent d'un écran de téléphone : sur
+          mobile elles se replient derrière « ⋯ », en gardant le badge des
+          jugements échus visible sur le bouton (seul signal d'action en attente). */}
+      <div className="safe-bottom-offset" style={{ position: 'absolute', right: 14, zIndex: 20 }}>
+        {isMobile ? (
+          <>
+            {quickOpen && (
+              <>
+                <div style={{ position: 'fixed', inset: 0, zIndex: 40 }} onClick={() => setQuickOpen(false)} />
+                <div
+                  className="canvas-float-pill"
+                  style={{ position: 'absolute', bottom: 50, right: 0, zIndex: 50, minWidth: 170, padding: '6px 0', overflow: 'hidden' }}
+                >
+                  <Link href="/review" onClick={() => setQuickOpen(false)}
+                    style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 14px', fontSize: 13, color: 'var(--node-title)', textDecoration: 'none' }}
+                  >
+                    <History size={14} style={{ color: 'var(--node-meta)', flexShrink: 0 }} />
+                    <span style={{ flex: 1 }}>Relire</span>
+                    {!!dueCount && dueCount > 0 && (
+                      <span style={{ fontSize: 10, fontWeight: 600, color: '#fff', background: '#ef4444', borderRadius: 999, padding: '0 6px', lineHeight: '15px' }}>{dueCount}</span>
+                    )}
+                  </Link>
+                  {QUICK_LINKS.map(({ href, label }) => (
+                    <Link key={href} href={href} onClick={() => setQuickOpen(false)}
+                      style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 14px', fontSize: 13, color: 'var(--node-preview)', textDecoration: 'none' }}
+                    >
+                      {label === 'Notes' ? <BookOpen size={14} style={{ color: 'var(--node-meta)', flexShrink: 0 }} /> : <HelpCircle size={14} style={{ color: 'var(--node-meta)', flexShrink: 0 }} />}
+                      {label}
+                    </Link>
+                  ))}
+                  <div style={{ height: 1, background: 'var(--float-border)', margin: '4px 0' }} />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px' }}>
+                    <ThemeToggleInline />
+                    {extraActions}
+                  </div>
+                </div>
+              </>
             )}
-          </Link>
-          {[
-            { href: '/notes', label: 'Notes' },
-            { href: '/guide', label: 'Guide' },
-          ].map(({ href, label }) => (
-            <Link key={href} href={href}
-              style={{ fontSize: 12, color: 'var(--node-meta)', padding: '4px 8px', borderRadius: 6, textDecoration: 'none', display: 'block' }}
+            <button
+              onClick={() => setQuickOpen(o => !o)}
+              className="canvas-float-pill"
+              title="Actions rapides"
+              style={{
+                position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                width: 42, height: 42, border: 'none', cursor: 'pointer', color: 'var(--node-title)',
+              }}
             >
-              {label}
+              <MoreHorizontal size={18} />
+              {!!dueCount && dueCount > 0 && (
+                <span style={{ position: 'absolute', top: -4, right: -4, fontSize: 10, fontWeight: 600, color: '#fff', background: '#ef4444', borderRadius: 999, padding: '0 5px', lineHeight: '16px' }}>{dueCount}</span>
+              )}
+            </button>
+          </>
+        ) : (
+          <div className="canvas-float-pill" style={{ display: 'flex', alignItems: 'center', gap: 2, padding: '4px 8px' }}>
+            <ThemeToggleInline />
+            <div style={{ width: 1, height: 16, background: 'var(--float-border)', margin: '0 4px' }} />
+            <Link href="/review"
+              title="Relire tes jugements A/B/C échus"
+              style={{ fontSize: 12, color: dueCount ? 'var(--node-title)' : 'var(--node-meta)', padding: '4px 8px', borderRadius: 6, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 5 }}
+            >
+              Relire
+              {!!dueCount && dueCount > 0 && (
+                <span style={{ fontSize: 10, fontWeight: 600, color: '#fff', background: '#ef4444', borderRadius: 999, padding: '0 6px', lineHeight: '15px' }}>{dueCount}</span>
+              )}
             </Link>
-          ))}
-          {extraActions}
-        </div>
+            {QUICK_LINKS.map(({ href, label }) => (
+              <Link key={href} href={href}
+                style={{ fontSize: 12, color: 'var(--node-meta)', padding: '4px 8px', borderRadius: 6, textDecoration: 'none', display: 'block' }}
+              >
+                {label}
+              </Link>
+            ))}
+            {extraActions}
+          </div>
+        )}
       </div>
     </div>
   )

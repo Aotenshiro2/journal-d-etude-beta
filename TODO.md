@@ -380,9 +380,45 @@ Découpage (ordre indicatif, le 0.1 ne ferme qu'à maturité) :
       · `EmailGate.tsx` embarque une clé API Kit en dur, donc **en clair dans le
         bundle public** — à révoquer si elle est secrète, et à déplacer côté
         serverless.
-- [ ] **⏭ PROCHAIN (26/07/2026) — Adapter le canvas à l'usage mobile** (journal) —
-      aujourd'hui pensé desktop ; définir ce qu'un élève peut faire au téléphone
-      (consulter ? capturer ? le mapping complet est-il réaliste en tactile ?).
+- [ ] **🔨 EN COURS (25/07/2026) — Adapter le canvas à l'usage mobile** (journal).
+
+      **Besoin cadré par Brice (25/07)** — au téléphone, trois choses et pas une
+      de plus : (1) consulter ses canvas pour voir les liens déjà créés (accueil
+      ET étude d'une note) ; (2) faire des correctifs rapides en `tap → tap`
+      (poser un bloc, tracer un trait) ; (3) relire ses notes, d'origine comme
+      retravaillées. « L'objectif n'est pas la même profondeur d'usage que
+      l'ordinateur, mais un accès à son travail dans une interface qui ne trahit
+      pas l'expérience visible sur ordinateur. »
+      **Hors périmètre explicite** : `/concepts`, `/analytics`, `/patterns`,
+      `/game`, `/session`, `/journal`, `/market` — leur mobile se fera quand on
+      retravaillera ces modules, si nécessaire.
+      **Gestes retenus** : `tap → tap` pour poser un bloc ET pour tracer un lien
+      (crayon actif : tap card de départ → tap card d'arrivée). Le crayon manque
+      au canvas d'étude (`select | mark | pan`), on l'y ajoute. Le drag & drop
+      souris reste intact au bureau.
+      **Pas de nouvel écran liste** : `/notes` est déjà responsive
+      (`grid-cols-1`), l'accueil mobile reste la carte.
+
+  - [x] **Étape 0 — Fondations** (25/07) : `export const viewport` dans
+        `layout.tsx` (sans ça le téléphone rendait la page à ~980 px et dézoomait
+        tout — cause n°1) ; `src/hooks/useIsMobile.ts` (`matchMedia` 767 px, sûr
+        au SSR) ; `100vh → 100dvh` (`CanvasShell`, `Landing`, `/auth`) ;
+        `.touch-target` / `.safe-bottom*` dans `globals.css` ; halo curseur non
+        monté sur mobile ; pill bas-droite (thème · Relire · Notes · Guide, qui
+        débordait à 375 px) repliée derrière « ⋯ » avec le badge `dueCount`
+        conservé sur le bouton. Build vert, `viewport` vérifiée dans le HTML
+        servi. **À valider sur le téléphone de Brice.**
+  - [ ] **Étape 1 — Consulter et corriger au doigt** : prop `mobile` sur
+        `NoteMapCanvasInner` (pan/pinch, pas de `RightToolbar`/`SettingsPanel`/
+        aperçu latéral, pill crayon) ; `tap → tap` pour poser un bloc
+        (`MessagePanel.onArm` + `StudyCanvas.onPaneClick`, qui rebranche le
+        `screenToFlowPosition` du `onDrop`) ; `tap → tap` pour les liens dans les
+        deux canvas (rebranche les `onConnect` existants) ; tiroirs plein écran.
+  - [ ] **Étape 2 — Relire** : `ReviewDeck` (grossir les boutons A/B/C),
+        `DocumentView` lisible en mobile, `NoteReader` sans débordement.
+  - [ ] Suite laissée de côté : **réordonnancement tactile de `DocumentView`**
+        (son DnD est du HTML5, inopérant au doigt — et réordonner n'est pas un
+        « correctif rapide »).
 
 - [ ] **0.1.7+ — Passe esthétique** (Brice : « n'imagine pas que le 0.1.6 soit
       la fin »). Revoir le look du canvas et de l'étude de notes jusqu'à
@@ -395,8 +431,10 @@ liens du 0.1.6, pas par la boîte).
 
 ---
 **Dernière mise à jour :** 25 juillet 2026
-**Chantier en cours :** Connexion aux comptes AOK **LIVRÉE en prod le 25/07/2026**
-(site + masterclass). Prochain (26/07) = **adapter le canvas du journal au mobile**.
+**Chantier en cours :** **adapter le canvas du journal au mobile** — étape 0
+(fondations) livrée, à valider sur le téléphone ; restent l'étape 1 (consulter et
+corriger au doigt) et l'étape 2 (relire). Connexion aux comptes AOK **LIVRÉE en
+prod le 25/07/2026** (site + masterclass).
 Restent dans la file pré-0.1.7 : écrans de première connexion (onboarding pilotage),
 puis 0.1.7 esthétique (dont repositionnement Verdict/Trades notés — ⚠️ avant le 0.2).
 **Chantier en cours :** 0.1.5 — la collection (canvas de mapping multi-notes).
