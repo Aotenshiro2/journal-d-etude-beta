@@ -560,9 +560,26 @@ input[type="search"]::-moz-selection {
   .note-preview-content ul, .note-preview-content ol,
   .note-content-preview ul, .note-content-preview ol  { padding-left: 16px; margin: 4px 0; }
   .note-preview-content a, .note-content-preview a { color: #3b82f6; text-decoration: none; }
-  .note-preview-content img, .note-content-preview img { max-width: 100%; border-radius: 6px; margin: 6px 0; }
+  .note-preview-content img, .note-content-preview img { max-width: 100%; height: auto; border-radius: 6px; margin: 6px 0; }
   /* Les images des panneaux de lecture s'agrandissent au clic (ImageLightbox) */
   .note-preview-content img { cursor: zoom-in; }
+
+  /* Le contenu vient de pages web capturées : il embarque ses propres largeurs
+     en dur, ses tableaux et ses blocs de code. Sur un téléphone, tout ça pousse
+     la page en scroll horizontal si on ne le borne pas. */
+  .note-preview-content, .note-content-preview {
+    overflow-wrap: anywhere;
+  }
+  .note-preview-content table, .note-content-preview table,
+  .note-preview-content pre, .note-content-preview pre {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+  .note-preview-content iframe, .note-preview-content video,
+  .note-content-preview iframe, .note-content-preview video {
+    max-width: 100%;
+  }
 
   /* Pastille [[concept]] (0.1.4 — second cerveau) : un lien, pas du texte */
   .wikilink {

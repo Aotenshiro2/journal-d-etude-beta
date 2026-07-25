@@ -433,8 +433,18 @@ Découpage (ordre indicatif, le 0.1 ne ferme qu'à maturité) :
         `screenToFlowPosition` du `onDrop`. État `armedMessageId` porté par
         `StudyLayout` et `CollectionLayout`. Le drag & drop souris est intact.
         **À valider sur le téléphone de Brice.**
-  - [ ] **Étape 2 — Relire** : `ReviewDeck` (grossir les boutons A/B/C),
-        `DocumentView` lisible en mobile, `NoteReader` sans débordement.
+  - [x] **Étape 2 — Relire** (25/07) : boutons **A/B/C à 44 px** au téléphone
+        (32 px suffisaient à la souris, pas au pouce) et causes descendues sur
+        leur propre ligne — alignées, elles s'écrasaient sur 375 px. Champs de
+        saisie à **16 px** : en dessous, iOS zoome tout seul à la mise au point.
+        « J'ai relu » prend la largeur, rappels 7 j / 30 j devenus de vraies
+        cibles. Lignes de la bibliothèque sur deux rangées (six éléments
+        alignés ne tenaient pas). `DocumentView` : marge droite 48 → 14 px,
+        décalage haut 76 → 20 px, et **lecture seule sur mobile** (son
+        réordonnancement est du DnD HTML5). `globals.css` : le HTML capturé est
+        borné (tableaux et blocs de code défilent dans leur boîte, images et
+        iframes bornées) — sans ça une page capturée poussait tout l'écran en
+        scroll horizontal.
   - [ ] Suite laissée de côté : **réordonnancement tactile de `DocumentView`**
         (son DnD est du HTML5, inopérant au doigt — et réordonner n'est pas un
         « correctif rapide »).
@@ -462,9 +472,12 @@ liens du 0.1.6, pas par la boîte).
 
 ---
 **Dernière mise à jour :** 25 juillet 2026
-**Chantier en cours :** **adapter le canvas du journal au mobile** — étape 0
-(fondations) livrée, à valider sur le téléphone ; restent l'étape 1 (consulter et
-corriger au doigt) et l'étape 2 (relire). Connexion aux comptes AOK **LIVRÉE en
+**Chantier en cours :** **adapter le canvas du journal au mobile** — les trois
+étapes sont livrées (fondations · consulter et corriger au doigt · relire), les
+étapes 0 et 1a validées par Brice sur son téléphone, 1b et 2 à valider. Restent
+deux chantiers tracés et volontairement non faits : **corriger un texte depuis
+le téléphone** (touche la doctrine note d'origine, à arbitrer avec Brice) et
+**placer une note sur la carte au doigt**. Connexion aux comptes AOK **LIVRÉE en
 prod le 25/07/2026** (site + masterclass).
 Restent dans la file pré-0.1.7 : écrans de première connexion (onboarding pilotage),
 puis 0.1.7 esthétique (dont repositionnement Verdict/Trades notés — ⚠️ avant le 0.2).

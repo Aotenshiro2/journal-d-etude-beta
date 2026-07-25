@@ -81,30 +81,34 @@ function VerdictRow({ v, onJudged, label, dot }: { v: AnnotationData; onJudged: 
           <span className="text-[11px] uppercase tracking-wide" style={{ color: 'var(--node-meta)' }}>{label}</span>
         </div>
       )}
-      <div className="flex items-center gap-1.5 mb-2 flex-wrap">
+      {/* A/B/C : le geste central de la relecture, et celui qu'on fait au pouce.
+          32 px suffisaient à la souris, pas au doigt → 44 px sur téléphone. Les
+          causes descendent sur leur propre ligne : sur 375 px, tout aligné
+          écrasait les deux (retour Brice, 25/07/2026). */}
+      <div className="flex items-center gap-2 mb-2">
         {GRADES.map(g => (
           <button key={g} disabled={saved} onClick={() => setGrade(g)}
-            className={`w-8 h-8 rounded-lg border text-sm font-semibold transition-all ${grade === g ? GRADE_CLASS[g] : ''}`}
+            className={`w-11 h-11 sm:w-8 sm:h-8 rounded-lg border text-base sm:text-sm font-semibold transition-all ${grade === g ? GRADE_CLASS[g] : ''}`}
             style={grade === g ? undefined : { borderColor: 'var(--node-border)', color: 'var(--node-meta)' }}>
             {g}
           </button>
         ))}
-        <div className="flex flex-wrap gap-1 ml-1">
-          {CAUSES.map(c => (
-            <button key={c.key} disabled={saved} onClick={() => setCause(cause === c.key ? null : c.key)}
-              className="text-[11px] px-2 py-0.5 rounded-full border transition-colors"
-              style={cause === c.key ? { borderColor: 'var(--node-title)', color: 'var(--node-title)' } : { borderColor: 'var(--node-border)', color: 'var(--node-meta)' }}>
-              {c.label}
-            </button>
-          ))}
-        </div>
+      </div>
+      <div className="flex flex-wrap gap-1.5 mb-2">
+        {CAUSES.map(c => (
+          <button key={c.key} disabled={saved} onClick={() => setCause(cause === c.key ? null : c.key)}
+            className="text-xs sm:text-[11px] px-3 py-2 sm:px-2 sm:py-0.5 rounded-full border transition-colors"
+            style={cause === c.key ? { borderColor: 'var(--node-title)', color: 'var(--node-title)' } : { borderColor: 'var(--node-border)', color: 'var(--node-meta)' }}>
+            {c.label}
+          </button>
+        ))}
       </div>
       <textarea value={phrase} disabled={saved} onChange={e => setPhrase(e.target.value)} rows={2}
-        className="w-full resize-none rounded-lg px-2.5 py-1.5 text-[13px] outline-none mb-2"
+        className="w-full resize-none rounded-lg px-2.5 py-2 text-base sm:text-[13px] outline-none mb-2"
         style={{ background: 'var(--node-bg)', border: '1px solid var(--node-border)', color: 'var(--node-title)' }} />
       <div className="flex justify-end">
         <button onClick={submit} disabled={saved || saving}
-          className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg text-white disabled:opacity-50"
+          className="flex items-center gap-1.5 text-sm sm:text-xs font-medium px-4 py-2.5 sm:px-3 sm:py-1.5 rounded-lg text-white disabled:opacity-50"
           style={{ background: saved ? '#22c55e' : '#3b82f6' }}>
           <Check size={13} /> {saved ? 'Relu' : changed ? 'Requalifier' : 'Confirmer'}
         </button>
@@ -157,7 +161,7 @@ function RelectureCard({ item, onRead, onRemind, onSkip, onJudged }: {
   return (
     <div className="w-full rounded-2xl overflow-hidden" style={{ background: 'var(--node-bg)', border: '1px solid var(--node-border)', boxShadow: 'var(--node-shadow)' }}>
       {/* En-tête : la note + son type */}
-      <div className="flex items-center gap-2.5 px-5 py-3.5" style={{ borderBottom: '1px solid var(--float-border)' }}>
+      <div className="flex items-center gap-2.5 px-4 sm:px-5 py-3.5" style={{ borderBottom: '1px solid var(--float-border)' }}>
         {item.note.favicon && (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={item.note.favicon} alt="" style={{ width: 16, height: 16, borderRadius: 3, flexShrink: 0 }} />
@@ -172,7 +176,7 @@ function RelectureCard({ item, onRead, onRemind, onSkip, onJudged }: {
       </div>
 
       {/* La réorganisation, relue (lecture seule, images cliquables en grand) */}
-      <div className="px-5 py-4 overflow-y-auto" style={{ maxHeight: '48vh' }}>
+      <div className="px-4 sm:px-5 py-4 overflow-y-auto" style={{ maxHeight: '48vh' }}>
         <DocumentView nodes={item.nodes} messages={item.messages} readOnly embedded tradeMeta={tradeMeta} />
       </div>
 
@@ -204,18 +208,20 @@ function RelectureCard({ item, onRead, onRemind, onSkip, onJudged }: {
       )}
 
       {/* Capture d'une idée qui vient en relisant — sans friction, atterrit dans « À trier » */}
-      <div className="px-5 py-3.5" style={{ borderTop: '1px solid var(--float-border)' }}>
+      <div className="px-4 sm:px-5 py-3.5" style={{ borderTop: '1px solid var(--float-border)' }}>
         <div className="flex items-center gap-2">
           <input
             value={thought}
             onChange={e => setThought(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addThought() } }}
-            placeholder="Une idée en relisant ? (ajoutée à la note)"
-            className="flex-1 rounded-lg px-3 py-2 text-[13px] outline-none"
+            placeholder="Une idée en relisant ?"
+            /* 16 px sur téléphone : en dessous, iOS zoome tout seul à la mise
+               au point et l'écran part de travers. */
+            className="flex-1 min-w-0 rounded-lg px-3 py-2.5 text-base sm:text-[13px] outline-none"
             style={{ background: 'var(--canvas-bg)', border: '1px solid var(--node-border)', color: 'var(--node-title)' }}
           />
           <button onClick={addThought} disabled={!thought.trim() || saving}
-            className="flex items-center gap-1 text-xs font-medium px-3 py-2 rounded-lg disabled:opacity-40"
+            className="flex items-center gap-1 text-sm sm:text-xs font-medium px-3 py-2.5 sm:py-2 rounded-lg disabled:opacity-40 flex-shrink-0"
             style={{ border: '1px solid var(--node-border)', color: 'var(--node-title)' }}>
             <Plus size={13} /> Ajouter
           </button>
@@ -232,22 +238,23 @@ function RelectureCard({ item, onRead, onRemind, onSkip, onJudged }: {
         )}
       </div>
 
-      {/* Actions */}
-      <div className="px-5 py-3.5" style={{ borderTop: '1px solid var(--float-border)' }}>
+      {/* Actions — « J'ai relu » est le bouton qu'on cherche au pouce, il prend
+          la largeur sur téléphone ; les rappels sont des cibles à part entière
+          plutôt qu'un lien souligné dans une phrase. */}
+      <div className="px-4 sm:px-5 py-3.5 safe-bottom" style={{ borderTop: '1px solid var(--float-border)' }}>
         <div className="flex items-center justify-between gap-3">
-          <button onClick={onSkip} className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg" style={{ color: 'var(--node-meta)' }}>
+          <button onClick={onSkip} className="flex items-center gap-1.5 text-sm sm:text-xs px-4 py-3 sm:px-3 sm:py-2 rounded-lg" style={{ color: 'var(--node-meta)' }}>
             <SkipForward size={13} /> Passer
           </button>
-          <button onClick={onRead} className="flex items-center gap-2 text-sm font-medium px-5 py-2.5 rounded-xl text-white" style={{ background: '#3b82f6' }}>
+          <button onClick={onRead} className="flex-1 sm:flex-none flex items-center justify-center gap-2 text-sm font-medium px-5 py-3 sm:py-2.5 rounded-xl text-white" style={{ background: '#3b82f6' }}>
             <Check size={15} /> J&apos;ai relu
           </button>
         </div>
-        <p className="text-center text-[11px] mt-2.5" style={{ color: 'var(--node-meta)', opacity: 0.8 }}>
-          Pas encore ancrée ? Me la reproposer dans{' '}
-          <button onClick={() => onRemind(7)} className="underline" style={{ color: 'var(--node-meta)' }}>7 j</button>
-          {' · '}
-          <button onClick={() => onRemind(30)} className="underline" style={{ color: 'var(--node-meta)' }}>30 j</button>
-        </p>
+        <div className="flex items-center justify-center flex-wrap gap-x-1.5 gap-y-1 text-[11px] mt-3" style={{ color: 'var(--node-meta)', opacity: 0.8 }}>
+          <span>Pas encore ancrée ? Me la reproposer dans</span>
+          <button onClick={() => onRemind(7)} className="px-2.5 py-1.5 rounded-md underline" style={{ color: 'var(--node-meta)' }}>7 j</button>
+          <button onClick={() => onRemind(30)} className="px-2.5 py-1.5 rounded-md underline" style={{ color: 'var(--node-meta)' }}>30 j</button>
+        </div>
       </div>
     </div>
   )
@@ -351,34 +358,41 @@ function LibrarySection({ items }: { items: LibraryItem[] }) {
       )}
       <div className="space-y-1.5 pr-1" style={{ maxHeight: 380, overflowY: 'auto' }}>
         {filtered.map(item => (
-          <div key={`${item.kind}-${item.targetId}`} className="flex items-center gap-2.5 rounded-xl px-3.5 py-2" style={{ background: 'var(--node-bg)', border: '1px solid var(--node-border)' }}>
-            {item.kind === 'collection'
-              ? <Layers size={13} style={{ color: 'var(--node-meta)', flexShrink: 0 }} />
-              : item.favicon
-                // eslint-disable-next-line @next/next/no-img-element
-                ? <img src={item.favicon} alt="" style={{ width: 14, height: 14, borderRadius: 3, flexShrink: 0 }} />
-                : <span style={{ width: 14, height: 14, borderRadius: 3, background: 'var(--node-border)', flexShrink: 0 }} />
-            }
-            <span className="flex-1 min-w-0 text-sm truncate" style={{ color: 'var(--node-title)' }}>{item.title}</span>
-            {item.kind === 'collection' && item.noteCount != null && (
-              <span className="text-[11px] flex-shrink-0" style={{ color: 'var(--node-meta)' }}>{item.noteCount} note{item.noteCount > 1 ? 's' : ''}</span>
-            )}
-            <span className={`text-[11px] flex-shrink-0 ${item.reviewed ? 'text-green-500' : 'text-blue-400'}`}>
-              {item.reviewed ? 'relue ✓' : 'à relire'}
-            </span>
-            <Link
-              href={item.kind === 'collection' ? `/collection/${item.targetId}` : `/review?note=${item.targetId}`}
-              title={item.kind === 'collection' ? 'Ouvrir la collection' : 'Revoir la version réorganisée (ne change rien à son état)'}
-              className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg flex-shrink-0"
-              style={{ border: '1px solid var(--node-border)', color: 'var(--node-title)' }}
-            >
-              <BookOpen size={12} /> Revoir
-            </Link>
-            {item.kind === 'note' && (
-              <Link href={`/notes/${item.targetId}`} title="Ouvrir le canvas pour ré-organiser" className="flex-shrink-0 p-1.5 rounded-md" style={{ color: 'var(--node-meta)' }}>
-                <ExternalLink size={13} />
+          // Six éléments sur une ligne tenaient au bureau, pas sur 375 px : le
+          // titre et les actions passent sur deux rangées au téléphone.
+          <div key={`${item.kind}-${item.targetId}`} className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-2.5 rounded-xl px-3.5 py-2.5 sm:py-2" style={{ background: 'var(--node-bg)', border: '1px solid var(--node-border)' }}>
+            <div className="flex items-center gap-2.5 min-w-0 flex-1">
+              {item.kind === 'collection'
+                ? <Layers size={13} style={{ color: 'var(--node-meta)', flexShrink: 0 }} />
+                : item.favicon
+                  // eslint-disable-next-line @next/next/no-img-element
+                  ? <img src={item.favicon} alt="" style={{ width: 14, height: 14, borderRadius: 3, flexShrink: 0 }} />
+                  : <span style={{ width: 14, height: 14, borderRadius: 3, background: 'var(--node-border)', flexShrink: 0 }} />
+              }
+              <span className="flex-1 min-w-0 text-sm truncate" style={{ color: 'var(--node-title)' }}>{item.title}</span>
+            </div>
+            <div className="flex items-center gap-2.5 flex-shrink-0">
+              {item.kind === 'collection' && item.noteCount != null && (
+                <span className="text-[11px] flex-shrink-0" style={{ color: 'var(--node-meta)' }}>{item.noteCount} note{item.noteCount > 1 ? 's' : ''}</span>
+              )}
+              <span className={`text-[11px] flex-shrink-0 ${item.reviewed ? 'text-green-500' : 'text-blue-400'}`}>
+                {item.reviewed ? 'relue ✓' : 'à relire'}
+              </span>
+              <span className="flex-1 sm:hidden" />
+              <Link
+                href={item.kind === 'collection' ? `/collection/${item.targetId}` : `/review?note=${item.targetId}`}
+                title={item.kind === 'collection' ? 'Ouvrir la collection' : 'Revoir la version réorganisée (ne change rien à son état)'}
+                className="flex items-center gap-1.5 text-xs font-medium px-3 py-2 sm:py-1.5 rounded-lg flex-shrink-0"
+                style={{ border: '1px solid var(--node-border)', color: 'var(--node-title)' }}
+              >
+                <BookOpen size={12} /> Revoir
               </Link>
-            )}
+              {item.kind === 'note' && (
+                <Link href={`/notes/${item.targetId}`} title="Ouvrir le canvas pour ré-organiser" className="flex-shrink-0 p-2 sm:p-1.5 rounded-md" style={{ color: 'var(--node-meta)' }}>
+                  <ExternalLink size={13} />
+                </Link>
+              )}
+            </div>
           </div>
         ))}
         {filtered.length === 0 && (
@@ -426,7 +440,7 @@ export default function ReviewDeck({ toRelire, toReorganize, library = [], focus
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="max-w-2xl mx-auto px-5 py-8">
+      <div className="max-w-2xl mx-auto px-4 sm:px-5 py-6 sm:py-8">
         {!focus && toReorganize.length > 0 && <ReorganizeSection items={toReorganize} />}
 
         {total === 0 ? (

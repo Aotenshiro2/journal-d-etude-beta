@@ -5,6 +5,7 @@ import { GripVertical } from 'lucide-react'
 import { MessageData, CanvasNodeData } from '@/types'
 import { parseBlockContent, GROUP_COLORS, TradeBadge, TradeMeta } from './StudyCanvas'
 import ImageLightbox from './ImageLightbox'
+import { useIsMobile } from '@/hooks/useIsMobile'
 
 // La vue document — l'AUTRE projection du même modèle : les groupes du canvas
 // deviennent des sections, les blocs une liste réordonnable. Rien de nouveau
@@ -31,7 +32,10 @@ const byOrder = (a: CanvasNodeData, b: CanvasNodeData) =>
   ((a.orderInParent ?? 1e9) - (b.orderInParent ?? 1e9)) || (a.y - b.y) || (a.x - b.x)
 
 export default function DocumentView({ nodes, messages, insetLeft = 0, readOnly = false, embedded = false, tradeMeta, onUpdateNode }: DocumentViewProps) {
-  const interactive = !readOnly
+  const isMobile = useIsMobile()
+  // Le réordonnancement passe par du drag & drop HTML5, inopérant au doigt :
+  // au téléphone la vue document est en lecture (tracé dans TODO.md).
+  const interactive = !readOnly && !isMobile
   const update = onUpdateNode ?? (() => {})
   const messageMap = useMemo(() => new Map(messages.map(m => [m.id, m])), [messages])
   const nodeById = useMemo(() => new Map(nodes.map(n => [n.id, n])), [nodes])
@@ -241,12 +245,15 @@ export default function DocumentView({ nodes, messages, insetLeft = 0, readOnly 
   const freeIds = lists[FREE] ?? []
   const isEmpty = sectionIds.length === 0 && freeIds.length === 0
 
+  // Au téléphone, la marge droite de 48 px (pensée pour laisser respirer à côté
+  // des panneaux du bureau) mangeait un huitième de l'écran, et le décalage
+  // haut de 76 px poussait le texte sous la ligne de flottaison.
   const outerStyle: React.CSSProperties = embedded
     ? { position: 'relative', width: '100%' }
-    : { position: 'absolute', inset: 0, overflowY: 'auto', paddingLeft: insetLeft, paddingRight: 48 }
+    : { position: 'absolute', inset: 0, overflowY: 'auto', paddingLeft: insetLeft, paddingRight: isMobile ? 14 : 48 }
   const innerStyle: React.CSSProperties = embedded
     ? { width: '100%' }
-    : { maxWidth: 700, margin: '0 auto', padding: '76px 0 160px' }
+    : { maxWidth: 700, margin: '0 auto', padding: isMobile ? '20px 0 140px' : '76px 0 160px' }
 
   return (
     <div style={outerStyle}>
