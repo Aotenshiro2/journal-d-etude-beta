@@ -238,6 +238,26 @@ Spec complète : `SPEC-second-cerveau.md` (backlinks à la Logseq). Répartie da
 le versionnage : lot 2 (wikilinks) → 0.1.4 ; lot 1 (page concept + références)
 → 0.2 ; lots 3-4 (mentions non liées, graphe global) → 0.2+.
 
+⚠️ **Toujours à faire — rappel Brice du 26/07/2026.** Le second cerveau n'est pas
+livré : seul le lot 2 (wikilinks) l'est. Ne pas le perdre de vue en sortant du 0.1.
+
+**Le chantier des traits (0.1.7) prépare le terrain, à mener dans ce sens.**
+Aujourd'hui tous les traits sont identiques (`smoothstep`, `#3b82f6`, 1,5 px,
+opacité 0.5 sur l'accueil et 0.75 en exploration) : rien ne distingue « cette
+note porte ce concept » de « ceci découle de cela ». Or c'est exactement la
+distinction dont le second cerveau a besoin pour exister à l'écran. Donc :
+
+- donner au trait une **grammaire** (3 types maximum, chacun sa forme), pas
+  seulement une animation. L'information existe déjà en base, via `CanvasEdge`
+  et le nœud-concept du 0.1.6 ;
+- le lien note → concept **est** le futur backlink. Le traiter à part dès
+  maintenant évite de tout redessiner au lot 1 (page concept + références) ;
+- le graphe global (lots 3-4) réutilisera ce même langage de trait. Posé
+  correctement ici, le lot 4 devient du branchement, pas du dessin.
+
+Comparaison en cours sur `/labo-traits` (page jetable) : la variante 4, « animé
+vers les concepts », est celle qui va le plus dans ce sens.
+
 > Côté extension, voir `apps/carnet-du-trader-extension/TODO.md`
 > (Edgyx, prompts IA, doctrine, mode mentorat).
 
