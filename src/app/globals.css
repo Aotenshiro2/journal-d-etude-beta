@@ -830,14 +830,21 @@ input[type="search"]::-moz-selection {
    composants (StudyCanvas, NoteMapCanvas), donc chargé APRÈS ce fichier qui l'est
    par le layout racine. À spécificité égale (0,1,0 des deux côtés) leur règle
    gagnait et celle-ci ne s'appliquait pas. Même raison que le `!important` des
-   deux neutralisations juste au-dessus. */
+   deux neutralisations juste au-dessus.
+
+   ⚠️ NE JAMAIS remettre `width` ici. React Flow pose la largeur réelle du
+   groupe en style INLINE sur le nœud ; un `!important` de feuille de style bat
+   un inline sans `!important`, donc `width: auto !important` écrasait la taille
+   calculée et la boîte se repliait sur son contenu (l'onglet seul au repos, +
+   la barre d'outils au survol). Leur `width: 150px` est inoffensif : l'inline
+   le bat déjà. Même prudence pour toute propriété que React Flow pilote en
+   inline (width, height, transform). */
 .react-flow__node-group {
   padding: 0 !important;
   border: none !important;
   border-radius: 0 !important;
   background: none !important;
   text-align: left !important;
-  width: auto !important;
   font-size: inherit !important;
   color: inherit !important;
   box-shadow: none !important;
