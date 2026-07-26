@@ -823,17 +823,24 @@ input[type="search"]::-moz-selection {
 /* Notre type de nœud s'appelle `group` — comme le type INTÉGRÉ de React Flow.
    Il hérite donc de la feuille par défaut (`dist/style.css`) : padding 10px,
    fond blanc à 25 %, coins à 3px, texte centré. C'est ce qui dessinait un halo
-   pâle tout autour du pointillé du groupe et recentrait son étiquette.
-   `noteMap` et `concept` sont des noms à nous : eux n'héritent de rien. */
+   pâle tout autour du groupe et recentrait son étiquette.
+   `noteMap` et `concept` sont des noms à nous : eux n'héritent de rien.
+
+   `!important` OBLIGATOIRE : `@xyflow/react/dist/style.css` est importé dans les
+   composants (StudyCanvas, NoteMapCanvas), donc chargé APRÈS ce fichier qui l'est
+   par le layout racine. À spécificité égale (0,1,0 des deux côtés) leur règle
+   gagnait et celle-ci ne s'appliquait pas. Même raison que le `!important` des
+   deux neutralisations juste au-dessus. */
 .react-flow__node-group {
-  padding: 0;
-  border: none;
-  border-radius: 0;
-  background: none;
-  text-align: left;
-  width: auto;
-  font-size: inherit;
-  color: inherit;
+  padding: 0 !important;
+  border: none !important;
+  border-radius: 0 !important;
+  background: none !important;
+  text-align: left !important;
+  width: auto !important;
+  font-size: inherit !important;
+  color: inherit !important;
+  box-shadow: none !important;
 }
 
 .react-flow__controls {
