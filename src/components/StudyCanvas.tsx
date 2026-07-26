@@ -51,12 +51,17 @@ interface StudyCanvasProps {
 }
 
 // Palette sobre des groupes — « ça va avec ça »
-export const GROUP_COLORS: Record<string, { border: string; bg: string; text: string }> = {
-  blue: { border: '#60a5fa', bg: 'rgba(96,165,250,0.07)', text: '#93c5fd' },
-  green: { border: '#34d399', bg: 'rgba(52,211,153,0.07)', text: '#6ee7b7' },
-  amber: { border: '#fbbf24', bg: 'rgba(251,191,36,0.07)', text: '#fcd34d' },
-  purple: { border: '#a78bfa', bg: 'rgba(167,139,250,0.07)', text: '#c4b5fd' },
-  pink: { border: '#f472b6', bg: 'rgba(244,114,182,0.07)', text: '#f9a8d4' },
+// `ink` (0.1.7) : encre sombre posée SUR l'onglet, qui est rempli de `border`.
+// Les cinq teintes sont pastel, donc une encre sombre reste lisible sur le
+// canvas clair comme sur le sombre — ce que le nom coloré sur fond translucide
+// ne permettait pas (il tombait à ~2,3:1 de contraste en clair).
+// `text` n'est utilisé nulle part, gardé pour ne rien casser en aval.
+export const GROUP_COLORS: Record<string, { border: string; bg: string; text: string; ink: string }> = {
+  blue: { border: '#60a5fa', bg: 'rgba(96,165,250,0.07)', text: '#93c5fd', ink: '#0a1f3d' },
+  green: { border: '#34d399', bg: 'rgba(52,211,153,0.07)', text: '#6ee7b7', ink: '#06281e' },
+  amber: { border: '#fbbf24', bg: 'rgba(251,191,36,0.07)', text: '#fcd34d', ink: '#3b2a02' },
+  purple: { border: '#a78bfa', bg: 'rgba(167,139,250,0.07)', text: '#c4b5fd', ink: '#231045' },
+  pink: { border: '#f472b6', bg: 'rgba(244,114,182,0.07)', text: '#f9a8d4', ink: '#3f0c25' },
 }
 const COLOR_KEYS = Object.keys(GROUP_COLORS)
 
@@ -279,10 +284,27 @@ export function GroupNode({ id, data, selected }: NodeProps) {
     if (v && v !== d.label) d.handlers.current.rename(id, v)
   }
 
+  // 0.1.7 — « filet + onglet », variante choisie par Brice sur /labo-groupes.
+  // Le groupe n'a plus de contour : un filet de 2 px en haut suffit à dire où il
+  // commence, et son nom vit dans un onglet plein posé dessus, façon dossier
+  // suspendu. Le pointillé d'avant lisait « zone provisoire » alors qu'un groupe
+  // est l'objet le plus durable du canvas, et deux groupes voisins étaient
+  // difficiles à séparer du regard.
+  const onglet: React.CSSProperties = {
+    display: 'inline-block', maxWidth: '60%', marginLeft: 16, marginTop: -2,
+    padding: '4px 12px 5px', borderRadius: '0 0 9px 9px',
+    background: palette.border, color: palette.ink,
+    fontSize: 11, fontWeight: 600, lineHeight: 1.35,
+  }
+
   return (
     <div
-      className="w-full h-full rounded-2xl group/gz"
-      style={{ border: `1.5px dashed ${palette.border}`, background: palette.bg }}
+      className="w-full h-full group/gz"
+      style={{
+        borderRadius: '2px 2px 16px 16px',
+        borderTop: `2px solid ${palette.border}`,
+        background: palette.bg,
+      }}
     >
       <NodeResizer
         isVisible={selected}
@@ -292,7 +314,9 @@ export function GroupNode({ id, data, selected }: NodeProps) {
         handleStyle={{ background: palette.border, border: 'none', width: 9, height: 9, borderRadius: 2 }}
         onResizeEnd={(_, p) => d.handlers.current.resize(id, { width: p.width, height: p.height, x: p.x, y: p.y })}
       />
-      <div className="flex items-center gap-1.5 px-2.5 py-1.5">
+      <div className="flex items-start gap-1.5 pr-2">
+        {/* L'onglet garde exactement la même forme en lecture et en saisie : on
+            renomme dans l'objet, la boîte ne saute pas sous le curseur. */}
         {editing ? (
           <input
             autoFocus
@@ -303,20 +327,20 @@ export function GroupNode({ id, data, selected }: NodeProps) {
               if (e.key === 'Enter') { e.preventDefault(); save() }
               if (e.key === 'Escape') { setDraft(d.label); setEditing(false) }
             }}
-            className="nodrag flex-1 min-w-0 bg-transparent text-xs font-medium outline-none border-b border-white/20 placeholder:text-gray-500"
-            style={{ color: palette.border }}
+            className="nodrag min-w-0 outline-none placeholder:text-black/40"
+            style={{ ...onglet, width: 150, maxWidth: '60%', border: 'none' }}
             placeholder="Nom du groupe…"
           />
         ) : (
           <>
-            <p
-              className="flex-1 min-w-0 text-xs font-medium truncate cursor-text"
-              style={{ color: palette.border }}
+            <span
+              className="truncate cursor-text"
+              style={onglet}
               onDoubleClick={() => { setDraft(d.label); setEditing(true) }}
               title="Double-clic pour renommer"
             >
               {d.label || 'Groupe'}
-            </p>
+            </span>
             {/* Le double-clic ne parvient pas au doigt (le navigateur en fait un
                 zoom) : au téléphone, le renommage a son propre bouton. */}
             {isMobile && (
@@ -331,10 +355,13 @@ export function GroupNode({ id, data, selected }: NodeProps) {
             )}
           </>
         )}
+        {/* Pousse les outils (couleurs, Mapper, promotion, dissoudre) à droite :
+            l'onglet ne prend plus toute la largeur, il se dimensionne à son texte. */}
+        <span className="flex-1" />
         {/* Groupe VIVANT : relié à un concept — déposer dedans tague, sortir détague */}
         {isLive && !editing && (
           <span
-            className="flex-shrink-0 text-[9px] font-semibold px-1 rounded"
+            className="flex-shrink-0 text-[9px] font-semibold px-1 rounded mt-1.5"
             style={{ color: palette.border, background: 'rgba(255,255,255,0.08)' }}
             title="Groupe vivant — relié au concept : y déposer tague automatiquement, en sortir détague"
           >
@@ -343,7 +370,7 @@ export function GroupNode({ id, data, selected }: NodeProps) {
         )}
         {/* Couleurs et « Mapper » : au survol au bureau, à la sélection du
             groupe au téléphone (le survol n'existe pas au doigt). */}
-        <span className={`${isMobile ? (selected ? 'flex' : 'hidden') : 'hidden group-hover/gz:flex'} items-center gap-1 nodrag flex-shrink-0`}>
+        <span className={`${isMobile ? (selected ? 'flex' : 'hidden') : 'hidden group-hover/gz:flex'} items-center gap-1 nodrag flex-shrink-0 mt-1`}>
           {COLOR_KEYS.map(k => (
             <button
               key={k}
