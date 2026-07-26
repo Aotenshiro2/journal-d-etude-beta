@@ -4,6 +4,12 @@
 
 `../../CLAUDE.md` — contexte écosystème complet, infrastructure partagée, contrat d'intégration avec l'extension.
 
+**Avant TOUT travail d'UI** (nouveau composant, refonte visuelle, passe esthétique) :
+`../../shared/design-system/DESIGN_REFERENCES.md` — les bases de design approuvées par
+Brice. Ce n'est pas optionnel : partir de ces sources avant de dessiner quoi que ce soit,
+et **dire explicitement à Brice ce qui est repris d'une source et ce qui est dessiné à la
+main**. Ne pas présenter une création perso comme si elle venait de ses bases.
+
 ## Cette app
 
 Next.js 15 + React 19 + Prisma 6 + Supabase PostgreSQL
