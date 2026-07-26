@@ -66,6 +66,12 @@
   --drawer-border: rgba(0, 0, 0, 0.20);
   --drawer-icon: rgba(229, 231, 233, 0.75);
 
+  /* Outil actif des barres du canvas. Même teinte dans les deux thèmes, seul
+     l'alpha change : sur le pill clair (#e5e7e9) le bleu à 15 % ne se voyait
+     presque pas, alors qu'il suffit sur le pill sombre. */
+  --tool-active-bg: rgba(59, 130, 246, 0.22);
+  --tool-active-border: rgba(59, 130, 246, 0.55);
+
   /* Modal and Editor - Compatibility with old system */
   --modal-overlay: rgba(0, 0, 0, 0.5);
   --modal-bg: 0 0% 100%;
@@ -162,6 +168,10 @@
   --drawer-bg: #1e1f23;
   --drawer-border: rgba(255, 255, 255, 0.12);
   --drawer-icon: rgba(241, 245, 249, 0.75);
+
+  /* Valeurs d'origine : le sombre ne bouge pas d'un pixel. */
+  --tool-active-bg: rgba(59, 130, 246, 0.15);
+  --tool-active-border: rgba(59, 130, 246, 0.40);
 
   /* Modal and Editor - Dark mode */
   --modal-overlay: rgba(0, 0, 0, 0.7);
@@ -875,14 +885,24 @@ input[type="search"]::-moz-selection {
   box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
 }
 
-.react-flow__handle {
-  background-color: hsl(var(--primary));
-  border: 2px solid hsl(var(--background));
-  transition: all 0.2s;
-}
+/* ⚠️ Ne JAMAIS toucher au `transform` d'une poignée. React Flow s'en sert pour
+   la POSITIONNER (`translate(-50%, 50%)` selon le côté). Il y avait ici un
+   `:hover { transform: scale(1.25) }` : même propriété, spécificité supérieure,
+   donc le scale REMPLAÇAIT le translate et la poignée sautait de la moitié de sa
+   taille. Avec `transition: all 0.2s` par-dessus, elle glissait hors du curseur
+   pendant 200 ms — sur une cible de 9 px, elle fuyait au moment où on visait.
+   C'était la cause n°1 du « il faut être pile poil sur le nœud ».
 
-.react-flow__handle:hover {
-  transform: scale(1.25);
+   Même interdit sur `width`/`height` : `handleBounds` est mesuré au
+   `getBoundingClientRect()`, les redimensionner déplacerait l'ancrage de tous
+   les traits. Pour un retour au survol, il n'y a que `box-shadow`.
+
+   `background-color` et `border` ont aussi disparu : c'était du code mort.
+   `hsl(var(--primary))` est invalide (`--primary` est en `oklch`), et de toute
+   façon `dist/style.css` est chargé après ce fichier et gagne à spécificité
+   égale. Chaque nœud pose donc déjà sa couleur de poignée en inline. */
+.react-flow__handle {
+  transition: opacity 0.15s ease, box-shadow 0.15s ease;
 }
 
 .react-flow__edge-path {

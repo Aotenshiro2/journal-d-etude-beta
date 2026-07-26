@@ -362,8 +362,13 @@ export function GroupNode({ id, data, selected }: NodeProps) {
         {/* Groupe VIVANT : relié à un concept — déposer dedans tague, sortir détague */}
         {isLive && !editing && (
           <span
-            className="flex-shrink-0 text-[9px] font-semibold px-1 rounded mt-1.5"
-            style={{ color: palette.border, background: 'rgba(255,255,255,0.08)' }}
+            className="flex-shrink-0 text-[9px] font-semibold px-1.5 py-0.5 rounded mt-1.5"
+            /* Même recette que l'onglet : pavé plein dans la couleur du groupe,
+               encre sombre. Le fond était en `rgba(255,255,255,0.08)`, invisible
+               sur le canvas clair, et le texte en `palette.border` y tombait
+               vers 2,4:1. Les teintes sont pastel, l'encre sombre passe dans les
+               deux thèmes. */
+            style={{ background: palette.border, color: palette.ink }}
             title="Groupe vivant — relié au concept : y déposer tague automatiquement, en sortir détague"
           >
             ◆ concept
@@ -376,7 +381,9 @@ export function GroupNode({ id, data, selected }: NodeProps) {
             <button
               key={k}
               onClick={() => d.handlers.current.recolor(id, k)}
-              className={`${isMobile ? 'w-5 h-5' : 'w-2.5 h-2.5'} rounded-full border border-black/40`}
+              /* Le liséré détache la pastille pastel du fond. Noir à 40 % était
+                 trop dur en clair et presque nul en sombre. */
+              className={`${isMobile ? 'w-5 h-5' : 'w-2.5 h-2.5'} rounded-full border border-black/20 dark:border-white/30`}
               style={{ background: GROUP_COLORS[k].border, opacity: k === d.color ? 1 : 0.45 }}
               title={`Couleur ${k}`}
               aria-label={`Couleur ${k}`}
@@ -386,7 +393,7 @@ export function GroupNode({ id, data, selected }: NodeProps) {
             <button
               onMouseDown={e => { e.stopPropagation(); e.preventDefault() }}
               onClick={() => d.handlers.current.openCollection!(id)}
-              className="ml-1 px-1.5 rounded text-[10px] font-semibold hover:bg-white/10 flex items-center gap-1"
+              className="ml-1 px-1.5 rounded text-[10px] font-semibold hover:bg-black/5 dark:hover:bg-white/5 flex items-center gap-1"
               style={{ color: palette.border }}
               title="Mapper ensemble : ouvrir ces notes dans un canvas de travail commun"
             >
@@ -395,7 +402,7 @@ export function GroupNode({ id, data, selected }: NodeProps) {
           )}
           <button
             onClick={async () => { if (await d.handlers.current.promote(d.label, id)) setPromoted(true) }}
-            className="ml-1 px-1 rounded text-[10px] font-semibold hover:bg-white/10"
+            className="ml-1 px-1 rounded text-[10px] font-semibold hover:bg-black/5 dark:hover:bg-white/5"
             style={{ color: palette.border }}
             title={promoted ? 'Concept créé, contenu du groupe tagué ✓' : 'Promouvoir en concept : crée le tag ET tague tout le contenu du groupe'}
           >
@@ -403,7 +410,8 @@ export function GroupNode({ id, data, selected }: NodeProps) {
           </button>
           <button
             onClick={() => d.handlers.current.dissolve(id)}
-            className="px-1 rounded text-[10px] text-gray-400 hover:text-red-400 hover:bg-white/10"
+            className="px-1 rounded text-[10px] hover:text-red-400 hover:bg-black/5 dark:hover:bg-white/5"
+            style={{ color: 'var(--node-meta)' }}
             title="Dissoudre le groupe (les blocs restent sur le canvas)"
           >
             ✕
@@ -483,8 +491,8 @@ function CanvasToolbar({ activeTool, setActiveTool, selectedCount, mergeableCoun
               title={tool.label}
               style={{
                 ...btnBase,
-                background: activeTool === tool.id ? 'rgba(59,130,246,0.15)' : 'none',
-                border: activeTool === tool.id ? '1px solid rgba(59,130,246,0.4)' : '1px solid transparent',
+                background: activeTool === tool.id ? 'var(--tool-active-bg)' : 'none',
+                border: activeTool === tool.id ? '1px solid var(--tool-active-border)' : '1px solid transparent',
                 color: activeTool === tool.id ? '#3b82f6' : 'var(--node-meta)',
               }}
             >

@@ -671,8 +671,8 @@ function RightToolbar({ activeTool, setActiveTool, isFav, onToggleFav, onAddConc
             title={tool.label}
             style={{
               ...btnBase,
-              background: activeTool === tool.id ? 'rgba(59,130,246,0.15)' : 'none',
-              border: activeTool === tool.id ? '1px solid rgba(59,130,246,0.4)' : '1px solid transparent',
+              background: activeTool === tool.id ? 'var(--tool-active-bg)' : 'none',
+              border: activeTool === tool.id ? '1px solid var(--tool-active-border)' : '1px solid transparent',
               color: activeTool === tool.id ? '#3b82f6' : 'var(--node-meta)',
             }}
           >

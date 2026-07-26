@@ -180,8 +180,8 @@ export default function CollectionLayout({ title, noteCount, memberNotes, messag
               style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 width: 26, height: 26, borderRadius: 6, cursor: 'pointer', flexShrink: 0,
-                background: view === id ? 'rgba(59,130,246,0.15)' : 'none',
-                border: view === id ? '1px solid rgba(59,130,246,0.4)' : '1px solid transparent',
+                background: view === id ? 'var(--tool-active-bg)' : 'none',
+                border: view === id ? '1px solid var(--tool-active-border)' : '1px solid transparent',
                 color: view === id ? '#3b82f6' : 'var(--node-meta)',
               }}
             >
