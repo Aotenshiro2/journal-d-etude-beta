@@ -820,6 +820,22 @@ input[type="search"]::-moz-selection {
   background: transparent !important;
 }
 
+/* Notre type de nœud s'appelle `group` — comme le type INTÉGRÉ de React Flow.
+   Il hérite donc de la feuille par défaut (`dist/style.css`) : padding 10px,
+   fond blanc à 25 %, coins à 3px, texte centré. C'est ce qui dessinait un halo
+   pâle tout autour du pointillé du groupe et recentrait son étiquette.
+   `noteMap` et `concept` sont des noms à nous : eux n'héritent de rien. */
+.react-flow__node-group {
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+  text-align: left;
+  width: auto;
+  font-size: inherit;
+  color: inherit;
+}
+
 .react-flow__controls {
   background-color: hsl(var(--card));
   border: 1px solid hsl(var(--border));
