@@ -23,6 +23,7 @@ import { FolderPlus, ZoomIn, ZoomOut, Maximize2, MousePointer2, Square, Hand, Ty
 import { MessageData, CanvasNodeData, CanvasEdgeData } from '@/types'
 import { htmlToText, truncateText, extractImageSrc } from '@/lib/utils'
 import ImageLightbox from './ImageLightbox'
+import { canvasEdgeTypes, avecSurvol } from './CanvasEdge'
 import { useIsMobile } from '@/hooks/useIsMobile'
 
 // `connect` = le crayon. Il manquait ici alors qu'il existe sur la carte
@@ -678,7 +679,7 @@ function StudyCanvasInner({
         sourceHandle: e.fromHandle ?? undefined,
         targetHandle: e.toHandle ?? undefined,
         label: e.label ?? undefined,
-        type: 'smoothstep',
+        type: 'trait',
         style: { stroke: 'rgba(59,130,246,0.75)', strokeWidth: 1.5 },
         labelStyle: { fill: 'var(--node-meta)', fontSize: 10 },
       })),
@@ -687,6 +688,13 @@ function StudyCanvasInner({
 
   const [nodes, setNodes, onNodesChange] = useNodesState(rfNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(rfEdges)
+
+  // 0.1.7 — même trait que sur l'accueil : le cercle ne parcourt que les traits
+  // du bloc survolé (variante 3 du labo). Voir `CanvasEdge.tsx`.
+  const [survole, setSurvole] = useState<string | null>(null)
+  const edgesAffichees = useMemo(() => avecSurvol(edges, survole), [edges, survole])
+  const onNodeMouseEnter = useCallback((_: React.MouseEvent, n: Node) => setSurvole(n.id), [])
+  const onNodeMouseLeave = useCallback(() => setSurvole(null), [])
 
   // Sync React Flow internal state when nodes/edges are added/removed externally
   useEffect(() => {
@@ -838,7 +846,7 @@ function StudyCanvasInner({
 
   const onConnect = useCallback(
     (params: Connection) => {
-      setEdges((eds) => addEdge({ ...params, type: 'smoothstep', style: { stroke: 'rgba(59,130,246,0.75)', strokeWidth: 1.5 } }, eds))
+      setEdges((eds) => addEdge({ ...params, type: 'trait', style: { stroke: 'rgba(59,130,246,0.75)', strokeWidth: 1.5 } }, eds))
       if (params.source && params.target) {
         onConnectCallback(params.source, params.target, params.sourceHandle ?? undefined, params.targetHandle ?? undefined)
       }
@@ -958,15 +966,17 @@ function StudyCanvasInner({
       <div style={{ position: 'absolute', inset: 0, zIndex: 2 }}>
       <ReactFlow
         nodes={nodes}
-        edges={edges}
+        edges={edgesAffichees}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         onNodeDragStop={onNodeDragStop}
         onEdgeDoubleClick={onEdgeDoubleClick}
         onNodeClick={onNodeClick}
+        onNodeMouseEnter={onNodeMouseEnter}
+        onNodeMouseLeave={onNodeMouseLeave}
         onPaneClick={onPaneClick}
-        nodeTypes={nodeTypes}
+        nodeTypes={nodeTypes} edgeTypes={canvasEdgeTypes}
         deleteKeyCode={null}
         fitView
         fitViewOptions={{ padding: 0.12, maxZoom: 1 }}

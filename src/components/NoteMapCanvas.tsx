@@ -33,6 +33,7 @@ import {
 } from 'lucide-react'
 import { NoteData, CanvasData, MessageData } from '@/types'
 import { GroupNode, GROUP_COLORS, sortParentsFirst, type GroupHandlers } from './StudyCanvas'
+import { canvasEdgeTypes, avecSurvol } from './CanvasEdge'
 import CaptureBar from '@/components/CaptureBar'
 import ImageLightbox from '@/components/ImageLightbox'
 import { stripHtml, formatRelativeTime, extractImageSrc } from '@/lib/utils'
@@ -1073,7 +1074,7 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
       const target = rfIdByDbId.get(e.toId)
       if (!source || !target) return []
       return [{
-        id: e.id, source, target, type: 'smoothstep',
+        id: e.id, source, target, type: 'trait',
         sourceHandle: e.fromHandle ?? undefined,
         targetHandle: e.toHandle ?? undefined,
         label: e.label ?? undefined,
@@ -1088,6 +1089,15 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
+
+  // 0.1.7 — le trait s'anime au survol de sa carte, et seulement là (variante 3
+  // du labo). `avecSurvol` renvoie `edges` inchangé tant que rien n'est survolé,
+  // donc aucun coût au repos ; c'est ce qui permet de garder l'effet sur un
+  // canvas dense sans le faire clignoter en permanence.
+  const [survole, setSurvole] = useState<string | null>(null)
+  const edgesAffichees = useMemo(() => avecSurvol(edges, survole), [edges, survole])
+  const handleNodeMouseEnter = useCallback((_: React.MouseEvent, n: Node) => setSurvole(n.id), [])
+  const handleNodeMouseLeave = useCallback(() => setSurvole(null), [])
 
   // Le halo de la card armée (lien en cours) passe par la `className` du nœud
   // React Flow — cf. `.link-armed` dans globals.css. Rien à faire remonter
@@ -1218,7 +1228,7 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
     if (!res.ok) return
     const dbEdge = await res.json()
     setEdges(eds => addEdge({
-      ...params, id: dbEdge.id, type: 'smoothstep',
+      ...params, id: dbEdge.id, type: 'trait',
       style: { stroke: '#3b82f6', strokeWidth: 1.5, opacity: 0.5 },
     }, eds))
   }, [setEdges, canvas.id, getNode, ensureDbNodeId])
@@ -1863,13 +1873,15 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
             </div>
           )}
           <ReactFlow
-            nodes={nodes} edges={edges}
+            nodes={nodes} edges={edgesAffichees}
             onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
             onConnect={onConnect} onEdgeDoubleClick={onEdgeDoubleClick} onNodeDragStop={handleNodeDragStop}
             onNodeClick={handleNodeClick}
             onNodeDoubleClick={handleNodeDoubleClick}
+            onNodeMouseEnter={handleNodeMouseEnter}
+            onNodeMouseLeave={handleNodeMouseLeave}
             onPaneClick={handlePaneClick}
-            nodeTypes={nodeTypes}
+            nodeTypes={nodeTypes} edgeTypes={canvasEdgeTypes}
             fitView fitViewOptions={{ padding: 0.12, maxZoom: 1 }}
             minZoom={0.08} maxZoom={2.5} deleteKeyCode={null}
             panOnScroll panOnScrollMode={PanOnScrollMode.Vertical}
