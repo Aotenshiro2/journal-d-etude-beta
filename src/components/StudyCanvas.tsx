@@ -12,8 +12,6 @@ import {
   useEdgesState,
   NodeProps,
   NodeResizer,
-  Handle,
-  Position,
   Panel,
   useReactFlow,
   useViewport,
@@ -24,6 +22,8 @@ import { MessageData, CanvasNodeData, CanvasEdgeData } from '@/types'
 import { htmlToText, truncateText, extractImageSrc } from '@/lib/utils'
 import ImageLightbox from './ImageLightbox'
 import { canvasEdgeTypes, avecSurvol } from './CanvasEdge'
+import { PoigneesCardinales } from './canvas/poignees'
+import { poigneesEntre } from './canvas/lienProche'
 import { useIsMobile } from '@/hooks/useIsMobile'
 
 // `connect` = le crayon. Il manquait ici alors qu'il existe sur la carte
@@ -166,11 +166,12 @@ function MessageNode({ data, selected }: NodeProps) {
         handleStyle={{ background: '#3b82f6', border: 'none', width: 8, height: 8, borderRadius: 2 }}
         onResizeEnd={(_, p) => d.onResizeEnd({ width: p.width, height: p.height, x: p.x, y: p.y })}
       />
-      {/* Mindmap : connexions sur les 4 côtés (haut/gauche = arrivée, bas/droite = départ) */}
-      <Handle id="tt" type="target" position={Position.Top} className="!bg-blue-500" />
-      <Handle id="tl" type="target" position={Position.Left} className="!bg-blue-500" />
-      <Handle id="sb" type="source" position={Position.Bottom} className="!bg-blue-500" />
-      <Handle id="sr" type="source" position={Position.Right} className="!bg-blue-500" />
+      {/* Mindmap : connexions sur les 4 côtés, départ ET arrivée sur chacun.
+          Ces poignées étaient de 6 px (taille par défaut de React Flow, aucune
+          taille n'était posée) et VISIBLES en permanence, soit quatre points
+          bleus sur chaque bloc. Elles suivent maintenant la même recette que les
+          cartes de l'accueil : 9 px, révélées au survol. */}
+      <PoigneesCardinales couleur="#3b82f6" />
       {editing ? (
         <textarea
           autoFocus
@@ -315,6 +316,15 @@ export function GroupNode({ id, data, selected }: NodeProps) {
         handleStyle={{ background: palette.border, border: 'none', width: 9, height: 9, borderRadius: 2 }}
         onResizeEnd={(_, p) => d.handlers.current.resize(id, { width: p.width, height: p.height, x: p.x, y: p.y })}
       />
+      {/* 0.1.7 — un groupe n'avait AUCUNE poignée. Conséquence : relier un
+          concept à un groupe créait bien la ligne en base, mais React Flow ne
+          trouvait pas de `handleBounds`, sortait l'erreur 008 en console et
+          n'affichait rien. Il y a donc peut-être déjà des traits fantômes en
+          base. Ces poignées restent invisibles (le groupe est en `zIndex: -1`,
+          elles sont derrière les cartes) : elles ne servent que d'ancrage
+          géométrique au trait, le geste passe par « touche le départ puis
+          l'arrivée ». */}
+      <PoigneesCardinales couleur={palette.border} classeSurvol="" />
       <div className="flex items-start gap-1.5 pr-2">
         {/* L'onglet garde exactement la même forme en lecture et en saisie : on
             renomme dans l'objet, la boîte ne saute pas sous le curseur. */}
@@ -574,7 +584,7 @@ function StudyCanvasInner({
 
   // ── Grille + spotlight — EXACTEMENT les couches du canvas home ──
   const isMobile = useIsMobile()
-  const { screenToFlowPosition } = useReactFlow()
+  const { screenToFlowPosition, getInternalNode } = useReactFlow()
   const { x: vpX, y: vpY, zoom } = useViewport()
   const rootRef = useRef<HTMLDivElement>(null)
   const spotlightRef = useRef<HTMLDivElement>(null)
@@ -879,8 +889,12 @@ function StudyCanvasInner({
     if (linkSourceId === node.id) { armLink(null); return } // re-tap = on annule
     const source = linkSourceId
     armLink(null)
-    onConnect({ source, target: node.id, sourceHandle: null, targetHandle: null })
-  }, [activeTool, linkSourceId, armLink, onConnect])
+    // Sans handles explicites, React Flow prend la première source et la
+    // première cible : le trait partirait toujours du bas vers le haut, même
+    // pour relier deux blocs côte à côte.
+    const cotes = poigneesEntre(getInternalNode, source, node.id, { w: 280, h: 120 })
+    onConnect({ source, target: node.id, ...cotes })
+  }, [activeTool, linkSourceId, armLink, onConnect, getInternalNode])
 
   // ── Le vide : y poser le bloc armé, ou annuler le lien en cours ──
   const onPaneClick = useCallback((event: React.MouseEvent) => {
@@ -990,6 +1004,12 @@ function StudyCanvasInner({
         fitViewOptions={{ padding: 0.12, maxZoom: 1 }}
         selectionOnDrag={activeTool === 'mark'}
         panOnDrag={activeTool === 'mark' ? [1, 2] : true}
+        // Jamais passé jusqu'ici, donc `true` par défaut dans TOUS les outils :
+        // les poignées restaient réactives même en mode sélection, alors que
+        // l'accueil les désactive hors crayon. On aligne sur l'accueil. React
+        // Flow ne donne `pointer-events: all` aux poignées que via la classe
+        // `connectionindicator`, qu'il ne pose que si ceci est vrai.
+        nodesConnectable={activeTool === 'connect'}
         // Crayon : les blocs ne bougent pas, sinon le premier tap les déplace
         // au lieu d'armer le lien. Le glissement reste libre pour se déplacer.
         nodesDraggable={activeTool !== 'pan' && activeTool !== 'connect'}

@@ -14,8 +14,6 @@ import {
   useReactFlow,
   ReactFlowProvider,
   MiniMap,
-  Handle,
-  Position,
   NodeProps,
   OnNodeDrag,
   PanOnScrollMode,
@@ -34,6 +32,8 @@ import {
 import { NoteData, CanvasData, MessageData } from '@/types'
 import { GroupNode, GROUP_COLORS, sortParentsFirst, type GroupHandlers } from './StudyCanvas'
 import { canvasEdgeTypes, avecSurvol } from './CanvasEdge'
+import { PoigneesCardinales } from './canvas/poignees'
+import { poigneesEntre } from './canvas/lienProche'
 import CaptureBar from '@/components/CaptureBar'
 import ImageLightbox from '@/components/ImageLightbox'
 import { stripHtml, formatRelativeTime, extractImageSrc } from '@/lib/utils'
@@ -137,20 +137,11 @@ const NoteMapNode = React.memo(function NoteMapNode({ id, data }: NodeProps) {
               }}
             >×</button>
           )}
-          {/* Handles nommes (meme convention que StudyCanvas) : leur id est
-              persiste dans CanvasEdge.fromHandle/toHandle, donc le trait
-              repart du bon cote au rechargement. */}
-          {([
-            { id: 'tt', type: 'target', position: Position.Top },
-            { id: 'tl', type: 'target', position: Position.Left },
-            { id: 'sb', type: 'source', position: Position.Bottom },
-            { id: 'sr', type: 'source', position: Position.Right },
-          ] as const).map(h => (
-            <Handle key={h.id} id={h.id} type={h.type} position={h.position}
-              style={{ background: 'var(--node-handle)', opacity: 0, width: 9, height: 9, minWidth: 0, border: 'none' }}
-              className="!transition-opacity group-hover:!opacity-100"
-            />
-          ))}
+          {/* Handles nommes : leur id est persiste dans
+              CanvasEdge.fromHandle/toHandle, donc le trait repart du bon cote au
+              rechargement. Depuis 0.1.7 il y en a huit (source + cible sur
+              chaque cote) — voir canvas/poignees.tsx. */}
+          <PoigneesCardinales />
 
           {/* Header */}
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '14px 14px 8px', flexShrink: 0 }}>
@@ -256,17 +247,7 @@ const ConceptNode = React.memo(function ConceptNode({ id, data }: NodeProps) {
         boxShadow: 'var(--node-shadow)',
       }}
     >
-      {([
-        { id: 'tt', type: 'target', position: Position.Top },
-        { id: 'tl', type: 'target', position: Position.Left },
-        { id: 'sb', type: 'source', position: Position.Bottom },
-        { id: 'sr', type: 'source', position: Position.Right },
-      ] as const).map(h => (
-        <Handle key={h.id} id={h.id} type={h.type} position={h.position}
-          style={{ background: color, opacity: 0, width: 9, height: 9, minWidth: 0, border: 'none' }}
-          className="!transition-opacity group-hover:!opacity-100"
-        />
-      ))}
+      <PoigneesCardinales couleur={color} />
       <span style={{ fontSize: 13, fontWeight: 700, color }}>#</span>
       <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--node-title)', whiteSpace: 'nowrap' }}>{d.label}</span>
       {hovered && (
@@ -930,7 +911,7 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
   const [conceptQuery, setConceptQuery] = useState('')
   const [conceptTags, setConceptTags] = useState<{ id: string; name: string; color: string }[] | null>(null)
   const dragEnterCounterRef = useRef(0)
-  const { setCenter, screenToFlowPosition, getNode } = useReactFlow()
+  const { setCenter, screenToFlowPosition, getNode, getInternalNode } = useReactFlow()
   const { x: vpX, y: vpY, zoom } = useViewport()
 
   const dotSize = 22 * zoom
@@ -1245,7 +1226,11 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
       if (linkSourceId === node.id) { armLink(null); return } // re-tap = on annule
       const source = linkSourceId
       armLink(null)
-      onConnect({ source, target: node.id, sourceHandle: null, targetHandle: null })
+      // Sans handles explicites, React Flow prend la première source et la
+      // première cible : le trait partirait toujours du bas vers le haut, même
+      // pour relier deux cartes côte à côte.
+      const cotes = poigneesEntre(getInternalNode, source, node.id, { w: 260, h: 152 })
+      onConnect({ source, target: node.id, ...cotes })
       return
     }
 
@@ -1262,7 +1247,7 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
     singleClickTimerRef.current = setTimeout(() => {
       openPreview(node.id)
     }, 220)
-  }, [activeTool, linkSourceId, armLink, onConnect, isMobile, router, openPreview])
+  }, [activeTool, linkSourceId, armLink, onConnect, isMobile, router, openPreview, getInternalNode])
 
   // Taper le vide annule le lien en cours (et referme l'aperçu au bureau).
   const handlePaneClick = useCallback(() => {
