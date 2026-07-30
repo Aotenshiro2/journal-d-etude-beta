@@ -905,6 +905,25 @@ input[type="search"]::-moz-selection {
   transition: opacity 0.15s ease, box-shadow 0.15s ease;
 }
 
+/* Zone d'accroche élargie, sans toucher à la géométrie. Une poignée fait 9 px ;
+   viser 9 px à la souris est pénible, et impossible au doigt.
+
+   `pointer-events: inherit` est la clé : React Flow met les poignées à `none` et
+   ne passe à `all` que via la classe `connectionindicator`, posée uniquement
+   quand `nodesConnectable` est vrai. La grande zone n'existe donc QUE pendant la
+   connexion, et n'avale rien le reste du temps.
+
+   Un pseudo-élément n'entre pas dans le `getBoundingClientRect()` de son parent :
+   `handleBounds` reste mesuré sur 9 px, donc l'ancrage des traits ne bouge pas.
+   C'est pour ça qu'on élargit ainsi plutôt qu'en changeant width/height. */
+.react-flow__handle::after {
+  content: '';
+  position: absolute;
+  inset: -12px;
+  border-radius: 50%;
+  pointer-events: inherit;
+}
+
 .react-flow__edge-path {
   stroke: hsl(var(--muted-foreground));
   stroke-width: 2;

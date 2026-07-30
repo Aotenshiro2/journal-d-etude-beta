@@ -105,10 +105,10 @@ export default function CollectionLayout({ title, noteCount, memberNotes, messag
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ fromId, toId, fromHandle: fromHandle ?? null, toHandle: toHandle ?? null }),
     })
-    if (res.ok) {
-      const edge: CanvasEdgeData = await res.json()
-      setCanvas((prev) => ({ ...prev, edges: [...prev.edges, edge] }))
-    }
+    if (!res.ok) return false // le canvas retire le trait affiché en optimiste
+    const edge: CanvasEdgeData = await res.json()
+    setCanvas((prev) => ({ ...prev, edges: [...prev.edges, edge] }))
+    return true
   }, [canvas.id])
 
   const handleDeleteEdge = useCallback(async (edgeId: string) => {

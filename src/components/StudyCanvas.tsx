@@ -24,6 +24,7 @@ import ImageLightbox from './ImageLightbox'
 import { canvasEdgeTypes, avecSurvol } from './CanvasEdge'
 import { PoigneesCardinales } from './canvas/poignees'
 import { poigneesEntre } from './canvas/lienProche'
+import { ASSISTANCE_CONNEXION, connexionValide, lienDejaPresent } from './canvas/lienValide'
 import { useIsMobile } from '@/hooks/useIsMobile'
 
 // `connect` = le crayon. Il manquait ici alors qu'il existe sur la carte
@@ -39,7 +40,9 @@ interface StudyCanvasProps {
   onDropMessage: (messageId: string, x: number, y: number) => void
   onMoveNode: (nodeId: string, x: number, y: number) => void
   onRemoveNode: (nodeId: string) => void
-  onConnect: (fromId: string, toId: string, fromHandle?: string, toHandle?: string) => void
+  /** Rend `false` si le serveur a refusé : le canvas retire alors le trait
+   *  affiché en optimiste. Tout autre retour est traité comme un succès. */
+  onConnect: (fromId: string, toId: string, fromHandle?: string, toHandle?: string) => void | Promise<boolean>|Promise<void>
   onDeleteEdge: (edgeId: string) => void
   onCreateGroup: (group: { label: string; color: string; x: number; y: number; width?: number; height?: number }) => Promise<CanvasNodeData | null>
   onCreateText: (pos: { x: number; y: number }) => Promise<CanvasNodeData | null>
@@ -711,6 +714,7 @@ function StudyCanvasInner({
   // du bloc survolé (variante 3 du labo). Voir `CanvasEdge.tsx`.
   const [survole, setSurvole] = useState<string | null>(null)
   const edgesAffichees = useMemo(() => avecSurvol(edges, survole), [edges, survole])
+  const connexionAutorisee = useMemo(() => connexionValide(edges), [edges])
   const onNodeMouseEnter = useCallback((_: React.MouseEvent, n: Node) => setSurvole(n.id), [])
   const onNodeMouseLeave = useCallback(() => setSurvole(null), [])
 
@@ -862,12 +866,24 @@ function StudyCanvasInner({
     }
   }, [nodes, onCreateGroup, nextColor, buildGroupNode, setNodes, onUpdateNode])
 
+  // Le trait s'affiche tout de suite (c'est ce qui rend le geste vivant), mais
+  // il est RETIRÉ si le serveur refuse. Avant, il était ajouté puis jamais
+  // annulé : un POST en échec laissait un trait fantôme à l'écran jusqu'au
+  // rechargement, alors qu'il n'existait nulle part en base. On se donne un id
+  // explicite pour pouvoir retirer exactement celui-là.
   const onConnect = useCallback(
-    (params: Connection) => {
-      setEdges((eds) => addEdge({ ...params, type: 'trait', style: { stroke: 'rgba(59,130,246,0.75)', strokeWidth: 1.5 } }, eds))
-      if (params.source && params.target) {
-        onConnectCallback(params.source, params.target, params.sourceHandle ?? undefined, params.targetHandle ?? undefined)
-      }
+    async (params: Connection) => {
+      if (!params.source || !params.target) return
+      const idProvisoire = `local-${params.source}-${params.target}`
+      setEdges(eds => addEdge(
+        { ...params, id: idProvisoire, type: 'trait', style: { stroke: 'rgba(59,130,246,0.75)', strokeWidth: 1.5 } },
+        eds,
+      ))
+      const ok = await onConnectCallback(
+        params.source, params.target,
+        params.sourceHandle ?? undefined, params.targetHandle ?? undefined,
+      )
+      if (ok === false) setEdges(eds => eds.filter(e => e.id !== idProvisoire))
     },
     [setEdges, onConnectCallback]
   )
@@ -889,12 +905,15 @@ function StudyCanvasInner({
     if (linkSourceId === node.id) { armLink(null); return } // re-tap = on annule
     const source = linkSourceId
     armLink(null)
+    // Le tap → tap ne passe PAS par `isValidConnection` (il appelle onConnect
+    // directement), donc on refait le garde ici.
+    if (lienDejaPresent(edges, source, node.id)) return
     // Sans handles explicites, React Flow prend la première source et la
     // première cible : le trait partirait toujours du bas vers le haut, même
     // pour relier deux blocs côte à côte.
     const cotes = poigneesEntre(getInternalNode, source, node.id, { w: 280, h: 120 })
     onConnect({ source, target: node.id, ...cotes })
-  }, [activeTool, linkSourceId, armLink, onConnect, getInternalNode])
+  }, [activeTool, linkSourceId, armLink, onConnect, getInternalNode, edges])
 
   // ── Le vide : y poser le bloc armé, ou annuler le lien en cours ──
   const onPaneClick = useCallback((event: React.MouseEvent) => {
@@ -1010,6 +1029,8 @@ function StudyCanvasInner({
         // Flow ne donne `pointer-events: all` aux poignées que via la classe
         // `connectionindicator`, qu'il ne pose que si ceci est vrai.
         nodesConnectable={activeTool === 'connect'}
+        {...ASSISTANCE_CONNEXION}
+        isValidConnection={connexionAutorisee}
         // Crayon : les blocs ne bougent pas, sinon le premier tap les déplace
         // au lieu d'armer le lien. Le glissement reste libre pour se déplacer.
         nodesDraggable={activeTool !== 'pan' && activeTool !== 'connect'}

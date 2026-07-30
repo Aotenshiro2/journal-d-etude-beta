@@ -34,6 +34,7 @@ import { GroupNode, GROUP_COLORS, sortParentsFirst, type GroupHandlers } from '.
 import { canvasEdgeTypes, avecSurvol } from './CanvasEdge'
 import { PoigneesCardinales } from './canvas/poignees'
 import { poigneesEntre } from './canvas/lienProche'
+import { ASSISTANCE_CONNEXION, connexionValide, lienDejaPresent } from './canvas/lienValide'
 import CaptureBar from '@/components/CaptureBar'
 import ImageLightbox from '@/components/ImageLightbox'
 import { stripHtml, formatRelativeTime, extractImageSrc } from '@/lib/utils'
@@ -1077,6 +1078,7 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
   // canvas dense sans le faire clignoter en permanence.
   const [survole, setSurvole] = useState<string | null>(null)
   const edgesAffichees = useMemo(() => avecSurvol(edges, survole), [edges, survole])
+  const connexionAutorisee = useMemo(() => connexionValide(edges), [edges])
   const handleNodeMouseEnter = useCallback((_: React.MouseEvent, n: Node) => setSurvole(n.id), [])
   const handleNodeMouseLeave = useCallback(() => setSurvole(null), [])
 
@@ -1226,6 +1228,10 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
       if (linkSourceId === node.id) { armLink(null); return } // re-tap = on annule
       const source = linkSourceId
       armLink(null)
+      // Le tap → tap ne passe PAS par `isValidConnection` (il appelle onConnect
+      // directement), donc on refait le garde ici. Le trait est déjà à l'écran,
+      // rien à expliquer : on désarme et on s'arrête.
+      if (lienDejaPresent(edges, source, node.id)) return
       // Sans handles explicites, React Flow prend la première source et la
       // première cible : le trait partirait toujours du bas vers le haut, même
       // pour relier deux cartes côte à côte.
@@ -1247,7 +1253,7 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
     singleClickTimerRef.current = setTimeout(() => {
       openPreview(node.id)
     }, 220)
-  }, [activeTool, linkSourceId, armLink, onConnect, isMobile, router, openPreview, getInternalNode])
+  }, [activeTool, linkSourceId, armLink, onConnect, isMobile, router, openPreview, getInternalNode, edges])
 
   // Taper le vide annule le lien en cours (et referme l'aperçu au bureau).
   const handlePaneClick = useCallback(() => {
@@ -1869,6 +1875,8 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
             nodeTypes={nodeTypes} edgeTypes={canvasEdgeTypes}
             fitView fitViewOptions={{ padding: 0.12, maxZoom: 1 }}
             minZoom={0.08} maxZoom={2.5} deleteKeyCode={null}
+            {...ASSISTANCE_CONNEXION}
+            isValidConnection={connexionAutorisee}
             panOnScroll panOnScrollMode={PanOnScrollMode.Vertical}
             zoomOnScroll={false} zoomActivationKeyCode="Control"
             panActivationKeyCode="Space"
