@@ -143,6 +143,24 @@ export default function StudyLayout({ note, canvas: initialCanvas, isDiverged }:
     [canvas.id]
   )
 
+  // 0.1.7 — poser un nœud-concept sur le canvas de la note. Passe par ici et pas
+  // par le canvas : StudyCanvas resynchronise ses nœuds depuis `canvas.nodes`,
+  // un ajout purement local y serait effacé au prochain recalcul.
+  const handleCreateConcept = useCallback(
+    async (c: { tagId: string; label: string; color: string; x: number; y: number }): Promise<CanvasNodeData | null> => {
+      const res = await fetch(`/api/canvas/${canvas.id}/nodes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: 'concept', ...c }),
+      })
+      if (!res.ok) return null
+      const node: CanvasNodeData = await res.json()
+      setCanvas((prev) => ({ ...prev, nodes: [...prev.nodes, node] }))
+      return node
+    },
+    [canvas.id]
+  )
+
   // Promouvoir le nom d'un groupe en tag de la taxonomie (proto-concept → concept).
   // 0.1.3 « le nom sert » : les blocs du groupe portent le concept (MessageTag) —
   // le regroupement spatial devient de la donnée pour /concepts.
@@ -241,6 +259,7 @@ export default function StudyLayout({ note, canvas: initialCanvas, isDiverged }:
             onConnect={handleConnect}
             onDeleteEdge={handleDeleteEdge}
             onReconnectEdge={handleReconnectEdge}
+            onCreateConcept={handleCreateConcept}
             onCreateGroup={handleCreateGroup}
             onCreateText={handleCreateText}
             onUpdateNode={handleUpdateNode}

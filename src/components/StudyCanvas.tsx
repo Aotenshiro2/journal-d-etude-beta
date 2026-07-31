@@ -17,7 +17,7 @@ import {
   useViewport,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { FolderPlus, Type, Combine, Pencil } from 'lucide-react'
+import { FolderPlus, Type, Combine, Pencil, Hash } from 'lucide-react'
 import { MessageData, CanvasNodeData, CanvasEdgeData } from '@/types'
 import { htmlToText, truncateText, extractImageSrc } from '@/lib/utils'
 import ImageLightbox from './ImageLightbox'
@@ -26,6 +26,8 @@ import { PoigneesCardinales } from './canvas/poignees'
 import { poigneesEntre } from './canvas/lienProche'
 import { ASSISTANCE_CONNEXION, connexionValide, lienDejaPresent } from './canvas/lienValide'
 import { CanvasToolbar, type ActionBarre } from './canvas/CanvasToolbar'
+import { ConceptNode } from './canvas/ConceptNode'
+import { ConceptPicker } from './canvas/ConceptPicker'
 import { useIsMobile } from '@/hooks/useIsMobile'
 
 // `connect` = le crayon. Il manquait ici alors qu'il existe sur la carte
@@ -47,6 +49,10 @@ interface StudyCanvasProps {
   onDeleteEdge: (edgeId: string) => void
   /** Changer le côté d'accroche d'un trait, sans toucher à ses extrémités. */
   onReconnectEdge?: (edgeId: string, fromHandle: string | null, toHandle: string | null) => void
+  /** Poser un nœud-concept. Passe par le layout : ce canvas resynchronise ses
+   *  nœuds depuis ses props, un ajout purement local serait effacé au prochain
+   *  recalcul. */
+  onCreateConcept?: (c: { tagId: string; label: string; color: string; x: number; y: number }) => Promise<CanvasNodeData | null>
   onCreateGroup: (group: { label: string; color: string; x: number; y: number; width?: number; height?: number }) => Promise<CanvasNodeData | null>
   onCreateText: (pos: { x: number; y: number }) => Promise<CanvasNodeData | null>
   onUpdateNode: (nodeId: string, patch: Partial<Pick<CanvasNodeData, 'x' | 'y' | 'width' | 'height' | 'label' | 'color' | 'parentId' | 'orderInParent' | 'content'>>) => Promise<void> | void
@@ -438,7 +444,7 @@ export function GroupNode({ id, data, selected }: NodeProps) {
   )
 }
 
-const nodeTypes = { message: MessageNode, group: GroupNode }
+const nodeTypes = { message: MessageNode, group: GroupNode, concept: ConceptNode }
 
 // React Flow exige les parents AVANT leurs enfants dans le tableau
 export function sortParentsFirst(nds: Node[]): Node[] {
@@ -447,9 +453,10 @@ export function sortParentsFirst(nds: Node[]): Node[] {
 
 // La barre partagée (canvas/CanvasToolbar) + le Panel « Grouper / Fusionner »,
 // qui doit rester enfant de <ReactFlow> et ne peut donc pas vivre dans la barre.
-function BarreOutilsNote({ activeTool, setActiveTool, selectedCount, mergeableCount, onGroupSelection, onMergeSelection, onNewGroup, onNewText }: {
+function BarreOutilsNote({ activeTool, setActiveTool, onAddConcept, selectedCount, mergeableCount, onGroupSelection, onMergeSelection, onNewGroup, onNewText }: {
   activeTool: CanvasTool
   setActiveTool: (t: CanvasTool) => void
+  onAddConcept?: () => void
   selectedCount: number
   mergeableCount: number
   onGroupSelection: () => void
@@ -493,6 +500,12 @@ function BarreOutilsNote({ activeTool, setActiveTool, selectedCount, mergeableCo
           { id: 'pan', label: 'Déplacer le canvas (H)' },
         ]}
         actions={([
+          ...(onAddConcept ? [{
+            id: 'concept',
+            Icon: Hash,
+            label: 'Poser un concept sur le canvas — relie-lui des blocs avec le crayon (E)',
+            onClick: onAddConcept,
+          }] : []),
           {
             id: 'groupe',
             Icon: FolderPlus,
@@ -523,6 +536,10 @@ export default function StudyCanvas(props: StudyCanvasProps) {
 }
 
 function StudyCanvasInner({
+  // ⚠️ `canvasId` était déclaré dans les props mais JAMAIS déstructuré : il
+  // était donc accepté et ignoré. Le nœud-concept en a besoin (il s'auto-retire
+  // via l'API), d'où son ajout ici au 0.1.7.
+  canvasId,
   nodes: initialNodes,
   edges: initialEdges,
   messages,
@@ -534,6 +551,7 @@ function StudyCanvasInner({
   onReconnectEdge,
   onCreateGroup,
   onCreateText,
+  onCreateConcept,
   onUpdateNode,
   onPromoteGroupTag,
   tradeMeta,
@@ -541,6 +559,7 @@ function StudyCanvasInner({
   onArmedPlaced,
 }: StudyCanvasProps) {
   const [activeTool, setActiveTool] = useState<CanvasTool>('select')
+  const [conceptPickerOpen, setConceptPickerOpen] = useState(false)
   // Bloc de départ d'un lien en cours (outil crayon).
   const [linkSourceId, setLinkSourceId] = useState<string | null>(null)
   const [zoomSrc, setZoomSrc] = useState<string | null>(null)
@@ -674,12 +693,21 @@ function StudyCanvasInner({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messageMap, onRemoveNode, onUpdateNode, tradeMeta])
 
+  // ⚠️ Ce filtre est exclusif : tout `kind` non prévu ici est SILENCIEUSEMENT
+  // jeté, sans erreur. C'est ce qui serait arrivé aux nœuds-concept, créés en
+  // base mais jamais affichés. D'où la troisième branche.
   const rfNodes: Node[] = useMemo(
     () => sortParentsFirst([
       ...initialNodes.filter((n) => n.kind === 'group').map((g) => buildGroupNode(g)),
-      ...initialNodes.filter((n) => n.kind !== 'group' && (n.messageId || n.kind === 'text')).map((n) => buildMessageNode(n)),
+      ...initialNodes.filter((n) => n.kind === 'concept').map((c) => ({
+        id: c.id,
+        type: 'concept',
+        position: { x: c.x, y: c.y },
+        data: { label: c.label ?? '', color: c.color, canvasId },
+      })),
+      ...initialNodes.filter((n) => n.kind !== 'group' && n.kind !== 'concept' && (n.messageId || n.kind === 'text')).map((n) => buildMessageNode(n)),
     ]),
-    [initialNodes, buildGroupNode, buildMessageNode]
+    [initialNodes, buildGroupNode, buildMessageNode, canvasId]
   )
 
   const rfEdges: Edge[] = useMemo(
@@ -710,6 +738,14 @@ function StudyCanvasInner({
   // 0.1.7 — même geste qu'à l'accueil : on détache l'extrémité d'un trait pour
   // la reposer sur une autre poignée DU MÊME bloc. Rebrancher sur un autre bloc
   // est refusé pour l'instant (tags et contrainte d'unicité).
+  // Pose le concept au centre de la vue, via le layout (cf. la prop).
+  const poserConcept = useCallback(async (tag: { id: string; name: string; color: string }) => {
+    if (!onCreateConcept) return
+    const centre = screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 })
+    await onCreateConcept({ tagId: tag.id, label: tag.name, color: tag.color, x: centre.x - 80, y: centre.y - 22 })
+    setConceptPickerOpen(false)
+  }, [onCreateConcept, screenToFlowPosition])
+
   const onReconnect = useCallback((ancien: Edge, nouveau: Connection) => {
     if (nouveau.source !== ancien.source || nouveau.target !== ancien.target) return
     setEdges(eds => eds.map(e => e.id === ancien.id
@@ -1045,9 +1081,15 @@ function StudyCanvasInner({
         elementsSelectable={activeTool !== 'pan'}
         style={{ background: 'transparent' }}
       >
+        <ConceptPicker
+          ouvert={conceptPickerOpen}
+          onFermer={() => setConceptPickerOpen(false)}
+          onChoisi={poserConcept}
+        />
         <BarreOutilsNote
           activeTool={activeTool}
           setActiveTool={setActiveTool}
+          onAddConcept={onCreateConcept ? () => setConceptPickerOpen(o => !o) : undefined}
           selectedCount={selectedFree.length}
           mergeableCount={selectedBlocks.length}
           onGroupSelection={handleGroupSelection}

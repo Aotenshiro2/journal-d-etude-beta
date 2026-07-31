@@ -35,6 +35,8 @@ import { PoigneesCardinales } from './canvas/poignees'
 import { poigneesEntre } from './canvas/lienProche'
 import { ASSISTANCE_CONNEXION, connexionValide, lienDejaPresent } from './canvas/lienValide'
 import { CanvasToolbar, type ActionBarre } from './canvas/CanvasToolbar'
+import { ConceptNode } from './canvas/ConceptNode'
+import { ConceptPicker } from './canvas/ConceptPicker'
 import CaptureBar from '@/components/CaptureBar'
 import ImageLightbox from '@/components/ImageLightbox'
 import { stripHtml, formatRelativeTime, extractImageSrc } from '@/lib/utils'
@@ -221,53 +223,8 @@ const NoteMapNode = React.memo(function NoteMapNode({ id, data }: NodeProps) {
 // 0.1.6 — Nœud-CONCEPT : un tag incarné sur le canvas. Relier une note à ce
 // nœud (outil crayon) = la note porte le concept (NoteTag, côté serveur).
 // C'est la multi-appartenance : une note peut tirer des liens vers N concepts.
-const ConceptNode = React.memo(function ConceptNode({ id, data }: NodeProps) {
-  const { setNodes, setEdges } = useReactFlow()
-  const d = data as { label: string; color?: string | null; canvasId: string }
-  const [hovered, setHovered] = useState(false)
-  const color = d.color || '#3b82f6'
-
-  const handleRemove = useCallback(async (e: React.MouseEvent) => {
-    e.stopPropagation()
-    if (!window.confirm(`Retirer le nœud « ${d.label} » du canvas ?\n\nLes notes reliées par un trait perdent CE concept (les tags posés autrement ne bougent pas).`)) return
-    await fetch(`/api/canvas/${d.canvasId}/nodes/${id}`, { method: 'DELETE' })
-    setEdges(eds => eds.filter(e2 => e2.source !== id && e2.target !== id))
-    setNodes(nds => nds.filter(n => n.id !== id))
-  }, [id, d.canvasId, d.label, setNodes, setEdges])
-
-  return (
-    <div
-      className="group"
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      style={{
-        position: 'relative',
-        display: 'flex', alignItems: 'center', gap: 6,
-        padding: '10px 16px', borderRadius: 100,
-        background: `${color}1f`, border: `1.5px solid ${color}`,
-        boxShadow: 'var(--node-shadow)',
-      }}
-    >
-      <PoigneesCardinales couleur={color} />
-      <span style={{ fontSize: 13, fontWeight: 700, color }}>#</span>
-      <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--node-title)', whiteSpace: 'nowrap' }}>{d.label}</span>
-      {hovered && (
-        <button
-          onClick={handleRemove}
-          title="Retirer ce concept du canvas"
-          style={{
-            position: 'absolute', top: -7, right: -7,
-            width: 18, height: 18, borderRadius: '50%',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            background: 'rgba(239,68,68,0.85)', border: 'none',
-            cursor: 'pointer', color: '#fff', fontSize: 12, lineHeight: 1, padding: 0,
-          }}
-        >×</button>
-      )}
-    </div>
-  )
-})
-
+// 0.1.6 — Nœud-CONCEPT : un tag incarné sur le canvas. Extrait au 0.1.7 dans
+// `canvas/ConceptNode.tsx` pour servir aussi au canvas d'une note.
 const nodeTypes = { noteMap: NoteMapNode, group: GroupNode, concept: ConceptNode }
 const GROUP_COLOR_KEYS = Object.keys(GROUP_COLORS)
 
@@ -856,8 +813,6 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
 
   // ── Picker de concepts (0.1.6) ──────────────────────────────────────────────
   const [conceptPickerOpen, setConceptPickerOpen] = useState(false)
-  const [conceptQuery, setConceptQuery] = useState('')
-  const [conceptTags, setConceptTags] = useState<{ id: string; name: string; color: string }[] | null>(null)
   const dragEnterCounterRef = useRef(0)
   const { setCenter, screenToFlowPosition, getNode, getInternalNode } = useReactFlow()
   const { x: vpX, y: vpY, zoom } = useViewport()
@@ -1246,15 +1201,9 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
     }
   }, [canvas.id, setEdges])
 
-  const openConceptPicker = useCallback(() => {
-    setConceptPickerOpen(o => !o)
-    setConceptQuery('')
-    if (!conceptTags) {
-      fetch('/api/tags').then(r => r.ok ? r.json() : []).then(setConceptTags).catch(() => setConceptTags([]))
-    }
-  }, [conceptTags])
-
-  // Pose le nœud-concept au centre de la vue actuelle
+  // Pose le nœud-concept au centre de la vue actuelle. L'accueil calcule ses
+  // nœuds une seule fois, il peut donc ajouter le sien en direct — contrairement
+  // au canvas d'une note, qui doit passer par son layout (cf. ConceptPicker).
   const addConceptNode = useCallback(async (tag: { id: string; name: string; color: string }) => {
     const center = screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 })
     const res = await fetch(`/api/canvas/${canvas.id}/nodes`, {
@@ -1270,19 +1219,6 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
     }])
     setConceptPickerOpen(false)
   }, [canvas.id, screenToFlowPosition, setNodes])
-
-  const createConceptAndAdd = useCallback(async () => {
-    const name = conceptQuery.trim()
-    if (!name) return
-    const res = await fetch('/api/tags', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name }),
-    })
-    if (!res.ok) return
-    const tag = await res.json()
-    setConceptTags(prev => prev ? [...prev.filter(t => t.id !== tag.id), tag] : [tag])
-    await addConceptNode(tag)
-  }, [conceptQuery, addConceptNode])
 
   const focusNote = useCallback((noteId: string) => {
     const node = nodes.find(n => n.id === noteId)
@@ -1640,72 +1576,17 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
               return next
             })
           }}
-          onAddConcept={openConceptPicker}
+          onAddConcept={() => setConceptPickerOpen(o => !o)}
         />
 
-        {/* ── Picker de concepts (0.1.6) — choisir/créer le concept à poser ── */}
-        {conceptPickerOpen && (
-          <div
-            className="canvas-float-pill"
-            style={{
-              position: 'absolute', right: 58, top: '50%', transform: 'translateY(-50%)',
-              zIndex: 45, width: 230, padding: 8, display: 'flex', flexDirection: 'column', gap: 6,
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Hash size={12} style={{ color: 'var(--node-meta)', flexShrink: 0 }} />
-              <input
-                autoFocus
-                value={conceptQuery}
-                onChange={e => setConceptQuery(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Escape') setConceptPickerOpen(false) }}
-                placeholder="Chercher ou créer un concept…"
-                style={{
-                  flex: 1, minWidth: 0, background: 'transparent', border: 'none', outline: 'none',
-                  fontSize: 12, color: 'var(--node-title)',
-                }}
-              />
-              <button onClick={() => setConceptPickerOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--node-meta)', fontSize: 13, padding: 0 }}>×</button>
-            </div>
-            <div style={{ maxHeight: 240, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
-              {(conceptTags ?? [])
-                .filter(t => t.name.toLowerCase().includes(conceptQuery.trim().toLowerCase()))
-                .slice(0, 12)
-                .map(t => (
-                  <button
-                    key={t.id}
-                    onClick={() => addConceptNode(t)}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px',
-                      borderRadius: 8, border: 'none', cursor: 'pointer', textAlign: 'left',
-                      background: 'none', color: 'var(--node-title)', fontSize: 12,
-                    }}
-                    onMouseEnter={e => { e.currentTarget.style.background = 'var(--canvas-bg)' }}
-                    onMouseLeave={e => { e.currentTarget.style.background = 'none' }}
-                  >
-                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: t.color, flexShrink: 0 }} />
-                    {t.name}
-                  </button>
-                ))}
-              {conceptQuery.trim() && !(conceptTags ?? []).some(t => t.name.toLowerCase() === conceptQuery.trim().toLowerCase()) && (
-                <button
-                  onClick={createConceptAndAdd}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px',
-                    borderRadius: 8, border: 'none', cursor: 'pointer', textAlign: 'left',
-                    background: 'rgba(59,130,246,0.1)', color: '#3b82f6', fontSize: 12,
-                  }}
-                >
-                  <Hash size={11} style={{ flexShrink: 0 }} />
-                  Créer « {conceptQuery.trim()} »
-                </button>
-              )}
-              {conceptTags === null && (
-                <p style={{ fontSize: 11, color: 'var(--node-meta)', textAlign: 'center', padding: 8 }}>Chargement…</p>
-              )}
-            </div>
-          </div>
-        )}
+        {/* ── Picker de concepts (0.1.6) — choisir/créer le concept à poser ──
+            Extrait au 0.1.7 dans canvas/ConceptPicker.tsx, partagé avec le
+            canvas d'une note. */}
+        <ConceptPicker
+          ouvert={conceptPickerOpen}
+          onFermer={() => setConceptPickerOpen(false)}
+          onChoisi={addConceptNode}
+        />
 
         {/* ── Bottom-left — notes bubble ──
             Au téléphone : rien ici. « Notes » vit déjà dans la pile en bas à
