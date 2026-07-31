@@ -25,8 +25,7 @@ import '@xyflow/react/dist/style.css'
 import {
   Sun, Moon, Map as MapIcon, Grid3x3, ChevronDown, ChevronLeft, ChevronRight,
   BookOpen, Lightbulb, BookMarked, BarChart2, FileText,
-  MousePointer2, Hand, Pencil, Square, ZoomIn, ZoomOut, Maximize2,
-  Star, FolderPlus, Compass, Sunrise, Layers, Eye, EyeOff, Hash,
+  Pencil, Star, FolderPlus, Compass, Sunrise, Layers, Eye, EyeOff, Hash,
   MoreHorizontal, History, HelpCircle,
 } from 'lucide-react'
 import { NoteData, CanvasData, MessageData } from '@/types'
@@ -35,6 +34,7 @@ import { canvasEdgeTypes, avecSurvol } from './CanvasEdge'
 import { PoigneesCardinales } from './canvas/poignees'
 import { poigneesEntre } from './canvas/lienProche'
 import { ASSISTANCE_CONNEXION, connexionValide, lienDejaPresent } from './canvas/lienValide'
+import { CanvasToolbar, type ActionBarre } from './canvas/CanvasToolbar'
 import CaptureBar from '@/components/CaptureBar'
 import ImageLightbox from '@/components/ImageLightbox'
 import { stripHtml, formatRelativeTime, extractImageSrc } from '@/lib/utils'
@@ -623,89 +623,37 @@ interface RightToolbarProps {
 }
 
 function RightToolbar({ activeTool, setActiveTool, isFav, onToggleFav, onAddConcept }: RightToolbarProps) {
-  const { zoomIn, zoomOut, fitView } = useReactFlow()
-
-  const tools: { id: Tool; Icon: React.ElementType; label: string }[] = [
-    { id: 'select',  Icon: MousePointer2, label: 'Sélectionner (V)' },
-    { id: 'mark',    Icon: Square,        label: 'Sélection groupée (M)' },
-    { id: 'connect', Icon: Pencil,        label: 'Connecter les cartes (E)' },
-    { id: 'pan',     Icon: Hand,          label: 'Déplacer le canvas (H)' },
-  ]
-
-  const btnBase: React.CSSProperties = {
-    width: 30, height: 30, borderRadius: 7,
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    background: 'none', border: '1px solid transparent',
-    cursor: 'pointer', color: 'var(--node-meta)',
+  const actions: ActionBarre[] = []
+  if (onAddConcept) {
+    actions.push({
+      id: 'concept',
+      Icon: Hash,
+      label: 'Poser un concept sur le canvas — relie-lui des notes avec le crayon (E)',
+      onClick: onAddConcept,
+    })
   }
 
-  const divider = <div style={{ height: 1, background: 'var(--float-border)', margin: '2px 0' }} />
-
   return (
-    <div style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', zIndex: 20 }}>
-      <div className="canvas-float-pill" style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '6px 4px' }}>
-
-        {/* Tools */}
-        {tools.map(tool => (
-          <button
-            key={tool.id}
-            onClick={() => setActiveTool(tool.id)}
-            title={tool.label}
-            style={{
-              ...btnBase,
-              background: activeTool === tool.id ? 'var(--tool-active-bg)' : 'none',
-              border: activeTool === tool.id ? '1px solid var(--tool-active-border)' : '1px solid transparent',
-              color: activeTool === tool.id ? '#3b82f6' : 'var(--node-meta)',
-            }}
-          >
-            <tool.Icon size={14} />
-          </button>
-        ))}
-
-        {/* 0.1.6 — poser un nœud-concept sur le canvas */}
-        {onAddConcept && (
-          <button
-            onClick={onAddConcept}
-            title="Poser un concept sur le canvas — relie-lui des notes avec le crayon (E)"
-            style={btnBase}
-            onMouseEnter={e => { e.currentTarget.style.color = '#3b82f6'; e.currentTarget.style.background = 'var(--canvas-bg)' }}
-            onMouseLeave={e => { e.currentTarget.style.color = 'var(--node-meta)'; e.currentTarget.style.background = 'none' }}
-          >
-            <Hash size={14} />
-          </button>
-        )}
-
-        {divider}
-
-        {/* Zoom controls */}
-        {([
-          { Icon: ZoomIn,    label: 'Zoom avant',    action: () => zoomIn({ duration: 200 }) },
-          { Icon: ZoomOut,   label: 'Zoom arrière',  action: () => zoomOut({ duration: 200 }) },
-          { Icon: Maximize2, label: 'Ajuster la vue', action: () => fitView({ duration: 400 }) },
-        ] as { Icon: React.ElementType; label: string; action: () => void }[]).map(({ Icon, label, action }) => (
-          <button key={label} onClick={action} title={label} style={btnBase}
-            onMouseEnter={e => { e.currentTarget.style.color = 'var(--node-title)'; e.currentTarget.style.background = 'var(--canvas-bg)' }}
-            onMouseLeave={e => { e.currentTarget.style.color = 'var(--node-meta)'; e.currentTarget.style.background = 'none' }}
-          >
-            <Icon size={14} />
-          </button>
-        ))}
-
-        {divider}
-
-        {/* Favorite */}
-        <button
-          onClick={onToggleFav}
-          title={isFav ? 'Retirer des favoris' : 'Ajouter aux favoris'}
-          style={{ ...btnBase, color: isFav ? '#f59e0b' : 'var(--node-meta)' }}
-          onMouseEnter={e => { if (!isFav) e.currentTarget.style.color = 'var(--node-title)' }}
-          onMouseLeave={e => { if (!isFav) e.currentTarget.style.color = 'var(--node-meta)' }}
-        >
-          <Star size={14} fill={isFav ? '#f59e0b' : 'none'} />
-        </button>
-
-      </div>
-    </div>
+    <CanvasToolbar
+      outil={activeTool}
+      setOutil={setActiveTool}
+      outils={[
+        { id: 'select', label: 'Sélectionner (V)' },
+        { id: 'mark', label: 'Sélection groupée (M)' },
+        { id: 'connect', label: 'Connecter les cartes (E)' },
+        { id: 'pan', label: 'Déplacer le canvas (H)' },
+      ]}
+      actions={actions}
+      actionsFin={[{
+        id: 'fav',
+        Icon: Star,
+        label: isFav ? 'Retirer des favoris' : 'Ajouter aux favoris',
+        onClick: onToggleFav,
+        actif: isFav,
+        couleurActive: '#f59e0b',
+        remplirIcone: true,
+      }]}
+    />
   )
 }
 
@@ -1079,6 +1027,23 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
   const [survole, setSurvole] = useState<string | null>(null)
   const edgesAffichees = useMemo(() => avecSurvol(edges, survole), [edges, survole])
   const connexionAutorisee = useMemo(() => connexionValide(edges), [edges])
+
+  // 0.1.7 — détacher l'extrémité d'un trait pour la reposer sur une AUTRE
+  // POIGNÉE DE LA MÊME CARTE. C'est le besoin esthétique : le trait sort du
+  // mauvais côté, on veut le rattraper à la main sans le refaire.
+  // Rebrancher sur une autre carte est refusé pour l'instant : ça touche aux
+  // tags posés par un lien vers un concept et à la contrainte d'unicité.
+  const onReconnect = useCallback(async (ancien: Edge, nouveau: Connection) => {
+    if (nouveau.source !== ancien.source || nouveau.target !== ancien.target) return
+    setEdges(eds => eds.map(e => e.id === ancien.id
+      ? { ...e, sourceHandle: nouveau.sourceHandle, targetHandle: nouveau.targetHandle }
+      : e))
+    await fetch(`/api/canvas/${canvas.id}/edges/${ancien.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fromHandle: nouveau.sourceHandle, toHandle: nouveau.targetHandle }),
+    })
+  }, [setEdges, canvas.id])
   const handleNodeMouseEnter = useCallback((_: React.MouseEvent, n: Node) => setSurvole(n.id), [])
   const handleNodeMouseLeave = useCallback(() => setSurvole(null), [])
 
@@ -1877,6 +1842,8 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
             minZoom={0.08} maxZoom={2.5} deleteKeyCode={null}
             {...ASSISTANCE_CONNEXION}
             isValidConnection={connexionAutorisee}
+            onReconnect={onReconnect}
+            reconnectRadius={25}
             panOnScroll panOnScrollMode={PanOnScrollMode.Vertical}
             zoomOnScroll={false} zoomActivationKeyCode="Control"
             panActivationKeyCode="Space"

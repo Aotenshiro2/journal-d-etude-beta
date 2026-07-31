@@ -17,7 +17,7 @@ import {
   useViewport,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { FolderPlus, ZoomIn, ZoomOut, Maximize2, MousePointer2, Square, Hand, Type, Combine, Pencil } from 'lucide-react'
+import { FolderPlus, Type, Combine, Pencil } from 'lucide-react'
 import { MessageData, CanvasNodeData, CanvasEdgeData } from '@/types'
 import { htmlToText, truncateText, extractImageSrc } from '@/lib/utils'
 import ImageLightbox from './ImageLightbox'
@@ -25,6 +25,7 @@ import { canvasEdgeTypes, avecSurvol } from './CanvasEdge'
 import { PoigneesCardinales } from './canvas/poignees'
 import { poigneesEntre } from './canvas/lienProche'
 import { ASSISTANCE_CONNEXION, connexionValide, lienDejaPresent } from './canvas/lienValide'
+import { CanvasToolbar, type ActionBarre } from './canvas/CanvasToolbar'
 import { useIsMobile } from '@/hooks/useIsMobile'
 
 // `connect` = le crayon. Il manquait ici alors qu'il existe sur la carte
@@ -44,6 +45,8 @@ interface StudyCanvasProps {
    *  affiché en optimiste. Tout autre retour est traité comme un succès. */
   onConnect: (fromId: string, toId: string, fromHandle?: string, toHandle?: string) => void | Promise<boolean>|Promise<void>
   onDeleteEdge: (edgeId: string) => void
+  /** Changer le côté d'accroche d'un trait, sans toucher à ses extrémités. */
+  onReconnectEdge?: (edgeId: string, fromHandle: string | null, toHandle: string | null) => void
   onCreateGroup: (group: { label: string; color: string; x: number; y: number; width?: number; height?: number }) => Promise<CanvasNodeData | null>
   onCreateText: (pos: { x: number; y: number }) => Promise<CanvasNodeData | null>
   onUpdateNode: (nodeId: string, patch: Partial<Pick<CanvasNodeData, 'x' | 'y' | 'width' | 'height' | 'label' | 'color' | 'parentId' | 'orderInParent' | 'content'>>) => Promise<void> | void
@@ -442,8 +445,9 @@ export function sortParentsFirst(nds: Node[]): Node[] {
   return [...nds.filter(n => n.type === 'group'), ...nds.filter(n => n.type !== 'group')]
 }
 
-// Pill d'outils à droite — même vocabulaire visuel que la RightToolbar du canvas home
-function CanvasToolbar({ activeTool, setActiveTool, selectedCount, mergeableCount, onGroupSelection, onMergeSelection, onNewGroup, onNewText }: {
+// La barre partagée (canvas/CanvasToolbar) + le Panel « Grouper / Fusionner »,
+// qui doit rester enfant de <ReactFlow> et ne peut donc pas vivre dans la barre.
+function BarreOutilsNote({ activeTool, setActiveTool, selectedCount, mergeableCount, onGroupSelection, onMergeSelection, onNewGroup, onNewText }: {
   activeTool: CanvasTool
   setActiveTool: (t: CanvasTool) => void
   selectedCount: number
@@ -453,22 +457,7 @@ function CanvasToolbar({ activeTool, setActiveTool, selectedCount, mergeableCoun
   onNewGroup: (pos: { x: number; y: number }) => void
   onNewText: (pos: { x: number; y: number }) => void
 }) {
-  const { screenToFlowPosition, zoomIn, zoomOut, fitView } = useReactFlow()
-
-  const btnBase: React.CSSProperties = {
-    width: 30, height: 30, borderRadius: 7,
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    background: 'none', border: '1px solid transparent',
-    cursor: 'pointer', color: 'var(--node-meta)',
-  }
-  const divider = <div style={{ height: 1, background: 'var(--float-border)', margin: '2px 0' }} />
-
-  const tools: { id: CanvasTool; Icon: React.ElementType; label: string }[] = [
-    { id: 'select', Icon: MousePointer2, label: 'Sélectionner (glisser = déplacer la vue)' },
-    { id: 'mark', Icon: Square, label: 'Sélection groupée (glisser = rectangle de sélection)' },
-    { id: 'connect', Icon: Pencil, label: 'Relier deux blocs (touche le départ, puis l\'arrivée)' },
-    { id: 'pan', Icon: Hand, label: 'Déplacer le canvas' },
-  ]
+  const { screenToFlowPosition } = useReactFlow()
 
   return (
     <>
@@ -495,57 +484,32 @@ function CanvasToolbar({ activeTool, setActiveTool, selectedCount, mergeableCoun
           )}
         </Panel>
       )}
-      <div style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', zIndex: 20 }}>
-        <div className="canvas-float-pill" style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '6px 4px' }}>
-          {tools.map(tool => (
-            <button
-              key={tool.id}
-              onClick={() => setActiveTool(tool.id)}
-              title={tool.label}
-              style={{
-                ...btnBase,
-                background: activeTool === tool.id ? 'var(--tool-active-bg)' : 'none',
-                border: activeTool === tool.id ? '1px solid var(--tool-active-border)' : '1px solid transparent',
-                color: activeTool === tool.id ? '#3b82f6' : 'var(--node-meta)',
-              }}
-            >
-              <tool.Icon size={14} />
-            </button>
-          ))}
-          {divider}
-          <button
-            title="Nouveau groupe — une zone nommée, puis glisse des blocs dedans"
-            style={btnBase}
-            onClick={(e) => onNewGroup(screenToFlowPosition({ x: e.clientX - 460, y: e.clientY }))}
-            onMouseEnter={e => { e.currentTarget.style.color = '#3b82f6' }}
-            onMouseLeave={e => { e.currentTarget.style.color = 'var(--node-meta)' }}
-          >
-            <FolderPlus size={14} />
-          </button>
-          <button
-            title="Bloc de texte libre — une pensée à toi sur le canvas"
-            style={btnBase}
-            onClick={(e) => onNewText(screenToFlowPosition({ x: e.clientX - 380, y: e.clientY }))}
-            onMouseEnter={e => { e.currentTarget.style.color = '#3b82f6' }}
-            onMouseLeave={e => { e.currentTarget.style.color = 'var(--node-meta)' }}
-          >
-            <Type size={14} />
-          </button>
-          {divider}
-          {([
-            { Icon: ZoomIn, label: 'Zoom avant', action: () => zoomIn({ duration: 200 }) },
-            { Icon: ZoomOut, label: 'Zoom arrière', action: () => zoomOut({ duration: 200 }) },
-            { Icon: Maximize2, label: 'Ajuster la vue', action: () => fitView({ duration: 400 }) },
-          ] as { Icon: React.ElementType; label: string; action: () => void }[]).map(({ Icon, label, action }) => (
-            <button key={label} onClick={action} title={label} style={btnBase}
-              onMouseEnter={e => { e.currentTarget.style.color = 'var(--node-title)'; e.currentTarget.style.background = 'var(--canvas-bg)' }}
-              onMouseLeave={e => { e.currentTarget.style.color = 'var(--node-meta)'; e.currentTarget.style.background = 'none' }}
-            >
-              <Icon size={14} />
-            </button>
-          ))}
-        </div>
-      </div>
+      <CanvasToolbar
+        outil={activeTool}
+        setOutil={setActiveTool}
+        outils={[
+          { id: 'select', label: 'Sélectionner (glisser = déplacer la vue)' },
+          { id: 'mark', label: 'Sélection groupée (glisser = rectangle de sélection)' },
+          { id: 'connect', label: 'Relier deux blocs (touche le départ, puis l\'arrivée)' },
+          { id: 'pan', label: 'Déplacer le canvas' },
+        ]}
+        actions={([
+          {
+            id: 'groupe',
+            Icon: FolderPlus,
+            label: 'Nouveau groupe — une zone nommée, puis glisse des blocs dedans',
+            // Le décalage écran reste ici : il dépend de la largeur du panneau
+            // latéral de CE canvas, la barre partagée n'a pas à le connaître.
+            onClick: (e) => onNewGroup(screenToFlowPosition({ x: e.clientX - 460, y: e.clientY })),
+          },
+          {
+            id: 'texte',
+            Icon: Type,
+            label: 'Bloc de texte libre — une pensée à toi sur le canvas',
+            onClick: (e) => onNewText(screenToFlowPosition({ x: e.clientX - 380, y: e.clientY })),
+          },
+        ] as ActionBarre[])}
+      />
     </>
   )
 }
@@ -568,6 +532,7 @@ function StudyCanvasInner({
   onRemoveNode,
   onConnect: onConnectCallback,
   onDeleteEdge,
+  onReconnectEdge,
   onCreateGroup,
   onCreateText,
   onUpdateNode,
@@ -715,6 +680,17 @@ function StudyCanvasInner({
   const [survole, setSurvole] = useState<string | null>(null)
   const edgesAffichees = useMemo(() => avecSurvol(edges, survole), [edges, survole])
   const connexionAutorisee = useMemo(() => connexionValide(edges), [edges])
+
+  // 0.1.7 — même geste qu'à l'accueil : on détache l'extrémité d'un trait pour
+  // la reposer sur une autre poignée DU MÊME bloc. Rebrancher sur un autre bloc
+  // est refusé pour l'instant (tags et contrainte d'unicité).
+  const onReconnect = useCallback((ancien: Edge, nouveau: Connection) => {
+    if (nouveau.source !== ancien.source || nouveau.target !== ancien.target) return
+    setEdges(eds => eds.map(e => e.id === ancien.id
+      ? { ...e, sourceHandle: nouveau.sourceHandle, targetHandle: nouveau.targetHandle }
+      : e))
+    onReconnectEdge?.(ancien.id, nouveau.sourceHandle ?? null, nouveau.targetHandle ?? null)
+  }, [setEdges, onReconnectEdge])
   const onNodeMouseEnter = useCallback((_: React.MouseEvent, n: Node) => setSurvole(n.id), [])
   const onNodeMouseLeave = useCallback(() => setSurvole(null), [])
 
@@ -1031,13 +1007,15 @@ function StudyCanvasInner({
         nodesConnectable={activeTool === 'connect'}
         {...ASSISTANCE_CONNEXION}
         isValidConnection={connexionAutorisee}
+        onReconnect={onReconnect}
+        reconnectRadius={25}
         // Crayon : les blocs ne bougent pas, sinon le premier tap les déplace
         // au lieu d'armer le lien. Le glissement reste libre pour se déplacer.
         nodesDraggable={activeTool !== 'pan' && activeTool !== 'connect'}
         elementsSelectable={activeTool !== 'pan'}
         style={{ background: 'transparent' }}
       >
-        <CanvasToolbar
+        <BarreOutilsNote
           activeTool={activeTool}
           setActiveTool={setActiveTool}
           selectedCount={selectedFree.length}
