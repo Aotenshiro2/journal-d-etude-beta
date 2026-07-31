@@ -163,9 +163,9 @@ const nodeTypes = { groupe: GroupeDemo, carte: CarteDemo }
 
 function Scene({ variante }: { variante: Variante }) {
   const nodes: Node[] = [
-    { id: 'g', type: 'groupe', position: { x: 40, y: 30 }, data: { variante }, style: { width: 520, height: 250, zIndex: -1 }, selected: true },
-    { id: 'c1', type: 'carte', position: { x: 80, y: 90 }, data: { titre: 'Les macros' } },
-    { id: 'c2', type: 'carte', position: { x: 330, y: 150 }, data: { titre: 'Session 17 Mars' } },
+    { id: 'g', type: 'groupe', position: { x: 40, y: 30 }, data: { variante }, style: { width: 480, height: 190, zIndex: -1 }, selected: true },
+    { id: 'c1', type: 'carte', position: { x: 76, y: 70 }, data: { titre: 'Les macros' } },
+    { id: 'c2', type: 'carte', position: { x: 306, y: 112 }, data: { titre: 'Session 17 Mars' } },
   ]
   return (
     <ReactFlow
@@ -173,7 +173,10 @@ function Scene({ variante }: { variante: Variante }) {
       edges={[]}
       nodeTypes={nodeTypes}
       fitView
-      fitViewOptions={{ padding: 0.18 }}
+      // `maxZoom: 1` est indispensable : sans lui fitView agrandit la scène pour
+      // remplir la tuile, et le toolbar flottant — qui vit SOUS le groupe et
+      // n'entre pas dans le cadrage — se retrouve pousse hors du champ.
+      fitViewOptions={{ padding: 0.22, maxZoom: 1 }}
       nodesDraggable={false}
       panOnDrag={false}
       zoomOnScroll={false}
@@ -236,7 +239,7 @@ export default function LaboBoutons() {
                   color: o.src === 'existant' ? 'var(--node-meta)' : '#818cf8', opacity: 0.85,
                 }}>{o.src}</span>
               </div>
-              <div style={{ position: 'relative', height: 330, borderRadius: 14, overflow: 'hidden', border: '1px solid var(--node-border)' }}>
+              <div style={{ position: 'relative', height: 420, borderRadius: 14, overflow: 'hidden', border: '1px solid var(--node-border)' }}>
                 <div className="canvas-grid" />
                 <ReactFlowProvider><Scene variante={o.n} /></ReactFlowProvider>
               </div>
