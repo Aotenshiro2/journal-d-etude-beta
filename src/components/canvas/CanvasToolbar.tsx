@@ -16,13 +16,14 @@
 
 import type React from 'react'
 import { useReactFlow } from '@xyflow/react'
-import { MousePointer2, Square, Pencil, Hand, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react'
+import { MousePointer2, Pencil, Hand, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react'
 
-export type OutilCanvas = 'select' | 'mark' | 'connect' | 'pan'
+// `mark` (la sélection groupée) a été retirée au 0.1.7 : elle ne se distinguait
+// de `select` que par `SelectionMode.Full`, le geste était le même.
+export type OutilCanvas = 'select' | 'connect' | 'pan'
 
 const ICONES: Record<OutilCanvas, React.ElementType> = {
   select: MousePointer2,
-  mark: Square,
   connect: Pencil,
   pan: Hand,
 }

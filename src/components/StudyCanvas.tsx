@@ -31,7 +31,7 @@ import { useIsMobile } from '@/hooks/useIsMobile'
 // `connect` = le crayon. Il manquait ici alors qu'il existe sur la carte
 // d'accueil : relier deux blocs demandait de tirer une poignée de 9 px, ce que
 // le doigt ne sait pas faire. Le geste est le même des deux côtés : tap → tap.
-type CanvasTool = 'select' | 'mark' | 'pan' | 'connect'
+type CanvasTool = 'select' | 'pan' | 'connect'
 
 interface StudyCanvasProps {
   canvasId: string
@@ -488,10 +488,9 @@ function BarreOutilsNote({ activeTool, setActiveTool, selectedCount, mergeableCo
         outil={activeTool}
         setOutil={setActiveTool}
         outils={[
-          { id: 'select', label: 'Sélectionner (glisser = déplacer la vue)' },
-          { id: 'mark', label: 'Sélection groupée (glisser = rectangle de sélection)' },
-          { id: 'connect', label: 'Relier deux blocs (touche le départ, puis l\'arrivée)' },
-          { id: 'pan', label: 'Déplacer le canvas' },
+          { id: 'select', label: 'Sélectionner — glisse sur le vide pour en prendre plusieurs (V)' },
+          { id: 'connect', label: 'Relier deux blocs — touche le départ, puis l\'arrivée (E)' },
+          { id: 'pan', label: 'Déplacer le canvas (H)' },
         ]}
         actions={([
           {
@@ -552,6 +551,33 @@ function StudyCanvasInner({
 
   // ── Grille + spotlight — EXACTEMENT les couches du canvas home ──
   const isMobile = useIsMobile()
+
+  // 0.1.7 — ce canvas n'avait AUCUN raccourci d'outil, contrairement à
+  // l'accueil : les quatre outils y étaient exclusivement à la souris.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const cible = e.target as HTMLElement | null
+      const saisie = cible?.tagName === 'INPUT' || cible?.tagName === 'TEXTAREA' || cible?.isContentEditable
+      if (saisie || e.ctrlKey || e.metaKey || e.altKey) return
+      if (e.key === 'v' || e.key === 'V') setActiveTool('select')
+      if (e.key === 'e' || e.key === 'E') setActiveTool('connect')
+      if (e.key === 'h' || e.key === 'H') setActiveTool('pan')
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  // ⚠️ Au doigt, le premier geste attendu est de déplacer la vue. Depuis que
+  // `select` trace un rectangle de sélection au glisser (0.1.7), démarrer sur
+  // `select` rendrait le canvas inerte au téléphone. L'accueil avait déjà cette
+  // bascule (retour Brice du 25/07), elle manquait ici.
+  const outilMobilePoseRef = useRef(false)
+  useEffect(() => {
+    if (isMobile && !outilMobilePoseRef.current) {
+      outilMobilePoseRef.current = true
+      setActiveTool('pan')
+    }
+  }, [isMobile])
   const { screenToFlowPosition, getInternalNode } = useReactFlow()
   const { x: vpX, y: vpY, zoom } = useViewport()
   const rootRef = useRef<HTMLDivElement>(null)
@@ -997,8 +1023,12 @@ function StudyCanvasInner({
         deleteKeyCode={null}
         fitView
         fitViewOptions={{ padding: 0.12, maxZoom: 1 }}
-        selectionOnDrag={activeTool === 'mark'}
-        panOnDrag={activeTool === 'mark' ? [1, 2] : true}
+        // 0.1.7 — `mark` supprimé, `select` prend son comportement. Glisser sur
+        // le vide trace donc maintenant un rectangle de sélection ici aussi, là
+        // où ça déplaçait la vue. Le déplacement reste sur H, sur Espace + glisser
+        // et sur le bouton du milieu. Pas le bouton 2 : c'est le menu contextuel.
+        selectionOnDrag={activeTool === 'select'}
+        panOnDrag={activeTool === 'select' ? [1] : true}
         // Jamais passé jusqu'ici, donc `true` par défaut dans TOUS les outils :
         // les poignées restaient réactives même en mode sélection, alors que
         // l'accueil les désactive hors crayon. On aligne sur l'accueil. React
@@ -1056,7 +1086,7 @@ function StudyCanvasInner({
             ) : (
               <>
                 <p className="text-sm" style={{ color: 'var(--node-meta)' }}>Glisse des blocs depuis le panneau bas</p>
-                <p className="text-xs mt-1" style={{ color: 'var(--node-meta)', opacity: 0.7 }}>Shift + glisser = sélectionner plusieurs blocs → « Grouper »</p>
+                <p className="text-xs mt-1" style={{ color: 'var(--node-meta)', opacity: 0.7 }}>Glisse sur le vide pour sélectionner plusieurs blocs → « Grouper »</p>
               </>
             )}
           </div>

@@ -59,7 +59,7 @@ import {
 
 // ─── Tool type ────────────────────────────────────────────────────────────────
 
-type Tool = 'select' | 'mark' | 'connect' | 'pan'
+type Tool = 'select' | 'connect' | 'pan'
 
 // ─── Modes ────────────────────────────────────────────────────────────────────
 
@@ -638,8 +638,7 @@ function RightToolbar({ activeTool, setActiveTool, isFav, onToggleFav, onAddConc
       outil={activeTool}
       setOutil={setActiveTool}
       outils={[
-        { id: 'select', label: 'Sélectionner (V)' },
-        { id: 'mark', label: 'Sélection groupée (M)' },
+        { id: 'select', label: 'Sélectionner — glisse sur le vide pour en prendre plusieurs (V)' },
         { id: 'connect', label: 'Connecter les cartes (E)' },
         { id: 'pan', label: 'Déplacer le canvas (H)' },
       ]}
@@ -924,7 +923,6 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
 
       if (!isInput) {
         if (e.key === 'v' || e.key === 'V') setActiveTool('select')
-        if (e.key === 'm' || e.key === 'M') setActiveTool('mark')
         if (e.key === 'e' || e.key === 'E') setActiveTool('connect')
         if (e.key === 'h' || e.key === 'H') setActiveTool('pan')
         if (e.key === 'Escape') closePreview()
@@ -1502,11 +1500,16 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
   // ne sont pas déplaçables et le glissement reste libre pour se déplacer sur la
   // carte — indispensable au doigt, où les deux extrémités d'un lien sont
   // rarement à l'écran en même temps.
+  // `mark` (sélection groupée) a disparu au 0.1.7 : il ne se distinguait de
+  // `select` que par `SelectionMode.Full` (« la carte n'est prise que si elle
+  // est ENTIÈREMENT dans le rectangle »), le geste était identique. On garde
+  // `Partial`, le plus permissif : effleurer une carte la sélectionne.
+  // `panOnDrag: [1]` = le bouton du milieu déplace la vue même en sélection.
+  // Surtout PAS le bouton 2 : le clic droit ouvre le menu contextuel d'une carte.
   const toolProps = {
-    select:  { panOnDrag: false as const, selectionOnDrag: true,  nodesConnectable: false, nodesDraggable: true,  selectionMode: SelectionMode.Partial },
-    mark:    { panOnDrag: false as const, selectionOnDrag: true,  nodesConnectable: false, nodesDraggable: true,  selectionMode: SelectionMode.Full    },
-    connect: { panOnDrag: true  as const, selectionOnDrag: false, nodesConnectable: true,  nodesDraggable: false, selectionMode: SelectionMode.Partial },
-    pan:     { panOnDrag: true  as const, selectionOnDrag: false, nodesConnectable: false, nodesDraggable: false, selectionMode: SelectionMode.Partial },
+    select:  { panOnDrag: [1],           selectionOnDrag: true,  nodesConnectable: false, nodesDraggable: true,  selectionMode: SelectionMode.Partial },
+    connect: { panOnDrag: true as const, selectionOnDrag: false, nodesConnectable: true,  nodesDraggable: false, selectionMode: SelectionMode.Partial },
+    pan:     { panOnDrag: true as const, selectionOnDrag: false, nodesConnectable: false, nodesDraggable: false, selectionMode: SelectionMode.Partial },
   }
 
   const previewNote = previewNoteId ? notes.find(n => n.id === previewNoteId) : undefined
