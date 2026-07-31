@@ -116,6 +116,19 @@ export default function CollectionLayout({ title, noteCount, memberNotes, messag
     setCanvas((prev) => ({ ...prev, edges: prev.edges.filter((e) => e.id !== edgeId) }))
   }, [canvas.id])
 
+  // 0.1.7 — changer le côté d'accroche d'un trait, sans toucher aux extrémités.
+  const handleReconnectEdge = useCallback(async (edgeId: string, fromHandle: string | null, toHandle: string | null) => {
+    setCanvas((prev) => ({
+      ...prev,
+      edges: prev.edges.map((e) => (e.id === edgeId ? { ...e, fromHandle, toHandle } : e)),
+    }))
+    await fetch(`/api/canvas/${canvas.id}/edges/${edgeId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fromHandle, toHandle }),
+    })
+  }, [canvas.id])
+
   const handleResetCanvas = useCallback(async () => {
     if (!window.confirm('Remettre ce canvas de collection à zéro ?\n\nLes blocs reviennent dans la liste du bas, les groupes et textes libres sont supprimés. Tes notes d\'origine ne sont pas touchées.')) return
     const res = await fetch(`/api/canvas/${canvas.id}`, {
@@ -139,6 +152,7 @@ export default function CollectionLayout({ title, noteCount, memberNotes, messag
             onRemoveNode={handleRemoveNode}
             onConnect={handleConnect}
             onDeleteEdge={handleDeleteEdge}
+            onReconnectEdge={handleReconnectEdge}
             onCreateGroup={handleCreateGroup}
             onCreateText={handleCreateText}
             onUpdateNode={handleUpdateNode}

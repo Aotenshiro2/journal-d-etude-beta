@@ -38,6 +38,7 @@ export async function DELETE(
 }
 
 // 0.1.6 — nommer un lien (le label vivait déjà en base, l'UI l'expose enfin)
+// 0.1.7 — et changer son côté d'accroche (fromHandle / toHandle).
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; edgeId: string }> }
@@ -51,9 +52,24 @@ export async function PATCH(
   if (!canvas) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
   const body = await req.json()
-  const updated = await prisma.canvasEdge.update({
-    where: { id: edgeId },
-    data: { label: typeof body.label === 'string' && body.label.trim() ? body.label.trim() : null },
-  })
+
+  // Mise à jour PARTIELLE : on ne touche qu'aux champs réellement envoyés.
+  // Avant, `label` était réécrit à chaque appel, donc un PATCH qui ne veut
+  // changer que le côté d'accroche aurait effacé le nom du trait au passage.
+  const data: { label?: string | null; fromHandle?: string | null; toHandle?: string | null } = {}
+  if ('label' in body) {
+    data.label = typeof body.label === 'string' && body.label.trim() ? body.label.trim() : null
+  }
+  if ('fromHandle' in body) data.fromHandle = typeof body.fromHandle === 'string' ? body.fromHandle : null
+  if ('toHandle' in body) data.toHandle = typeof body.toHandle === 'string' ? body.toHandle : null
+
+  if (Object.keys(data).length === 0) {
+    return NextResponse.json({ error: 'Rien à modifier' }, { status: 400 })
+  }
+
+  // Les extrémités (fromId / toId) ne sont volontairement PAS modifiables ici :
+  // les déplacer touche aux tags posés par un lien vers un concept et à la
+  // contrainte d'unicité. Chantier à part.
+  const updated = await prisma.canvasEdge.update({ where: { id: edgeId }, data })
   return NextResponse.json(updated)
 }

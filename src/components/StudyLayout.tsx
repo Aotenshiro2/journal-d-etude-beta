@@ -189,6 +189,22 @@ export default function StudyLayout({ note, canvas: initialCanvas, isDiverged }:
     [canvas.id]
   )
 
+  // 0.1.7 — changer le côté d'accroche d'un trait, sans toucher aux extrémités.
+  const handleReconnectEdge = useCallback(
+    async (edgeId: string, fromHandle: string | null, toHandle: string | null) => {
+      setCanvas((prev) => ({
+        ...prev,
+        edges: prev.edges.map((e) => (e.id === edgeId ? { ...e, fromHandle, toHandle } : e)),
+      }))
+      await fetch(`/api/canvas/${canvas.id}/edges/${edgeId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fromHandle, toHandle }),
+      })
+    },
+    [canvas.id]
+  )
+
   // Remettre le canvas à zéro — si on n'est pas satisfait de sa réorganisation.
   // Les blocs reviennent dans la liste du bas ; l'original n'est pas touché.
   const handleResetCanvas = useCallback(async () => {
@@ -224,6 +240,7 @@ export default function StudyLayout({ note, canvas: initialCanvas, isDiverged }:
             onRemoveNode={handleRemoveNode}
             onConnect={handleConnect}
             onDeleteEdge={handleDeleteEdge}
+            onReconnectEdge={handleReconnectEdge}
             onCreateGroup={handleCreateGroup}
             onCreateText={handleCreateText}
             onUpdateNode={handleUpdateNode}
