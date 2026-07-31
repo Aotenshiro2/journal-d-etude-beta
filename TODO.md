@@ -255,8 +255,12 @@ distinction dont le second cerveau a besoin pour exister à l'écran. Donc :
 - le graphe global (lots 3-4) réutilisera ce même langage de trait. Posé
   correctement ici, le lot 4 devient du branchement, pas du dessin.
 
-Comparaison en cours sur `/labo-traits` (page jetable) : la variante 4, « animé
-vers les concepts », est celle qui va le plus dans ce sens.
+Tranché le 26/07/2026 sur la page jetable `/labo-traits` (depuis supprimée) :
+Brice a choisi **la courbe de Bézier avec animation au survol de la carte**, pas
+l'animation permanente ni le déclenchement par type de lien. La grammaire du
+trait reste donc entièrement à poser : aujourd'hui `CanvasEdge.tsx` rend tous
+les traits pareil, quel que soit ce qu'ils relient. C'est le point d'entrée du
+second cerveau.
 
 > Côté extension, voir `apps/carnet-du-trader-extension/TODO.md`
 > (Edgyx, prompts IA, doctrine, mode mentorat).

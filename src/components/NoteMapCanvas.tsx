@@ -577,9 +577,10 @@ interface RightToolbarProps {
   isFav: boolean
   onToggleFav: () => void
   onAddConcept?: () => void
+  onNewGroup?: (e: React.MouseEvent) => void
 }
 
-function RightToolbar({ activeTool, setActiveTool, isFav, onToggleFav, onAddConcept }: RightToolbarProps) {
+function RightToolbar({ activeTool, setActiveTool, isFav, onToggleFav, onAddConcept, onNewGroup }: RightToolbarProps) {
   const actions: ActionBarre[] = []
   if (onAddConcept) {
     actions.push({
@@ -587,6 +588,14 @@ function RightToolbar({ activeTool, setActiveTool, isFav, onToggleFav, onAddConc
       Icon: Hash,
       label: 'Poser un concept sur le canvas — relie-lui des notes avec le crayon (E)',
       onClick: onAddConcept,
+    })
+  }
+  if (onNewGroup) {
+    actions.push({
+      id: 'groupe',
+      Icon: FolderPlus,
+      label: 'Nouveau groupe — une zone nommée, puis glisse des cartes dedans',
+      onClick: onNewGroup,
     })
   }
 
@@ -1431,6 +1440,30 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
     }
   }, [nodes, canvas.id, patchNode, setNodes])
 
+  // 0.1.7 — groupe VIDE, posé là où on clique : le canvas d'une note l'avait,
+  // pas l'accueil, où il fallait d'abord sélectionner deux cartes. `autoEdit`
+  // ouvre le renommage tout de suite, un groupe sans nom ne sert à rien.
+  const handleNewGroup = useCallback(async (e: React.MouseEvent) => {
+    if (creatingGroupRef.current) return
+    creatingGroupRef.current = true
+    try {
+      const pos = screenToFlowPosition({ x: e.clientX - 420, y: e.clientY - 120 })
+      const color = GROUP_COLOR_KEYS[nodes.filter(n => n.type === 'group').length % GROUP_COLOR_KEYS.length]
+      const res = await fetch(`/api/canvas/${canvas.id}/nodes`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: 'group', label: 'Groupe', color, x: pos.x, y: pos.y, width: 360, height: 260 }),
+      })
+      if (!res.ok) return
+      const g = await res.json()
+      setNodes(nds => sortParentsFirst([
+        { id: g.id, type: 'group', position: { x: g.x, y: g.y }, style: { width: g.width, height: g.height, zIndex: -1 }, data: { label: g.label ?? 'Groupe', color: g.color ?? color, autoEdit: true, handlers: groupHandlersRef } },
+        ...nds,
+      ]))
+    } finally {
+      creatingGroupRef.current = false
+    }
+  }, [nodes, canvas.id, setNodes, screenToFlowPosition])
+
   // Tool → ReactFlow props mapping
   // Crayon : le lien se trace en tap → tap (cf. handleNodeClick), donc les cards
   // ne sont pas déplaçables et le glissement reste libre pour se déplacer sur la
@@ -1577,6 +1610,7 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
             })
           }}
           onAddConcept={() => setConceptPickerOpen(o => !o)}
+          onNewGroup={handleNewGroup}
         />
 
         {/* ── Picker de concepts (0.1.6) — choisir/créer le concept à poser ──
