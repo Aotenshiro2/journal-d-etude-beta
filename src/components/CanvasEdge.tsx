@@ -21,8 +21,16 @@ import { BaseEdge, getBezierPath, type EdgeProps } from '@xyflow/react'
 
 export type TraitData = { vif?: boolean }
 
-export function TraitCanvas({ id, data, style, markerEnd, ...p }: EdgeProps) {
-  const [chemin] = getBezierPath({
+export function TraitCanvas({
+  id, data, style, markerEnd,
+  // Le libellé d'un trait (le concept qu'on lui donne au double-clic) était rendu
+  // gratuitement par le `smoothstep` intégré de React Flow. En passant à ce
+  // composant, il a disparu : `BaseEdge` sait l'afficher, encore faut-il le lui
+  // passer. Régression introduite avec ce fichier, réparée ici.
+  label, labelStyle, labelShowBg, labelBgStyle, labelBgPadding, labelBgBorderRadius,
+  ...p
+}: EdgeProps) {
+  const [chemin, labelX, labelY] = getBezierPath({
     sourceX: p.sourceX,
     sourceY: p.sourceY,
     sourcePosition: p.sourcePosition,
@@ -37,7 +45,20 @@ export function TraitCanvas({ id, data, style, markerEnd, ...p }: EdgeProps) {
 
   return (
     <>
-      <BaseEdge id={id} path={chemin} markerEnd={markerEnd} style={style} />
+      <BaseEdge
+        id={id}
+        path={chemin}
+        markerEnd={markerEnd}
+        style={style}
+        label={label}
+        labelX={labelX}
+        labelY={labelY}
+        labelStyle={labelStyle}
+        labelShowBg={labelShowBg}
+        labelBgStyle={labelBgStyle}
+        labelBgPadding={labelBgPadding}
+        labelBgBorderRadius={labelBgBorderRadius}
+      />
       {vif && (
         <circle r={3.5} fill={couleur}>
           <animateMotion dur="2s" repeatCount="indefinite" path={chemin} />
