@@ -12,12 +12,14 @@ import {
   useEdgesState,
   NodeProps,
   NodeResizer,
+  NodeToolbar,
+  Position,
   Panel,
   useReactFlow,
   useViewport,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { FolderPlus, Type, Combine, Pencil, Hash } from 'lucide-react'
+import { FolderPlus, Type, Combine, Pencil, Hash, Maximize2, X, Check } from 'lucide-react'
 import { MessageData, CanvasNodeData, CanvasEdgeData } from '@/types'
 import { htmlToText, truncateText, extractImageSrc } from '@/lib/utils'
 import ImageLightbox from './ImageLightbox'
@@ -28,6 +30,9 @@ import { ASSISTANCE_CONNEXION, connexionValide, lienDejaPresent } from './canvas
 import { CanvasToolbar, type ActionBarre } from './canvas/CanvasToolbar'
 import { ConceptNode } from './canvas/ConceptNode'
 import { ConceptPicker } from './canvas/ConceptPicker'
+import { Button } from './ui/button'
+import { ButtonGroup } from './ui/button-group'
+import { ToggleGroup, ToggleGroupItem } from './ui/toggle-group'
 import { useIsMobile } from '@/hooks/useIsMobile'
 
 // `connect` = le crayon. Il manquait ici alors qu'il existe sur la carte
@@ -111,6 +116,16 @@ export interface GroupHandlers {
   // 0.1.5 : ouvrir la collection (groupe de NOTES de l'accueil) dans un canvas
   // de mapping commun. Absent dans l'exploration (groupes de blocs) → pas de bouton.
   openCollection?: (groupId: string) => void
+}
+
+/* Remplissage des actions d'un nœud, calibré par thème dans globals.css.
+   Surtout PAS la variante `primary` de ShadCN telle quelle : elle s'inverse
+   mécaniquement, donc le blanc franc qui marche sur le canvas sombre devient un
+   presque-noir écrasant sur le canvas clair (constat de Brice sur /labo-boutons). */
+const ACTION_PLEIN: React.CSSProperties = {
+  background: 'var(--action-plein-bg)',
+  color: 'var(--action-plein-fg)',
+  borderColor: 'transparent',
 }
 
 const IMAGE_TYPES = new Set(['image', 'screenshot', 'capture'])
@@ -289,6 +304,7 @@ export function GroupNode({ id, data, selected }: NodeProps) {
   const [draft, setDraft] = useState(d.label)
   // Un groupe déjà relié à un concept (tagId persisté) arrive « promu »
   const [promoted, setPromoted] = useState(!!d.tagId)
+  const [survole, setSurvole] = useState(false)
   const isLive = promoted || !!d.tagId
   const palette = GROUP_COLORS[d.color] ?? GROUP_COLORS.blue
 
@@ -311,15 +327,69 @@ export function GroupNode({ id, data, selected }: NodeProps) {
     fontSize: 11, fontWeight: 600, lineHeight: 1.35,
   }
 
+  // 0.1.7 — variante 6 de /labo-boutons. Les actions SORTENT de l'en-tête pour
+  // vivre dans une barre rattachée au nœud (parti AI SDK Elements) : dans le
+  // titre, elles se battaient pour la place avec l'onglet et les cinq pastilles,
+  // et aucune n'avait de place à elle. Au doigt, la barre offre en plus des
+  // cibles utilisables, ce que l'en-tête ne permettait pas.
+  const outilsVisibles = (isMobile ? !!selected : survole || !!selected) && !editing
+
   return (
     <div
       className="w-full h-full group/gz"
+      onMouseEnter={() => setSurvole(true)}
+      onMouseLeave={() => setSurvole(false)}
       style={{
         borderRadius: '2px 2px 16px 16px',
         borderTop: `2px solid ${palette.border}`,
         background: palette.bg,
       }}
     >
+      <NodeToolbar isVisible={outilsVisibles} position={Position.Bottom} offset={10}>
+        <div className="canvas-float-pill nodrag nopan flex items-center gap-1.5" style={{ padding: '6px 8px' }}>
+          {/* Les couleurs sont un ÉTAT (quelle teinte est active), pas cinq
+              actions : d'où ToggleGroup et non cinq boutons, comme le distingue
+              la doc ShadCN. */}
+          <ToggleGroup
+            value={[d.color]}
+            onValueChange={(v: string[]) => { const k = v[0]; if (k && k !== d.color) d.handlers.current.recolor(id, k) }}
+            size="sm"
+            variant="outline"
+            spacing={0}
+          >
+            {COLOR_KEYS.map(k => (
+              <ToggleGroupItem key={k} value={k} aria-label={`Couleur ${k}`} className="px-1.5">
+                <span className="size-3 rounded-full block" style={{ background: GROUP_COLORS[k].border }} />
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
+
+          {/* Les trois actions ne forment qu'UNE barre, remplissage calibré par
+              thème (`--action-plein-*`) et non l'inversion de `primary`, qui
+              donnait du presque-noir écrasant sur le canvas clair. */}
+          <ButtonGroup>
+            {d.handlers.current.openCollection && (
+              <Button size="xs" variant="default" style={ACTION_PLEIN}
+                onMouseDown={e => { e.stopPropagation(); e.preventDefault() }}
+                onClick={() => d.handlers.current.openCollection!(id)}
+                title="Mapper ensemble : ouvrir ces notes dans un canvas de travail commun">
+                <Maximize2 /> Mapper
+              </Button>
+            )}
+            <Button size="icon-xs" variant="default" style={ACTION_PLEIN}
+              onClick={async () => { if (await d.handlers.current.promote(d.label, id)) setPromoted(true) }}
+              title={promoted ? 'Concept créé, contenu du groupe tagué ✓' : 'Promouvoir en concept : crée le tag ET tague tout le contenu du groupe'}>
+              {promoted ? <Check /> : <Hash />}
+            </Button>
+            <Button size="icon-xs" variant="default" style={ACTION_PLEIN}
+              onClick={() => d.handlers.current.dissolve(id)}
+              title="Dissoudre le groupe (les blocs restent sur le canvas)">
+              <X />
+            </Button>
+          </ButtonGroup>
+        </div>
+      </NodeToolbar>
+
       <NodeResizer
         isVisible={selected}
         minWidth={220}
@@ -396,49 +466,6 @@ export function GroupNode({ id, data, selected }: NodeProps) {
             ◆ concept
           </span>
         )}
-        {/* Couleurs et « Mapper » : au survol au bureau, à la sélection du
-            groupe au téléphone (le survol n'existe pas au doigt). */}
-        <span className={`${isMobile ? (selected ? 'flex' : 'hidden') : 'hidden group-hover/gz:flex'} items-center gap-1 nodrag flex-shrink-0 mt-1`}>
-          {COLOR_KEYS.map(k => (
-            <button
-              key={k}
-              onClick={() => d.handlers.current.recolor(id, k)}
-              /* Le liséré détache la pastille pastel du fond. Noir à 40 % était
-                 trop dur en clair et presque nul en sombre. */
-              className={`${isMobile ? 'w-5 h-5' : 'w-2.5 h-2.5'} rounded-full border border-black/20 dark:border-white/30`}
-              style={{ background: GROUP_COLORS[k].border, opacity: k === d.color ? 1 : 0.45 }}
-              title={`Couleur ${k}`}
-              aria-label={`Couleur ${k}`}
-            />
-          ))}
-          {d.handlers.current.openCollection && (
-            <button
-              onMouseDown={e => { e.stopPropagation(); e.preventDefault() }}
-              onClick={() => d.handlers.current.openCollection!(id)}
-              className="ml-1 px-1.5 rounded text-[10px] font-semibold hover:bg-black/5 dark:hover:bg-white/5 flex items-center gap-1"
-              style={{ color: palette.border }}
-              title="Mapper ensemble : ouvrir ces notes dans un canvas de travail commun"
-            >
-              ⤢ Mapper
-            </button>
-          )}
-          <button
-            onClick={async () => { if (await d.handlers.current.promote(d.label, id)) setPromoted(true) }}
-            className="ml-1 px-1 rounded text-[10px] font-semibold hover:bg-black/5 dark:hover:bg-white/5"
-            style={{ color: palette.border }}
-            title={promoted ? 'Concept créé, contenu du groupe tagué ✓' : 'Promouvoir en concept : crée le tag ET tague tout le contenu du groupe'}
-          >
-            {promoted ? '✓' : '#'}
-          </button>
-          <button
-            onClick={() => d.handlers.current.dissolve(id)}
-            className="px-1 rounded text-[10px] hover:text-red-400 hover:bg-black/5 dark:hover:bg-white/5"
-            style={{ color: 'var(--node-meta)' }}
-            title="Dissoudre le groupe (les blocs restent sur le canvas)"
-          >
-            ✕
-          </button>
-        </span>
       </div>
     </div>
   )
