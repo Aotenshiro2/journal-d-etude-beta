@@ -65,6 +65,22 @@ function ClusterPlein() {
   )
 }
 
+/* Les trois pleins, mais avec un remplissage CALIBRÉ par thème au lieu de
+   l'inversion mécanique de `primary`. Même intention des deux côtés — une
+   surface solide qui se détache — sans le presque-noir écrasant sur le canvas
+   clair. Les valeurs vivent dans globals.css (`--action-plein-*`,
+   `--action-doux-*`), donc réutilisables si Brice retient ce parti. */
+function ClusterRempli({ bg, fg }: { bg: string; fg: string }) {
+  const style = { background: bg, color: fg, borderColor: 'transparent' }
+  return (
+    <ButtonGroup className="scale-90 origin-right">
+      <Button size="xs" variant="default" style={style}><Maximize2 /> Mapper</Button>
+      <Button size="icon-xs" variant="default" style={style} title="Promouvoir en concept"><Hash /></Button>
+      <Button size="icon-xs" variant="default" style={style} title="Dissoudre le groupe"><X /></Button>
+    </ButtonGroup>
+  )
+}
+
 // Même groupe, tout en outline : plus sobre, aucune hiérarchie.
 function ClusterOutline() {
   return (
@@ -98,16 +114,17 @@ function CouleursToggle() {
      · `flottant` — les actions vivent sous le groupe, ou dans l'en-tête
      · `plein`    — « Mapper » est promu action principale, ou tout au même niveau
    Les couleurs sont en ToggleGroup partout : ses deux finalistes l'avaient. */
-type Variante = 1 | 2 | 3 | 4 | 5
+type Variante = 1 | 2 | 3 | 4 | 5 | 6 | 7
 
 function GroupeDemo({ data }: NodeProps) {
   const v = (data as { variante: Variante }).variante
-  const flottant = v === 1 || v === 2 || v === 5
-  const cluster = v === 1 || v === 3
-    ? <ClusterButtonGroup />
-    : v === 5
-      ? <ClusterPlein />
-      : <ClusterOutline />
+  const flottant = v !== 3 && v !== 4
+  const cluster =
+    v === 1 || v === 3 ? <ClusterButtonGroup />
+    : v === 5 ? <ClusterPlein />
+    : v === 6 ? <ClusterRempli bg="var(--action-plein-bg)" fg="var(--action-plein-fg)" />
+    : v === 7 ? <ClusterRempli bg="var(--action-doux-bg)" fg="var(--action-doux-fg)" />
+    : <ClusterOutline />
 
   const onglet = (
     <span style={{
@@ -194,7 +211,9 @@ const OPTIONS: { n: Variante; titre: string; note: string; src: string }[] = [
   { n: 2, titre: 'Flottant · tout au même niveau', note: 'la place de la 4, la sobriété de la 5', src: 'ShadCN + AI SDK' },
   { n: 3, titre: 'En-tête · Mapper promu', note: 'la place de la 5, la hiérarchie de la 4', src: 'ShadCN' },
   { n: 4, titre: 'En-tête · tout au même niveau', note: 'l\'ancienne 5, telle quelle', src: 'ShadCN' },
-  { n: 5, titre: 'Flottant · les trois pleins', note: 'la 2, mais dans le blanc plein du « Mapper » de la 1', src: 'ShadCN' },
+  { n: 5, titre: 'Flottant · les trois pleins', note: 'validée en sombre, trop lourde en clair', src: 'ShadCN' },
+  { n: 6, titre: 'Flottant · plein calibré', note: 'le blanc de la 5 en sombre, de l\'ardoise en clair au lieu du noir', src: 'ShadCN + maison' },
+  { n: 7, titre: 'Flottant · plein doux', note: 'même idée, un cran plus discret dans les deux thèmes', src: 'ShadCN + maison' },
 ]
 
 export default function LaboBoutons() {
@@ -227,6 +246,13 @@ export default function LaboBoutons() {
           n&apos;apparaît qu&apos;au survol au bureau, et à la sélection au téléphone. Le flottant gère ça nativement et offre des
           cibles bien plus grandes au doigt ; l&apos;en-tête reste serré entre l&apos;onglet et les pastilles. Si tu hésites encore
           après avoir regardé, c&apos;est l&apos;argument qui départage.
+          <br /><br />
+          <strong style={{ color: 'var(--node-title)' }}>Le remplissage, en 5, 6 et 7.</strong> La 5 utilise la variante
+          <code> primary</code> de ShadCN telle quelle : elle s&apos;<em>inverse</em> mécaniquement, d&apos;où le presque-noir
+          écrasant sur le canvas clair. Les 6 et 7 ne copient pas la formule mais l&apos;intention — une surface solide qui se
+          détache — en calibrant chaque thème séparément. La 6 garde exactement le blanc que tu as validé en sombre et passe à
+          de l&apos;ardoise en clair ; la 7 fait pareil un cran plus bas. <strong>Regarde-les dans les deux thèmes</strong> :
+          c&apos;est tout l&apos;intérêt.
         </div>
 
         <div style={{ display: 'grid', gap: 34 }}>

@@ -72,6 +72,17 @@
   --tool-active-bg: rgba(59, 130, 246, 0.22);
   --tool-active-border: rgba(59, 130, 246, 0.55);
 
+  /* Action pleine d'un cluster de nœud. PAS l'inversion mécanique de `primary`
+     de ShadCN : sur le canvas clair elle donne du presque-noir, beaucoup trop
+     lourd pour trois petits boutons. On calibre chaque thème pour le même
+     ressenti — une surface solide qui se détache — plutôt que pour la même
+     formule. Ici : ardoise, présent sans écraser. */
+  --action-plein-bg: #475569;
+  --action-plein-fg: #f8fafc;
+  /* Version douce : le cluster reste solide mais ne crie jamais. */
+  --action-doux-bg: #e2e5e9;
+  --action-doux-fg: #1e293b;
+
   /* Modal and Editor - Compatibility with old system */
   --modal-overlay: rgba(0, 0, 0, 0.5);
   --modal-bg: 0 0% 100%;
@@ -172,6 +183,12 @@
   /* Valeurs d'origine : le sombre ne bouge pas d'un pixel. */
   --tool-active-bg: rgba(59, 130, 246, 0.15);
   --tool-active-border: rgba(59, 130, 246, 0.40);
+
+  /* En sombre, le blanc franc que Brice a validé sur la variante 5. */
+  --action-plein-bg: #f1f5f9;
+  --action-plein-fg: #0f172a;
+  --action-doux-bg: #32343a;
+  --action-doux-fg: #e2e8f0;
 
   /* Modal and Editor - Dark mode */
   --modal-overlay: rgba(0, 0, 0, 0.7);
