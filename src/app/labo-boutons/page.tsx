@@ -33,26 +33,7 @@ const TEINTES = ['#60a5fa', '#34d399', '#fbbf24', '#a78bfa', '#f472b6']
 
 /* ── Les cinq habillages du cluster d'actions ────────────────────────────── */
 
-// 1 — Témoin : exactement ce qu'il y a en prod aujourd'hui.
-function ClusterTemoin() {
-  return (
-    <span className="flex items-center gap-1">
-      {TEINTES.map(c => (
-        <button key={c} className="w-2.5 h-2.5 rounded-full border border-black/20 dark:border-white/30"
-          style={{ background: c, opacity: c === VERT.border ? 1 : 0.45 }} />
-      ))}
-      <button className="ml-1 px-1.5 rounded text-[10px] font-semibold hover:bg-black/5 dark:hover:bg-white/5"
-        style={{ color: VERT.border }}>⤢ Mapper</button>
-      <button className="ml-1 px-1 rounded text-[10px] font-semibold hover:bg-black/5 dark:hover:bg-white/5"
-        style={{ color: VERT.border }}>#</button>
-      <button className="px-1 rounded text-[10px] hover:text-red-400 hover:bg-black/5 dark:hover:bg-white/5"
-        style={{ color: 'var(--node-meta)' }}>✕</button>
-    </span>
-  )
-}
-
-// 2 — ButtonGroup ShadCN, dans l'en-tête. « Mapper » devient l'action
-// principale (bouton plein), les deux autres restent des icônes discrètes.
+// « Mapper » en action principale (bouton plein), les deux autres en icônes.
 function ClusterButtonGroup() {
   return (
     <ButtonGroup className="scale-90 origin-right">
@@ -66,7 +47,7 @@ function ClusterButtonGroup() {
   )
 }
 
-// 5 — Même ButtonGroup, mais tout en outline : plus sobre, aucune hiérarchie.
+// Même groupe, tout en outline : plus sobre, aucune hiérarchie.
 function ClusterOutline() {
   return (
     <ButtonGroup className="scale-90 origin-right">
@@ -93,11 +74,18 @@ function CouleursToggle() {
 
 /* ── Le nœud de groupe, décliné par variante ─────────────────────────────── */
 
-type Variante = 1 | 2 | 3 | 4 | 5
+/* SECOND TOUR. Brice hésitait entre l'ancienne 4 et l'ancienne 5. Elles
+   différaient sur DEUX axes indépendants, d'où l'hésitation : ce n'était pas un
+   choix mais deux. On les croise.
+     · `flottant` — les actions vivent sous le groupe, ou dans l'en-tête
+     · `plein`    — « Mapper » est promu action principale, ou tout au même niveau
+   Les couleurs sont en ToggleGroup partout : ses deux finalistes l'avaient. */
+type Variante = 1 | 2 | 3 | 4
 
 function GroupeDemo({ data }: NodeProps) {
   const v = (data as { variante: Variante }).variante
-  const flottant = v === 3 || v === 4
+  const flottant = v === 1 || v === 2
+  const plein = v === 1 || v === 3
 
   const onglet = (
     <span style={{
@@ -116,15 +104,8 @@ function GroupeDemo({ data }: NodeProps) {
       {flottant && (
         <NodeToolbar isVisible position={Position.Bottom} offset={12}>
           <div className="canvas-float-pill flex items-center gap-1.5" style={{ padding: '6px 8px' }}>
-            {v === 4 ? <CouleursToggle /> : (
-              <span className="flex items-center gap-1 mr-1">
-                {TEINTES.map(c => (
-                  <button key={c} className="w-3 h-3 rounded-full border border-black/20 dark:border-white/30"
-                    style={{ background: c, opacity: c === VERT.border ? 1 : 0.45 }} />
-                ))}
-              </span>
-            )}
-            <ClusterButtonGroup />
+            <CouleursToggle />
+            {plein ? <ClusterButtonGroup /> : <ClusterOutline />}
           </div>
         </NodeToolbar>
       )}
@@ -134,9 +115,8 @@ function GroupeDemo({ data }: NodeProps) {
         <span className="flex-1" />
         {!flottant && (
           <span className="flex items-center gap-1 mt-1">
-            {v === 1 && <ClusterTemoin />}
-            {v === 2 && <><CouleursToggle /><ClusterButtonGroup /></>}
-            {v === 5 && <><CouleursToggle /><ClusterOutline /></>}
+            <CouleursToggle />
+            {plein ? <ClusterButtonGroup /> : <ClusterOutline />}
           </span>
         )}
       </div>
@@ -188,11 +168,10 @@ function Scene({ variante }: { variante: Variante }) {
 }
 
 const OPTIONS: { n: Variante; titre: string; note: string; src: string }[] = [
-  { n: 1, titre: 'Témoin', note: 'ce que tu as en prod aujourd\'hui', src: 'existant' },
-  { n: 2, titre: 'ButtonGroup dans l\'en-tête', note: '« Mapper » devient l\'action principale, le reste en icônes', src: 'ShadCN' },
-  { n: 3, titre: 'Toolbar flottant', note: 'les actions sortent de l\'en-tête et se posent sous le groupe', src: 'AI SDK Elements' },
-  { n: 4, titre: 'Toolbar flottant + ToggleGroup', note: 'idem, et les couleurs deviennent un état, pas des actions', src: 'ShadCN + AI SDK' },
-  { n: 5, titre: 'Tout en outline', note: 'même groupe, aucune hiérarchie : plus sobre, plus plat', src: 'ShadCN' },
+  { n: 1, titre: 'Flottant · Mapper promu', note: 'l\'ancienne 4, telle quelle', src: 'ShadCN + AI SDK' },
+  { n: 2, titre: 'Flottant · tout au même niveau', note: 'la place de la 4, la sobriété de la 5', src: 'ShadCN + AI SDK' },
+  { n: 3, titre: 'En-tête · Mapper promu', note: 'la place de la 5, la hiérarchie de la 4', src: 'ShadCN' },
+  { n: 4, titre: 'En-tête · tout au même niveau', note: 'l\'ancienne 5, telle quelle', src: 'ShadCN' },
 ]
 
 export default function LaboBoutons() {
@@ -203,7 +182,7 @@ export default function LaboBoutons() {
       <div style={{ maxWidth: 980, margin: '0 auto' }}>
 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginBottom: 6 }}>
-          <h1 style={{ fontSize: 22, color: 'var(--node-title)' }}>Donner une place aux actions d&apos;un groupe</h1>
+          <h1 style={{ fontSize: 22, color: 'var(--node-title)' }}>Second tour : où vivent les actions, et laquelle domine</h1>
           <button onClick={toggleTheme} className="canvas-float-pill" style={{ padding: '8px 14px', fontSize: 13, color: 'var(--node-title)', cursor: 'pointer', flexShrink: 0 }}>
             {theme === 'dark' ? '☀ Voir en clair' : '☾ Voir en sombre'}
           </button>
@@ -213,13 +192,18 @@ export default function LaboBoutons() {
           fontSize: 12.5, color: 'var(--node-meta)', lineHeight: 1.65, margin: '14px 0 30px', maxWidth: 780,
           padding: '12px 14px', borderRadius: 10, background: 'var(--node-bg)', border: '1px solid var(--node-border)',
         }}>
-          <strong style={{ color: 'var(--node-title)' }}>Le vrai problème n&apos;est pas le contraste.</strong> Ces boutons sont
-          entassés dans la barre de titre, où ils se battent pour la place avec l&apos;onglet et les cinq pastilles. Aucun n&apos;a
-          de place à lui, d&apos;où le côté « pas travaillé ». Les options 3 et 4 les <em>sortent</em> de l&apos;en-tête ; les
-          options 2 et 5 les habillent sur place. Tout ce qui suit vient de tes bases, rien n&apos;est dessiné à la main :
-          <code> ButtonGroup</code> et <code>ToggleGroup</code> de ShadCN (que j&apos;ai installés, ils manquaient) et le parti
-          « barre rattachée au nœud » d&apos;AI SDK Elements. À noter : « ⤢ Mapper » est le seul bouton qui <strong>ouvre un autre
-          écran</strong>, il est traité comme l&apos;action principale partout sauf dans le témoin et la 5.
+          <strong style={{ color: 'var(--node-title)' }}>Second tour : deux axes, pas un.</strong> Tes deux finalistes
+          différaient sur <em>deux</em> choses à la fois, d&apos;où l&apos;hésitation. <strong>Où vivent les actions</strong> :
+          flottantes sous le groupe (1 et 2) ou dans l&apos;en-tête (3 et 4). Et <strong>la hiérarchie</strong> : « Mapper » promu
+          en bouton plein (1 et 3) ou tout au même niveau (2 et 4). Rien n&apos;oblige à les prendre ensemble : les 2 et 3 sont les
+          croisements que tu n&apos;avais pas vus. Les couleurs sont en <code>ToggleGroup</code> partout, tes deux finalistes
+          l&apos;avaient. Tout vient de tes bases : <code>ButtonGroup</code> et <code>ToggleGroup</code> de ShadCN, et le parti
+          « barre rattachée au nœud » d&apos;AI SDK Elements.
+          <br /><br />
+          <strong style={{ color: 'var(--node-title)' }}>Ce que la page ne montre pas.</strong> Dans la vraie app ce cluster
+          n&apos;apparaît qu&apos;au survol au bureau, et à la sélection au téléphone. Le flottant gère ça nativement et offre des
+          cibles bien plus grandes au doigt ; l&apos;en-tête reste serré entre l&apos;onglet et les pastilles. Si tu hésites encore
+          après avoir regardé, c&apos;est l&apos;argument qui départage.
         </div>
 
         <div style={{ display: 'grid', gap: 34 }}>
