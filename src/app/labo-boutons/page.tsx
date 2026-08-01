@@ -50,6 +50,21 @@ function ClusterButtonGroup() {
   )
 }
 
+// Les trois PLEINS, dans le blanc/gris de la variante `default` de ShadCN —
+// celui du « Mapper » de la 1. Aucune hiérarchie, mais le cluster existe
+// franchement au lieu de s'effacer. À savoir : cette variante s'inverse d'un
+// thème à l'autre (blanc sur sombre, presque noir sur clair), c'est le
+// comportement normal de `primary` chez ShadCN. À regarder dans les deux.
+function ClusterPlein() {
+  return (
+    <ButtonGroup className="scale-90 origin-right">
+      <Button size="xs" variant="default"><Maximize2 /> Mapper</Button>
+      <Button size="icon-xs" variant="default" title="Promouvoir en concept"><Hash /></Button>
+      <Button size="icon-xs" variant="default" title="Dissoudre le groupe"><X /></Button>
+    </ButtonGroup>
+  )
+}
+
 // Même groupe, tout en outline : plus sobre, aucune hiérarchie.
 function ClusterOutline() {
   return (
@@ -83,12 +98,16 @@ function CouleursToggle() {
      · `flottant` — les actions vivent sous le groupe, ou dans l'en-tête
      · `plein`    — « Mapper » est promu action principale, ou tout au même niveau
    Les couleurs sont en ToggleGroup partout : ses deux finalistes l'avaient. */
-type Variante = 1 | 2 | 3 | 4
+type Variante = 1 | 2 | 3 | 4 | 5
 
 function GroupeDemo({ data }: NodeProps) {
   const v = (data as { variante: Variante }).variante
-  const flottant = v === 1 || v === 2
-  const plein = v === 1 || v === 3
+  const flottant = v === 1 || v === 2 || v === 5
+  const cluster = v === 1 || v === 3
+    ? <ClusterButtonGroup />
+    : v === 5
+      ? <ClusterPlein />
+      : <ClusterOutline />
 
   const onglet = (
     <span style={{
@@ -108,7 +127,7 @@ function GroupeDemo({ data }: NodeProps) {
         <NodeToolbar isVisible position={Position.Bottom} offset={12}>
           <div className="canvas-float-pill flex items-center gap-1.5" style={{ padding: '6px 8px' }}>
             <CouleursToggle />
-            {plein ? <ClusterButtonGroup /> : <ClusterOutline />}
+            {cluster}
           </div>
         </NodeToolbar>
       )}
@@ -119,7 +138,7 @@ function GroupeDemo({ data }: NodeProps) {
         {!flottant && (
           <span className="flex items-center gap-1 mt-1">
             <CouleursToggle />
-            {plein ? <ClusterButtonGroup /> : <ClusterOutline />}
+            {cluster}
           </span>
         )}
       </div>
@@ -175,6 +194,7 @@ const OPTIONS: { n: Variante; titre: string; note: string; src: string }[] = [
   { n: 2, titre: 'Flottant · tout au même niveau', note: 'la place de la 4, la sobriété de la 5', src: 'ShadCN + AI SDK' },
   { n: 3, titre: 'En-tête · Mapper promu', note: 'la place de la 5, la hiérarchie de la 4', src: 'ShadCN' },
   { n: 4, titre: 'En-tête · tout au même niveau', note: 'l\'ancienne 5, telle quelle', src: 'ShadCN' },
+  { n: 5, titre: 'Flottant · les trois pleins', note: 'la 2, mais dans le blanc plein du « Mapper » de la 1', src: 'ShadCN' },
 ]
 
 export default function LaboBoutons() {
