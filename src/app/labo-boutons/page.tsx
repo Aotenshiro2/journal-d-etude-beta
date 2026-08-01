@@ -25,7 +25,7 @@ import '@xyflow/react/dist/style.css'
 import { Maximize2, Hash, X } from 'lucide-react'
 import { useTheme } from '@/contexts/ThemeContext'
 import { Button } from '@/components/ui/button'
-import { ButtonGroup, ButtonGroupSeparator } from '@/components/ui/button-group'
+import { ButtonGroup } from '@/components/ui/button-group'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 
 const VERT = { border: '#34d399', bg: 'rgba(52,211,153,0.07)', ink: '#06281e' }
@@ -33,16 +33,19 @@ const TEINTES = ['#60a5fa', '#34d399', '#fbbf24', '#a78bfa', '#f472b6']
 
 /* ── Les cinq habillages du cluster d'actions ────────────────────────────── */
 
-// « Mapper » en action principale (bouton plein), les deux autres en icônes.
+// « Mapper » reste l'action principale, mais les trois ne forment qu'UNE barre.
+// Avant, un séparateur détachait Mapper et les deux icônes étaient en `ghost`,
+// donc sans contour : trois éléments, trois traitements, aucune cohérence. Ici
+// les trois partagent la même forme et le même contour ; seul le remplissage de
+// Mapper porte la hiérarchie.
 function ClusterButtonGroup() {
   return (
     <ButtonGroup className="scale-90 origin-right">
       <Button size="xs" variant="default">
         <Maximize2 /> Mapper
       </Button>
-      <ButtonGroupSeparator />
-      <Button size="icon-xs" variant="ghost" title="Promouvoir en concept"><Hash /></Button>
-      <Button size="icon-xs" variant="ghost" title="Dissoudre le groupe"><X /></Button>
+      <Button size="icon-xs" variant="outline" title="Promouvoir en concept"><Hash /></Button>
+      <Button size="icon-xs" variant="outline" title="Dissoudre le groupe"><X /></Button>
     </ButtonGroup>
   )
 }
