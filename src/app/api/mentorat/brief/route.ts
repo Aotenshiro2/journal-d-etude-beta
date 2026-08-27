@@ -1,0 +1,29 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { getUserId } from '@/lib/api-auth'
+import { buildMentoratBrief } from '@/lib/mentorat-brief'
+
+/**
+ * GET /api/mentorat/brief?days=90 — le brief compressé de l'élève connecté.
+ * Étape 1 du mode mentorat : calcul pur depuis la base, aucun jeton IA.
+ *
+ * Auth : Bearer (extension) ou session SSR (journal), comme les autres routes.
+ * ⚠️ Pas encore de gating d'abonnement mentorat : il viendra avec Stripe et
+ * le contrôle d'accès par la base (décision Brice 17/07 : l'extension ne
+ * décide jamais, le backend vérifie). Pour l'instant la route ne sert que
+ * les données de l'utilisateur authentifié : aucune fuite possible.
+ */
+export async function GET(req: NextRequest) {
+  const userId = await getUserId(req)
+  if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const raw = Number(req.nextUrl.searchParams.get('days'))
+  const days = Number.isFinite(raw) ? Math.min(365, Math.max(7, Math.round(raw))) : 90
+
+  try {
+    const brief = await buildMentoratBrief(userId, days)
+    return NextResponse.json(brief)
+  } catch (err) {
+    console.error('[mentorat/brief]', err)
+    return NextResponse.json({ error: 'Brief indisponible' }, { status: 500 })
+  }
+}
