@@ -105,7 +105,7 @@ export default async function ReviewPage({ searchParams }: { searchParams: Promi
       select: { id: true, title: true, favicon: true, folderId: true },
       orderBy: { lastModifiedAt: 'desc' },
     }),
-    prisma.folder.findMany({ where: { userId }, select: { id: true, name: true } }),
+    prisma.folder.findMany({ where: { userId }, select: { id: true, name: true, parentId: true } }),
   ])
 
   // ── Bibliothèque (décision Brice 19/07) : l'inventaire PERMANENT de tout ce
@@ -146,10 +146,17 @@ export default async function ReviewPage({ searchParams }: { searchParams: Promi
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
     .map(({ updatedAt: _u, ...item }) => item)
 
-  const folderName = new Map(folders.map(f => [f.id, f.name]))
+  // Sous-dossier → libellé « Parent / Sous-dossier » (1 niveau max)
+  const folderById = new Map(folders.map(f => [f.id, f]))
+  const folderLabel = (id: string): string | null => {
+    const f = folderById.get(id)
+    if (!f) return null
+    const parent = f.parentId ? folderById.get(f.parentId) : null
+    return parent ? `${parent.name} / ${f.name}` : f.name
+  }
   const toReorganize: ReorganizeItem[] = unorganized.map(n => ({
     id: n.id, title: n.title ?? 'Sans titre', favicon: n.favicon,
-    folder: n.folderId ? folderName.get(n.folderId) ?? null : null,
+    folder: n.folderId ? folderLabel(n.folderId) : null,
   }))
 
   // Même définition que le badge « Relire » de l'accueil (canvas d'étude non relus),

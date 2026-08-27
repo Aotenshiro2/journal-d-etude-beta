@@ -81,14 +81,31 @@ export async function POST(req: NextRequest) {
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await req.json()
-  const { title, content, sourceUrl, favicon, source, lastSyncAt, messages, createdAt, extensionVersion, extensionNoteId, tags, concepts, trades, warmups, dols, folderId, folderName } = body
+  const { title, content, sourceUrl, favicon, source, lastSyncAt, messages, createdAt, extensionVersion, extensionNoteId, tags, concepts, trades, warmups, dols, folderId, folderName, folderParentId, folderParentName } = body
 
-  // Dossier extension : upsert du nom pour que le pull puisse tout restaurer
+  // Dossier extension : upsert du nom pour que le pull puisse tout restaurer.
+  // Sous-dossiers (1 niveau max) : le payload peut porter folderParentId +
+  // folderParentName — le parent est upserté d'abord (il peut n'avoir aucune
+  // note à lui). parentId n'est touché QUE si le champ est présent dans le
+  // payload : une vieille extension (≤1.6.11) qui ne l'envoie pas ne doit pas
+  // effacer une hiérarchie posée par une version récente.
   if (typeof folderId === 'string' && folderId && typeof folderName === 'string' && folderName.trim()) {
+    const hasParentField = folderParentId !== undefined
+    let parentId: string | null = null
+    if (typeof folderParentId === 'string' && folderParentId && folderParentId !== folderId) {
+      const parentName = typeof folderParentName === 'string' && folderParentName.trim() ? folderParentName.trim() : null
+      const parent = await prisma.folder.upsert({
+        where: { id: folderParentId },
+        create: { id: folderParentId, userId, name: parentName ?? 'Dossier' },
+        update: { ...(parentName ? { name: parentName } : {}) },
+      })
+      // Borne de profondeur : jamais d'enfant sous un dossier qui a lui-même un parent
+      if (!parent.parentId) parentId = folderParentId
+    }
     await prisma.folder.upsert({
       where: { id: folderId },
-      create: { id: folderId, userId, name: folderName.trim() },
-      update: { name: folderName.trim() },
+      create: { id: folderId, userId, name: folderName.trim(), parentId },
+      update: { name: folderName.trim(), ...(hasParentField ? { parentId } : {}) },
     })
   }
 

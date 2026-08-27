@@ -144,6 +144,10 @@ model Folder {
   id        String   @id
   userId    String
   name      String
+  // Sous-dossiers, 1 niveau max (demande élève 28/08/2026) : null = racine.
+  // Pas de FK : couplage lâche comme le reste du modèle Folder (ids extension).
+  // La profondeur est bornée à l'écriture (API notes + extension), pas en base.
+  parentId  String?
   createdAt DateTime @default(now())
 
   @@index([userId])

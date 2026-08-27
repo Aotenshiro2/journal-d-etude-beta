@@ -40,16 +40,23 @@ export default async function StudyPage() {
         },
       },
     }),
-    prisma.folder.findMany({ where: { userId: user.id }, select: { id: true, name: true } }),
+    prisma.folder.findMany({ where: { userId: user.id }, select: { id: true, name: true, parentId: true } }),
     // Notes réorganisées mais pas encore relues — même badge « Relire » que l'accueil
     prisma.canvas.count({ where: { userId: user.id, type: 'note-study', reviewedAt: null, nodes: { some: {} } } }),
   ])
 
-  const folderNames = new Map(folders.map(f => [f.id, f.name]))
+  // Sous-dossier → libellé « Parent / Sous-dossier » (1 niveau max)
+  const folderById = new Map(folders.map(f => [f.id, f]))
+  const folderLabel = (id: string): string | null => {
+    const f = folderById.get(id)
+    if (!f) return null
+    const parent = f.parentId ? folderById.get(f.parentId) : null
+    return parent ? `${parent.name} / ${f.name}` : f.name
+  }
   const notes = rawNotes.map(({ canvas, trades, ...n }) => ({
     ...n,
     trades: (trades as unknown as import('@/types').TradeSegmentData[] | null) ?? undefined,
-    folderName: n.folderId ? folderNames.get(n.folderId) ?? null : null,
+    folderName: n.folderId ? folderLabel(n.folderId) : null,
     worked: (canvas?._count.nodes ?? 0) > 0,
   }))
 
