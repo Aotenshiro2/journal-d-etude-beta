@@ -37,6 +37,7 @@ import { ASSISTANCE_CONNEXION, connexionValide, lienDejaPresent } from './canvas
 import { CanvasToolbar, type ActionBarre } from './canvas/CanvasToolbar'
 import { ConceptNode } from './canvas/ConceptNode'
 import { ConceptPicker } from './canvas/ConceptPicker'
+import SupportBubble from './SupportBubble'
 import CaptureBar from '@/components/CaptureBar'
 import ImageLightbox from '@/components/ImageLightbox'
 import { stripHtml, formatRelativeTime, extractImageSrc } from '@/lib/utils'
@@ -1654,7 +1655,7 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
               {quickOpen && (
                 <>
                   <div style={{ position: 'fixed', inset: 0, zIndex: 40 }} onClick={() => setQuickOpen(false)} />
-                  <div className="canvas-float-pill" style={{ position: 'absolute', bottom: 50, right: 0, zIndex: 50, minWidth: 170, padding: '6px 0', overflow: 'hidden' }}>
+                  <div className="canvas-float-pill" style={{ position: 'absolute', bottom: 100, right: 0, zIndex: 50, minWidth: 170, padding: '6px 0', overflow: 'hidden' }}>
                     <Link href="/review" onClick={() => setQuickOpen(false)}
                       style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 14px', fontSize: 13, color: 'var(--node-title)', textDecoration: 'none' }}
                     >
@@ -1685,6 +1686,9 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
                   </div>
                 </>
               )}
+              {/* La bouée vit HORS du menu replié : son panneau doit survivre à
+                  la fermeture du menu (le déclencheur porte l'état du panneau). */}
+              <SupportBubble variant="round" />
               <button
                 onClick={() => setQuickOpen(o => !o)}
                 className="canvas-float-pill"
@@ -1724,6 +1728,7 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
                 {label}
               </Link>
             ))}
+            <SupportBubble />
           </div>
           )}
         </div>

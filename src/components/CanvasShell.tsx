@@ -26,6 +26,7 @@ import {
 import { useTheme } from '@/contexts/ThemeContext'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import UserMenu from './UserMenu'
+import SupportBubble from './SupportBubble'
 
 // Les ESPACES — même liste que l'accueil (NoteMapCanvas.MODES).
 const MODES = [
@@ -218,7 +219,7 @@ export default function CanvasShell({ user, dueCount, extraActions, children }: 
                 <div style={{ position: 'fixed', inset: 0, zIndex: 40 }} onClick={() => setQuickOpen(false)} />
                 <div
                   className="canvas-float-pill"
-                  style={{ position: 'absolute', bottom: 50, right: 0, zIndex: 50, minWidth: 170, padding: '6px 0', overflow: 'hidden' }}
+                  style={{ position: 'absolute', bottom: 100, right: 0, zIndex: 50, minWidth: 170, padding: '6px 0', overflow: 'hidden' }}
                 >
                   {/* Le retour à la carte : sans lui, une fois dans les notes on
                       n'a que le bouton « précédent » du navigateur pour revenir
@@ -253,6 +254,9 @@ export default function CanvasShell({ user, dueCount, extraActions, children }: 
                 </div>
               </>
             )}
+            {/* La bouée vit HORS du menu replié : son panneau doit survivre à
+                la fermeture du menu (le déclencheur porte l'état du panneau). */}
+            <SupportBubble variant="round" />
             <button
               onClick={() => setQuickOpen(o => !o)}
               className="canvas-float-pill"
@@ -288,6 +292,7 @@ export default function CanvasShell({ user, dueCount, extraActions, children }: 
                 {label}
               </Link>
             ))}
+            <SupportBubble />
             {extraActions}
           </div>
         )}
