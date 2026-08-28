@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getUserId } from '@/lib/api-auth'
 import { buildMentoratBrief } from '@/lib/mentorat-brief'
+import { checkMentoratAccess } from '@/lib/entitlements'
 
 /**
  * GET /api/mentorat/brief?days=90 — le brief compressé de l'élève connecté.
@@ -15,6 +16,13 @@ import { buildMentoratBrief } from '@/lib/mentorat-brief'
 export async function GET(req: NextRequest) {
   const userId = await getUserId(req)
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  // Mode mentorat réservé aux membres (Live Club, Skool premium/vip, accès
+  // manuel) — vérifié CÔTÉ SERVEUR, l'extension ne décide jamais
+  const access = await checkMentoratAccess(userId)
+  if (!access.entitled) {
+    return NextResponse.json({ error: 'mentorat_requis' }, { status: 403 })
+  }
 
   const raw = Number(req.nextUrl.searchParams.get('days'))
   const days = Number.isFinite(raw) ? Math.min(365, Math.max(7, Math.round(raw))) : 90

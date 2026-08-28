@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { getUserId } from '@/lib/api-auth'
 import { buildMentoratBrief } from '@/lib/mentorat-brief'
 import { aiClient, AI_MODEL, logAiUsage, textOf, aiErrorMessage } from '@/lib/ai'
+import { checkMentoratAccess } from '@/lib/entitlements'
 
 // La génération réfléchit : bien au-delà des 10 s par défaut de Vercel
 export const maxDuration = 60
@@ -30,6 +31,12 @@ Interdits : conseil financier personnalisé, promesse de gains, jargon inutile, 
 export async function POST(req: NextRequest) {
   const userId = await getUserId(req)
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  // Le plan (IA payante) est LE cœur du mode mentorat : gating serveur strict
+  const access = await checkMentoratAccess(userId)
+  if (!access.entitled) {
+    return NextResponse.json({ error: 'mentorat_requis' }, { status: 403 })
+  }
 
   const body = await req.json().catch(() => ({}))
   const raw = Number(body.days)
@@ -76,6 +83,10 @@ export async function POST(req: NextRequest) {
 export async function GET(req: NextRequest) {
   const userId = await getUserId(req)
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const access = await checkMentoratAccess(userId)
+  if (!access.entitled) {
+    return NextResponse.json({ error: 'mentorat_requis' }, { status: 403 })
+  }
   const last = await prisma.mentoratPlan.findFirst({
     where: { userId },
     orderBy: { createdAt: 'desc' },

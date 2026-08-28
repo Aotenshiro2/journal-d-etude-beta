@@ -174,6 +174,20 @@ model SupportThread {
   @@index([userId, updatedAt])
 }
 
+// Accès mentorat accordé À LA MAIN par Brice (anciens formats 3000 €, cas
+// particuliers, emails non rattachés au cockpit). Les droits automatiques
+// (Live Club actif, Skool premium/vip) se lisent dans les vues cockpit_* :
+// cf. src/lib/entitlements.ts. revokedAt non nul = accès retiré.
+model MentoratGrant {
+  id        String    @id @default(uuid())
+  email     String
+  note      String?
+  createdAt DateTime  @default(now())
+  revokedAt DateTime?
+
+  @@index([email])
+}
+
 // Plan d'évolution mentorat : l'IA propose, Brice valide (statut proposed →
 // approved/rejected). Le brief qui a nourri le plan est conservé avec lui.
 model MentoratPlan {
