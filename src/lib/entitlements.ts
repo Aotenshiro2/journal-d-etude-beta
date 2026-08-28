@@ -10,7 +10,46 @@
 // l'extension.
 import { prisma } from './db'
 
-export type MentoratReason = 'manuel' | 'liveclub' | 'skool-vip' | 'skool-premium'
+export type MentoratReason = 'manuel' | 'liveclub' | 'skool-vip' | 'skool-premium' | 'carnet-premium'
+
+// Le produit « Carnet Premium » (5,99 €/mois) sur le Stripe aoknowledge —
+// créé le 28/08/2026. La vérification en direct donne l'accès IMMÉDIAT après
+// paiement, sans attendre la synchro cockpit du lendemain matin.
+const CARNET_PREMIUM_PRODUCT = 'prod_V9jniZCCbIJsmV'
+
+async function hasCarnetPremium(email: string): Promise<boolean> {
+  const key = process.env.STRIPE_KEY_CARNET
+  if (!key) return false // clé absente : les autres voies d'accès suffisent
+  try {
+    const headers = { Authorization: `Bearer ${key}` }
+    const custRes = await fetch(
+      `https://api.stripe.com/v1/customers?email=${encodeURIComponent(email)}&limit=10`,
+      { headers }
+    )
+    if (!custRes.ok) return false
+    const customers: { id: string }[] = (await custRes.json()).data ?? []
+    for (const c of customers) {
+      const subRes = await fetch(
+        `https://api.stripe.com/v1/subscriptions?customer=${c.id}&limit=20`,
+        { headers }
+      )
+      if (!subRes.ok) continue
+      const subs: { status: string; items: { data: { price: { product: string } }[] } }[] =
+        (await subRes.json()).data ?? []
+      for (const s of subs) {
+        if (
+          (s.status === 'active' || s.status === 'trialing' || s.status === 'past_due') &&
+          s.items.data.some(i => i.price.product === CARNET_PREMIUM_PRODUCT)
+        ) {
+          return true
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[entitlements] Stripe carnet-premium check failed:', err)
+  }
+  return false
+}
 
 export interface MentoratAccess {
   entitled: boolean
@@ -45,6 +84,12 @@ export async function checkMentoratAccess(userId: string): Promise<MentoratAcces
     if (m.abonnement_en_cours) return { entitled: true, reason: 'liveclub', email }
     if (m.tier_skool === 'vip') return { entitled: true, reason: 'skool-vip', email }
     if (m.tier_skool === 'premium') return { entitled: true, reason: 'skool-premium', email }
+  }
+
+  // 3. Abonnement Carnet Premium (Stripe aoknowledge, vérif en direct :
+  // l'accès s'ouvre dans la minute qui suit le paiement)
+  if (await hasCarnetPremium(email)) {
+    return { entitled: true, reason: 'carnet-premium', email }
   }
 
   return { entitled: false, reason: null, email }
