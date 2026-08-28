@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getUserId } from '@/lib/api-auth'
-import { aiClient, AI_MODEL, logAiUsage, textOf } from '@/lib/ai'
+import { aiClient, AI_MODEL, logAiUsage, textOf, aiErrorMessage } from '@/lib/ai'
 
 // L'appel Claude peut dépasser les 10 s par défaut des fonctions Vercel
 export const maxDuration = 60
@@ -94,6 +94,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ threadId: thread.id, reply })
   } catch (err) {
     console.error('[support/chat]', err)
-    return NextResponse.json({ error: 'Le support IA est indisponible, réessaie ou contacte un humain.' }, { status: 502 })
+    return NextResponse.json({ error: aiErrorMessage(err, 'ANTHROPIC_API_KEY_SUPPORT') }, { status: 502 })
   }
 }

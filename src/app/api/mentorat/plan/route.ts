@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getUserId } from '@/lib/api-auth'
 import { buildMentoratBrief } from '@/lib/mentorat-brief'
-import { aiClient, AI_MODEL, logAiUsage, textOf } from '@/lib/ai'
+import { aiClient, AI_MODEL, logAiUsage, textOf, aiErrorMessage } from '@/lib/ai'
 
 // La génération réfléchit : bien au-delà des 10 s par défaut de Vercel
 export const maxDuration = 60
@@ -68,7 +68,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ planId: saved.id, status: saved.status, plan, brief: brief.text })
   } catch (err) {
     console.error('[mentorat/plan]', err)
-    return NextResponse.json({ error: 'Plan indisponible, réessaie.' }, { status: 502 })
+    return NextResponse.json({ error: aiErrorMessage(err, 'ANTHROPIC_API_KEY_CARNET') }, { status: 502 })
   }
 }
 

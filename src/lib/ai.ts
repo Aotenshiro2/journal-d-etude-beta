@@ -68,3 +68,23 @@ export function textOf(response: Anthropic.Message): string {
     .join('')
     .trim()
 }
+
+/**
+ * Message d'erreur exploitable pour les routes : distinguer une clé morte
+ * (401/403, l'erreur d'ENV la plus probable) d'une saturation (429) ou d'une
+ * panne — un « indisponible » générique ne dit pas quoi réparer.
+ */
+export function aiErrorMessage(err: unknown, envVar: string): string {
+  if (err instanceof Anthropic.APIError) {
+    if (err.status === 401 || err.status === 403) {
+      return `Clé API invalide ou révoquée côté serveur : vérifie ${envVar} dans Vercel puis redéploie.`
+    }
+    if (err.status === 429) {
+      return 'Trop de demandes en ce moment, réessaie dans un instant.'
+    }
+    if (err.status === 529 || (err.status ?? 0) >= 500) {
+      return 'Le service IA est momentanément saturé, réessaie dans une minute.'
+    }
+  }
+  return 'Le service IA est indisponible, réessaie ou contacte un humain.'
+}
