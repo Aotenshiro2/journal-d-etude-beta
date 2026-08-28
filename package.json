@@ -45,6 +45,7 @@
     "prisma": "^6.17.1",
     "react": "19.1.0",
     "react-dom": "19.1.0",
+    "resend": "^6.24.0",
     "shadcn": "^4.0.8",
     "tailwind-merge": "^3.5.0",
     "tailwindcss-animate": "^1.0.7",
