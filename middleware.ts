@@ -39,6 +39,9 @@ export async function middleware(request: NextRequest) {
 
   // API routes — allow Bearer token through (handled in route handlers)
   if (pathname.startsWith('/api/')) {
+    // Préflight CORS (support depuis les frontends web) : sans cookies ni
+    // Authorization par construction — le laisser passer, la route répond.
+    if (request.method === 'OPTIONS') return supabaseResponse
     if (!user) {
       const authHeader = request.headers.get('authorization')
       if (!authHeader?.startsWith('Bearer ')) {
