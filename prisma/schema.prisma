@@ -140,6 +140,54 @@ model MessageTag {
 }
 
 // Dossiers de l'extension (id = uuid extension) — la sync les upserte, le pull les restaure
+// ── IA (mentorat, support, capture) ──────────────────────────────────────────
+
+// Chaque appel à l'API Claude est loggé ici : c'est la source du futur écran
+// cockpit « jetons/coûts par membre » (les clés console ne donnent que le
+// par-produit ; le par-membre, c'est nous).
+model AiUsage {
+  id           String   @id @default(uuid())
+  userId       String
+  product      String // 'mentorat' | 'support' | 'capture'
+  model        String
+  inputTokens  Int
+  outputTokens Int
+  createdAt    DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([product, createdAt])
+}
+
+// Fil de conversation du support IA (bouton « contacter le support »).
+// messages = [{role:'user'|'assistant', content, at}] ; escalatedAt posé quand
+// l'utilisateur demande un humain. Lu plus tard par le cockpit (questions
+// posées, suivi par membre).
+model SupportThread {
+  id          String    @id @default(uuid())
+  userId      String
+  app         String    @default("extension")
+  messages    Json      @default("[]")
+  escalatedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([userId, updatedAt])
+}
+
+// Plan d'évolution mentorat : l'IA propose, Brice valide (statut proposed →
+// approved/rejected). Le brief qui a nourri le plan est conservé avec lui.
+model MentoratPlan {
+  id         String   @id @default(uuid())
+  userId     String
+  periodDays Int
+  brief      Json
+  plan       String
+  status     String   @default("proposed")
+  createdAt  DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
 model Folder {
   id        String   @id
   userId    String
