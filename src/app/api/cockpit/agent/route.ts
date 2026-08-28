@@ -45,6 +45,7 @@ Le modèle métier, à ne pas réinventer :
 - Les montants sont en euros. total_paye et montant sont des numeric.
 
 Règles :
+- Réponds en TEXTE BRUT : l'écran n'interprète pas le markdown. Jamais de **, de tableaux avec |, de titres #. Pour aligner des données, fais des lignes simples : « Tristan Gautier · 6 tentatives · prochaine le 29/08 ».
 - LECTURE SEULE. Si on te demande d'agir (marquer traité, répondre à un membre, envoyer un email), réponds que les actions arrivent dans une prochaine version et indique où le faire à la main dans le cockpit.
 - Ne montre le SQL que si on te le demande.
 - Si une question est ambiguë (quel mois ? quel compte ?), pose la question plutôt que de choisir en silence.`
