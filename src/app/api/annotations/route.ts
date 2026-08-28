@@ -158,3 +158,18 @@ export async function PATCH(req: NextRequest) {
     )
   }
 }
+
+/**
+ * DELETE — retirer un jugement (id client stable). Demande Brice 29/08 :
+ * on doit pouvoir enlever une note A/B/C posee par erreur sur un trade.
+ * deleteMany borne au userId : on ne supprime que chez soi.
+ */
+export async function DELETE(req: NextRequest) {
+  const userId = await getUserId(req)
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  const body = await req.json().catch(() => ({}))
+  const id = typeof body.id === "string" && body.id ? body.id : null
+  if (!id) return NextResponse.json({ error: "id manquant" }, { status: 400 })
+  const r = await prisma.annotation.deleteMany({ where: { id, userId } })
+  return NextResponse.json({ deleted: r.count })
+}
