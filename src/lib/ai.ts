@@ -5,16 +5,24 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { prisma } from './db'
 
-export type AiProduct = 'mentorat' | 'support' | 'capture'
+export type AiProduct = 'mentorat' | 'support' | 'capture' | 'cockpit'
 
 const KEY_ENV: Record<AiProduct, string> = {
   mentorat: 'ANTHROPIC_API_KEY_CARNET',
   capture: 'ANTHROPIC_API_KEY_CARNET',
   support: 'ANTHROPIC_API_KEY_SUPPORT',
+  cockpit: 'ANTHROPIC_API_KEY_COCKPIT',
 }
 
 export function aiKeyFor(product: AiProduct): string | null {
-  return process.env[KEY_ENV[product]] ?? process.env.ANTHROPIC_API_KEY ?? null
+  return (
+    process.env[KEY_ENV[product]] ??
+    // L'agent cockpit emprunte la clé support tant que sa clé dédiée n'existe
+    // pas (à créer par Brice : workspace dédié, cf. convention credentials.local).
+    (product === 'cockpit' ? process.env.ANTHROPIC_API_KEY_SUPPORT : undefined) ??
+    process.env.ANTHROPIC_API_KEY ??
+    null
+  )
 }
 
 /** Client Anthropic du produit — throw clair si la clé n'est pas configurée */
@@ -33,6 +41,7 @@ export const AI_MODEL: Record<AiProduct, string> = {
   mentorat: process.env.AI_MODEL_MENTORAT ?? 'claude-opus-5',
   support: process.env.AI_MODEL_SUPPORT ?? 'claude-opus-5',
   capture: process.env.AI_MODEL_CAPTURE ?? 'claude-opus-5',
+  cockpit: process.env.AI_MODEL_COCKPIT ?? 'claude-opus-5',
 }
 
 /**
