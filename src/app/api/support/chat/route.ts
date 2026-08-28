@@ -47,15 +47,14 @@ export async function POST(req: NextRequest) {
   const threadId = typeof body.threadId === 'string' ? body.threadId : null
   if (!message) return NextResponse.json({ error: 'Message vide' }, { status: 400 })
 
-  // Fil existant (au propriétaire seulement) ou nouveau fil
-  let thread = threadId
+  // Fil existant (au propriétaire seulement). Un NOUVEAU fil n'est créé
+  // qu'APRÈS une réponse réussie : créer avant laissait des fils vides à
+  // chaque échec (3 fils fantômes constatés le 28/08 pendant le dogfooding).
+  const thread = threadId
     ? await prisma.supportThread.findFirst({ where: { id: threadId, userId } })
     : null
-  if (!thread) {
-    thread = await prisma.supportThread.create({ data: { userId, app, messages: [] } })
-  }
 
-  const history = (Array.isArray(thread.messages) ? thread.messages : []) as unknown as ThreadMessage[]
+  const history = (Array.isArray(thread?.messages) ? thread!.messages : []) as unknown as ThreadMessage[]
   const recent = history.slice(-MAX_HISTORY)
 
   let client
@@ -86,12 +85,16 @@ export async function POST(req: NextRequest) {
       { role: 'user', content: message, at: now },
       { role: 'assistant', content: reply, at: now },
     ]
-    await prisma.supportThread.update({
-      where: { id: thread.id },
-      data: { messages: updated as object[] },
-    })
+    const saved = thread
+      ? await prisma.supportThread.update({
+          where: { id: thread.id },
+          data: { messages: updated as object[] },
+        })
+      : await prisma.supportThread.create({
+          data: { userId, app, messages: updated as object[] },
+        })
 
-    return NextResponse.json({ threadId: thread.id, reply })
+    return NextResponse.json({ threadId: saved.id, reply })
   } catch (err) {
     console.error('[support/chat]', err)
     return NextResponse.json({ error: aiErrorMessage(err, 'ANTHROPIC_API_KEY_SUPPORT') }, { status: 502 })
