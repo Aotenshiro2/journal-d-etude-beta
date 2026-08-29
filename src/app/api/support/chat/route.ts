@@ -44,6 +44,7 @@ const APP_CONTEXT: Record<string, string> = {
   site: `Le membre t'écrit depuis le site aoknowledge.com : formations, blog, podcast, Live Club (communauté payante avec lives), espace membre sur /mon-espace. Pour un problème d'achat, de facturation ou d'accès à une formation, propose directement de parler à un humain.`,
   masterclass: `Le membre t'écrit depuis masterclass.aoknowledge.com : les replays des masterclass AOK, accessibles après connexion. Problème fréquent : il faut se connecter avec le MÊME compte AOK que sur le site (même email).`,
   pilotage: `Le membre t'écrit depuis Pilotage (pilotage.aoknowledge.com) : l'app de pilotage financier du trader (profil financier, pilotage mensuel des flux, comptes de trading). Ses données restent stockées dans SON navigateur (localStorage) : elles ne sont pas sur nos serveurs, et changer de navigateur ou vider le cache les fait disparaître.`,
+  meltrade: `Le membre t'écrit depuis MelTrade (melaniechart.com), le site de Mélanie : sessions de live trading quotidiennes par abonnement mensuel sans engagement, en 3 paliers, avec du contenu éducatif. C'est un site de l'écosystème AOK mais un produit distinct : pour toute question d'abonnement, de paiement ou d'accès MelTrade, propose directement de parler à un humain.`,
 }
 
 const MAX_HISTORY = 20
