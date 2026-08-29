@@ -37,6 +37,24 @@ Les tables et vues du cockpit (schéma public, PostgreSQL) :
 - cockpit_support_threads (vue) : id, user_id, email, app, messages (jsonb, [{role,content,at}]), escalated_at, created_at, updated_at
 - "AiUsage" (guillemets obligatoires, colonnes camelCase entre guillemets) : "userId", product, model, "inputTokens", "outputTokens", "createdAt"
 - cockpit_releves_audience : relevés d'audience par compte (colonnes à découvrir au besoin)
+- cockpit_top_items : snapshot_date, kind, rank, label, sublabel, metrics (jsonb). kind = youtube_top_watchtime | youtube_traffic_sources | gsc_top_queries | kit_broadcasts | stripe_by_product | audience_par_compte. TOUJOURS filtrer sur le dernier snapshot_date, sinon la même vidéo revient une fois par semaine collectée.
+- cockpit_ia_usage (vue) : user_id, email, produit, appels, tokens_entree, tokens_sortie, dernier_appel, appels_30j. Le coût de l'IA PAR MEMBRE, que la console Anthropic ne donne pas.
+- cockpit_concepts_journal (vue) : concept, occurrences, eleves, depuis_capture, depuis_tags. Ce que les élèves travaillent dans le journal, AGRÉGÉ SANS IDENTITÉ. Un concept qui revient et qu'aucun contenu ne couvre est un trou de contenu.
+- cockpit_activite_journal (vue) : user_id, email, notes, notes_30j, derniere_activite, premiere_note, trades, dols, annotations, grade_a, relectures_dues. dols = niveaux Draw on Liquidity posés.
+- cockpit_mentorat_acces (vue) : id, email, note, accorde_le, retire_le, actif. Les accès mentorat posés à la main. Les droits automatiques (Live Club actif, Skool premium/vip) ne sont PAS là, ils se déduisent des vues membres.
+- cockpit_membre_emails : email, membre_id, principal, verifie. LE PONT entre le monde des comptes (auth.users, journal, support, IA — rangés par email) et le monde des paiements (rangé par membre_id). Un membre a souvent plusieurs emails : passe TOUJOURS par cette table, jamais par email_principal seul, sinon tu perds ceux qui ont payé avec une adresse et se sont inscrits avec une autre.
+
+L'ONTOLOGIE (le graphe du business, deux tables) :
+- cockpit_ontologie_noeuds : id, type, nom, detail, note. type = offre | offre_morte | acces | canal | entree | compte | personne | client | chantier | avatar | concept | ressource | contenu | source | outil | document | methode | rituel | livre | categorie
+- cockpit_ontologie_liens : de, vers, type, note. type = alimente | convertit | donne_acces | inclut | encaisse | gere | anime | remplace | contient | concerne | cible | vise | traite | enseigne | publie_sur | derive_de | mesure | outille | fait_foi | applique | cadence | inspire
+C'est le SENS que les autres tables n'ont pas : qui vise quel avatar, quel livre a nourri quelle méthode, quel fichier fait foi sur quel sujet, de quoi telle app dépend. Les chiffres n'y sont jamais — ils vivent dans les tables ci-dessus. Pour une question de sens, joins les deux tables ; pour une question de chiffres, va aux tables métier. Le graphe est un miroir du fichier apps/cockpit/src/data/ontologie.ts : s'il paraît périmé, c'est que le script de poussée n'a pas retourné.
+
+LES AVATARS CLIENTS :
+- cockpit_membres_avatar (vue) : membre_id, nom, email_principal, avatar (monday | zumadog | tucker | bob), avatar_calcule, avatar_manuel, note_manuelle, confiance, pourquoi, intensite_etude, a_signal_etude, total_paye, abonnement_en_cours, tier_skool, anciennete_jours, natures, notes, notes_30j, dols, trades, annotations, relectures_dues.
+  L'avatar est DÉDUIT DU COMPORTEMENT OBSERVÉ (ce qui a été payé, l'ancienneté, l'étude), jamais d'un niveau auto-déclaré — la règle vient de voix-client.md : un client s'est classé « intermédiaire » en fonctionnant comme un débutant. « pourquoi » explique chaque classement en clair, « confiance » dit ce qu'on sait.
+  ⚠️ À DIRE quand tu t'en sers : le signal d'ÉTUDE ne couvre presque personne (le journal est peu adopté), donc la classification s'appuie surtout sur l'achat et l'ancienneté. Regarde « a_signal_etude » et « confiance » avant d'affirmer.
+  Les cinq stades de voix-client.md : monday = le curieux sans structure · zumadog = le technicien désordonné · tucker = l'intermédiaire en transition · bob = le rentable qui veut professionnaliser · visionnaire = le mentor en devenir, jamais attribué automatiquement (c'est du relationnel, il se pose à la main).
+- cockpit_avatar_manuel : membre_id, avatar, note, pose_le, pose_par. L'avatar posé à la main depuis le cockpit ; il prime sur le calcul.
 
 Le modèle métier, à ne pas réinventer :
 - DEUX comptes Stripe : aoknowledge = le comptant (formations, VIP), melanie = TOUT le récurrent (Live Club). Le chiffre complet demande les deux.
