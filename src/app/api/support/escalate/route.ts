@@ -48,6 +48,9 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json().catch(() => ({}))
   const threadId = typeof body.threadId === 'string' ? body.threadId : null
+  // Visiteurs en session anonyme (MelTrade) : auth.users n'a pas d'email,
+  // le widget demande une adresse de contact au moment de l'escalade.
+  const contactEmail = typeof body.contactEmail === 'string' ? body.contactEmail.trim().slice(0, 200) : null
 
   let thread = null
   if (threadId) {
@@ -67,7 +70,7 @@ export async function POST(req: NextRequest) {
       // L'email du membre : le fil ne porte que le userId Supabase.
       const rows = await prisma.$queryRaw<{ email: string | null }[]>`
         select email from auth.users where id = ${userId}::uuid`
-      const memberEmail = rows[0]?.email ?? `compte ${userId.slice(0, 8)}…`
+      const memberEmail = rows[0]?.email ?? contactEmail ?? `visiteur anonyme (${userId.slice(0, 8)}…)`
 
       const messages = (Array.isArray(thread?.messages) ? thread!.messages : []) as unknown as ThreadMessage[]
       const derniers = messages.slice(-6)
@@ -92,6 +95,9 @@ export async function POST(req: NextRequest) {
         html: [
           `<p><strong>${memberEmail}</strong> a demandé un humain dans le support`,
           ` (app : ${thread?.app ?? 'inconnue'}).</p>`,
+          contactEmail && rows[0]?.email && contactEmail !== rows[0].email
+            ? `<p>Email de contact laissé dans le chat : ${contactEmail.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</p>`
+            : '',
           `<p><a href="https://cockpit.aoknowledge.com/?vue=support">Ouvrir l'onglet Support du cockpit</a> pour répondre.</p>`,
           '<hr />',
           '<p>Derniers échanges :</p>',
