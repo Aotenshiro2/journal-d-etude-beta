@@ -11,6 +11,12 @@ import type Anthropic from '@anthropic-ai/sdk'
 // repondre au support etc. viendront apres cadrage — l'agent le dit quand on
 // le lui demande.
 //
+// PIECES JOINTES (30/08) : on peut lui deposer un PDF, une capture ou un
+// export. Meme moteur de lecture que /api/pilotage/releve — PDF et image en
+// blocs natifs, tout le reste decode en texte — mais ici le document ne
+// remplace pas la base, il s'y CONFRONTE : le cas d'usage est le releve
+// d'Adil ou l'export Stripe qu'on veut rapprocher de cockpit_paiements.
+//
 // Garde : la meme allowlist que tout le cockpit, verifiee cote serveur.
 
 export const maxDuration = 120
@@ -20,7 +26,16 @@ const MAX_MESSAGE_LEN = 4000
 const MAX_TOURS = 8
 const MAX_RESULTAT = 14000
 
-const SYSTEM_PROMPT = `Tu es l'agent privé du Cockpit AOK, au service exclusif de Brice (fondateur) et Mélanie (gère le Stripe du récurrent et la compta). Tu réponds en français, en tutoyant, court et chiffré. N'utilise jamais de tiret cadratin.
+// Le corps d'une fonction Vercel est borne a 4,5 Mo, et le base64 pese un
+// tiers de plus que le fichier sur le disque. On garde de la marge pour
+// l'historique texte et les entetes.
+const TYPES_IMAGE = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
+const MAX_PIECE = 3_200_000
+const MAX_PIECES_TOTAL = 3_600_000
+const MAX_PIECES_PAR_MESSAGE = 4
+const MAX_TEXTE_FICHIER = 200_000
+
+const SYSTEM_PROMPT = `Tu es l'agent privé du Cockpit AOK, au service exclusif de Brice (fondateur), Mélanie (gère le Stripe du récurrent) et Adil (la compta côté Mélanie et ses accès Stripe). Tu réponds en français, en tutoyant, court et chiffré. N'utilise jamais de tiret cadratin.
 
 Ton rôle : répondre à leurs questions de pilotage en interrogeant la base via l'outil requete_sql (lecture seule). Ne réponds JAMAIS un chiffre de mémoire : chaque chiffre vient d'une requête exécutée. Si une requête échoue, adapte-la (commence par un select * ... limit 3 pour découvrir les colonnes).
 
@@ -69,6 +84,14 @@ Le modèle métier, à ne pas réinventer :
 - Le tier Skool ne décide pas des révocations : un vip a payé comptant.
 - Les montants sont en euros. total_paye et montant sont des numeric.
 
+LES DOCUMENTS QU'ON TE DÉPOSE :
+On peut joindre un PDF, une capture d'écran, un export CSV, un relevé bancaire, une facture. Quand il y en a un :
+- dis en une ligne ce que tu as reçu et sur quelle période il porte, AVANT de conclure quoi que ce soit ;
+- un chiffre du document n'est jamais un chiffre de la base. Ce sont deux sources, et l'intérêt est de les CONFRONTER : si on te demande un rapprochement, requête la base sur la même période et rends les écarts ligne par ligne, avec le montant de chaque côté ;
+- pour rattacher une ligne de paiement à quelqu'un, passe par cockpit_membre_emails, jamais par le nom : les libellés d'export ne sont pas nos noms ;
+- rappelle-toi qu'un remboursement est un paiement négatif chez nous, et que tout le récurrent est sur le Stripe de Mélanie ;
+- si le document est illisible, tronqué, ou sans rapport avec ce qu'on te demande, dis-le au lieu de deviner. Tu n'inventes jamais une ligne que tu n'as pas lue.
+
 Règles :
 - Réponds en TEXTE BRUT : l'écran n'interprète pas le markdown. Jamais de **, de tableaux avec |, de titres #. Pour aligner des données, fais des lignes simples : « Tristan Gautier · 6 tentatives · prochaine le 29/08 ».
 - LECTURE SEULE. Si on te demande d'agir (marquer traité, répondre à un membre, envoyer un email), réponds que les actions arrivent dans une prochaine version et indique où le faire à la main dans le cockpit.
@@ -77,8 +100,8 @@ Règles :
 
 // L'outil unique : du SQL en lecture seule, borne par le code (pas par le
 // prompt). Denylist assumee plutot qu'allowlist : les seuls utilisateurs sont
-// Brice et Melanie, deja admins de ces donnees ; le verrou empeche l'ecriture
-// et les schemas sensibles, pas la lecture de leurs propres tables.
+// Brice, Melanie et Adil, deja admins de ces donnees ; le verrou empeche
+// l'ecriture et les schemas sensibles, pas la lecture de leurs propres tables.
 const SQL_INTERDIT = /\b(insert|update|delete|drop|alter|create|grant|revoke|truncate|vacuum|copy|call|do|into|listen|notify|set|reset|begin|commit|rollback)\b/i
 const SCHEMAS_INTERDITS = /\b(auth|storage|vault|extensions|pgsodium|graphql[a-z_]*|realtime|supabase_[a-z_]*)\s*\.|pg_|information_schema/i
 
@@ -129,6 +152,52 @@ const OUTILS: Anthropic.Tool[] = [
   },
 ]
 
+type PieceEntrante = { nom?: unknown; type?: unknown; data?: unknown }
+type MessageEntrant = { role?: unknown; content?: unknown; pieces?: unknown }
+
+/**
+ * Transforme une piece jointe du front en bloc pour l'API.
+ *
+ * LE FRONT N'ENVOIE JAMAIS DE BLOC TOUT FAIT : il envoie un nom, un type MIME
+ * et du base64, et c'est ici qu'on decide de la forme. Un client bricole ne
+ * peut donc pas fabriquer un bloc arbitraire, ni faire pointer une source vers
+ * une URL distante.
+ *
+ * PDF et image partent en blocs natifs ; tout le reste est decode en texte, ce
+ * qui couvre CSV, TSV, JSON, OFX, QIF et un simple copier-coller — meme regle
+ * que /api/pilotage/releve, pour qu'il n'y ait qu'un seul comportement a
+ * connaitre dans la maison.
+ */
+function blocDePiece(piece: PieceEntrante): Anthropic.ContentBlockParam | null {
+  const nom = typeof piece?.nom === 'string' ? piece.nom.slice(0, 120) : 'document'
+  const type = typeof piece?.type === 'string' ? piece.type : ''
+  const data = typeof piece?.data === 'string' ? piece.data : ''
+  if (!data || data.length > MAX_PIECE) return null
+  // Base64 strict : un data: URL ou du binaire brut est refuse ici, pas plus loin.
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(data)) return null
+
+  if (type === 'application/pdf') {
+    return {
+      type: 'document',
+      source: { type: 'base64', media_type: 'application/pdf', data },
+      title: nom,
+    }
+  }
+  if (TYPES_IMAGE.includes(type)) {
+    return {
+      type: 'image',
+      source: {
+        type: 'base64',
+        media_type: type as 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp',
+        data,
+      },
+    }
+  }
+  const texte = Buffer.from(data, 'base64').toString('utf8').slice(0, MAX_TEXTE_FICHIER)
+  if (!texte.trim()) return null
+  return { type: 'text', text: `Contenu du fichier « ${nom} » :\n\n${texte}` }
+}
+
 export function OPTIONS(req: NextRequest) {
   return corsPreflight(req)
 }
@@ -146,17 +215,76 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json().catch(() => ({}))
-  const brut = Array.isArray(body.messages) ? body.messages : []
-  const historique = brut
-    .filter((m: { role?: string; content?: string }) =>
-      (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content.trim())
-    .slice(-MAX_HISTORY)
-    .map((m: { role: 'user' | 'assistant'; content: string }) => ({
-      role: m.role,
-      content: m.content.slice(0, MAX_MESSAGE_LEN),
-    }))
+  const brut: MessageEntrant[] = Array.isArray(body.messages) ? body.messages : []
+
+  // Poids cumulé des pièces de TOUTE la conversation : le front renvoie
+  // l'historique complet à chaque tour, donc un deuxième PDF s'ajoute au
+  // premier. On refuse tôt et en clair plutôt que de laisser Vercel couper la
+  // requête avec une erreur illisible.
+  let poids = 0
+  for (const m of brut) {
+    if (!Array.isArray(m?.pieces)) continue
+    for (const p of m.pieces as PieceEntrante[]) {
+      if (typeof p?.data === 'string') poids += p.data.length
+    }
+  }
+  if (poids > MAX_PIECES_TOTAL) {
+    return NextResponse.json(
+      {
+        error:
+          'Trop de documents dans cette conversation. Recharge la page pour repartir propre, ou envoie-les un par un.',
+      },
+      { status: 413, headers: cors },
+    )
+  }
+
+  const historique: Anthropic.MessageParam[] = []
+  for (const m of brut.slice(-MAX_HISTORY)) {
+    if (m?.role !== 'user' && m?.role !== 'assistant') continue
+    const texte = typeof m.content === 'string' ? m.content.slice(0, MAX_MESSAGE_LEN).trim() : ''
+    const pieces =
+      m.role === 'user' && Array.isArray(m.pieces)
+        ? (m.pieces as PieceEntrante[])
+            .slice(0, MAX_PIECES_PAR_MESSAGE)
+            .map(blocDePiece)
+            .filter((b): b is Anthropic.ContentBlockParam => b !== null)
+        : []
+
+    if (pieces.length === 0) {
+      if (!texte) continue
+      historique.push({ role: m.role, content: texte })
+      continue
+    }
+    // Le document d'abord, la question ensuite : le modèle lit mieux quand la
+    // pièce précède la demande qui porte dessus.
+    historique.push({
+      role: 'user',
+      content: [
+        ...pieces,
+        { type: 'text', text: texte || 'Regarde ce document et dis-moi ce que tu y vois.' },
+      ],
+    })
+  }
+
   if (historique.length === 0 || historique[historique.length - 1].role !== 'user') {
     return NextResponse.json({ error: 'Message manquant' }, { status: 400, headers: cors })
+  }
+
+  // UN SEUL point de cache sur les pièces, posé sur la dernière. La boucle
+  // d'outils rejoue la conversation entière jusqu'à 8 fois : sans ça, un PDF
+  // de 5 pages est refacturé à chaque aller-retour avec la base. Une seule
+  // borne, parce que l'API en compte 4 au total et que le prompt système en
+  // prend déjà une.
+  posePointDeCache: for (let i = historique.length - 1; i >= 0; i--) {
+    const contenu = historique[i].content
+    if (!Array.isArray(contenu)) continue
+    for (let j = contenu.length - 1; j >= 0; j--) {
+      const bloc = contenu[j]
+      if (bloc.type === 'document' || bloc.type === 'image') {
+        bloc.cache_control = { type: 'ephemeral' }
+        break posePointDeCache
+      }
+    }
   }
 
   let client

@@ -18,8 +18,9 @@ const KEY_ENV: Record<AiProduct, string> = {
 export function aiKeyFor(product: AiProduct): string | null {
   return (
     process.env[KEY_ENV[product]] ??
-    // L'agent cockpit emprunte la clé support tant que sa clé dédiée n'existe
-    // pas (à créer par Brice : workspace dédié, cf. convention credentials.local).
+    // ANTHROPIC_API_KEY_COCKPIT existe depuis le 30/08/2026 (posée par Brice sur
+    // journal-d-etude-beta) : ce repli sur la clé support ne sert donc plus,
+    // gardé comme filet si la variable disparaissait d'un environnement.
     (product === 'cockpit' ? process.env.ANTHROPIC_API_KEY_SUPPORT : undefined) ??
     process.env.ANTHROPIC_API_KEY ??
     null
