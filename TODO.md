@@ -1,4 +1,5 @@
 # ✅ TODO — Journal d'Études
+<!-- ontologie: id=ch-todo-journal; statut=actif; concerne=journal,support-ia -->
 
 > Nettoyé le 17/07/2026 : sections d'octobre 2025 retirées (setup fait — l'app
 > est en prod sur journal-d-etude-beta.vercel.app), `NEXT_STEPS.md` et
@@ -175,6 +176,35 @@ attendant.
   blocs, screenshots, grades). = lot 1 de `SPEC-second-cerveau.md`. La même
   donnée nourrit l'agrégation du mode mentorat de l'extension (moins cosmétique
   qu'il n'y paraît).
+- **Écran d'ontologie** (demande Brice du 29/08/2026, projet pour la suite) :
+  un écran dédié à l'exploration des données d'apprentissage de l'élève.
+  Deux usages : s'explorer soi-même (ce que je travaille, ce qui revient, où
+  j'en suis), et recevoir des « recommandations de contenu » pour consolider
+  un sujet. S'appuie sur la même donnée que /concepts et le graphe global
+  (`SPEC-second-cerveau.md` lots 3-4).
+  **Découpage recommandé (29/08)** : la moitié « s'explorer » = la forme mûre
+  du 0.2 « Observer les concepts » (profite de la grammaire des traits du
+  0.1.7, nourrit le mentorat) ; la moitié « recommandations de contenu
+  AOK » = post-bêta (dépend d'un catalogue de contenu mappé sur les
+  concepts). Avant-goût possible dès le 0.2 : recommander ses PROPRES notes
+  (« tu travailles le FVG, ces 3 séances en parlent et ne sont pas reliées »).
+  **Architecture actée (29/08)** : même grammaire que l'ontologie du cockpit
+  (`apps/cockpit/src/data/ontologie.ts` — nœuds/liens typés + RÉSOLVEURS qui
+  lisent la base à l'expansion, jamais de recopie) ; à factoriser dans
+  `shared/` le moment venu. Chaque app n'embarque que SES résolveurs :
+  cockpit = business entier, journal = apprentissage de l'élève connecté.
+  **⚠️ Doctrine sécurité (Brice, 29/08)** — la frontière est SERVEUR, pas UI :
+  - Le backend journal n'expose JAMAIS de donnée business (pricing, marges,
+    autres clients). Brider = ne pas embarquer le résolveur, pas masquer.
+  - Tout résolveur journal est borné au userId de la session (précédents :
+    DELETE annotations `91f3081`, gating mentorat 403 re-vérifié serveur).
+  - Sens cockpit → membre (fiche Franky : achats + concepts travaillés) : le
+    cockpit lit la donnée d'apprentissage via un endpoint admin du journal
+    (allowlist vérifiée serveur, comme /api/cockpit/agent) — la donnée reste
+    dans le Postgres du journal, source unique. Détail côté cockpit :
+    `D:\6_Societe\Pilotage\Data-Performance\COCKPIT-ROADMAP.md` (item 1).
+  - Piège connu : `auth.users.role` reste `authenticated`, le rôle métier
+    vit dans `profiles.role`.
 - **Pont Edgyx** : événementiel, en attente du retour de Geoffrey (dossier
   envoyé). Hors numérotation — extension d'abord, journal peut-être ensuite.
 - `/market` est orphelin (aucun lien n'y mène) — supprimer si « Observer le
@@ -529,18 +559,25 @@ haut (limite de la carte à mi-chemin entre deux concepts = résolue par les
 liens du 0.1.6, pas par la boîte).
 
 ---
-**Dernière mise à jour :** 25 juillet 2026
-**Chantier terminé :** **canvas du journal au mobile** — LIVRÉ le 25/07/2026,
-testé par Brice au fil des lots. Restent deux suites tracées et volontairement
-non faites : **corriger un texte depuis le téléphone** (touche la doctrine note
-d'origine, à arbitrer avec Brice) et **placer une note sur la carte au doigt**.
-Les deux dettes de prod du 24/07 sont **traitées** (l'une reposait sur un
-constat faux : une seule image morte, pas neuf — détail plus haut) et les
-**écrans de première connexion sont faits des deux côtés**. La file pré-0.1.7
-est donc vide : **prochain = 0.1.7, la passe esthétique**.
-Connexion aux comptes AOK **LIVRÉE en prod le 25/07/2026**.
-Restent dans la file pré-0.1.7 : écrans de première connexion (onboarding pilotage),
-puis 0.1.7 esthétique (dont repositionnement Verdict/Trades notés — ⚠️ avant le 0.2).
-**Chantier en cours :** 0.1.5 — la collection (canvas de mapping multi-notes).
-Le 0.1 reste OUVERT jusqu'à maturité (fonctionnel 0.1.5/0.1.6 + esthétique
-0.1.7+). Le 0.2 « Observer les concepts » attend la fin du 0.1.
+**Dernière mise à jour :** 29 août 2026
+**Où on en est :** la file pré-0.1.7 est **VIDE** (onboarding des deux côtés,
+connexion comptes AOK, masterclass requalifiée, canvas mobile — tout livré fin
+juillet). **Chantier en cours : 0.1.7, la passe esthétique**, entamée du 26/07
+au 01/08 dans sa conversation dédiée :
+- /labo-traits tranché : **courbe de Bézier + animation au survol de la carte** ;
+- actions de groupe **sorties de l'en-tête** vers une barre flottante sous le
+  groupe (variante 6 du labo, plein calibré par thème — commit `3b5a010`,
+  survol au bureau / sélection au téléphone).
+**Reste pour clore la 0.1.7 :**
+- la **grammaire des traits** (3 types max, chacun sa forme — le point d'entrée
+  du second cerveau, cf. section « chantier des traits » plus haut) ;
+- repositionnement **Verdict / Trades notés** dans la carte de relecture +
+  bouton **« Retravailler »** (⚠️ avant le 0.2) ;
+- les deux suites mobiles à arbitrer : édition de texte depuis le téléphone
+  (doctrine note d'origine) et placer une note sur la carte au doigt.
+**En parallèle (août, autres fils — PAS des chantiers 0.1.x) :** le backend
+journal a reçu les sous-dossiers 1 niveau, le mentorat (brief compressé,
+gating, Stripe Carnet Premium), le support IA multi-apps (CORS, bouée web) et
+l'agent cockpit. Détail : `D:\7_Agents\ETAT.md`.
+Le 0.2 « Observer les concepts » attend la fin du 0.1. L'écran d'ontologie
+(file d'attente) sera positionné dans le versionnage à l'ouverture du 0.2.
