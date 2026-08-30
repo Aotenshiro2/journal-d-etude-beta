@@ -637,18 +637,33 @@ au 01/08 dans sa conversation dédiée :
   groupe (variante 6 du labo, plein calibré par thème — commit `3b5a010`,
   survol au bureau / sélection au téléphone).
 **Reste pour clore la 0.1.7 (arrêté avec Brice le 30/08) :**
-- la **grammaire des traits** (3 types max, chacun sa forme — le point d'entrée
-  du second cerveau, cf. section « chantier des traits » plus haut). ⚠️ Ne pas
-  confondre avec `/labo-traits` (commit `367b053`, page supprimée depuis par
-  `144967c`) : ce labo comparait six **rendus** du trait (témoin smoothstep,
-  Bézier calme, animé partout, animé au survol, animé vers les concepts, animé
-  en cours de tracé) et Brice y a tranché la FORME (Bézier + animation au
-  survol de la carte, variante 3). La variante 4 « animé vers les concepts »
-  était la seule à distinguer un type de lien, et elle a été écartée. La
-  grammaire — donner une forme propre à chaque type de lien — n'a donc jamais
-  été traitée ;
-- repositionnement **Verdict / Trades notés** dans la carte de relecture +
-  bouton **« Retravailler »** (⚠️ avant le 0.2).
+- [x] ✅ **La grammaire des traits — LIVRÉE le 30/08/2026** (commit `56d9abf`),
+  variante F du second tour du labo. Trois types qui se **déduisent** de ce que
+  le trait relie, donc sans migration, sans sélecteur et sans rien demander à
+  l'élève : *appartenance* (une extrémité est un concept → couleur DU concept,
+  tiretée, épaisse), *filiation* (bloc → bloc → ambre, pleine, avec une pointe),
+  *association* (le reste → neutre, fine, en retrait). La grammaire vit dans
+  `CanvasEdge.tsx` **et nulle part ailleurs** : elle lit les nœuds dans le store
+  de React Flow, donc elle habille aussi le trait qu'on vient de poser au
+  crayon. Les quatre sites de construction (chargement + création × 2 canvas)
+  ont perdu leur `style`.
+  · Fait au passage, et à ne pas défaire : `src/lib/couleur-concept.ts` calcule
+    la couleur d'un concept depuis son NOM. Les 126 `Tag.color` de la base
+    valent tous le même bleu par défaut et rien dans l'app n'écrit jamais cette
+    colonne — la lire telle quelle rendait 126 traits identiques. Corollaire
+    assumé : les pastilles de concept se colorent aussi.
+  · Trois décisions à ne pas défaire : l'appartenance ne porte PAS de pointe (le
+    lien de concept existe dans les deux sens en base, une flèche mentirait) ;
+    l'association passe au neutre, ce qui libère le bleu pour les concepts ;
+    l'ambre est réservée à la filiation et exclue de la palette des concepts.
+  · Outils laissés en place : `scripts/inventaire-traits-0.1.7.mjs` (les 22
+    traits et leurs 4 paires) et `scripts/inventaire-couleurs-concepts.mjs`.
+- [ ] repositionnement **Verdict / Trades notés** dans la carte de relecture +
+  bouton **« Retravailler »** (⚠️ avant le 0.2). **DERNIER VERROU.**
+- [ ] ménage : supprimer `src/app/labo-traits` (une fois la grammaire validée en
+  ligne par Brice) **et `src/app/labo-boutons`**, qui traîne depuis le 31/07 —
+  le ménage de `144967c` avait pris `labo-groupes` et `labo-traits`, pas
+  celle-là. Retirer les deux routes de `publicPaths` dans `middleware.ts`.
 **En parallèle (août, autres fils — PAS des chantiers 0.1.x) :** le backend
 journal a reçu les sous-dossiers 1 niveau, le mentorat (brief compressé,
 gating, Stripe Carnet Premium), le support IA multi-apps (CORS, bouée web) et
