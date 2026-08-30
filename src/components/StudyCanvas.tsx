@@ -747,7 +747,9 @@ function StudyCanvasInner({
         targetHandle: e.toHandle ?? undefined,
         label: e.label ?? undefined,
         type: 'trait',
-        style: { stroke: 'rgba(59,130,246,0.75)', strokeWidth: 1.5 },
+        // Pas de `style` ici : depuis le 0.1.7 l'aspect du trait se déduit de ce
+        // qu'il relie, et c'est `CanvasEdge.tsx` qui le décide. Un style posé au
+        // site de construction serait ignoré, donc trompeur.
         labelStyle: { fill: 'var(--node-meta)', fontSize: 10 },
       })),
     [initialEdges]
@@ -941,7 +943,8 @@ function StudyCanvasInner({
       if (!params.source || !params.target) return
       const idProvisoire = `local-${params.source}-${params.target}`
       setEdges(eds => addEdge(
-        { ...params, id: idProvisoire, type: 'trait', style: { stroke: 'rgba(59,130,246,0.75)', strokeWidth: 1.5 } },
+        // Aspect décidé par `CanvasEdge.tsx` d'après les nœuds reliés (0.1.7).
+        { ...params, id: idProvisoire, type: 'trait' },
         eds,
       ))
       const ok = await onConnectCallback(

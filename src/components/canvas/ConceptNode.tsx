@@ -15,12 +15,18 @@
 import React, { useCallback, useState } from 'react'
 import { useReactFlow, type NodeProps } from '@xyflow/react'
 import { PoigneesCardinales } from './poignees'
+import { couleurConcept } from '@/lib/couleur-concept'
 
 export const ConceptNode = React.memo(function ConceptNode({ id, data }: NodeProps) {
   const { setNodes, setEdges } = useReactFlow()
   const d = data as { label: string; color?: string | null; canvasId: string }
   const [hovered, setHovered] = useState(false)
-  const color = d.color || '#3b82f6'
+  // 0.1.7 — la couleur se DÉDUIT du nom. `Tag.color` vaut le même bleu par
+  // défaut pour les 126 concepts de la base (personne n'a jamais pu en choisir
+  // un), donc s'y fier rendait toutes les pastilles identiques — et avec elles
+  // tous les traits d'appartenance. Une couleur réellement choisie reste
+  // prioritaire : voir `lib/couleur-concept.ts`.
+  const color = couleurConcept(d.label, d.color)
 
   const handleRemove = useCallback(async (e: React.MouseEvent) => {
     e.stopPropagation()

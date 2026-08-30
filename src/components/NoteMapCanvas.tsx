@@ -973,7 +973,9 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
         label: e.label ?? undefined,
         labelStyle: { fontSize: 10, fill: 'var(--node-meta)' },
         labelBgStyle: { fill: 'var(--node-bg)', fillOpacity: 0.9 },
-        style: { stroke: '#3b82f6', strokeWidth: 1.5, opacity: 0.5 },
+        // Pas de `style` ici : depuis le 0.1.7 l'aspect du trait se déduit de ce
+        // qu'il relie, et c'est `CanvasEdge.tsx` qui le décide. Un style posé au
+        // site de construction serait ignoré, donc trompeur.
       }]
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1138,10 +1140,9 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
     })
     if (!res.ok) return
     const dbEdge = await res.json()
-    setEdges(eds => addEdge({
-      ...params, id: dbEdge.id, type: 'trait',
-      style: { stroke: '#3b82f6', strokeWidth: 1.5, opacity: 0.5 },
-    }, eds))
+    // Aspect décidé par `CanvasEdge.tsx` d'après les nœuds reliés (0.1.7) : le
+    // trait qu'on vient de poser au crayon prend sa grammaire tout seul.
+    setEdges(eds => addEdge({ ...params, id: dbEdge.id, type: 'trait' }, eds))
   }, [setEdges, canvas.id, getNode, ensureDbNodeId])
 
   // Défini APRÈS onConnect : la liste de dépendances est évaluée au rendu, une
