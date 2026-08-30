@@ -1,41 +1,31 @@
 'use client'
 
 /* ─────────────────────────────────────────────────────────────────────────────
-   PAGE JETABLE — 0.1.7, la GRAMMAIRE des traits.
+   PAGE JETABLE — 0.1.7, la GRAMMAIRE des traits. SECOND TOUR.
 
-   À ne pas confondre avec le labo du 26/07 (même route, commit `367b053`,
-   supprimé depuis) : celui-là comparait six RENDUS du trait et a tranché la
-   forme — courbe de Bézier + cercle animé au survol de la carte. Cette
-   décision-là est acquise, elle est reprise à l'identique dans TOUTES les
-   variantes ci-dessous. Ce qu'on tranche ici est autre chose : donner à chaque
-   TYPE de lien une forme qui lui est propre, pour qu'on lise à l'écran ce que
-   le trait veut dire.
+   Premier tour (commit `ebd72e0`) : cinq grammaires, Brice élimine A et D et
+   hésite entre B (chaque type sa couleur) et C (le trait d'appartenance porte
+   la couleur du concept). Il demande un mix.
 
-   Les trois types viennent de la base, pas de la tête : `scripts/inventaire-
-   traits-0.1.7.mjs` a compté les 22 traits existants et n'a trouvé que quatre
-   paires, sans recouvrement. Le type est donc DÉDUCTIBLE de ce que le trait
-   relie — aucune migration, aucun sélecteur à ajouter, rien à demander à
-   l'élève :
+   CE QUE LE PREMIER TOUR CACHAIT, trouvé en vérifiant `Tag.color` avant de
+   dessiner le mix (`scripts/inventaire-couleurs-concepts.mjs`) : les 126
+   concepts de la base sont TOUS au même bleu `#3b82f6`, le défaut du schéma —
+   rien dans l'app n'écrit jamais cette colonne, il n'existe aucun endroit pour
+   choisir la couleur d'un concept. La variante C ne tenait donc qu'à une
+   tricherie de la démo, où j'avais peint les deux concepts à la main. En vrai
+   elle rendrait 126 traits bleus, c'est-à-dire le témoin.
 
-     appartenance   note ↔ concept   « cette note porte ce concept »  (le futur backlink)
-     filiation      bloc → bloc      « ceci découle de cela »          (orienté)
-     association    note ↔ note      « ces deux séances se répondent » (symétrique)
+   D'où la forme de ce second tour : les deux mix ne diffèrent que par UN point,
+   celui qui sépare B de C — d'où vient la couleur du trait d'appartenance.
+     E : d'une couleur fixe du type (B), avec la hiérarchie de poids de C.
+     F : du concept lui-même, dérivée de son nom (ce que C voulait dire, rendu
+         possible sans sélecteur ni migration).
+   Tout le reste est identique entre les deux, exprès : c'est la seule façon de
+   juger le point qui reste ouvert.
 
-   Deux faits de terrain qui contraignent le dessin :
-   · le lien de concept existe DANS LES DEUX SENS en base (3 concept→note,
-     1 note→concept) — le sens dépend juste de par où on a commencé le trait au
-     crayon. L'appartenance ne peut donc pas porter de pointe de flèche : elle
-     doit se lire pareil dans les deux sens. Le graphe ci-dessous en contient un
-     de chaque sens, exprès ;
-   · `@@unique([fromId, toId])` : un seul trait par couple de nœuds. Aucune
-     grammaire ne pourra afficher deux liens de types différents entre les deux
-     mêmes objets.
-
-   Le graphe mélange les trois types sur un même écran. Aucune vue de l'app ne
-   fait ça aujourd'hui (la filiation vit dans le canvas d'une note, les deux
-   autres sur l'accueil) — mais le graphe global du second cerveau, lui, le fera,
-   et c'est le pire cas : si les trois se distinguent ici, ils se distinguent
-   partout.
+   Ce qui est acquis et repris partout : la forme du trait (Bézier + cercle
+   animé au survol de la carte, tranché le 26/07), et les trois types déduits de
+   la structure (inventaire des 22 traits, `scripts/inventaire-traits-0.1.7.mjs`).
 
    Route publique déclarée dans `middleware.ts` (publicPaths).
    À SUPPRIMER une fois tranché :
@@ -52,14 +42,27 @@ import {
 import '@xyflow/react/dist/style.css'
 import { useTheme } from '@/contexts/ThemeContext'
 
-const BLEU = '#3b82f6'      // la couleur du trait aujourd'hui
+const BLEU = '#3b82f6'      // la couleur de TOUT aujourd'hui : traits et concepts
 const AMBRE = '#f59e0b'
 const VIOLET = '#a855f7'
+const NEUTRE = 'var(--node-meta)'
 
-/* ── Poignées : les quatre côtés, en départ comme en arrivée ─────────────────
-   Invisibles. Elles servent uniquement à faire sortir les traits du bon côté
-   pour que la démo soit lisible — la vraie mécanique des poignées est déjà
-   posée dans le canvas (commit `7aad539`). */
+/* ── La couleur dérivée du nom du concept ────────────────────────────────────
+   L'ambre est volontairement absente de la palette : elle est prise par la
+   filiation, et un concept qui tirerait la même teinte qu'un type de lien
+   ruinerait la grammaire. Le bleu reste, lui, parce que l'association passe au
+   neutre dans les deux mix. Hash stable : `#FVG` tire la même couleur sur tous
+   les écrans, à toutes les sessions, sans rien stocker. */
+const PALETTE = ['#3b82f6', '#a855f7', '#10b981', '#06b6d4', '#ec4899', '#84cc16', '#6366f1', '#14b8a6']
+
+function couleurDerivee(nom: string): string {
+  let h = 0
+  for (let i = 0; i < nom.length; i++) h = (h * 31 + nom.charCodeAt(i)) >>> 0
+  return PALETTE[h % PALETTE.length]
+}
+
+/* ── Poignées : les quatre côtés, en départ comme en arrivée ─────────────── */
+
 function Poignees() {
   const c = { opacity: 0, width: 8, height: 8, border: 'none' } as const
   return (
@@ -109,8 +112,6 @@ function ConceptDemo({ data }: NodeProps) {
   )
 }
 
-// Le bloc du canvas d'étude : même recette que `StudyCanvas` (fond, bordure,
-// ombre, coin arrondi), en figé.
 function BlocDemo({ data }: NodeProps) {
   const d = data as { texte: string }
   return (
@@ -129,18 +130,8 @@ const nodeTypes = { note: NoteDemo, concept: ConceptDemo, bloc: BlocDemo }
 
 /* ── Le trait ─────────────────────────────────────────────────────────────── */
 
-type Look = {
-  couleur: string
-  epaisseur: number
-  tirets?: string
-  opacite: number
-}
+type Look = { couleur: string; epaisseur: number; tirets?: string; opacite: number }
 
-/** Un seul composant pour toutes les variantes : le look arrive en `data`, donc
- *  une grammaire n'est qu'une table de correspondance — on en compare cinq sans
- *  écrire cinq composants. Le cercle animé au survol est le rendu de
- *  production (`CanvasEdge.tsx`), gardé partout : la grammaire doit tenir AVEC
- *  lui, pas dans un décor de laboratoire. */
 function Trait({ id, data, markerEnd, ...p }: EdgeProps) {
   const [chemin] = getBezierPath(p as Parameters<typeof getBezierPath>[0])
   const d = data as { look: Look; vif?: boolean }
@@ -166,42 +157,48 @@ const edgeTypes = { trait: Trait }
 
 /* ── Le graphe de démonstration ──────────────────────────────────────────── */
 
-const NODES: Node[] = [
-  { id: 'n1', type: 'note', position: { x: 0, y: 20 }, data: { titre: 'Session 17 mars', apercu: 'TopStepX MNQM26 −0.41% · RP&L $52.40 · BAL $49 408,80' } },
-  { id: 'n2', type: 'note', position: { x: 0, y: 230 }, data: { titre: 'Les macros', apercu: 'NQ1! 30 347,75 ▼ −0.58% · Cours élève · Exercice 1 : observation' } },
-  { id: 'c1', type: 'concept', position: { x: 300, y: 40 }, data: { label: 'FVG', couleur: BLEU } },
-  { id: 'c2', type: 'concept', position: { x: 296, y: 262 }, data: { label: 'Discipline', couleur: VIOLET } },
-  { id: 'b1', type: 'bloc', position: { x: 520, y: 110 }, data: { texte: 'Le déséquilibre laissé par l\'impulsion de 10h32.' } },
-  { id: 'b2', type: 'bloc', position: { x: 520, y: 240 }, data: { texte: '→ donc j\'attends son retour avant d\'entrer.' } },
-]
+const CONCEPTS = ['FVG', 'Discipline'] as const
+
+/** Les nœuds dépendent de la grammaire : la couleur des pastilles de concept
+ *  fait partie de ce qu'on juge, elle ne peut pas être figée dans une constante. */
+function noeuds(couleurConcept: (nom: string) => string): Node[] {
+  return [
+    { id: 'n1', type: 'note', position: { x: 0, y: 20 }, data: { titre: 'Session 17 mars', apercu: 'TopStepX MNQM26 −0.41% · RP&L $52.40 · BAL $49 408,80' } },
+    { id: 'n2', type: 'note', position: { x: 0, y: 230 }, data: { titre: 'Les macros', apercu: 'NQ1! 30 347,75 ▼ −0.58% · Cours élève · Exercice 1 : observation' } },
+    { id: 'c1', type: 'concept', position: { x: 300, y: 40 }, data: { label: 'FVG', couleur: couleurConcept('FVG') } },
+    { id: 'c2', type: 'concept', position: { x: 288, y: 262 }, data: { label: 'Discipline', couleur: couleurConcept('Discipline') } },
+    { id: 'b1', type: 'bloc', position: { x: 520, y: 110 }, data: { texte: 'Le déséquilibre laissé par l\'impulsion de 10h32.' } },
+    { id: 'b2', type: 'bloc', position: { x: 520, y: 240 }, data: { texte: '→ donc j\'attends son retour avant d\'entrer.' } },
+  ]
+}
 
 type TypeLien = 'appartenance' | 'filiation' | 'association'
 
 type Lien = Edge & {
   nature: TypeLien
-  /** Couleur du concept touché, quand il y en a un. En vrai c'est `Tag.color`. */
-  couleurConcept?: string
+  /** Nom du concept touché, quand il y en a un — la couleur en est dérivée. */
+  concept?: string
 }
 
 const LIENS: Lien[] = [
-  // Association : deux séances qui se répondent. Symétrique.
   { id: 'e1', source: 'n1', target: 'n2', sourceHandle: 's-b', targetHandle: 't-t', nature: 'association' },
   // Appartenance, sens note → concept.
-  { id: 'e2', source: 'n1', target: 'c1', sourceHandle: 's-r', targetHandle: 't-l', nature: 'appartenance', couleurConcept: BLEU },
+  { id: 'e2', source: 'n1', target: 'c1', sourceHandle: 's-r', targetHandle: 't-l', nature: 'appartenance', concept: 'FVG' },
   // Appartenance, sens concept → note : LE MÊME LIEN, tracé dans l'autre sens.
-  // Il doit se rendre exactement pareil que le précédent.
-  { id: 'e3', source: 'c2', target: 'n2', sourceHandle: 's-l', targetHandle: 't-r', nature: 'appartenance', couleurConcept: VIOLET },
+  { id: 'e3', source: 'c2', target: 'n2', sourceHandle: 's-l', targetHandle: 't-r', nature: 'appartenance', concept: 'Discipline' },
   // Filiation : le raisonnement à l'intérieur d'une note. Orienté.
   { id: 'e4', source: 'b1', target: 'b2', sourceHandle: 's-b', targetHandle: 't-t', nature: 'filiation' },
 ]
 
-/* ── Les grammaires à comparer ───────────────────────────────────────────── */
+/* ── Les grammaires ──────────────────────────────────────────────────────── */
 
 type Grammaire = {
   n: string
   titre: string
   idee: string
-  /** true = le type porte une pointe de flèche (donc il est orienté). */
+  /** Étiquette d'état affichée à côté du titre. */
+  statut?: { texte: string; ton: 'mix' | 'alerte' }
+  couleurConcept: (nom: string) => string
   pointe: (nature: TypeLien) => boolean
   look: (l: Lien) => Look
 }
@@ -210,25 +207,16 @@ const GRAMMAIRES: Grammaire[] = [
   {
     n: '0',
     titre: 'Témoin — aujourd\'hui',
-    idee: 'les trois types rendus à l\'identique : rien ne dit ce que le trait veut dire',
+    idee: 'les trois types rendus à l\'identique, et les concepts tous au même bleu : c\'est l\'état réel de la base',
+    couleurConcept: () => BLEU,
     pointe: () => false,
     look: () => ({ couleur: BLEU, epaisseur: 1.5, opacite: 0.5 }),
   },
   {
-    n: 'A',
-    titre: 'La forme seule',
-    idee: 'un seul canal, le tracé. Pas de couleur nouvelle : l\'appartenance est tiretée, la filiation porte une pointe, l\'association reste le trait nu',
-    pointe: nature => nature === 'filiation',
-    look: l => ({
-      appartenance: { couleur: BLEU, epaisseur: 1.5, tirets: '5 4', opacite: 0.6 },
-      filiation: { couleur: BLEU, epaisseur: 1.5, opacite: 0.7 },
-      association: { couleur: BLEU, epaisseur: 1.5, opacite: 0.4 },
-    }[l.nature]),
-  },
-  {
     n: 'B',
     titre: 'Forme + couleur',
-    idee: 'chaque type sa teinte, reconnaissable d\'un coup d\'œil — au prix de trois couleurs de plus dans un canvas qui a déjà celles des groupes',
+    idee: 'chaque type sa teinte fixe. Ce que tu avais retenu au premier tour',
+    couleurConcept: () => BLEU,
     pointe: nature => nature === 'filiation',
     look: l => ({
       appartenance: { couleur: VIOLET, epaisseur: 1.6, tirets: '5 4', opacite: 0.75 },
@@ -239,27 +227,45 @@ const GRAMMAIRES: Grammaire[] = [
   {
     n: 'C',
     titre: 'Le trait porte la couleur du concept',
-    idee: 'l\'appartenance emprunte la couleur du concept qu\'elle touche (en vrai : `Tag.color`) ; les deux autres restent neutres. Dit que le backlink est l\'information forte et le reste du décor',
+    idee: 'l\'autre moitié de ton hésitation — mais les couleurs ci-dessous sont peintes à la main : en base les 126 concepts sont au même bleu, donc en vrai cette variante rend le témoin',
+    statut: { texte: 'ne tient pas en l\'état', ton: 'alerte' },
+    couleurConcept: nom => (nom === 'FVG' ? BLEU : VIOLET),
     pointe: nature => nature === 'filiation',
     look: l => l.nature === 'appartenance'
-      ? { couleur: l.couleurConcept ?? BLEU, epaisseur: 2, opacite: 0.85 }
-      : { couleur: 'var(--node-meta)', epaisseur: 1.4, opacite: l.nature === 'filiation' ? 0.6 : 0.35 },
+      ? { couleur: l.concept === 'FVG' ? BLEU : VIOLET, epaisseur: 2, opacite: 0.85 }
+      : { couleur: NEUTRE, epaisseur: 1.4, opacite: l.nature === 'filiation' ? 0.6 : 0.35 },
   },
   {
-    n: 'D',
-    titre: 'La hiérarchie par le poids',
-    idee: 'ni couleur ni tiret : l\'épaisseur et l\'opacité trient. L\'appartenance pèse, la filiation existe, l\'association s\'efface',
+    n: 'E',
+    titre: 'Mix — la couleur du TYPE, le poids de C',
+    idee: 'B pour les teintes (appartenance violette, filiation ambre), C pour la hiérarchie : l\'appartenance pèse, l\'association s\'efface en neutre au lieu de disputer le bleu. Aucune condition préalable, implémentable ce soir',
+    statut: { texte: 'mix', ton: 'mix' },
+    couleurConcept: () => BLEU,
     pointe: nature => nature === 'filiation',
     look: l => ({
-      appartenance: { couleur: BLEU, epaisseur: 2.6, opacite: 0.8 },
-      filiation: { couleur: BLEU, epaisseur: 1.6, opacite: 0.55 },
-      association: { couleur: BLEU, epaisseur: 1, opacite: 0.3 },
+      appartenance: { couleur: VIOLET, epaisseur: 2.2, tirets: '5 4', opacite: 0.85 },
+      filiation: { couleur: AMBRE, epaisseur: 1.6, opacite: 0.7 },
+      association: { couleur: NEUTRE, epaisseur: 1.1, opacite: 0.32 },
     }[l.nature]),
+  },
+  {
+    n: 'F',
+    titre: 'Mix — la couleur du CONCEPT, dérivée de son nom',
+    idee: 'identique à E sur tout, sauf un point : l\'appartenance prend la couleur du concept, calculée depuis son nom (donc stable et gratuite, sans sélecteur ni migration). Corollaire visible : les pastilles de concept se colorent aussi',
+    statut: { texte: 'mix', ton: 'mix' },
+    couleurConcept: couleurDerivee,
+    pointe: nature => nature === 'filiation',
+    look: l => l.nature === 'appartenance'
+      ? { couleur: couleurDerivee(l.concept ?? ''), epaisseur: 2.2, tirets: '5 4', opacite: 0.85 }
+      : l.nature === 'filiation'
+        ? { couleur: AMBRE, epaisseur: 1.6, opacite: 0.7 }
+        : { couleur: NEUTRE, epaisseur: 1.1, opacite: 0.32 },
   },
 ]
 
 function Demo({ g }: { g: Grammaire }) {
   const [survole, setSurvole] = useState<string | null>(null)
+  const nodes = useMemo(() => noeuds(g.couleurConcept), [g])
   const edges = useMemo(
     () => LIENS.map(l => {
       const look = g.look(l)
@@ -279,7 +285,7 @@ function Demo({ g }: { g: Grammaire }) {
 
   return (
     <ReactFlow
-      nodes={NODES}
+      nodes={nodes}
       edges={edges}
       nodeTypes={nodeTypes}
       edgeTypes={edgeTypes}
@@ -314,26 +320,37 @@ export default function LaboTraits() {
       <div style={{ maxWidth: 1000, margin: '0 auto' }}>
 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginBottom: 6 }}>
-          <h1 style={{ fontSize: 22, color: 'var(--node-title)' }}>La grammaire des traits</h1>
+          <h1 style={{ fontSize: 22, color: 'var(--node-title)' }}>La grammaire des traits — second tour</h1>
           <button onClick={toggleTheme} className="canvas-float-pill" style={{ padding: '8px 14px', fontSize: 13, color: 'var(--node-title)', cursor: 'pointer', flexShrink: 0 }}>
             {theme === 'dark' ? '☀ Voir en clair' : '☾ Voir en sombre'}
           </button>
         </div>
         <p style={{ fontSize: 13, color: 'var(--node-meta)', marginBottom: 14, maxWidth: 790, lineHeight: 1.6 }}>
-          La forme du trait est déjà tranchée (26/07) : <strong style={{ color: 'var(--node-title)' }}>Bézier, et le cercle
-          s&apos;anime au survol d&apos;une carte</strong>. C&apos;est repris tel quel dans les cinq — <strong style={{ color: 'var(--node-title)' }}>survole
-          une carte</strong> pour le vérifier. Ce qu&apos;on tranche ici, c&apos;est autre chose : donner à chaque <em>type</em> de
-          lien une forme qui lui est propre, pour qu&apos;on lise à l&apos;écran ce que le trait veut dire.
+          Tu as éliminé A et D, et tu hésites entre <strong style={{ color: 'var(--node-title)' }}>B</strong> et <strong style={{ color: 'var(--node-title)' }}>C</strong>.
+          Les deux mix, <strong style={{ color: 'var(--node-title)' }}>E</strong> et <strong style={{ color: 'var(--node-title)' }}>F</strong>, sont
+          identiques en tout sauf sur le point exact qui les sépare : <em>d&apos;où vient la couleur du trait d&apos;appartenance</em>.
+          Du type, ou du concept. Tout le reste est verrouillé pareil, pour que ce soit ça — et rien d&apos;autre — que tu juges.
         </p>
+
+        <div style={{
+          fontSize: 12, color: 'var(--node-meta)', lineHeight: 1.65, marginBottom: 14, maxWidth: 790,
+          padding: '12px 14px', borderRadius: 10, border: `1px solid ${AMBRE}66`, background: `${AMBRE}0f`,
+        }}>
+          <strong style={{ color: 'var(--node-title)' }}>Ce que le premier tour cachait.</strong> En vérifiant <code>Tag.color</code> avant
+          de dessiner le mix : <strong style={{ color: 'var(--node-title)' }}>les 126 concepts de la base sont tous au même bleu</strong>,
+          le défaut du schéma — rien dans l&apos;app n&apos;écrit jamais cette colonne, il n&apos;existe aucun endroit pour choisir la
+          couleur d&apos;un concept. La variante C ne tenait donc qu&apos;à une tricherie de ma démo, où j&apos;avais peint les deux
+          concepts à la main. Telle quelle, elle rendrait 126 traits bleus, c&apos;est-à-dire le témoin. F est ce que C voulait
+          dire, rendu possible : la couleur se <em>calcule</em> depuis le nom du concept, donc elle est stable partout et ne coûte
+          ni sélecteur, ni migration, ni 126 concepts à peindre à la main.
+        </div>
 
         <div style={{
           fontSize: 12, color: 'var(--node-meta)', lineHeight: 1.65, marginBottom: 14, maxWidth: 790,
           padding: '12px 14px', borderRadius: 10, background: 'var(--node-bg)', border: '1px solid var(--node-border)',
         }}>
-          <strong style={{ color: 'var(--node-title)' }}>Les trois types viennent de la base, pas de la tête.</strong> L&apos;inventaire
-          des 22 traits existants (<code>scripts/inventaire-traits-0.1.7.mjs</code>) n&apos;a trouvé que quatre paires, sans
-          recouvrement — donc le type se <em>déduit</em> de ce que le trait relie : aucune migration, aucun sélecteur, rien à
-          demander à l&apos;élève.
+          <strong style={{ color: 'var(--node-title)' }}>Les trois types, rappel.</strong> Déduits de ce que le trait relie
+          (<code>scripts/inventaire-traits-0.1.7.mjs</code>) : ni migration, ni sélecteur, rien à demander à l&apos;élève.
           <div style={{ display: 'grid', gap: 6, marginTop: 10 }}>
             {LEGENDE.map(l => (
               <div key={l.nature} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'baseline' }}>
@@ -350,11 +367,11 @@ export default function LaboTraits() {
           fontSize: 12, color: 'var(--node-meta)', lineHeight: 1.65, marginBottom: 30, maxWidth: 790,
           padding: '12px 14px', borderRadius: 10, border: '1px dashed var(--node-border)',
         }}>
-          <strong style={{ color: 'var(--node-title)' }}>Deux pièges que le dessin doit encaisser.</strong> ① Le lien de concept
-          existe <strong>dans les deux sens</strong> en base (3 <code>concept→note</code>, 1 <code>note→concept</code>) : le sens
-          dépend juste de par où tu as commencé le trait au crayon. Le graphe en contient un de chaque — <em>ils doivent se
-          rendre pareil</em>, sinon le backlink pointera au hasard. ② Le graphe mélange les trois types, ce qu&apos;aucun écran
-          ne fait aujourd&apos;hui : c&apos;est le pire cas, et c&apos;est exactement ce que sera le graphe global du second cerveau.
+          <strong style={{ color: 'var(--node-title)' }}>Le test qui élimine.</strong> Les deux traits d&apos;appartenance du graphe
+          sont le même lien tracé <strong>dans les deux sens</strong> (<code>note → #FVG</code> et <code>#Discipline → note</code>) :
+          en base il y en a 3 dans un sens et 1 dans l&apos;autre, selon par où le crayon est parti. Ils doivent se rendre
+          identiques. Et le cercle animé au survol d&apos;une carte est celui de la production : la grammaire doit rester lisible
+          pendant qu&apos;il passe.
         </div>
 
         <div style={{ display: 'grid', gap: 34 }}>
@@ -367,6 +384,13 @@ export default function LaboTraits() {
                   background: 'var(--node-bg)', border: '1px solid var(--node-border)', color: 'var(--node-title)',
                 }}>{g.n}</span>
                 <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--node-title)' }}>{g.titre}</span>
+                {g.statut && (
+                  <span style={{
+                    fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 100, whiteSpace: 'nowrap',
+                    border: `1px solid ${g.statut.ton === 'mix' ? '#10b981' : AMBRE}`,
+                    color: g.statut.ton === 'mix' ? '#10b981' : AMBRE,
+                  }}>{g.statut.texte}</span>
+                )}
                 <span style={{ fontSize: 12, color: 'var(--node-meta)', flex: 1, minWidth: 240 }}>{g.idee}</span>
               </div>
               <div style={{ position: 'relative', height: 380, borderRadius: 14, overflow: 'hidden', border: '1px solid var(--node-border)' }}>
