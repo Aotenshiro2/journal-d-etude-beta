@@ -11,7 +11,8 @@
     "lint": "eslint",
     "db:push": "prisma db push",
     "db:generate": "prisma generate",
-    "db:reset": "prisma db push --force-reset"
+    "db:reset": "prisma db push --force-reset",
+    "verifier:rls": "node scripts/audit-rls.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.122.0",
