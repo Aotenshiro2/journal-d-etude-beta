@@ -1,6 +1,70 @@
 # ✅ TODO — Journal d'Études
 <!-- ontologie: id=ch-todo-journal; statut=actif; concerne=journal,support-ia -->
 
+## ✅ Brique IA de la capture — CODÉE, ATTEND LA MIGRATION (30/08/2026)
+
+Backend de la capture intelligente 1.8.0 de l'extension (détail complet dans
+`apps/carnet-du-trader-extension/TODO.md`). **Rien n'est poussé, rien n'est
+appliqué en base.**
+
+**Routes** — `POST /api/capture` (secrétaire : extrait et trie, aucun jugement,
+tous les paliers, Haiku 4.5), `POST /api/capture/analyse` (étude : relit la note
+dans le cadre de l'académie, Opus 5, paliers payants), `GET /api/capture/acces`
+(ce que le compte a le droit de faire + la jauge). Les trois compilent et sont
+dans le build.
+
+**Comptes maison sans plafond** (demande Brice, 30/08) — `brice.d@aoknowledge.com`
+n'est jamais bloqué par le budget. L'exemption porte UNIQUEMENT sur le blocage :
+sa consommation reste intégralement enregistrée dans `AiUsage`, sinon il perdrait
+de vue ce que son propre usage coûte, et c'est justement le chiffre qui sert à
+régler les budgets des autres. Liste surchargeable par `IA_COMPTES_SANS_PLAFOND`
+(emails séparés par des virgules) sans redéployer. Vérifié contre la base :
+l'email de son compte Supabase correspond bien à la liste.
+
+**Modules** — `ia-prix.ts` (grille de tarifs, coût en micro-euros),
+`ia-niveau.ts` (résolution du palier : club / premium / libre / aucun),
+`ia-budget.ts` (fenêtre glissante 30 j, plafond global du niveau libre),
+`capture-prompts.ts` (les deux socles, 6 familles de pages en deux moitiés « où
+regarder » et « comment lire », routage par domaine), `capture-appel.ts`
+(montage de l'appel, cache, image, effort).
+
+**Bug corrigé dans `ai.ts`** — `logAiUsage` ne comptait PAS les jetons de cache :
+l'API les rend hors de `input_tokens`. Les routes mentorat et support
+sous-comptent leur dépense depuis le 28/08, c'est-à-dire exactement là où le
+cache est utilisé. Le coût est désormais figé à l'écriture (`costMicros`) :
+recalculer avec la grille du jour réécrirait rétroactivement la consommation
+passée des membres à chaque changement de tarif.
+
+**Deux détails mesurés qui comptent** — Haiku 4.5 REFUSE `output_config.effort`
+(400), d'où le garde-fou `accepteEffort()` ; et Haiku ne met pas en cache un
+socle de 2 000 jetons (préfixe minimum plus haut que sur Opus et Sonnet), donc
+il le paie plein tarif à chaque appel. Ça reste le moins cher de loin.
+
+**✅ MIGRATION APPLIQUÉE le 30/08/2026 au soir** :
+`sites/Aoknowledgecom/supabase/migrations/20260830230000_ia_budget_capture.sql`
+(colonnes `cacheCreationTokens`, `cacheReadTokens`, `costMicros`, `niveau` sur
+`AiUsage`, plus l'index `AiUsage_niveau_createdAt_idx`). Les 5 ordres sont
+passés, colonnes et index relus après coup. Les lignes antérieures prennent 0 en
+coût — leur part de cache est perdue et non reconstituable, mais la fenêtre de
+budget est glissante sur 30 jours, donc l'historique en sera sorti avant que ça
+compte.
+
+Le fichier a dû être **déplacé** depuis `prisma/migrations-manual/` : le
+garde-fou de `scripts/appliquer-migration.sh` n'accepte que le dossier canonique
+`sites/Aoknowledgecom/supabase/migrations`. C'est le bon endroit — vérifié au
+passage, `DATABASE_URL` pointe sur `aws-0-eu-west-3.pooler.supabase.com`, donc
+sur CE projet Supabase. La note « Supabase = données de compte uniquement, tout
+le reste sur Railway » en tête de ce fichier date du 17/07 et **n'est plus
+vraie**.
+
+⚠️ Pour appeler le script depuis Git Bash sous Windows : préfixer
+`MSYS_NO_PATHCONV=1`, sinon Git Bash réécrit le chemin absolu en
+`C:/Program Files/Git/home/...` et l'exécution échoue.
+
+**Vérifié bout en bout** contre la vraie base et la vraie clé : résolution du
+palier, lecture du budget, appel Haiku réel, écriture d'une ligne `AiUsage`
+complète, et la jauge qui bouge.
+
 > Nettoyé le 17/07/2026 : sections d'octobre 2025 retirées (setup fait — l'app
 > est en prod sur journal-d-etude-beta.vercel.app), `NEXT_STEPS.md` et
 > `RESUME.md` supprimés (obsolètes). **Décisions Brice du 17/07** :
@@ -548,6 +612,10 @@ Découpage (ordre indicatif, le 0.1 ne ferme qu'à maturité) :
         impossible (le drop de note vient d'un drag & drop HTML5). Piste
         évoquée : un bouton « Placer sur la carte » sur la card de `/notes`, qui
         renvoie à l'accueil avec la note armée.
+  - 📌 **DÉCISION Brice 30/08/2026 — ces deux suites mobiles sortent du 0.1.7 et
+        sont reportées à JUSTE AVANT LA 1.0.** Raison : elles touchent au module
+        (doctrine note d'origine, gestes de dépôt) et arbitrer maintenant
+        freinerait le dev. Elles ne bloquent donc plus le passage au 0.2.
 
 - [ ] **0.1.7+ — Passe esthétique** (Brice : « n'imagine pas que le 0.1.6 soit
       la fin »). Revoir le look du canvas et de l'étude de notes jusqu'à
@@ -559,7 +627,7 @@ haut (limite de la carte à mi-chemin entre deux concepts = résolue par les
 liens du 0.1.6, pas par la boîte).
 
 ---
-**Dernière mise à jour :** 29 août 2026
+**Dernière mise à jour :** 30 août 2026
 **Où on en est :** la file pré-0.1.7 est **VIDE** (onboarding des deux côtés,
 connexion comptes AOK, masterclass requalifiée, canvas mobile — tout livré fin
 juillet). **Chantier en cours : 0.1.7, la passe esthétique**, entamée du 26/07
@@ -568,13 +636,19 @@ au 01/08 dans sa conversation dédiée :
 - actions de groupe **sorties de l'en-tête** vers une barre flottante sous le
   groupe (variante 6 du labo, plein calibré par thème — commit `3b5a010`,
   survol au bureau / sélection au téléphone).
-**Reste pour clore la 0.1.7 :**
+**Reste pour clore la 0.1.7 (arrêté avec Brice le 30/08) :**
 - la **grammaire des traits** (3 types max, chacun sa forme — le point d'entrée
-  du second cerveau, cf. section « chantier des traits » plus haut) ;
+  du second cerveau, cf. section « chantier des traits » plus haut). ⚠️ Ne pas
+  confondre avec `/labo-traits` (commit `367b053`, page supprimée depuis par
+  `144967c`) : ce labo comparait six **rendus** du trait (témoin smoothstep,
+  Bézier calme, animé partout, animé au survol, animé vers les concepts, animé
+  en cours de tracé) et Brice y a tranché la FORME (Bézier + animation au
+  survol de la carte, variante 3). La variante 4 « animé vers les concepts »
+  était la seule à distinguer un type de lien, et elle a été écartée. La
+  grammaire — donner une forme propre à chaque type de lien — n'a donc jamais
+  été traitée ;
 - repositionnement **Verdict / Trades notés** dans la carte de relecture +
-  bouton **« Retravailler »** (⚠️ avant le 0.2) ;
-- les deux suites mobiles à arbitrer : édition de texte depuis le téléphone
-  (doctrine note d'origine) et placer une note sur la carte au doigt.
+  bouton **« Retravailler »** (⚠️ avant le 0.2).
 **En parallèle (août, autres fils — PAS des chantiers 0.1.x) :** le backend
 journal a reçu les sous-dossiers 1 niveau, le mentorat (brief compressé,
 gating, Stripe Carnet Premium), le support IA multi-apps (CORS, bouée web) et

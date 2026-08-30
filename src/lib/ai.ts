@@ -4,12 +4,16 @@
 // ANTHROPIC_API_KEY suit la leçon du secret Drive : accepter les deux noms.
 import Anthropic from '@anthropic-ai/sdk'
 import { prisma } from './db'
+import { coutMicroEuros, type JetonsUtilises } from './ia-prix'
 
-export type AiProduct = 'mentorat' | 'support' | 'capture' | 'cockpit' | 'pilotage'
+export type AiProduct = 'mentorat' | 'support' | 'capture' | 'etude' | 'cockpit' | 'pilotage'
 
 const KEY_ENV: Record<AiProduct, string> = {
   mentorat: 'ANTHROPIC_API_KEY_CARNET',
   capture: 'ANTHROPIC_API_KEY_CARNET',
+  // L'étude (2e temps de la capture) est le même produit commercial que la
+  // capture : même clé, même workspace console, une seule facture à lire.
+  etude: 'ANTHROPIC_API_KEY_CARNET',
   support: 'ANTHROPIC_API_KEY_SUPPORT',
   cockpit: 'ANTHROPIC_API_KEY_COCKPIT',
   pilotage: 'ANTHROPIC_API_KEY_PILOTAGE',
@@ -42,7 +46,15 @@ export function aiClient(product: AiProduct): Anthropic {
 export const AI_MODEL: Record<AiProduct, string> = {
   mentorat: process.env.AI_MODEL_MENTORAT ?? 'claude-opus-5',
   support: process.env.AI_MODEL_SUPPORT ?? 'claude-opus-5',
-  capture: process.env.AI_MODEL_CAPTURE ?? 'claude-opus-5',
+  // Capture = travail de SECRÉTAIRE (extraire, trier, ne rien juger). Haiku
+  // s'en sort très bien et coûte 0,4 centime ; mesuré au banc du 30/08, il
+  // n'invente plus rien dès qu'on ne lui demande plus d'avis. C'est le bon
+  // outil pour la tâche, pas un modèle au rabais.
+  capture: process.env.AI_MODEL_CAPTURE ?? 'claude-haiku-4-5',
+  // Étude = lecture de la note dans le cadre de l'académie. Là, la profondeur
+  // se voit : au banc, Opus a lu un outil de position sur un JPEG et repéré
+  // deux erreurs classiques que Haiku n'a pas vues.
+  etude: process.env.AI_MODEL_ETUDE ?? 'claude-opus-5',
   cockpit: process.env.AI_MODEL_COCKPIT ?? 'claude-opus-5',
   // Lecture de relevés : opus par défaut comme partout, mais c'est la tâche la
   // plus mécanique du lot. Passer AI_MODEL_PILOTAGE à claude-haiku-4-5 divise
@@ -52,13 +64,20 @@ export const AI_MODEL: Record<AiProduct, string> = {
 
 /**
  * Log d'usage par membre — la source de l'écran cockpit « jetons/coûts par
- * membre ». Best-effort : un échec de log ne casse jamais la réponse.
+ * membre » ET l'assiette des budgets IA. Best-effort : un échec de log ne
+ * casse jamais la réponse.
+ *
+ * Les jetons de CACHE arrivent hors de input_tokens : les oublier, c'est
+ * sous-compter la dépense exactement là où on l'optimise. Le coût est figé ici,
+ * avec la grille en vigueur au moment de l'appel — jamais recalculé après coup,
+ * sinon un changement de tarif réécrit la consommation passée des membres.
  */
 export async function logAiUsage(
   userId: string,
   product: AiProduct,
   model: string,
-  usage: { input_tokens: number; output_tokens: number }
+  usage: JetonsUtilises,
+  niveau?: string | null
 ): Promise<void> {
   try {
     await prisma.aiUsage.create({
@@ -66,8 +85,12 @@ export async function logAiUsage(
         userId,
         product,
         model,
-        inputTokens: usage.input_tokens,
-        outputTokens: usage.output_tokens,
+        inputTokens: usage.input_tokens ?? 0,
+        outputTokens: usage.output_tokens ?? 0,
+        cacheCreationTokens: usage.cache_creation_input_tokens ?? 0,
+        cacheReadTokens: usage.cache_read_input_tokens ?? 0,
+        costMicros: coutMicroEuros(model, usage),
+        niveau: niveau ?? null,
       },
     })
   } catch (err) {

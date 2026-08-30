@@ -148,14 +148,33 @@ model MessageTag {
 model AiUsage {
   id           String   @id @default(uuid())
   userId       String
-  product      String // 'mentorat' | 'support' | 'capture'
+  product      String // 'mentorat' | 'support' | 'capture' | 'etude' | 'cockpit' | 'pilotage'
   model        String
   inputTokens  Int
   outputTokens Int
-  createdAt    DateTime @default(now())
+
+  // Les jetons de cache ne sont PAS inclus dans input_tokens : l'API les rend
+  // dans deux champs séparés. Les ignorer, c'est sous-compter sa propre
+  // dépense — ce que faisait ce modèle depuis le premier jour, précisément sur
+  // les routes qui utilisent cache_control (mentorat, support).
+  cacheCreationTokens Int @default(0)
+  cacheReadTokens     Int @default(0)
+
+  // Coût figé À L'ÉCRITURE, en millionièmes d'euro. Recalculer l'historique
+  // avec la grille du jour réécrirait rétroactivement la consommation des
+  // membres à chaque changement de tarif ou de modèle : le budget se mettrait
+  // à mentir. Les centimes sont trop gros (une capture Haiku vaut 0,4 centime).
+  costMicros Int @default(0)
+
+  // Palier au moment de l'appel : 'libre' | 'premium' | 'club'. Sert au
+  // plafond global du niveau libre et à la ventilation par palier au cockpit.
+  niveau String?
+
+  createdAt DateTime @default(now())
 
   @@index([userId, createdAt])
   @@index([product, createdAt])
+  @@index([niveau, createdAt])
 }
 
 // Fil de conversation du support IA (bouton « contacter le support »).
