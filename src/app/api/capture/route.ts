@@ -66,6 +66,7 @@ export async function POST(req: NextRequest) {
       famille,
       temps: 'secretaire',
       contenu,
+      langue: typeof body.langue === 'string' ? body.langue : null,
       image: imageUtile,
     })
     return NextResponse.json({

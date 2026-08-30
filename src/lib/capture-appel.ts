@@ -4,7 +4,7 @@
 import type Anthropic from '@anthropic-ai/sdk'
 import { aiClient, AI_MODEL, logAiUsage, textOf, type AiProduct } from './ai'
 import {
-  SOCLE_SECRETAIRE, SOCLE_ETUDE, cadrePour,
+  SOCLE_SECRETAIRE, SOCLE_ETUDE, cadrePour, consigneLangue,
   SCHEMA_SECRETAIRE, SCHEMA_ETUDE, type Famille,
 } from './capture-prompts'
 
@@ -44,6 +44,8 @@ export interface DemandeCapture {
   /** modèle imposé par l'appelant, DÉJÀ VALIDÉ contre le palier. Sert au
    *  sélecteur de l'écran « Configurer son IA ». Absent = modèle du produit. */
   modele?: string | null
+  /** langue d'usage de l'élève : la SORTIE la suit, le cadre reste en français */
+  langue?: string | null
 }
 
 export interface ResultatCapture<T> {
@@ -85,7 +87,9 @@ export async function appelerCapture<T>(d: DemandeCapture): Promise<ResultatCapt
       // Le socle est identique d'un appel à l'autre : c'est lui qu'on met en
       // cache. Le cadre, qui varie par famille, passe APRÈS le point de cache.
       { type: 'text', text: secretaire ? SOCLE_SECRETAIRE : SOCLE_ETUDE, cache_control: { type: 'ephemeral' } },
-      { type: 'text', text: cadrePour(d.famille, d.temps) },
+      // Le cadre et la consigne de langue passent APRÈS le point de cache :
+      // ils varient d'un appel à l'autre, le socle non.
+      { type: 'text', text: [cadrePour(d.famille, d.temps), consigneLangue(d.langue)].filter(Boolean).join('\n\n') },
     ],
     messages: [{ role: 'user', content: bloc }],
     output_config,

@@ -21,6 +21,7 @@ import { aiClient, AI_MODEL, logAiUsage, textOf, aiErrorMessage } from '@/lib/ai
 import { buildMentoratBrief } from '@/lib/mentorat-brief'
 import { resoudreNiveauIA } from '@/lib/ia-niveau'
 import { verifierBudget } from '@/lib/ia-budget'
+import { consigneLangue } from '@/lib/capture-prompts'
 
 // Le mentor raisonne sur 90 jours de trades : au-delà des 10 s de Vercel.
 export const maxDuration = 60
@@ -139,7 +140,13 @@ export async function POST(req: NextRequest) {
         // Le cadre ne bouge jamais : c'est lui qu'on met en cache. Le brief,
         // qui change à chaque trade documenté, passe après le point de cache.
         { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
-        { type: 'text', text: `Voici le brief chiffré de l’élève sur ${days} jours :\n\n${brief.text}` },
+        {
+          type: 'text',
+          text: [
+            `Voici le brief chiffré de l’élève sur ${days} jours :\n\n${brief.text}`,
+            consigneLangue(typeof body.langue === 'string' ? body.langue : null),
+          ].filter(Boolean).join('\n\n'),
+        },
       ],
       messages,
     })

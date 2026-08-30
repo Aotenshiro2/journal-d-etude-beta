@@ -239,6 +239,28 @@ Si le texte promet des gains ou parle en signaux, c’est un fait à noter, pas 
 Bascule sur l’application. Pas « qu’est-ce que ça raconte », mais « qu’est-ce que tu en fais demain, et qu’est-ce que tu ne fais pas encore ». Si le contenu propose un exercice, la question de relecture porte sur le fait de l’avoir mené ou non.`,
 }
 
+/**
+ * La consigne de langue de SORTIE.
+ *
+ * Les socles et le cadre doctrinal restent rédigés en français : le modèle
+ * raisonne dessus sans difficulté, et les traduire créerait deux textes à
+ * maintenir en parallèle, donc deux occasions de diverger. Ce qui doit suivre
+ * la langue de l'élève, c'est ce qu'il LIT.
+ *
+ * Rien n'est ajouté pour le français : le prompt reste alors identique à
+ * l'octet près, ce qui compte pour le cache.
+ */
+const LANGUES_SORTIE: Record<string, string> = {
+  en: `LANGUE DE SORTIE : ANGLAIS.
+
+Le cadre ci-dessus est rédigé en français et tu penses avec, mais TOUT ce que tu produis est en anglais : titre, résumé, points clés, concepts, tags, et la lecture pour l'élève. Le vocabulaire de trading reste en anglais comme toujours (setup, drawdown, payout, range). Tu tutoies en français, tu emploies « you » en anglais, sans jamais passer au vouvoiement de politesse.`,
+}
+
+export function consigneLangue(langue: string | null | undefined): string {
+  if (!langue || langue === 'fr') return ''
+  return LANGUES_SORTIE[langue] ?? ''
+}
+
 /** Le bloc système qui suit le socle, monté pour un temps donné. */
 export function cadrePour(famille: Famille, temps: 'secretaire' | 'etude'): string {
   return temps === 'secretaire'

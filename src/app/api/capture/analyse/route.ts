@@ -86,6 +86,7 @@ export async function POST(req: NextRequest) {
       famille,
       temps: 'etude',
       contenu,
+      langue: typeof body.langue === 'string' ? body.langue : null,
       image: imageUtile,
       modele,
     })
