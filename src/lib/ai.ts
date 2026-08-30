@@ -5,13 +5,14 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { prisma } from './db'
 
-export type AiProduct = 'mentorat' | 'support' | 'capture' | 'cockpit'
+export type AiProduct = 'mentorat' | 'support' | 'capture' | 'cockpit' | 'pilotage'
 
 const KEY_ENV: Record<AiProduct, string> = {
   mentorat: 'ANTHROPIC_API_KEY_CARNET',
   capture: 'ANTHROPIC_API_KEY_CARNET',
   support: 'ANTHROPIC_API_KEY_SUPPORT',
   cockpit: 'ANTHROPIC_API_KEY_COCKPIT',
+  pilotage: 'ANTHROPIC_API_KEY_PILOTAGE',
 }
 
 export function aiKeyFor(product: AiProduct): string | null {
@@ -42,6 +43,10 @@ export const AI_MODEL: Record<AiProduct, string> = {
   support: process.env.AI_MODEL_SUPPORT ?? 'claude-opus-5',
   capture: process.env.AI_MODEL_CAPTURE ?? 'claude-opus-5',
   cockpit: process.env.AI_MODEL_COCKPIT ?? 'claude-opus-5',
+  // Lecture de relevés : opus par défaut comme partout, mais c'est la tâche la
+  // plus mécanique du lot. Passer AI_MODEL_PILOTAGE à claude-haiku-4-5 divise
+  // la facture par ~10 si la qualité tient sur les relevés réels.
+  pilotage: process.env.AI_MODEL_PILOTAGE ?? 'claude-opus-5',
 }
 
 /**
