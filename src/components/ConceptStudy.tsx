@@ -51,6 +51,16 @@ export type DonneesConcept = {
   /** La seule donnée inter-membres de l'app, et elle ne contient que des NOMBRES.
    *  `membres` est null sous le seuil, `notation` aussi — voir la page serveur. */
   collectif: { membres: number | null; notation: { A: number; B: number; C: number } | null }
+  /** La fiche du concept (lot 5). Partagée et relisable par Brice ; seul l'ORDRE
+   *  des tips est personnalisé, d'où `cadre`. `null` si aucune fiche n'existe —
+   *  et c'est le cas le plus fréquent aujourd'hui, faute de corpus exploitable. */
+  fiche: {
+    definition: string | null
+    tips: { angle: string; texte: string; source: string }[]
+    sources: { oeuvre: string; reperage: string }[]
+    corrigee: boolean
+    cadre: 'geste' | 'friction'
+  } | null
   stats: {
     seances: number; blocs: number; captures: number
     resultats: { gain: number; perte: number; be: number }
@@ -121,7 +131,7 @@ function Repartition({ titre, chemin, parts, couleurs }: {
 }
 
 export default function ConceptStudy({ donnees }: { donnees: DonneesConcept }) {
-  const { tag, seances, captures, voisins, stats, collectif } = donnees
+  const { tag, seances, captures, voisins, stats, collectif, fiche } = donnees
   const [agrandie, setAgrandie] = useState<string | null>(null)
 
   const seancesAvecTexte = seances.filter(s => s.blocsTexte.length > 0)
@@ -293,6 +303,54 @@ export default function ConceptStudy({ donnees }: { donnees: DonneesConcept }) {
                 </Link>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* ── La fiche du concept ─────────────────────────────────────────
+            Placée sous « Va avec », comme demandé. Tout ce qui s'affiche ici
+            vient du CORPUS et porte sa source : un tip sans source est filtré
+            côté serveur avant d'arriver. C'est ce qui rend « sans mentir »
+            vérifiable par quelqu'un d'autre que celui qui l'a écrit. */}
+        {fiche && (
+          <div className="mt-10">
+            <p className="text-[11px] uppercase tracking-wide mb-2" style={{ color: 'var(--node-meta)' }}>Le concept</p>
+            <Tuile>
+              {fiche.definition && (
+                <p className="text-[13px] leading-relaxed mb-4" style={{ color: 'var(--node-preview)' }}>{fiche.definition}</p>
+              )}
+
+              {fiche.tips.length > 0 && (
+                <div className="space-y-3">
+                  {fiche.tips.map((t, i) => (
+                    <div key={i} className="flex gap-2.5">
+                      <span
+                        className="w-1 rounded-full flex-shrink-0 mt-0.5"
+                        style={{ background: t.angle === 'friction' ? '#ef4444' : '#22c55e', opacity: 0.55 }}
+                        title={t.angle === 'friction' ? 'Là où ça casse' : 'Le geste juste'}
+                      />
+                      <div className="min-w-0">
+                        <p className="text-[13px] leading-relaxed" style={{ color: 'var(--node-preview)' }}>{t.texte}</p>
+                        <p className="text-[10px] mt-1" style={{ color: 'var(--node-meta)', opacity: 0.8 }}>{t.source}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex flex-wrap items-center gap-2 mt-4 pt-3" style={{ borderTop: '1px solid var(--float-border)' }}>
+                <span className="text-[10px]" style={{ color: 'var(--node-meta)', opacity: 0.8 }}>
+                  {fiche.sources.map(s => `${s.oeuvre}${s.reperage ? ` — ${s.reperage}` : ''}`).join(' · ')}
+                </span>
+                {/* Le cadrage est la SEULE chose personnalisée : l'ordre des tips
+                    suit ce que ce membre a noté sur ce concept. Le dire évite de
+                    laisser croire que la fiche elle-même a été écrite pour lui. */}
+                {fiche.cadre === 'friction' && (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full ml-auto" style={{ background: 'var(--canvas-bg)', color: 'var(--node-meta)' }}>
+                    tes notes penchent vers C — l&apos;erreur fréquente d&apos;abord
+                  </span>
+                )}
+              </div>
+            </Tuile>
           </div>
         )}
 

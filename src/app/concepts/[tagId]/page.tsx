@@ -197,7 +197,37 @@ export default async function PageConcept({ params }: { params: Promise<{ tagId:
     notationCollective = { A: c.A, B: c.B, C: c.C }
   }
 
+  // ── La fiche du concept (lot 5) ──────────────────────────────────────────
+  // Clé = le nom normalisé, pas le tagId : la fiche vaut pour tous ceux qui
+  // emploient le mot, alors que chaque membre a sa propre ligne `Tag`.
+  const ficheBrute = await prisma.conceptFiche.findUnique({
+    where: { nomNormalise: tag.name.trim().toLowerCase() },
+  })
+
+  type Tip = { angle: string; texte: string; source: string }
+  let fiche: DonneesConcept['fiche'] = null
+  if (ficheBrute && ficheBrute.statut !== 'rejete') {
+    const tips = (Array.isArray(ficheBrute.tips) ? ficheBrute.tips : []) as unknown as Tip[]
+    // PERSONNALISATION (SPEC §11.7b) : la fiche est la même pour tout le monde —
+    // c'est ce qui la rend relisable par Brice — mais l'ORDRE des tips dépend de
+    // ce que CE membre a posé. Qui collectionne les C sur ce concept voit d'abord
+    // l'erreur fréquente ; qui aligne les A voit d'abord le geste juste.
+    const enPeine = notation.C > notation.A
+    const ordonnes = [...tips].sort((a, b) => {
+      const poids = (t: Tip) => (enPeine ? (t.angle === 'friction' ? 0 : 1) : (t.angle === 'geste' ? 0 : 1))
+      return poids(a) - poids(b)
+    })
+    fiche = {
+      definition: ficheBrute.definition,
+      tips: ordonnes.filter(t => t.source), // un tip sans source ne s'affiche pas
+      sources: (Array.isArray(ficheBrute.sources) ? ficheBrute.sources : []) as unknown as { oeuvre: string; reperage: string }[],
+      corrigee: ficheBrute.corrigee,
+      cadre: enPeine ? 'friction' : 'geste',
+    }
+  }
+
   const donnees: DonneesConcept = {
+    fiche,
     collectif: {
       membres: membres.size >= SEUIL_MEMBRES ? membres.size : null,
       notation: notationCollective,

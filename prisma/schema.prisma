@@ -139,6 +139,35 @@ model MessageTag {
   @@id([messageId, tagId])
 }
 
+// 0.2 lot 5 — la FICHE d'un concept (SPEC-second-cerveau.md §11).
+// La clé est le NOM NORMALISÉ, pas un tagId : chaque membre a sa propre ligne
+// `Tag` (unique par (name, userId)), le vocabulaire est partagé mais pas la
+// taxonomie. Une fiche vaut donc pour tous ceux qui emploient le mot.
+// Aucune relation vers `Tag` pour la même raison — il y en aurait N.
+model ConceptFiche {
+  id           String   @id @default(uuid())
+  nomNormalise String   @unique
+  definition   String?
+  // [{ texte, source, angle }] — `angle` vaut 'geste' ou 'friction' : le corpus
+  // dit le geste juste, les notes des membres disent où ça casse. Un tip sans
+  // `source` est inacceptable : c'est ce qui rend « sans mentir » vérifiable.
+  tips         Json     @default("[]")
+  sources      Json     @default("[]")
+  origine      String   @default("corpus") // 'corpus' | 'friction' | 'mixte'
+  statut       String   @default("propose") // 'propose' | 'valide' | 'rejete'
+  // La régénération n'écrase JAMAIS une fiche corrigée à la main. Même patron que
+  // `cockpit_avatar_manuel` : le calcul est une déduction, celui qui sait doit
+  // pouvoir la corriger, et sa correction survit au recalcul.
+  corrigee     Boolean  @default(false)
+  // Empreinte de la matière (nombre de liens, de notations, dernière modif) :
+  // sert à savoir s'il faut régénérer, sans relire tout le corpus à chaque fois.
+  empreinte    String?
+  calculeeLe   DateTime @default(now())
+  modifieeLe   DateTime @default(now()) @updatedAt
+
+  @@index([statut])
+}
+
 // Dossiers de l'extension (id = uuid extension) — la sync les upserte, le pull les restaure
 // ── IA (mentorat, support, capture) ──────────────────────────────────────────
 

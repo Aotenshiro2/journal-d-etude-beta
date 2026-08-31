@@ -984,7 +984,11 @@ function StudyCanvasInner({
 
   // Au lâcher : rattacher/détacher selon la zone survolée (« ça va avec ça » au drag)
   const onNodeDragStop = useCallback(
-    (_: React.MouseEvent, node: Node) => {
+    // L'événement est un `MouseEvent | TouchEvent` du DOM, pas un `React.MouseEvent` :
+    // React Flow appelle ce rappel depuis ses propres écouteurs, hors du système
+    // d'événements synthétiques de React. Le tapuscrit s'en plaignait depuis le
+    // passage à xyflow v12 ; l'événement n'étant pas utilisé, seul le type change.
+    (_: MouseEvent | TouchEvent, node: Node) => {
       if (node.type === 'group') {
         onMoveNode(node.id, node.position.x, node.position.y)
         return
