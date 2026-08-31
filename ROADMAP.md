@@ -13,8 +13,8 @@ le numéro affiché correspond au module le plus avancé considéré exploitable
 
 | Version | Espace | Contenu |
 |---|---|---|
-| **0.1.x** | Étudier mes notes | ← **EN COURS** — le poste de travail note (détail dans TODO.md) |
-| **0.2.x** | Observer les concepts | Compteur + exploration (tuile → notes/blocs/screenshots du concept) + graphe global — cf. `SPEC-second-cerveau.md` lot 1 |
+| **0.1.x** | Étudier mes notes | ✅ **CLOS le 31/08/2026** — le poste de travail note, jusqu'à la passe esthétique (grammaire des traits, carte de relecture) |
+| **0.2.x** | Observer les concepts | ← **EN COURS** depuis le 31/08/2026 — étudier PAR concept : ses notes, ses captures de séance, ses chiffres, et une fiche sourcée. Plan et mesures : `SPEC-second-cerveau.md` §7 à §11, état des lots en tête de `TODO.md` |
 | **0.3.x** | Relire | Le deck + la note de relecture auto (le résultat de l'étude de notes — on y jugera l'utilité réelle du mode document) |
 | **0.4.x** | Analyser mes données | Les 3 lentilles, affinées avec de vraies données accumulées |
 | **0.5.x** | Pattern maps | |
@@ -40,6 +40,15 @@ Exception assumée : **le pont Edgyx** (logiciel de Geoffrey, hors écosystème)
 Événementiel — on avance quand Geoffrey répond. D'abord extension ↔ Edgyx,
 éventuellement journal ↔ Edgyx dans un second temps.
 
+⚠️ **Ce que le 0.2 a révélé et qui vaut pour toute la suite (31/08/2026).** Le
+moteur tourne, mais **il tourne à vide** : 6 membres taguent, 54 captures sont
+reliées sur ~930, 20 notations existent en tout, et 3 membres actifs ne taguent
+jamais. Chaque écran qu'on branche est donc honnête et maigre. La conséquence
+pour le versionnage : la priorité n'est plus d'ajouter des vues, c'est de faire
+monter la MATIÈRE — que les liens se posent sans corvée (lot 3 du
+`SPEC-second-cerveau.md`). Un écran de plus sur un stock vide ne rapproche pas
+de la bêta.
+
 ## Vision long terme (inchangée, condensée)
 
 AOKnowledge = écosystème d'apps éducatives (journal, extension Carnet du Trader,
@@ -53,4 +62,4 @@ journal est la première brique ; l'intégration écosystème vient après la 1.
 - `apps/carnet-du-trader-extension/TODO.md` — côté extension (Edgyx, mode mentorat, doctrine)
 
 ---
-**Dernière mise à jour :** 17 juillet 2026
+**Dernière mise à jour :** 31 août 2026
