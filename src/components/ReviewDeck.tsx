@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Check, SkipForward, ArrowRight, ExternalLink, TrendingUp, BookOpen, CalendarDays, Plus, FolderPlus, ChevronRight, ChevronDown, Layers } from 'lucide-react'
+import { Check, SkipForward, ArrowRight, ExternalLink, TrendingUp, BookOpen, CalendarDays, Plus, FolderPlus, ChevronRight, ChevronDown, Layers, Pencil } from 'lucide-react'
 import { AnnotationData, MessageData, CanvasNodeData } from '@/types'
 import DocumentView from './DocumentView'
 import { TradeMeta } from './StudyCanvas'
@@ -48,8 +48,23 @@ const OUTCOME: Record<string, { label: string; color: string }> = {
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
-// Re-jugement d'un verdict — compact. `label`/`dot` situent le verdict (trade, note entière…).
-function VerdictRow({ v, onJudged, label, dot }: { v: AnnotationData; onJudged: (grade: string) => void; label?: string; dot?: string }) {
+/** Ce qui est à re-juger dans une note, et s'il y a matière. Sert à deux
+ *  endroits : la carte, pour bâtir sa colonne de droite ; et le deck, pour
+ *  savoir s'il doit s'élargir. Une note de cours se relit, elle ne se note pas. */
+function verdictsDe(item: ReviewNote) {
+  const globaux = item.verdicts.filter(v => v.tradeRef == null && v.messageRef == null)
+  const trades = item.verdicts.filter(v => v.tradeRef != null)
+  return { globaux, trades, aJuger: item.type !== 'course' && (globaux.length > 0 || trades.length > 0) }
+}
+
+// Re-jugement d'un verdict — compact.
+// 0.1.7 : la ligne ne porte plus son propre libellé. Il est rendu au-dessus
+// d'elle par l'appelant, comme celui d'un trade — avant, « Verdict de la note »
+// était un label DANS la boîte et « Trades notés » un titre AU-DESSUS des
+// siennes, soit deux grammaires collées. Le fond passe en `--node-bg` : la ligne
+// avait la même surface que le bandeau qui la contient, donc rien ne se
+// détachait et seules les bordures travaillaient.
+function VerdictRow({ v, onJudged }: { v: AnnotationData; onJudged: (grade: string) => void }) {
   const [grade, setGrade] = useState<string>(v.grade)
   const [phrase, setPhrase] = useState<string>(v.phrase)
   const [cause, setCause] = useState<string | null>(v.causeCategory ?? null)
@@ -74,13 +89,7 @@ function VerdictRow({ v, onJudged, label, dot }: { v: AnnotationData; onJudged: 
   }
 
   return (
-    <div className="rounded-xl p-3" style={{ background: 'var(--canvas-bg)', border: '1px solid var(--node-border)', opacity: saved ? 0.7 : 1 }}>
-      {label && (
-        <div className="flex items-center gap-1.5 mb-2">
-          {dot && <span className="w-2 h-2 rounded-full" style={{ background: dot }} />}
-          <span className="text-[11px] uppercase tracking-wide" style={{ color: 'var(--node-meta)' }}>{label}</span>
-        </div>
-      )}
+    <div className="rounded-xl p-3" style={{ background: 'var(--node-bg)', border: '1px solid var(--node-border)', opacity: saved ? 0.7 : 1 }}>
       {/* A/B/C : le geste central de la relecture, et celui qu'on fait au pouce.
           32 px suffisaient à la souris, pas au doigt → 44 px sur téléphone. Les
           causes descendent sur leur propre ligne : sur 375 px, tout aligné
@@ -117,12 +126,13 @@ function VerdictRow({ v, onJudged, label, dot }: { v: AnnotationData; onJudged: 
   )
 }
 
-function RelectureCard({ item, onRead, onRemind, onSkip, onJudged }: {
+function RelectureCard({ item, onRead, onRemind, onSkip, onJudged, onRework }: {
   item: ReviewNote
   onRead: () => void
   onRemind: (days: number) => void
   onSkip: () => void
   onJudged: (grade: string) => void
+  onRework: () => void
 }) {
   const [thought, setThought] = useState('')
   const [added, setAdded] = useState<string[]>([])
@@ -130,8 +140,7 @@ function RelectureCard({ item, onRead, onRemind, onSkip, onJudged }: {
   const meta = TYPE_META[item.type]
 
   const tradeById = useMemo(() => new Map(item.trades.map(t => [t.id, t])), [item.trades])
-  const globalVerdicts = item.verdicts.filter(v => v.tradeRef == null && v.messageRef == null)
-  const tradeVerdicts = item.verdicts.filter(v => v.tradeRef != null)
+  const { globaux: globalVerdicts, trades: tradeVerdicts, aJuger } = verdictsDe(item)
 
   // Métadonnées de trade pour badger les blocs dans la relecture (comme sur le canvas)
   const tradeMeta = useMemo<Record<string, TradeMeta>>(() => {
@@ -175,37 +184,66 @@ function RelectureCard({ item, onRead, onRemind, onSkip, onJudged }: {
         </Link>
       </div>
 
-      {/* La réorganisation, relue (lecture seule, images cliquables en grand) */}
-      <div className="px-4 sm:px-5 py-4 overflow-y-auto" style={{ maxHeight: '48vh' }}>
-        <DocumentView nodes={item.nodes} messages={item.messages} readOnly embedded tradeMeta={tradeMeta} />
-      </div>
-
-      {/* Verdicts — seulement pour un trade / journée */}
-      {item.type !== 'course' && (globalVerdicts.length > 0 || tradeVerdicts.length > 0) && (
-        <div className="px-5 py-4 space-y-3" style={{ borderTop: '1px solid var(--float-border)', background: 'var(--canvas-bg)' }}>
-          {globalVerdicts.length > 0 && (
-            <div className="space-y-2.5">
-              {globalVerdicts.map(v => (
-                <VerdictRow key={v.id} v={v} onJudged={onJudged} label={item.type === 'day' ? 'Verdict de la journée' : 'Verdict de la note'} />
-              ))}
-            </div>
-          )}
-          {tradeVerdicts.length > 0 && (
-            <div className="space-y-2.5">
-              <p className="text-[11px] uppercase tracking-wide" style={{ color: 'var(--node-meta)' }}>Trades notés</p>
-              {tradeVerdicts.map(v => {
-                const t = v.tradeRef ? tradeById.get(v.tradeRef) : null
-                const info = t?.outcome ? OUTCOME[t.outcome] : null
-                const time = t?.startedAt ? new Date(t.startedAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : null
-                const label = ['Trade', time, info?.label].filter(Boolean).join(' · ')
-                return (
-                  <VerdictRow key={v.id} v={v} onJudged={onJudged} label={label} dot={info?.color} />
-                )
-              })}
-            </div>
-          )}
+      {/* 0.1.7 — variante C du labo `/labo-relecture`, choisie par Brice le
+          31/08. Au bureau : le document à gauche, le re-jugement dans sa propre
+          colonne à droite — on ne scrolle plus pour passer de ce qu'on relit à
+          ce qu'on juge, chaque colonne défile de son côté. Sous 768 px la carte
+          s'empile et retrouve l'ordre d'avant (document, puis verdicts).
+          La colonne de droite n'existe QUE s'il y a matière : une note de cours
+          se relit, elle ne se note pas. C'est la même condition qui décide de
+          l'élargissement du deck (voir `ReviewDeck`) — sans elle, un document
+          seul s'étalerait sur toute la largeur pour rien. */}
+      <div className="flex flex-col md:flex-row">
+        <div
+          className={`px-4 sm:px-5 py-4 overflow-y-auto max-h-[48vh] ${aJuger ? 'md:flex-1 md:min-w-0 md:border-r md:max-h-[52vh]' : ''}`}
+          style={{ borderColor: 'var(--float-border)' }}
+        >
+          <DocumentView nodes={item.nodes} messages={item.messages} readOnly embedded tradeMeta={tradeMeta} />
         </div>
-      )}
+
+        {aJuger && (
+          <div
+            className="px-4 sm:px-5 py-4 border-t md:border-t-0 md:w-[340px] md:flex-shrink-0 md:overflow-y-auto md:max-h-[52vh]"
+            style={{ borderColor: 'var(--float-border)', background: 'var(--canvas-bg)' }}
+          >
+            <p className="text-[11px] font-semibold uppercase tracking-wide mb-3" style={{ color: 'var(--node-title)' }}>Re-juger</p>
+
+            {globalVerdicts.length > 0 && (
+              <div className="mb-4">
+                <p className="text-[11px] uppercase tracking-wide mb-2" style={{ color: 'var(--node-meta)' }}>
+                  {item.type === 'day' ? 'La journée' : 'La note'}
+                </p>
+                <div className="space-y-2.5">
+                  {globalVerdicts.map(v => <VerdictRow key={v.id} v={v} onJudged={onJudged} />)}
+                </div>
+              </div>
+            )}
+
+            {tradeVerdicts.length > 0 && (
+              <div>
+                <p className="text-[11px] uppercase tracking-wide mb-2" style={{ color: 'var(--node-meta)' }}>Les trades</p>
+                <div className="space-y-2.5">
+                  {tradeVerdicts.map(v => {
+                    const t = v.tradeRef ? tradeById.get(v.tradeRef) : null
+                    const info = t?.outcome ? OUTCOME[t.outcome] : null
+                    const time = t?.startedAt ? new Date(t.startedAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : null
+                    const label = ['Trade', time, info?.label].filter(Boolean).join(' · ')
+                    return (
+                      <div key={v.id}>
+                        <div className="flex items-center gap-1.5 mb-1.5 px-0.5">
+                          {info?.color && <span className="w-2 h-2 rounded-full" style={{ background: info.color }} />}
+                          <span className="text-[11px]" style={{ color: 'var(--node-meta)' }}>{label}</span>
+                        </div>
+                        <VerdictRow v={v} onJudged={onJudged} />
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Capture d'une idée qui vient en relisant — sans friction, atterrit dans « À trier » */}
       <div className="px-4 sm:px-5 py-3.5" style={{ borderTop: '1px solid var(--float-border)' }}>
@@ -242,9 +280,16 @@ function RelectureCard({ item, onRead, onRemind, onSkip, onJudged }: {
           la largeur sur téléphone ; les rappels sont des cibles à part entière
           plutôt qu'un lien souligné dans une phrase. */}
       <div className="px-4 sm:px-5 py-3.5 safe-bottom" style={{ borderTop: '1px solid var(--float-border)' }}>
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
           <button onClick={onSkip} className="flex items-center gap-1.5 text-sm sm:text-xs px-4 py-3 sm:px-3 sm:py-2 rounded-lg" style={{ color: 'var(--node-meta)' }}>
             <SkipForward size={13} /> Passer
+          </button>
+          {/* 0.1.7 (demande Brice du 23/07) — « Retravailler » ouvre le canvas
+              quand la réorganisation ne satisfait pas, et la note RESTE à relire :
+              on ne la marque pas. C'est ce qui le distingue de « J'ai relu », qui
+              la sort de la file — d'où le contour plutôt que le bleu plein. */}
+          <button onClick={onRework} title="Rouvrir le canvas — la note reste à relire" className="flex items-center justify-center gap-1.5 text-sm font-medium px-4 py-3 sm:py-2.5 rounded-xl" style={{ border: '1px solid var(--node-border)', color: 'var(--node-title)' }}>
+            <Pencil size={14} /> Retravailler
           </button>
           <button onClick={onRead} className="flex-1 sm:flex-none flex items-center justify-center gap-2 text-sm font-medium px-5 py-3 sm:py-2.5 rounded-xl text-white" style={{ background: '#3b82f6' }}>
             <Check size={15} /> J&apos;ai relu
@@ -429,6 +474,10 @@ export default function ReviewDeck({ toRelire, toReorganize, library = [], focus
     advance()
     router.refresh() // badge home + « déjà relues » à jour, sans toucher la file figée
   }
+  // « Retravailler » : on ouvre le canvas et on ne touche à RIEN. Pas de PATCH,
+  // pas d'avance dans la file — la note doit rester à relire, c'est tout
+  // l'intérêt du bouton (demande Brice du 23/07).
+  const onRework = () => { if (current) router.push(`/notes/${current.note.id}`) }
   const onRemind = async (days: number) => {
     if (current) await fetch(`/api/canvas/${current.canvasId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reminderDays: days }) })
     advance()
@@ -438,11 +487,21 @@ export default function ReviewDeck({ toRelire, toReorganize, library = [], focus
   const judgedTotal = tally.A + tally.B + tally.C
   const maxTally = Math.max(1, tally.A, tally.B, tally.C)
 
+  // 0.1.7 — la carte à deux colonnes ne tient pas dans les 672 px du deck : la
+  // colonne de re-jugement en prendrait 340 et il resterait MOINS de place au
+  // document qu'avant. On élargit donc, mais seulement au bureau et seulement
+  // quand cette colonne existe — un document seul étalé sur 1024 px serait pire
+  // que le format actuel. Les autres sections gardent leur colonne étroite.
+  const largeurCarte = current && verdictsDe(current).aJuger ? 'max-w-2xl md:max-w-5xl' : 'max-w-2xl'
+
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="max-w-2xl mx-auto px-4 sm:px-5 py-6 sm:py-8">
-        {!focus && toReorganize.length > 0 && <ReorganizeSection items={toReorganize} />}
+      <div className="px-4 sm:px-5 py-6 sm:py-8">
+        {!focus && toReorganize.length > 0 && (
+          <div className="max-w-2xl mx-auto"><ReorganizeSection items={toReorganize} /></div>
+        )}
 
+        <div className={total === 0 || done ? 'max-w-2xl mx-auto' : `${largeurCarte} mx-auto`}>
         {total === 0 ? (
           toReorganize.length > 0 ? (
             <p className="text-sm text-center py-6" style={{ color: 'var(--node-meta)' }}>✅ Rien à relire — tes notes réorganisées sont à jour.</p>
@@ -487,13 +546,16 @@ export default function ReviewDeck({ toRelire, toReorganize, library = [], focus
                 {idx + 1} <ArrowRight size={11} className="opacity-40" /> {total}
               </span>
             </div>
-            <RelectureCard key={current.canvasId} item={current} onRead={onRead} onRemind={onRemind} onSkip={onSkip} onJudged={onJudged} />
+            <RelectureCard key={current.canvasId} item={current} onRead={onRead} onRemind={onRemind} onSkip={onSkip} onJudged={onJudged} onRework={onRework} />
             <p className="text-center text-[11px] mt-5" style={{ color: 'var(--node-meta)', opacity: 0.7 }}>
               Relis ta réorganisation — c&apos;est là que la rétention se joue.
             </p>
           </>
         )}
-        {!focus && library.length > 0 && <LibrarySection items={library} />}
+        </div>
+        {!focus && library.length > 0 && (
+          <div className="max-w-2xl mx-auto"><LibrarySection items={library} /></div>
+        )}
       </div>
     </div>
   )

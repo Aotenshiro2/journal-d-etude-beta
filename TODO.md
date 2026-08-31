@@ -660,12 +660,30 @@ au 01/08 dans sa conversation dédiée :
     l'ambre est réservée à la filiation et exclue de la palette des concepts.
   · Outils laissés en place : `scripts/inventaire-traits-0.1.7.mjs` (les 22
     traits et leurs 4 paires) et `scripts/inventaire-couleurs-concepts.mjs`.
-- [ ] repositionnement **Verdict / Trades notés** dans la carte de relecture +
-  bouton **« Retravailler »** (⚠️ avant le 0.2). **DERNIER VERROU.**
-- [ ] ménage : supprimer `src/app/labo-traits` (une fois la grammaire validée en
-  ligne par Brice) **et `src/app/labo-boutons`**, qui traîne depuis le 31/07 —
-  le ménage de `144967c` avait pris `labo-groupes` et `labo-traits`, pas
-  celle-là. Retirer les deux routes de `publicPaths` dans `middleware.ts`.
+- [x] ✅ **La carte de relecture — LIVRÉE le 31/08/2026**, variante C du labo
+  `/labo-relecture`. Au bureau, le document à gauche et le re-jugement dans sa
+  propre colonne à droite : on ne scrolle plus entre ce qu'on relit et ce qu'on
+  juge, chaque colonne défile de son côté. Sous 768 px la carte s'empile et
+  retrouve l'ordre d'avant.
+  · Les deux défauts de fond sont corrigés : une seule convention d'étiquetage
+    (le libellé est TOUJOURS au-dessus de sa boîte — avant, « Verdict de la
+    note » était dedans et « Trades notés » un titre au-dessus des siennes), et
+    les lignes passent en `--node-bg` sur le bandeau `--canvas-bg`, là où elles
+    avaient la même surface que lui et ne se détachaient de rien.
+  · **Bouton « Retravailler »** posé dans la barre d'actions : il ouvre le canvas
+    et ne touche à RIEN — pas de PATCH, pas d'avance dans la file, la note reste
+    à relire. C'est ce qui le distingue de « J'ai relu », d'où le contour au lieu
+    du bleu plein.
+  · ⚠️ À ne pas défaire : le deck s'élargit (`md:max-w-5xl`) **uniquement** quand
+    la colonne de re-jugement existe. Le labo ne pouvait pas le montrer — le deck
+    vit dans `max-w-2xl`, et en deux colonnes le document aurait eu moins de
+    place qu'avant. Une note de cours n'a pas de verdicts : elle garde la colonne
+    étroite, sinon un document seul s'étalerait sur 1024 px pour rien.
+- [ ] ménage : supprimer `src/app/labo-traits`, `src/app/labo-relecture` (une
+  fois les deux validés en ligne par Brice) **et `src/app/labo-boutons`**, qui
+  traîne depuis le 31/07 — le ménage de `144967c` avait pris `labo-groupes` et
+  `labo-traits`, pas celle-là. Retirer les trois routes de `publicPaths` dans
+  `middleware.ts`. **C'est le dernier geste de la 0.1.7.**
 **En parallèle (août, autres fils — PAS des chantiers 0.1.x) :** le backend
 journal a reçu les sous-dossiers 1 niveau, le mentorat (brief compressé,
 gating, Stripe Carnet Premium), le support IA multi-apps (CORS, bouée web) et
