@@ -679,14 +679,39 @@ au 01/08 dans sa conversation dédiée :
     vit dans `max-w-2xl`, et en deux colonnes le document aurait eu moins de
     place qu'avant. Une note de cours n'a pas de verdicts : elle garde la colonne
     étroite, sinon un document seul s'étalerait sur 1024 px pour rien.
-- [ ] ménage : supprimer `src/app/labo-traits`, `src/app/labo-relecture` (une
-  fois les deux validés en ligne par Brice) **et `src/app/labo-boutons`**, qui
-  traîne depuis le 31/07 — le ménage de `144967c` avait pris `labo-groupes` et
-  `labo-traits`, pas celle-là. Retirer les trois routes de `publicPaths` dans
-  `middleware.ts`. **C'est le dernier geste de la 0.1.7.**
+- [x] ✅ **Ménage fait le 31/08/2026** : `labo-traits`, `labo-relecture` et
+  `labo-boutons` supprimées, `publicPaths` revenu à `['/auth', '/api/health',
+  '/guide']`. Les pages restent lisibles dans l'historique git si un choix doit
+  être rejoué (`git show <commit>:src/app/labo-…/page.tsx`). Les composants
+  ShadCN installés pour `labo-boutons` (`ButtonGroup`, `ToggleGroup`) ne sont PAS
+  retirés : le canvas s'en sert.
+
+## 🏁 0.1.7 CLOSE — 31/08/2026
+
+La passe esthétique est finie, et avec elle le 0.1. Les trois chantiers ouverts
+le 29/08 sont livrés : la grammaire des traits (`56d9abf`), la carte de
+relecture en deux colonnes avec le bouton « Retravailler » (`dd7f5fa`), et le
+ménage des pages labo. Les deux suites mobiles ont été explicitement reportées
+à juste avant la 1.0 (décision Brice du 31/08, plus haut) — elles ne bloquent
+rien.
+
+**Méthode qui a marché trois fois de suite, à réutiliser :** compter en base
+avant de dessiner. Les trois types de trait viennent de l'inventaire des 22
+traits existants, pas d'une taxonomie inventée ; et c'est en vérifiant
+`Tag.color` avant de coder qu'on a découvert que les 126 concepts étaient du
+même bleu — ce qui aurait rendu la variante choisie identique au témoin. Les
+deux scripts sont restés en place pour être rejoués.
+
 **En parallèle (août, autres fils — PAS des chantiers 0.1.x) :** le backend
 journal a reçu les sous-dossiers 1 niveau, le mentorat (brief compressé,
-gating, Stripe Carnet Premium), le support IA multi-apps (CORS, bouée web) et
-l'agent cockpit. Détail : `D:\7_Agents\ETAT.md`.
-Le 0.2 « Observer les concepts » attend la fin du 0.1. L'écran d'ontologie
-(file d'attente) sera positionné dans le versionnage à l'ouverture du 0.2.
+gating, Stripe Carnet Premium), le support IA multi-apps (CORS, bouée web),
+l'agent cockpit et la brique IA de la capture. Détail : `D:\7_Agents\ETAT.md`.
+
+**➡️ PROCHAINE VERSION : 0.2 « Observer les concepts. »** Elle n'est pas
+ouverte — c'est une décision de Brice, et la convention de ce fichier est **une
+conversation Claude par version**. À faire à son ouverture : positionner l'écran
+d'ontologie (file d'attente) dans le versionnage, et déplacer le curseur
+« ← EN COURS » dans `ROADMAP.md`, qui pointe encore sur 0.1.x. Contenu prévu :
+compteur de journalisation, exploration d'une tuile de concept vers ses
+notes/blocs/screenshots, et le lot 1 de `SPEC-second-cerveau.md` (page concept +
+références) — dont la grammaire des traits vient de poser le langage visuel.
