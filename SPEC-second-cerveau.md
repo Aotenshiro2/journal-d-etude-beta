@@ -289,87 +289,155 @@ Inchangé (§3, lot 4). Après, et il réutilisera la grammaire des traits posé
 Le lot 3 est celui qui décide si le 0.2 sert à quelque chose. Les lots 1 et 2 sont
 la vitrine ; le lot 3 est le stock.
 
-## 11. « Ce que les traders disent du concept » — lot 5, à arbitrer avant de coder
+## 11. La fiche du concept — lot 5
 
 **Demande de Brice, 31/08/2026**, en lisant la page du lot 1 : sous « Va avec »,
-une note qui se sert de **toute la base** pour résumer ce qui marche ou ne marche
-pas sur ce concept, **sans dire de qui vient l'information**, et qui donne un ou
-deux conseils à l'élève en train de documenter ce concept pour lui.
+une petite aide sur le concept lui-même. Précisée le même jour, et la précision
+change tout : *« le concept en tant que tel est largement documenté en ligne, donc
+trouver des tips n'est pas le plus compliqué. Ce qui compte, c'est que la notation
+A/B/C de nos membres permette de piocher dans ce qui marche, comparé à la
+documentation externe — et on a plein de PDF, de notes de cours et de formation
+sur la machine. Servir de petits tips. Sans mentir, sans nommer, car ce n'est pas
+le but : c'est juste une aide sur le concept. »*
 
-C'est la première fonctionnalité du journal qui traverse la frontière entre
-membres. Elle est réalisable, elle a de la valeur — c'est même le seul endroit où
-une petite base devient un avantage collectif — mais elle demande trois décisions
-explicites, et une quatrième qui est un piège pédagogique.
+**Conséquence de conception, majeure : le contenu du conseil ne vient PAS des
+notes des autres membres, il vient du CORPUS.** Toute la difficulté d'anonymat
+d'une première version envisagée tombe : la notation collective n'est plus une
+source, c'est un **signal de priorité**. Un signal agrégé n'identifie personne.
 
-### 11.1 Elle rompt la doctrine de cloisonnement, et il faut l'écrire
+### 11.1 Le corpus existe déjà, et il est de taille tenable
 
-La règle en vigueur (TODO, « Doctrine sécurité », 29/08) : « tout résolveur
-journal est borné au userId de la session ». Cette note-ci lit les données des
-autres. C'est donc une **exception délibérée**, à tenir dans un cadre strict :
+Inventorié le 31/08 sur `D:\3_Pedagogie` :
 
-- **serveur uniquement.** Aucune ligne d'un autre membre ne descend jamais dans le
-  navigateur. Ce qui descend est un TEXTE agrégé, écrit par le modèle.
-- **agrégat seulement.** Jamais de verbatim, jamais un titre de note, jamais un
-  nom, jamais une capture d'un autre membre. Un verbatim est identifiant.
-- **le concept est la clé, pas le membre.** L'agrégation se fait sur le NOM
-  normalisé de l'étiquette : chaque membre a sa propre ligne `Tag`, le vocabulaire
-  partagé est le nom.
+- **`FORMATION Aok\`** — 152 fichiers texte (formations 2022, 2023, Deep Knowledge,
+  Secrets des MM, Module Psycho, `Maitrise des Marché 2026.pdf`). **La parole de
+  Brice.**
+- **`Skool-Classroom-Export\`** — `module-chronique-accelerateur.md` (429 Ko,
+  66 chroniques) et `module-journaling.md` (116 Ko). Sa voix écrite, déjà réutilisée
+  telle quelle dans la communauté.
+- **`Autres académies\ICT\`** — une vingtaine de PDF texte dont
+  `Glossary of ICT Terms.pdf`, `Inner Circle Trader - SMT Concepts.pdf`,
+  `Market Structure and Powerful Setup.pdf` et les notes des 12 mois de mentorship.
+  **La source canonique du vocabulaire.**
+- **`PDF - workbook\`** — les workbooks AOK.
+- ⚠️ Les 27 Go du dossier ICT sont de la **vidéo** : hors périmètre. Les
+  transcrire est un chantier à part.
 
-### 11.2 Le seuil d'anonymat — LA décision à prendre
+### 11.2 Pas de RAG en direct — une fiche curée par concept
 
-⚠️ **Avec le volume actuel, « anonyme » serait faux.** Six membres taguent en
-tout. Si deux d'entre eux portent `macro breaker` — c'est le cas : `fdb811` (7
-blocs) et `digital4web3` (1 bloc) — un résumé « anonyme » servi au troisième est
-attribuable par élimination, d'autant que Brice connaît ses élèves.
+Le premier réflexe (indexer le corpus et interroger à l'affichage) est le mauvais :
+il faudrait embarquer 243 PDF côté serveur, monter un index vectoriel, et payer un
+appel par vue. Or il n'y a que ~36 concepts réels.
 
-Il faut donc un **seuil de k-anonymat** : pas de note tant que moins de *k*
-membres DISTINCTS n'ont contribué sur ce concept. Proposition : **k = 3**, et le
-membre qui regarde ne compte pas dans les 3. Sur la base d'aujourd'hui, cela veut
-dire que **presque aucun concept n'aurait de note** — et c'est le comportement
-correct : la fonctionnalité s'allume d'elle-même quand la base grossit, au lieu de
-mentir tout de suite.
+**On génère une FICHE par concept, une fois, hors ligne, et Brice la valide.**
 
-### 11.3 Le coût, et donc le cache
+- **Génération sur la machine de Brice**, là où le corpus vit, exactement comme
+  l'ontologie du cockpit : un script produit, la base est un **miroir** qu'on
+  régénère (`npm run pousser:ontologie` est le précédent à copier — ne jamais
+  éditer la table à la main).
+- **Table `ConceptFiche`** : nom normalisé de l'étiquette (clé — le vocabulaire est
+  partagé, chaque membre a sa propre ligne `Tag`), définition courte, 1 à 3 tips,
+  **sources** (module, chronique, page du PDF), statut `propose` / `valide` /
+  `rejete`, date. Le statut est repris de `MentoratPlan`, même esprit : l'IA
+  propose, Brice tranche.
+- **Rien ne s'affiche tant que `valide`.** C'est ce qui répond à « sans mentir » :
+  aucune fiche ne part sans avoir été lue par le professeur.
 
-Un appel au modèle à chaque affichage de page serait absurde. Le résumé se calcule
-**une fois par concept**, se stocke, et ne se recalcule que quand la matière a
-bougé (nouveau lien, nouvelle notation).
+### 11.3 L'ordre des sources — à confirmer par Brice
 
-- **Table** `ConceptInsight` : nom normalisé de l'étiquette, résumé, conseils,
-  nombre de membres et d'éléments qui l'ont nourri, date de calcul, empreinte de
-  la matière (pour savoir quand recalculer). Pas de FK vers `Tag` — la clé est le
-  nom, partagé entre membres.
+Proposition, et elle n'est pas neutre pour son positionnement :
+
+1. **La matière AOK d'abord.** Pour ses élèves, dans son produit, sa parole fait
+   foi. Si ICT dit X et que Brice enseigne Y, servir X à l'intérieur de son propre
+   outil le contredirait devant ses élèves.
+2. **La source ICT ensuite**, pour le vocabulaire canonique (le glossaire sert à
+   définir, pas à conseiller).
+3. **Le web en dernier**, et seulement s'il ne contredit pas les deux premiers.
+
+⚠️ À ne pas confondre avec la règle inverse de `D:\CLAUDE.md` (« pour une
+recherche trading de Brice, ne PAS puiser dans le blog AOK en priorité, ça
+fausserait sa lecture de son positionnement ») : celle-là vaut quand **Brice**
+cherche, celle-ci quand on sert **un élève**. Les deux coexistent sans se
+contredire.
+
+**Chaque tip porte sa source.** Une fiche sans provenance est invérifiable, donc
+inacceptable — c'est la règle d'extraction de `D:\CLAUDE.md` appliquée ici.
+
+### 11.4 Ce que la notation collective apporte vraiment
+
+Elle ne fournit aucun contenu. Elle sert à deux choses, et les deux sont des
+agrégats :
+
+- **la priorité** : quels concepts méritent une fiche en premier (ceux que les
+  membres travaillent et notent le plus) ;
+- **l'angle** : un concept qui collecte surtout des **C** appelle un tip
+  « l'erreur fréquente » ; un concept qui collecte des **A** appelle un tip
+  « ce qui le rend propre ». C'est exactement le « piocher dans ce qui marche »
+  demandé, sans qu'aucun contenu d'élève ne circule.
+
+Ces deux usages restent des compteurs. Aucun seuil d'anonymat n'est nécessaire
+pour eux, et **la doctrine de cloisonnement n'a pas besoin d'être rompue** : la
+fiche est la même pour tout le monde, et les compteurs ne nomment personne.
+
+### 11.5 Ce qui reste vrai de l'analyse précédente
+
+- **Ne pas écrire « ce qui marche » à partir des données membres.** 20 annotations
+  sur 5 membres, zéro intersection entre blocs tagués et blocs de trade : la
+  statistique n'existe pas. La fiche affirme depuis le CORPUS, pas depuis la base.
+- **Brice doit pouvoir corriger.** C'est le sens du statut `valide`.
 - **Réutiliser l'infrastructure IA en production** (`ia-prix`, `ia-niveau`,
-  `ia-budget`, journalisation `AiUsage` avec `product: 'etude'`). Ne pas ouvrir un
-  second circuit : le budget, les paliers et le coût par membre sont déjà tenus
-  par celui-là.
-- Recalcul par tâche de fond ou à la demande, jamais dans le rendu de la page.
+  `ia-budget`, `AiUsage` avec `product: 'etude'`) pour la génération. Pas de
+  second circuit.
 
-### 11.4 Le piège pédagogique, et le recadrage qu'il impose
+### 11.6 Ce qui peut s'afficher tout de suite, sans rien construire
 
-Brice a demandé « un résumé de ce qui marche ou ne marche pas ». **Deux raisons de
-ne pas écrire exactement ça :**
+Sous « Va avec », deux choses vraies et sans risque :
+- **combien d'autres membres travaillent ce concept** (un `count` distinct, aucun
+  nom) — « je ne suis pas seul à creuser ça » ;
+- la fiche dès qu'elle existe et qu'elle est validée.
 
-1. **La donnée ne le soutient pas.** Mesuré le 31/08 : 20 annotations en tout sur
-   5 membres, 27 segments de trade avec un résultat, et zéro intersection entre
-   les blocs tagués et les blocs rattachés à un trade. Dire « ce qui marche »
-   demanderait une statistique qui n'existe pas. Ce qui existe, c'est ce que les
-   membres ÉCRIVENT : 2 739 blocs, dont 122 tagués, plus les captures.
-2. **Le risque de propager une erreur.** Si trois membres écrivent la même chose
-   de faux sur un concept, le résumé la sert au quatrième comme un consensus. Dans
-   un produit d'enseignement, c'est exactement l'inverse du but.
+### 11.7 Trois compléments de Brice (31/08), et ce qu'ils impliquent
 
-**Recadrage proposé :** la note dit « **ce que les autres notent sur ce
-concept** », pas « ce qui marche ». Qualitatif assumé, avec le nombre d'éléments
-et de membres affiché — l'élève juge lui-même du poids. Et **Brice doit pouvoir
-lire et corriger un résumé** : il est le professeur, il est le seul à pouvoir
-arrêter une bêtise qui circule. La partie quantitative n'apparaît que si le seuil
-du §11.2 ET celui du lot 2 (10 occurrences pour un pourcentage) sont franchis.
+**a) Pondérer les notations selon l'élève.** Idée : les meilleurs élèves, ou ceux
+qui ont les meilleurs résultats, ou ceux qui documentent le plus, pèsent davantage
+dans la notation d'un concept. Juste sur le fond — un A posé par quelqu'un qui
+sait vaut plus qu'un A posé au hasard.
 
-### 11.5 En attendant
+⚠️ Deux réserves à lever avant de coder :
+- **C'est prématuré au volume actuel.** 20 annotations sur 5 membres. Pondérer,
+  c'est régler finement un signal qui n'existe pas encore ; le résultat serait
+  dominé par le bruit, et invérifiable. À rouvrir quand la notation aura du corps.
+- **Le poids ne doit PAS être inventé ici.** Un classement par membre existe déjà :
+  l'**avatar** du cockpit (`cockpit_membres_avatar`, corrigeable à la main via
+  `cockpit_avatar_manuel`). Mais attention — relevé du 30/08 : sur 255 membres, 3
+  seulement ont une trace d'étude dans le journal, donc **l'avatar s'appuie
+  aujourd'hui surtout sur l'achat et l'ancienneté**. C'est un classement
+  COMMERCIAL, pas une mesure de compétence : l'utiliser tel quel comme poids
+  pédagogique ferait peser le plus gros acheteur, pas le meilleur trader. Il
+  faudra soit une composante « étude » dans l'avatar, soit un poids distinct.
+- Troisième critère cité, « le plus de documentation » : celui-là, lui, est déjà
+  mesurable aujourd'hui (liens, captures, blocs par membre) et ne dépend de rien.
+  C'est le plus honnête des trois pour commencer.
 
-La zone existe dans `ConceptStudy.tsx`, sous « Va avec ». Tant que le seuil n'est
-pas franchi, elle peut afficher ce qui est déjà vrai et sans risque : **combien
-d'autres membres travaillent ce concept**, et rien de plus. C'est utile (« je ne
-suis pas seul à creuser ça »), c'est honnête, et ça ne demande ni IA, ni table, ni
-exception de cloisonnement — seulement un `count` distinct côté serveur.
+**b) Une fiche générée pour le membre qui ouvre son concept.** Tension réelle avec
+le §11.2, et voici la résolution proposée :
+- **la fiche reste PARTAGÉE et validée** — c'est elle qui porte les affirmations,
+  et c'est ce qui rend la validation par Brice possible. Une génération par membre
+  et par vue rendrait la relecture impossible, le coût imprévisible, et « sans
+  mentir » invérifiable ;
+- **ce qui est personnalisé, c'est le CADRAGE** : quel tip remonte en premier,
+  selon les A/B/C que CE membre a posés sur CE concept. Le membre qui collectionne
+  les C sur `macro breaker` voit d'abord le tip « l'erreur fréquente » ; celui qui
+  aligne les A voit « ce qui le rend propre ». Personnalisation réelle, zéro texte
+  neuf à valider, zéro appel au modèle à l'affichage.
+
+**c) Les bases externes, ictindex.io par exemple.** Utile — mais à traiter comme
+une **référence de vérification**, pas comme un corpus à recopier.
+- ⚠️ **Question de droits, à trancher avant tout ingest.** Servir du contenu tiers
+  substantiel à l'intérieur d'un produit payant expose Brice. Le corpus AOK, lui,
+  lui appartient : c'est la source sûre pour le texte SERVI.
+- Usage propre : s'en servir pour **vérifier** qu'une définition ne dit pas de
+  bêtise et que le vocabulaire est le bon, puis écrire la fiche depuis la matière
+  maison. La source citée dans la fiche reste alors la matière maison.
+- Ça ne change rien à l'ordre du §11.3 : AOK d'abord, ICT canonique ensuite, web
+  en dernier et jamais en contradiction avec les deux premiers.
