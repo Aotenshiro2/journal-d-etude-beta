@@ -103,8 +103,11 @@ l'existant. Lot 3 ajoute `Tag.aliases`.
   `CanvasNode.content` par un embed synchronisé) — chantier canvas séparé.
 - Références de blocs `((id))` à la Logseq — le couple wikilink + backlinks suffit
   pour l'usage journal de trading.
-- Requêtes avancées (« blocs [[FVG]] en trade perdant ») — attendre que les données
-  de liens existent ; les filtres du lot 4 en sont la première marche.
+- ~~Requêtes avancées (« blocs [[FVG]] en trade perdant »)~~ → **REMONTÉ DANS LE
+  PÉRIMÈTRE le 31/08/2026, sur demande de Brice** : les stats de résultat par
+  concept sont l'une des trois choses qu'il attend de l'écran. Voir §7 et §8. La
+  raison d'origine (« attendre que les données de liens existent ») reste juste,
+  et c'est précisément ce que §8 traite en priorité.
 - Autocomplete `[[` dans l'extension Chrome.
 
 ## 6. Estimation grossière
@@ -118,3 +121,170 @@ l'existant. Lot 3 ajoute `Tag.aliases`.
 
 Le lot 1 seul apporte déjà de la valeur avec les tags existants, sans rien changer
 à la saisie.
+
+---
+
+# ADDENDUM 31/08/2026 — ce que le 0.2 doit faire, et ce que la base permet
+
+> Cette partie étend la spec plutôt que de créer un fichier : `SPEC-second-cerveau.md`
+> fait déjà autorité sur la page concept. Elle est écrite après la demande de Brice
+> du 31/08 et **après avoir compté la base** — la partie 1-6 ci-dessus a été rédigée
+> le 17/07 sur des hypothèses, pas sur des mesures.
+
+## 7. La demande de Brice, mot pour mot
+
+Permettre à un élève d'**étudier en fonction des concepts, stratégies, étiquettes**
+posés dans l'extension ou dans le journal. L'écran concept doit donner, pour un
+concept donné :
+
+1. **toutes les notes** prises sur ce concept ;
+2. **tous les screenshots** pris pendant les séances de trading où il est en jeu ;
+3. **des stats** sur le résultat d'usage du concept et sur sa notation.
+
+Le point 2 n'était pas dans la spec du 17/07. Le point 3 y était explicitement
+hors périmètre (§5). Les deux entrent maintenant.
+
+## 8. Ce que la base contient VRAIMENT (mesuré le 31/08)
+
+Scripts rejouables : `scripts/inventaire-concepts-0.2.mjs`, `-bis.mjs`,
+`-par-membre.mjs`, `scripts/lister-etiquettes.mjs`.
+
+**Les liens existent, et ils portent déjà des images.** 129 étiquettes, 78 liens
+`NoteTag`, 122 liens `MessageTag` — dont **43 sur des blocs `image` et 11 sur des
+`screenshot`**. Le mécanisme de la galerie fonctionne donc déjà ; il est juste peu
+utilisé (54 captures liées sur ~930 blocs image). 3 étiquettes orphelines
+seulement. Mais le volume par concept est minuscule : le mieux fourni en a 8.
+
+**La taxonomie vient de six membres, pas d'une personne.** `brice.d` porte 52
+étiquettes sur 129 (40 %), `fdb811` 50, `digital4web3` 17, puis 5, 3, 2. **Et deux
+styles d'usage OPPOSÉS coexistent** : `fdb811` tague les blocs et les images (89
+liens bloc, dont 42 captures, contre 4 liens note) ; `brice.d` tague au niveau de
+la note (51 liens note, 26 liens bloc). L'écran doit réunir les deux sources sans
+privilégier l'une — ce que `/concepts/page.tsx` fait déjà par union.
+**Corollaire à ne pas oublier : trois membres actifs ont des notes et ZÉRO
+étiquette** (`cedri98` va jusqu'à poser 3 notations sans jamais taguer). Compter
+sur le tag manuel, c'est ignorer un tiers des membres qui utilisent l'app.
+
+**La chaîne précise vers le résultat est cassée, et pas par hasard.** 72 blocs
+portent un `tradeRef`, 122 blocs sont tagués, **l'intersection est exactement 0**.
+Ce sont deux populations disjointes : on tague les blocs d'explication, on rattache
+au trade les blocs de séance. Donc « ce concept en trade perdant » au niveau du
+bloc est impossible aujourd'hui, et le restera tant que ce nombre ne montera pas.
+
+**Le chemin de repli fonctionne, à petite échelle.** En attribuant le résultat à la
+SÉANCE et non au bloc : 20 concepts sur 129 ont au moins un chiffre. Exemples
+réels : `macro breaker` 6 séances / 1 gain / A1 B1 ; `50:10` 1 gain 2 pertes / A1
+B1 ; `50% DRT` 1 gain 1 BE / C1. C'est vrai et calculable ; ce n'est pas une base
+statistique.
+
+**Un gisement s'ouvre.** `Note.concepts[]` (concepts auto-extraits) n'est rempli
+que sur 1 note / 200 — mais la brique IA de la capture est entrée en production le
+31/08. Ce champ va se remplir tout seul. C'est le carburant des suggestions, et il
+n'existait pas quand la partie 1-6 a été écrite.
+
+**Conclusion : l'écran n'est pas le goulot, la production des liens l'est.** On
+peut dessiner la plus belle page concept possible : avec 54 captures liées sur 930
+et 20 concepts ayant un chiffre, elle sera honnête et vide.
+
+## 9. Les lots du 0.2
+
+### Lot 0 — Classer la taxonomie (préalable, court)
+
+`Tag.category` était vide sur les 129. Sans classement, l'écran de sélection mêle
+concepts ICT, instruments, plateformes, jours de la semaine et bruit de test.
+
+Neuf catégories, posées par `scripts/classer-etiquettes-0.2.mjs` (blanc par
+défaut, `--appliquer` pour écrire) : `concept` 32, `moment` 23, `source` 22,
+`a-trier` 19, `instrument` 9, `activite` 8, `execution` 7, `evenement` 5,
+`mental` 4.
+
+Trois partis pris :
+- **le classement se fait par NOM**, pas par (nom, membre) : deux membres qui
+  écrivent « macro breaker » parlent de la même chose. La catégorie est un
+  vocabulaire partagé, la taxonomie reste privée à chacun ;
+- **on ne fusionne rien.** Les 10 « doublons » apparents appartiennent à des
+  membres différents (`Tag` est unique par `(name, userId)`) : les fusionner
+  détruirait la taxonomie de quelqu'un. Un seul vrai doublon existe, `tp`/`TP`
+  chez `brice.d` ;
+- **`a-trier` est un panier assumé**, pas un fourre-tout d'échec : abréviations
+  indécidables de l'extérieur (`ker`, `qlys`, `blc`, `bb`, `hrlr`, `std`,
+  `shadow`), raccourcis personnels (`race`, `ferrari`, `the futur`), ambiguïtés
+  réelles (`eth` = Ethereum ou Electronic Trading Hours ?) et bruit de test.
+  Les deviner remplirait de bruit le champ censé en retirer.
+
+⚠️ `Tag.category` est un `String?`, **pas un enum** : d'autres catégories
+émergeront avec les élèves (Brice, 31/08). En ajouter une ne demande ni migration
+ni changement de modèle, seulement une ligne dans le script. L'écran ne doit donc
+jamais coder la liste en dur — il affiche les catégories qui ont du contenu.
+
+### Lot 1 — La page concept `/concepts/[tagId]`
+
+Quatre zones, dans cet ordre :
+- **en-tête** : nom, catégorie, récurrence, nombre de séances, et les chiffres du
+  lot 2 ;
+- **galerie de captures** : les blocs `image` et `screenshot` liés au concept, en
+  grille, cliquables en grand (`ImageLightbox` existe), avec séance et date sous
+  chacun. C'est le point 2 de la demande, et la moitié de l'usage du membre le
+  plus assidu ;
+- **références** : les blocs texte groupés par séance, antichronologiques, chacun
+  avec son grade et son trade éventuel. Clic → la note à ce bloc ;
+- **concepts voisins**, cliquables (le calcul de co-occurrence existe déjà dans
+  `/concepts/page.tsx`).
+
+`ConceptsEmergence` : chaque carte devient un lien vers sa page, et les cartes se
+filtrent par catégorie.
+
+### Lot 2 — Les stats d'usage, avec une règle d'honnêteté
+
+Répartition gain / perte / BE, répartition A/B/C, et les causes (technique /
+connaissance / émotionnel — 14 des 20 annotations en portent une).
+
+**Deux règles non négociables, imposées par les mesures du §8 :**
+1. **dire par quel chemin un chiffre est calculé.** « Résultat de la séance où ce
+   concept apparaît » n'est pas « résultat du trade où ce concept était en jeu ».
+   Confondre les deux fabrique une certitude fausse ;
+2. **jamais de pourcentage sous un seuil.** Afficher « 33 % de réussite » sur trois
+   trades installe une croyance sur un concept, ce qui est l'inverse du but de
+   l'écran. En dessous du seuil : les nombres bruts, et rien d'autre.
+
+### Lot 3 — Faire monter les liens (le vrai chantier)
+
+**Demande explicite de Brice du 31/08 : que ça s'ajoute NATURELLEMENT.** « Tous
+les élèves ne pensent pas à mettre des tags, donc une lecture soft de leurs notes
+ou screenshots sera aussi utile pour faire cela sans rajouter une corvée de plus. »
+Les chiffres le confirment : trois membres actifs ne taguent jamais.
+
+- **Lecture douce par l'IA** — la voie principale, pas un complément. Elle propose
+  des liens concept ↔ note / bloc / capture à partir du texte ET des images, en
+  réutilisant l'infrastructure déjà en production (`lib/ia-prix.ts`,
+  `ia-niveau.ts`, `ia-budget.ts`, `capture-prompts.ts`, journalisation `AiUsage`).
+  ⚠️ Ne pas inventer un second circuit IA : le budget, les paliers et le coût par
+  membre sont déjà tenus par celui-là. L'élève **confirme**, il ne saisit pas.
+- **Récolte de `Note.concepts[]`** que la capture IA remplit désormais → « cette
+  note mentionne *dealing range*, la lier ? ».
+- **Tag au moment de la notation** : quand l'élève juge un trade A/B/C, il dit
+  quels concepts étaient en jeu. C'est là — et seulement là — que les deux
+  populations disjointes du §8 se rejoignent, et donc que les stats de résultat
+  deviennent exactes plutôt qu'approchées. Le geste existe déjà (le rituel de
+  jugement) : les stats deviennent un produit dérivé, pas une corvée de plus.
+- **Modèle** : un lien explicite concept ↔ segment de trade est nécessaire (rien ne
+  relie les deux aujourd'hui). Table à part, **sans clé étrangère sur le segment** —
+  `Note.trades` est du JSON, même convention qu'`Annotation.tradeRef`.
+
+### Lot 4 — Le graphe global
+
+Inchangé (§3, lot 4). Après, et il réutilisera la grammaire des traits posée en
+0.1.7 (`CanvasEdge.tsx`) : appartenance, filiation, association.
+
+## 10. Ordre et dépendances
+
+| Lot | Dépend de | Pourquoi cet ordre |
+|---|---|---|
+| 0 Classer | rien | sans lui l'écran de sélection est illisible ; c'est court |
+| 1 La page | 0 (pour le filtre) | marche avec les données actuelles, sera maigre |
+| 2 Les stats | 1 | les chiffres se lisent dans l'en-tête de la page |
+| 3 Les liens | 1 (l'UI de confirmation) | c'est lui qui remplit tout le reste |
+| 4 Le graphe | 3 | plus de liens = graphe qui vaut quelque chose |
+
+Le lot 3 est celui qui décide si le 0.2 sert à quelque chose. Les lots 1 et 2 sont
+la vitrine ; le lot 3 est le stock.
