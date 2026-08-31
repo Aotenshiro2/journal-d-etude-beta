@@ -48,6 +48,9 @@ export type DonneesConcept = {
     seanceId: string; seanceTitre: string; date: string | null
   }[]
   voisins: { id: string; name: string; color: string; partagees: number }[]
+  /** La seule donnée inter-membres de l'app, et elle ne contient que des NOMBRES.
+   *  `membres` est null sous le seuil, `notation` aussi — voir la page serveur. */
+  collectif: { membres: number | null; notation: { A: number; B: number; C: number } | null }
   stats: {
     seances: number; blocs: number; captures: number
     resultats: { gain: number; perte: number; be: number }
@@ -118,7 +121,7 @@ function Repartition({ titre, chemin, parts, couleurs }: {
 }
 
 export default function ConceptStudy({ donnees }: { donnees: DonneesConcept }) {
-  const { tag, seances, captures, voisins, stats } = donnees
+  const { tag, seances, captures, voisins, stats, collectif } = donnees
   const [agrandie, setAgrandie] = useState<string | null>(null)
 
   const seancesAvecTexte = seances.filter(s => s.blocsTexte.length > 0)
@@ -290,6 +293,41 @@ export default function ConceptStudy({ donnees }: { donnees: DonneesConcept }) {
                 </Link>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* ── Dans la base ────────────────────────────────────────────────
+            Première marche du lot 5 (SPEC §11.10) : ce que la base entière sait
+            de ce concept, en NOMBRES seulement. Aucun nom, aucun extrait, aucune
+            capture d'un autre membre — la fiche rédigée viendra après, et c'est
+            elle qui portera les conseils. Ici on ne dit que « tu n'es pas seul ». */}
+        {collectif.membres !== null && (
+          <div className="mt-10">
+            <p className="text-[11px] uppercase tracking-wide mb-2" style={{ color: 'var(--node-meta)' }}>Dans la base</p>
+            <Tuile>
+              <p className="text-[13px]" style={{ color: 'var(--node-preview)' }}>
+                <strong style={{ color: 'var(--node-title)' }}>{collectif.membres} membres</strong> travaillent ce concept.
+              </p>
+              {collectif.notation ? (
+                <div className="mt-3">
+                  <p className="text-[11px] mb-2" style={{ color: 'var(--node-meta)' }}>
+                    Notation posée par l&apos;ensemble des membres sur les séances où ce concept apparaît :
+                  </p>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1">
+                    {(['A', 'B', 'C'] as const).map(g => (
+                      <span key={g} className="text-[12px] flex items-center gap-1.5" style={{ color: 'var(--node-preview)' }}>
+                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: COULEUR_GRADE[g] }} />
+                        {g} <strong style={{ color: 'var(--node-title)' }}>{collectif.notation![g]}</strong>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <p className="text-[11px] mt-2" style={{ color: 'var(--node-meta)', opacity: 0.8 }}>
+                  Pas encore assez de monde dessus pour qu&apos;une tendance collective veuille dire quelque chose.
+                </p>
+              )}
+            </Tuile>
           </div>
         )}
       </div>

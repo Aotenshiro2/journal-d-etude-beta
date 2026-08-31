@@ -155,7 +155,53 @@ export default async function PageConcept({ params }: { params: Promise<{ tagId:
     .sort((a, b) => b.partagees - a.partagees)
     .slice(0, 8)
 
+  // ── « Dans la base » — la seule lecture inter-membres de l'app ───────────
+  // ⚠️ EXCEPTION DÉLIBÉRÉE à la doctrine « tout résolveur borné au userId de la
+  // session ». Elle est tenue dans un cadre strict, à ne pas élargir sans y
+  // repenser : il ne remonte d'ici que des NOMBRES. Jamais un nom, jamais un
+  // titre de note, jamais un verbatim, jamais un userId. Rien de ce qui sort de
+  // ce bloc ne permet de savoir QUI a écrit quoi.
+  //
+  // Deux seuils, et le premier argument n'est pas la vie privée mais la QUALITÉ :
+  // une note posée par une seule personne n'est pas une tendance, c'est une
+  // anecdote — la servir comme un enseignement transformerait la mauvaise journée
+  // de quelqu'un en vérité générale. Que ça protège aussi l'anonymat vient après.
+  const SEUIL_MEMBRES = 2   // en dessous, on ne dit même pas combien ils sont
+  const SEUIL_NOTATION = 3  // en dessous, pas de répartition A/B/C collective
+
+  // Le vocabulaire est partagé, la taxonomie ne l'est pas : chaque membre a sa
+  // propre ligne `Tag`. La clé de rapprochement est donc le NOM, insensible à la
+  // casse (`tp` et `TP` coexistaient encore ce matin).
+  const memeConcept = await prisma.tag.findMany({
+    where: { name: { equals: tag.name, mode: 'insensitive' } },
+    select: {
+      userId: true,
+      notes: { select: { noteId: true } },
+      messages: { select: { message: { select: { noteId: true } } } },
+    },
+  })
+  const membres = new Set(memeConcept.map(t => t.userId))
+  let notationCollective: { A: number; B: number; C: number } | null = null
+  if (membres.size >= SEUIL_NOTATION) {
+    const seancesCollectives = new Set<string>()
+    for (const t of memeConcept) {
+      for (const n of t.notes) seancesCollectives.add(n.noteId)
+      for (const m of t.messages) seancesCollectives.add(m.message.noteId)
+    }
+    const annosCollectives = await prisma.annotation.findMany({
+      where: { noteId: { in: [...seancesCollectives] }, note: { deletedAt: null } },
+      select: { grade: true }, // ← rien d'autre ne doit jamais être sélectionné ici
+    })
+    const c = { A: 0, B: 0, C: 0 } as Record<string, number>
+    for (const a of annosCollectives) if (c[a.grade] !== undefined) c[a.grade]++
+    notationCollective = { A: c.A, B: c.B, C: c.C }
+  }
+
   const donnees: DonneesConcept = {
+    collectif: {
+      membres: membres.size >= SEUIL_MEMBRES ? membres.size : null,
+      notation: notationCollective,
+    },
     tag: { id: tag.id, name: tag.name, color: tag.color, category: tag.category },
     seances,
     captures,

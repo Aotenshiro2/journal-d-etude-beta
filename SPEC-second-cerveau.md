@@ -340,8 +340,9 @@ appel par vue. Or il n'y a que ~36 concepts réels.
   **sources** (module, chronique, page du PDF), statut `propose` / `valide` /
   `rejete`, date. Le statut est repris de `MentoratPlan`, même esprit : l'IA
   propose, Brice tranche.
-- **Rien ne s'affiche tant que `valide`.** C'est ce qui répond à « sans mentir » :
-  aucune fiche ne part sans avoir été lue par le professeur.
+- ~~Rien ne s'affiche tant que `valide`.~~ **Assoupli au §11.8** : Brice veut que
+  les fiches se génèrent en AUTO à mesure que les membres alimentent la base. La
+  validation devient une correction qui prime, pas un péage.
 
 ### 11.3 L'ordre des sources — à confirmer par Brice
 
@@ -433,6 +434,74 @@ le §11.2, et voici la résolution proposée :
 
 **c) Les bases externes, ictindex.io par exemple.** Utile — mais à traiter comme
 une **référence de vérification**, pas comme un corpus à recopier.
+
+### 11.8 Pourquoi le corpus NE SUFFIT PAS — recadrage de Brice (31/08)
+
+> *« La raison pour laquelle je ne voulais pas que ça vienne uniquement du corpus,
+> c'est que dans un cours, dans un corpus, tout est toujours parfait, et pas
+> souvent à côté des frustrations ou des blocages réels que rencontrent les
+> élèves. »*
+
+C'est le point qui manquait, et il corrige la conception du §11.2. Le corpus
+montre **le geste juste** ; il ne montre jamais **l'endroit où l'élève se cogne**.
+Une fiche uniquement corpus serait exacte et inutile. C'est d'ailleurs la règle
+d'extraction de `D:\CLAUDE.md` appliquée au produit : le concept seul ne suffit
+pas, il faut le cas travaillé et ce qui coince.
+
+**Donc DEUX couches, et elles ne jouent pas le même rôle :**
+
+| couche | source | ce qu'elle dit | où elle se génère |
+|---|---|---|---|
+| **le geste juste** | corpus AOK + ICT | la définition, comment on s'en sert | sur la machine de Brice (le corpus y vit) — change rarement |
+| **la friction** | notes et notations des membres | où ça casse en vrai, ce qui revient | côté serveur, depuis Postgres — vit et se rafraîchit tout seul |
+
+Cette séparation résout aussi l'exigence « génération automatique » : la couche
+corpus est stable et demande Brice ; la couche friction est vivante et doit être
+automatique. Ce sont deux rythmes, pas un seul.
+
+**Le seuil, reformulé — et c'est un meilleur argument que la vie privée.** Une
+friction rapportée par une seule personne n'est pas un motif, c'est une anecdote.
+La servir comme un enseignement, c'est transformer la mauvaise journée de
+quelqu'un en vérité générale. Le seuil protège donc d'abord la QUALITÉ ; que ça
+protège aussi l'anonymat est un bénéfice second.
+
+**Ce qui reste par membre, sans aucun seuil :** ses PROPRES frictions, tirées de
+ses propres notes. C'est sa donnée, aucune règle ne s'y oppose, et c'est le plus
+utile des deux. La page peut donc dire « toi, tu butes sur X » et « plusieurs
+butent sur Y », sans jamais dire qui.
+
+### 11.9 Génération automatique — et la correction qui prime
+
+Brice (31/08) : *« je veux que les fiches se génèrent en auto à mesure que les
+membres les renseignent dans la base de données. »* La validation préalable du
+§11.2 est donc abandonnée : elle ferait de lui un péage.
+
+**Patron à copier, il existe déjà dans la maison** : `cockpit_avatar_manuel`.
+« L'avatar calculé est une DÉDUCTION : quelqu'un qui connaît la personne doit
+pouvoir la corriger. La vue fait primer le manuel sur le calcul. » Même forme ici :
+
+- la fiche se (re)génère toute seule quand la matière du concept a bougé
+  (empreinte : nombre de liens, de notations, dernière modification) ;
+- une **correction de Brice prime** sur le calcul et **survit à la régénération** —
+  elle n'est jamais écrasée ;
+- il n'a donc rien à faire pour que ça tourne, et tout pouvoir quand il veut
+  reprendre la main. C'est « sans mentir » sans le péage.
+
+### 11.10 Par où commencer — léger, et dans cet ordre
+
+Brice, 31/08 : *« on peut faire quelque chose pour commencer mais ne nous
+encombrons pas d'une tâche lourde. »*
+
+1. **Maintenant, zéro IA et zéro table** : sous « Va avec », un bloc « Dans la
+   base » — combien de membres travaillent ce concept, et la répartition A/B/C
+   collective. C'est déjà « piocher dans ce qui marche », dans sa forme la plus
+   brute et la plus honnête. Un `count` et une agrégation SQL.
+2. **Ensuite, la couche FRICTION** (pas la couche corpus) : elle vit déjà dans
+   Postgres, donc pas d'ingestion à construire, et c'est celle qui manque au
+   corpus. Une génération par concept, une table, la correction qui prime.
+3. **En dernier, la couche corpus** : c'est elle qui demande une chaîne
+   d'extraction sur 243 PDF. La plus lourde, et la moins urgente puisque le
+   corpus, lui, est déjà accessible à l'élève par la formation.
 - ⚠️ **Question de droits, à trancher avant tout ingest.** Servir du contenu tiers
   substantiel à l'intérieur d'un produit payant expose Brice. Le corpus AOK, lui,
   lui appartient : c'est la source sûre pour le texte SERVI.
