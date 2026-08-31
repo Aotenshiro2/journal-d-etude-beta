@@ -1,11 +1,13 @@
 # ✅ TODO — Journal d'Études
 <!-- ontologie: id=ch-todo-journal; statut=actif; concerne=journal,support-ia -->
 
-## ✅ Brique IA de la capture — CODÉE, ATTEND LA MIGRATION (30/08/2026)
+## ✅ Brique IA de la capture — EN PRODUCTION (31/08/2026)
 
-Backend de la capture intelligente 1.8.0 de l'extension (détail complet dans
-`apps/carnet-du-trader-extension/TODO.md`). **Rien n'est poussé, rien n'est
-appliqué en base.**
+Backend de la capture intelligente 1.8.1 de l'extension (détail complet dans
+`apps/carnet-du-trader-extension/TODO.md`). **Poussé, déployé sur Vercel,
+migration appliquée.** Les quatre routes répondent en production :
+`/api/capture`, `/api/capture/analyse`, `/api/capture/acces` et
+`/api/mentorat/chat`.
 
 **Routes** — `POST /api/capture` (secrétaire : extrait et trie, aucun jugement,
 tous les paliers, Haiku 4.5), `POST /api/capture/analyse` (étude : relit la note
