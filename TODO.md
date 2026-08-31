@@ -84,7 +84,62 @@ une version mineure ; patch = une tâche finie et visible à l'écran).
 
 ---
 
-## 🔨 CHANTIER EN COURS — 0.1.x « Étudier mes notes »
+## 🔨 CHANTIER EN COURS — 0.2 « Observer les concepts » (ouvert le 31/08/2026)
+
+Plan complet et mesures : **`SPEC-second-cerveau.md` §7 à §11**. Le 0.1 est clos.
+
+**Fait :**
+- [x] **Lot 0 — la taxonomie classée.** `Tag.category` était vide sur les 129
+      étiquettes des 6 membres qui taguent. Neuf catégories, posées par
+      `scripts/classer-etiquettes-0.2.mjs` : concept 36, moment 24, source 22,
+      a-trier 13, instrument 10, activite 8, execution 6, evenement 5, mental 4.
+      Brice a décodé 6 des 19 indécidables (hrlr, bb, std, std pré market →
+      concept ; blc → instrument ; eth → moment). `tp`/`TP` fusionnées
+      (`scripts/fusionner-tp.mjs`) — seul vrai doublon, les 9 autres appartenaient
+      à des membres différents.
+- [x] **Lot 1 — la page `/concepts/[tagId]`.** En-tête, galerie de captures,
+      références par séance, concepts voisins. Réunit `NoteTag` ET `MessageTag` :
+      les deux membres qui taguent le plus ont des habitudes opposées (89 blocs /
+      4 notes contre 51 notes / 26 blocs), ne lire qu'une table viderait l'écran
+      pour l'un des deux. `/concepts` filtre par catégorie, lue en base.
+- [x] **Lot 2 — les chiffres, avec la règle d'honnêteté.** On dit par quel chemin
+      un chiffre est calculé, et aucun pourcentage sous 10 occurrences.
+- [x] **Lot 5, première marche — « Dans la base ».** Seule lecture inter-membres
+      de l'app : des NOMBRES uniquement. Seuils 2 membres / 3 pour la notation.
+- [x] **Lot 5, la table `ConceptFiche`** (migration `20260901170000`, appliquée,
+      RLS vérifiée) + affichage + 2 fiches sourcées (`amd`, `mss`).
+
+**⚠️ BLOQUÉ, ET ÇA DEMANDE UNE COMMANDE DE BRICE :**
+La couche corpus ne peut pas aller plus loin. Le corpus TEXTE accessible ne
+couvre presque pas les concepts tagués — le `Glossaire V3` est un glossaire
+DÉBUTANT (0 sur macro breaker, ffvg, nro, ote, hrlr, quadrants, modèle 2022) et
+les chroniques n'en portent que quelques-uns (fvg 8, amd 9, mss 8). La matière
+avancée est dans les **147 PDF** de la formation et les ~20 PDF ICT, illisibles
+sans `pdftotext`. Le script est prêt et refuse proprement :
+
+```
+sudo apt install poppler-utils
+wsl.exe -e /home/aotenshiro/Projects/Aoknowledge/apps/journal-d-etude/scripts/extraire-corpus.sh
+```
+
+Second blocage, moins urgent : **aucune clé Anthropic en local** (`vercel env
+pull` vide les clés sensibles), donc aucune génération automatisée depuis la
+machine. Les 2 fiches livrées ont été rédigées à la lecture du corpus, sourcées
+tip par tip — c'est ce que veut dire « sans mentir ».
+
+**Reste :**
+- [ ] **Lot 3 — faire monter les liens** (la lecture douce par l'IA). C'est lui
+      qui décide si le 0.2 sert à quelque chose : 54 captures liées sur ~930, et
+      3 membres actifs ne taguent jamais.
+- [ ] **Lot 5, couche friction** : elle vit déjà dans Postgres, donc aucune
+      ingestion à construire — à faire AVANT la couche corpus, qui est bloquée.
+- [ ] **Lot 4 — le graphe global**, en dernier.
+- [ ] Déplacer le curseur « ← EN COURS » de `ROADMAP.md`, qui pointe encore sur
+      0.1.x.
+
+---
+
+## ✅ CHANTIER CLOS — 0.1.x « Étudier mes notes »
 
 Objectif : le poste de travail note devient exploitable — « je le montre à un
 élève sans m'excuser ». Le panneau de gauche est LA surface de travail ; le
