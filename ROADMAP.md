@@ -57,8 +57,11 @@ journal est la première brique ; l'intégration écosystème vient après la 1.
 
 ## Documents liés
 
-- `TODO.md` — le chantier en cours (0.1.x) et les tâches
-- `SPEC-second-cerveau.md` — backlinks à la Logseq (lot 2 → 0.1.4, lot 1 → 0.2, lots 3-4 → 0.2+)
+- `TODO.md` — le chantier en cours (0.2.x) et les tâches
+- `SPEC-second-cerveau.md` — la page concept et le second cerveau. §1-6 = la spec
+  d'origine (17/07, écrite sur hypothèses) ; **§7-11 = le plan du 0.2, écrit après
+  avoir compté la base le 31/08**. En cas de contradiction entre les deux, §7-11
+  fait foi : lui seul repose sur des mesures.
 - `apps/carnet-du-trader-extension/TODO.md` — côté extension (Edgyx, mode mentorat, doctrine)
 
 ---
