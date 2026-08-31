@@ -271,6 +271,36 @@ attendant.
     `D:\6_Societe\Pilotage\Data-Performance\COCKPIT-ROADMAP.md` (item 1).
   - Piège connu : `auth.users.role` reste `authenticated`, le rôle métier
     vit dans `profiles.role`.
+- **MODE IA — la carte de l'accueil mappée automatiquement** (idée de Brice,
+  31/08/2026, à consigner et non à ouvrir). L'IA lit les notes de l'élève et
+  PROPOSE une carte sur le **premier canvas, celui de l'accueil** : des groupes de
+  notes qui vont ensemble, des nœuds-concept, et des traits entre les séances qui
+  se répondent. L'élève arrive devant une carte déjà dégrossie au lieu d'une
+  grille de cartes à ranger à la main.
+  **⚠️ LA FRONTIÈRE, POSÉE PAR BRICE ET À NE PAS FRANCHIR : la RELECTURE reste un
+  geste MANUEL.** L'IA ne pré-organise pas la note retravaillée ni la carte de
+  relecture. C'est cohérent avec toute la doctrine du journal : la réorganisation
+  est l'endroit où la rétention se joue (« relis ta réorganisation — c'est là que
+  la rétention se joue », en pied de la carte de relecture). Une IA qui range à la
+  place de l'élève lui retire précisément l'exercice. L'accueil, lui, n'est pas un
+  exercice : c'est un plan de travail, et l'aider à le dresser ne coûte rien à
+  l'apprentissage.
+  Quatre points à tenir le jour où on l'ouvre :
+  - **PROPOSER, jamais écraser.** Même règle que le sync des collections (« upsert
+    ADDITIF des membres — on n'enlève jamais automatiquement ») : la proposition
+    ne doit pas défaire un rangement fait à la main. Précédent de forme utile :
+    `MentoratPlan` (statut `proposed` → `approved`/`rejected`).
+  - **Un seul moteur, pas deux.** C'est le même « lecture douce des notes par
+    l'IA » que le lot 3 du 0.2 (`SPEC-second-cerveau.md` §9), qui produit des
+    liens concept ↔ note/bloc/capture. Ici on en produit en plus un ARRANGEMENT
+    SPATIAL. À bâtir comme une sortie supplémentaire du même moteur, sur
+    l'infrastructure IA déjà en production (`ia-prix`, `ia-niveau`, `ia-budget`,
+    `AiUsage`) — pas un second circuit.
+  - **La doctrine « note d'origine » n'est pas en cause** : l'accueil ne modifie
+    que des `CanvasNode` (positions, groupes, liens), pas le contenu des notes.
+  - **La grammaire des traits du 0.1.7 s'applique telle quelle** : un trait proposé
+    entre deux notes est une *association*, un trait vers un concept une
+    *appartenance* (`CanvasEdge.tsx`). Rien à redessiner.
 - **Pont Edgyx** : événementiel, en attente du retour de Geoffrey (dossier
   envoyé). Hors numérotation — extension d'abord, journal peut-être ensuite.
 - `/market` est orphelin (aucun lien n'y mène) — supprimer si « Observer le
