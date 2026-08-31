@@ -614,7 +614,7 @@ Découpage (ordre indicatif, le 0.1 ne ferme qu'à maturité) :
         impossible (le drop de note vient d'un drag & drop HTML5). Piste
         évoquée : un bouton « Placer sur la carte » sur la card de `/notes`, qui
         renvoie à l'accueil avec la note armée.
-  - 📌 **DÉCISION Brice 30/08/2026 — ces deux suites mobiles sortent du 0.1.7 et
+  - 📌 **DÉCISION Brice 31/08/2026 — ces deux suites mobiles sortent du 0.1.7 et
         sont reportées à JUSTE AVANT LA 1.0.** Raison : elles touchent au module
         (doctrine note d'origine, gestes de dépôt) et arbitrer maintenant
         freinerait le dev. Elles ne bloquent donc plus le passage au 0.2.
@@ -629,7 +629,7 @@ haut (limite de la carte à mi-chemin entre deux concepts = résolue par les
 liens du 0.1.6, pas par la boîte).
 
 ---
-**Dernière mise à jour :** 30 août 2026
+**Dernière mise à jour :** 31 août 2026
 **Où on en est :** la file pré-0.1.7 est **VIDE** (onboarding des deux côtés,
 connexion comptes AOK, masterclass requalifiée, canvas mobile — tout livré fin
 juillet). **Chantier en cours : 0.1.7, la passe esthétique**, entamée du 26/07
@@ -638,8 +638,8 @@ au 01/08 dans sa conversation dédiée :
 - actions de groupe **sorties de l'en-tête** vers une barre flottante sous le
   groupe (variante 6 du labo, plein calibré par thème — commit `3b5a010`,
   survol au bureau / sélection au téléphone).
-**Reste pour clore la 0.1.7 (arrêté avec Brice le 30/08) :**
-- [x] ✅ **La grammaire des traits — LIVRÉE le 30/08/2026** (commit `56d9abf`),
+**Reste pour clore la 0.1.7 (arrêté avec Brice le 31/08) :**
+- [x] ✅ **La grammaire des traits — LIVRÉE le 31/08/2026** (commit `56d9abf`),
   variante F du second tour du labo. Trois types qui se **déduisent** de ce que
   le trait relie, donc sans migration, sans sélecteur et sans rien demander à
   l'élève : *appartenance* (une extrémité est un concept → couleur DU concept,

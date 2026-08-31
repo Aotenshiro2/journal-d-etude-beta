@@ -10,7 +10,7 @@
    D'où cette dérivation : la couleur se CALCULE depuis le nom. `#FVG` tire la
    même teinte sur tous les écrans, à toutes les sessions, sans rien stocker,
    sans migration, sans sélecteur à construire et sans 126 concepts à peindre à
-   la main. Variante F du labo `/labo-traits`, choisie par Brice le 30/08/2026.
+   la main. Variante F du labo `/labo-traits`, choisie par Brice le 31/08/2026.
 
    La couleur stockée reste prioritaire si elle a été VOULUE (différente du
    défaut) : le jour où un sélecteur existera, il gagnera sans qu'on retouche ce

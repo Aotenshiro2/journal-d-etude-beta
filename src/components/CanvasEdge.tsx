@@ -14,7 +14,7 @@
    rien ne coûte — `avecSurvol` renvoie la liste inchangée tant qu'aucune carte
    n'est survolée.
 
-   ── La GRAMMAIRE (tranchée le 30/08, second tour du labo, variante F) ────────
+   ── La GRAMMAIRE (tranchée le 31/08, second tour du labo, variante F) ────────
    Jusqu'ici tous les traits se rendaient pareil : rien ne distinguait « cette
    note porte ce concept » de « ceci découle de cela ». C'est pourtant la
    distinction dont le second cerveau a besoin pour exister à l'écran, et le

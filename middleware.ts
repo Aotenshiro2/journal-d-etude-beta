@@ -31,9 +31,10 @@ export async function middleware(request: NextRequest) {
   // Public routes. NB : '/' est public en exact-match uniquement (surtout PAS via
   // startsWith, sinon toute l'app deviendrait publique) — l'accueil anonyme affiche
   // la landing, et page.tsx branche vers l'app dès qu'un user est présent.
-  // '/labo-boutons' et '/labo-traits' : pages JETABLES de comparaison visuelle
-  // (0.1.7). Aucune donnée réelle. À retirer d'ici en même temps que la page.
-  const publicPaths = ['/auth', '/api/health', '/guide', '/labo-boutons', '/labo-traits']
+  // '/labo-boutons', '/labo-traits' et '/labo-relecture' : pages JETABLES de
+  // comparaison visuelle (0.1.7). Aucune donnée réelle — le labo de relecture
+  // tourne sur des verdicts inventés. À retirer d'ici en même temps que les pages.
+  const publicPaths = ['/auth', '/api/health', '/guide', '/labo-boutons', '/labo-traits', '/labo-relecture']
   const isPublic = pathname === '/' || publicPaths.some(p => pathname.startsWith(p))
   if (isPublic) return supabaseResponse
 
