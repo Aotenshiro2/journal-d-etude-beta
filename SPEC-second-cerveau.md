@@ -288,3 +288,88 @@ Inchangé (§3, lot 4). Après, et il réutilisera la grammaire des traits posé
 
 Le lot 3 est celui qui décide si le 0.2 sert à quelque chose. Les lots 1 et 2 sont
 la vitrine ; le lot 3 est le stock.
+
+## 11. « Ce que les traders disent du concept » — lot 5, à arbitrer avant de coder
+
+**Demande de Brice, 31/08/2026**, en lisant la page du lot 1 : sous « Va avec »,
+une note qui se sert de **toute la base** pour résumer ce qui marche ou ne marche
+pas sur ce concept, **sans dire de qui vient l'information**, et qui donne un ou
+deux conseils à l'élève en train de documenter ce concept pour lui.
+
+C'est la première fonctionnalité du journal qui traverse la frontière entre
+membres. Elle est réalisable, elle a de la valeur — c'est même le seul endroit où
+une petite base devient un avantage collectif — mais elle demande trois décisions
+explicites, et une quatrième qui est un piège pédagogique.
+
+### 11.1 Elle rompt la doctrine de cloisonnement, et il faut l'écrire
+
+La règle en vigueur (TODO, « Doctrine sécurité », 29/08) : « tout résolveur
+journal est borné au userId de la session ». Cette note-ci lit les données des
+autres. C'est donc une **exception délibérée**, à tenir dans un cadre strict :
+
+- **serveur uniquement.** Aucune ligne d'un autre membre ne descend jamais dans le
+  navigateur. Ce qui descend est un TEXTE agrégé, écrit par le modèle.
+- **agrégat seulement.** Jamais de verbatim, jamais un titre de note, jamais un
+  nom, jamais une capture d'un autre membre. Un verbatim est identifiant.
+- **le concept est la clé, pas le membre.** L'agrégation se fait sur le NOM
+  normalisé de l'étiquette : chaque membre a sa propre ligne `Tag`, le vocabulaire
+  partagé est le nom.
+
+### 11.2 Le seuil d'anonymat — LA décision à prendre
+
+⚠️ **Avec le volume actuel, « anonyme » serait faux.** Six membres taguent en
+tout. Si deux d'entre eux portent `macro breaker` — c'est le cas : `fdb811` (7
+blocs) et `digital4web3` (1 bloc) — un résumé « anonyme » servi au troisième est
+attribuable par élimination, d'autant que Brice connaît ses élèves.
+
+Il faut donc un **seuil de k-anonymat** : pas de note tant que moins de *k*
+membres DISTINCTS n'ont contribué sur ce concept. Proposition : **k = 3**, et le
+membre qui regarde ne compte pas dans les 3. Sur la base d'aujourd'hui, cela veut
+dire que **presque aucun concept n'aurait de note** — et c'est le comportement
+correct : la fonctionnalité s'allume d'elle-même quand la base grossit, au lieu de
+mentir tout de suite.
+
+### 11.3 Le coût, et donc le cache
+
+Un appel au modèle à chaque affichage de page serait absurde. Le résumé se calcule
+**une fois par concept**, se stocke, et ne se recalcule que quand la matière a
+bougé (nouveau lien, nouvelle notation).
+
+- **Table** `ConceptInsight` : nom normalisé de l'étiquette, résumé, conseils,
+  nombre de membres et d'éléments qui l'ont nourri, date de calcul, empreinte de
+  la matière (pour savoir quand recalculer). Pas de FK vers `Tag` — la clé est le
+  nom, partagé entre membres.
+- **Réutiliser l'infrastructure IA en production** (`ia-prix`, `ia-niveau`,
+  `ia-budget`, journalisation `AiUsage` avec `product: 'etude'`). Ne pas ouvrir un
+  second circuit : le budget, les paliers et le coût par membre sont déjà tenus
+  par celui-là.
+- Recalcul par tâche de fond ou à la demande, jamais dans le rendu de la page.
+
+### 11.4 Le piège pédagogique, et le recadrage qu'il impose
+
+Brice a demandé « un résumé de ce qui marche ou ne marche pas ». **Deux raisons de
+ne pas écrire exactement ça :**
+
+1. **La donnée ne le soutient pas.** Mesuré le 31/08 : 20 annotations en tout sur
+   5 membres, 27 segments de trade avec un résultat, et zéro intersection entre
+   les blocs tagués et les blocs rattachés à un trade. Dire « ce qui marche »
+   demanderait une statistique qui n'existe pas. Ce qui existe, c'est ce que les
+   membres ÉCRIVENT : 2 739 blocs, dont 122 tagués, plus les captures.
+2. **Le risque de propager une erreur.** Si trois membres écrivent la même chose
+   de faux sur un concept, le résumé la sert au quatrième comme un consensus. Dans
+   un produit d'enseignement, c'est exactement l'inverse du but.
+
+**Recadrage proposé :** la note dit « **ce que les autres notent sur ce
+concept** », pas « ce qui marche ». Qualitatif assumé, avec le nombre d'éléments
+et de membres affiché — l'élève juge lui-même du poids. Et **Brice doit pouvoir
+lire et corriger un résumé** : il est le professeur, il est le seul à pouvoir
+arrêter une bêtise qui circule. La partie quantitative n'apparaît que si le seuil
+du §11.2 ET celui du lot 2 (10 occurrences pour un pourcentage) sont franchis.
+
+### 11.5 En attendant
+
+La zone existe dans `ConceptStudy.tsx`, sous « Va avec ». Tant que le seuil n'est
+pas franchi, elle peut afficher ce qui est déjà vrai et sans risque : **combien
+d'autres membres travaillent ce concept**, et rien de plus. C'est utile (« je ne
+suis pas seul à creuser ça »), c'est honnête, et ça ne demande ni IA, ni table, ni
+exception de cloisonnement — seulement un `count` distinct côté serveur.

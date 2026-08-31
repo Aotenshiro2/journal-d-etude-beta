@@ -47,6 +47,13 @@ const CLASSEMENT = {
   'consolidation sur side of liquidity': 'concept', '50% drt': 'concept', '50:10': 'concept',
   'range': 'concept', 'fibo': 'concept', 'fibonacci': 'concept', 'htf': 'concept',
   'contre tendance': 'concept', 'bullish': 'concept', 'short': 'concept', 'no setup': 'concept',
+  // Décodées par Brice le 31/08 — elles étaient dans `a-trier` faute de pouvoir
+  // les lire de l'extérieur. C'est la raison d'être du panier : on demande, on ne
+  // devine pas.
+  'hrlr': 'concept',            // high liquidity run / low liquidity run
+  'bb': 'concept',              // breaker block
+  'std': 'concept',             // standard — standard deviation
+  'std pré market': 'concept',  // standard deviation en pré-market
 
   // ── moment : quand. Macros, pré-market, unités de temps, jours. ────────────
   'macro': 'moment', 'macro 10h20': 'moment', 'macro 10h20 10h40': 'moment',
@@ -55,10 +62,15 @@ const CLASSEMENT = {
   '1m': 'moment', '15m': 'moment', '1h': 'moment', '4h': 'moment', 'd': 'moment',
   'daily': 'moment', 'w': 'moment', 'lundi': 'moment', 'mardi': 'moment',
   'vendredi': 'moment', 'days of week': 'moment', 'rth': 'moment',
+  // Tranché par Brice le 31/08 : Electronic Trading Hours, pas Ethereum. Le
+  // membre qui l'a posée a aussi `rth`, `nyse` et `cme`, ce qui allait dans ce
+  // sens — mais l'ambiguïté valait d'être posée plutôt que devinée.
+  'eth': 'moment',
 
   // ── instrument : sur quoi. ────────────────────────────────────────────────
   'nq': 'instrument', 'nq1!': 'instrument', 'mnq': 'instrument', 'mnq1!': 'instrument',
   'mes1!': 'instrument', 'es': 'instrument', 'xauusd': 'instrument', 'spcx': 'instrument',
+  'blc': 'instrument', // une action (ticker), décodée par Brice le 31/08
 
   // ── evenement : les rendez-vous macro-économiques. ────────────────────────
   'nfp': 'evenement', 'ppi': 'evenement', 'veille cpi': 'evenement',
@@ -84,11 +96,13 @@ const CLASSEMENT = {
 
   // ── a-trier : ce que je ne peux PAS décider de l'extérieur. ───────────────
   // Abréviations indécidables + raccourcis personnels + bruit de test.
-  // Brice tranche ; en attendant elles restent visibles mais rangées à part.
-  'ker': 'a-trier', 'qlys': 'a-trier', 'blc': 'a-trier', 'bb': 'a-trier',
-  'hrlr': 'a-trier', 'std': 'a-trier', 'std pré market': 'a-trier', 'shadow': 'a-trier',
+  // Brice a décodé 6 des 19 le 31/08 (hrlr, bb, std, std pré market → concept ;
+  // blc → instrument ; eth → moment) : elles ont rejoint leur catégorie plus
+  // haut. Le panier fonctionne comme prévu — on demande au lieu de deviner.
+  // Restent celles qu'il ne sait pas non plus (`shadow`) et le bruit.
+  'ker': 'a-trier', 'qlys': 'a-trier', 'shadow': 'a-trier',
   'race': 'a-trier', 'ferrari': 'a-trier', 'the futur': 'a-trier', 'mindmap': 'a-trier',
-  'sélection-zone': 'a-trier', 'eth': 'a-trier', // Ethereum ou Electronic Trading Hours ?
+  'sélection-zone': 'a-trier',
   'test': 'a-trier', 'exemple': 'a-trier', 'groupe': 'a-trier', 'piece-jointe': 'a-trier',
   'liveclub · trading knowledge —': 'a-trier',
 }
