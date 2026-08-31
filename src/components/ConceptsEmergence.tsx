@@ -1,4 +1,8 @@
-import { Lightbulb } from 'lucide-react'
+'use client'
+
+import { useMemo, useState } from 'react'
+import Link from 'next/link'
+import { Lightbulb, ChevronRight } from 'lucide-react'
 
 export type ConceptStat = {
   id: string
@@ -42,6 +46,20 @@ function GradeLean({ grades }: { grades: Record<string, number> }) {
 }
 
 export default function ConceptsEmergence({ concepts, totalJudged }: { concepts: ConceptStat[]; totalJudged: number }) {
+  const [filtre, setFiltre] = useState<string | null>(null)
+
+  // 0.2 — le filtre ne connaît AUCUNE catégorie à l'avance : il lit celles qui
+  // existent en base. `Tag.category` est un `String?`, pas un enum, et Brice a
+  // demandé que d'autres catégories puissent émerger avec les élèves — une liste
+  // codée en dur ici les rendrait invisibles le jour où elles apparaîtraient.
+  const categories = useMemo(() => {
+    const n = new Map<string, number>()
+    for (const c of concepts) if (c.category) n.set(c.category, (n.get(c.category) ?? 0) + 1)
+    return [...n.entries()].sort((a, b) => b[1] - a[1])
+  }, [concepts])
+
+  const visibles = filtre ? concepts.filter(c => c.category === filtre) : concepts
+
   if (concepts.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center">
@@ -76,10 +94,37 @@ export default function ConceptsEmergence({ concepts, totalJudged }: { concepts:
           </div>
         )}
 
-        {/* Concepts classés */}
+        {/* Filtre par catégorie — n'apparaît que s'il y a de quoi filtrer */}
+        {categories.length > 1 && (
+          <div className="flex flex-wrap gap-1.5 mb-4">
+            <button
+              onClick={() => setFiltre(null)}
+              className="text-[12px] px-3 py-1.5 rounded-full transition-colors"
+              style={filtre === null
+                ? { background: 'var(--node-title)', color: 'var(--node-bg)' }
+                : { background: 'var(--node-bg)', border: '1px solid var(--node-border)', color: 'var(--node-meta)' }}
+            >
+              Tout <span style={{ opacity: 0.7 }}>{concepts.length}</span>
+            </button>
+            {categories.map(([cat, n]) => (
+              <button
+                key={cat}
+                onClick={() => setFiltre(filtre === cat ? null : cat)}
+                className="text-[12px] px-3 py-1.5 rounded-full transition-colors"
+                style={filtre === cat
+                  ? { background: 'var(--node-title)', color: 'var(--node-bg)' }
+                  : { background: 'var(--node-bg)', border: '1px solid var(--node-border)', color: 'var(--node-meta)' }}
+              >
+                {cat} <span style={{ opacity: 0.7 }}>{n}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Concepts classés — chaque carte ouvre sa page d'étude (0.2) */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {concepts.map(c => (
-            <div key={c.id} className="rounded-2xl p-4" style={{ background: 'var(--node-bg)', border: '1px solid var(--node-border)', boxShadow: 'var(--node-shadow)' }}>
+          {visibles.map(c => (
+            <Link key={c.id} href={`/concepts/${c.id}`} className="group block rounded-2xl p-4 transition-colors" style={{ background: 'var(--node-bg)', border: '1px solid var(--node-border)', boxShadow: 'var(--node-shadow)' }}>
               <div className="flex items-center gap-2 mb-1">
                 <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: c.color }} />
                 <h2 className="text-sm font-semibold truncate" style={{ color: 'var(--node-title)' }}>{c.name}</h2>
@@ -89,6 +134,7 @@ export default function ConceptsEmergence({ concepts, totalJudged }: { concepts:
                 <span className="text-[11px] ml-auto flex-shrink-0" style={{ color: 'var(--node-meta)' }}>
                   {c.noteCount} note{c.noteCount > 1 ? 's' : ''} · {c.blockCount} bloc{c.blockCount > 1 ? 's' : ''}
                 </span>
+                <ChevronRight size={14} className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" style={{ color: 'var(--node-meta)' }} />
               </div>
 
               <div className="my-3">
@@ -106,9 +152,15 @@ export default function ConceptsEmergence({ concepts, totalJudged }: { concepts:
                   ))}
                 </div>
               )}
-            </div>
+            </Link>
           ))}
         </div>
+
+        {visibles.length === 0 && (
+          <p className="text-[13px] text-center py-8" style={{ color: 'var(--node-meta)' }}>
+            Aucun concept dans cette catégorie.
+          </p>
+        )}
       </div>
     </div>
   )

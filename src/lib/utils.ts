@@ -56,3 +56,32 @@ export function extractImageSrc(content: string): string | null {
   const match = content.match(/<img[^>]+src=["']([^"']+)["']/)
   return match ? match[1] : null
 }
+
+/** Les types de bloc qui portent une image. L'extension en produit trois noms. */
+export const IMAGE_TYPES = new Set(['image', 'screenshot', 'capture'])
+
+/**
+ * Sépare un bloc en son image et son texte. Vivait dans `StudyCanvas.tsx` ;
+ * remontée ici au 0.2 parce que c'est une fonction PURE et que la page concept
+ * en a besoin pour sa galerie de captures — l'importer depuis `StudyCanvas`
+ * aurait traîné React Flow entier dans une page qui ne l'affiche pas.
+ *
+ * Trois formes coexistent en base, d'où les trois branches : une balise `<img>`
+ * dans du HTML, une URL brute (ce que l'extension écrit pour un bloc image), et
+ * les cas résiduels que `extractImageSrc` rattrape. Mesuré le 31/08 : 873 blocs
+ * `image` et 59 `screenshot`, dont seulement 468 portent une balise `<img>` —
+ * les autres sont des URL nues. Se fier au seul `<img>` en perdrait la moitié.
+ */
+export function parseBlockContent(content: string, type: string): { imgSrc: string | null; text: string } {
+  let imgSrc: string | null = null
+  const imgMatch = content.match(/<img[^>]*src=["']([^"']+)["']/i)
+  if (imgMatch) {
+    imgSrc = imgMatch[1]
+  } else if (IMAGE_TYPES.has(type) && /^(https?:\/\/|data:image)/.test(content.trim())) {
+    imgSrc = content.trim()
+  } else if (IMAGE_TYPES.has(type)) {
+    imgSrc = extractImageSrc(content)
+  }
+  const text = htmlToText(content.replace(/<img[^>]*>/gi, ''))
+  return { imgSrc, text }
+}

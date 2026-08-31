@@ -21,7 +21,7 @@ import {
 import '@xyflow/react/dist/style.css'
 import { FolderPlus, Type, Combine, Pencil, Hash, Maximize2, X, Check } from 'lucide-react'
 import { MessageData, CanvasNodeData, CanvasEdgeData } from '@/types'
-import { htmlToText, truncateText, extractImageSrc } from '@/lib/utils'
+import { htmlToText, truncateText, parseBlockContent } from '@/lib/utils'
 import ImageLightbox from './ImageLightbox'
 import { canvasEdgeTypes, avecSurvol } from './CanvasEdge'
 import { PoigneesCardinales } from './canvas/poignees'
@@ -128,23 +128,11 @@ const ACTION_PLEIN: React.CSSProperties = {
   borderColor: 'transparent',
 }
 
-const IMAGE_TYPES = new Set(['image', 'screenshot', 'capture'])
-
+// `parseBlockContent` et `IMAGE_TYPES` sont remontés dans `@/lib/utils` au 0.2 :
+// fonction pure dont la page concept a besoin pour sa galerie, et l'importer
+// depuis ici aurait traîné React Flow dans une page qui ne l'affiche pas.
 // Un bloc peut être : une image typée (URL nue ou <img>), du texte, OU du texte
 // contenant une <img> inline (réalité des données synquées — base64 inclus).
-export function parseBlockContent(content: string, type: string): { imgSrc: string | null; text: string } {
-  let imgSrc: string | null = null
-  const imgMatch = content.match(/<img[^>]*src=["']([^"']+)["']/i)
-  if (imgMatch) {
-    imgSrc = imgMatch[1]
-  } else if (IMAGE_TYPES.has(type) && /^(https?:\/\/|data:image)/.test(content.trim())) {
-    imgSrc = content.trim()
-  } else if (IMAGE_TYPES.has(type)) {
-    imgSrc = extractImageSrc(content)
-  }
-  const text = htmlToText(content.replace(/<img[^>]*>/gi, ''))
-  return { imgSrc, text }
-}
 
 function MessageNode({ data, selected }: NodeProps) {
   const d = data as {

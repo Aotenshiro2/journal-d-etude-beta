@@ -3,7 +3,8 @@
 import { useMemo, useRef, useState } from 'react'
 import { GripVertical } from 'lucide-react'
 import { MessageData, CanvasNodeData } from '@/types'
-import { parseBlockContent, GROUP_COLORS, TradeBadge, TradeMeta } from './StudyCanvas'
+import { parseBlockContent } from '@/lib/utils'
+import { GROUP_COLORS, TradeBadge, TradeMeta } from './StudyCanvas'
 import ImageLightbox from './ImageLightbox'
 import { useIsMobile } from '@/hooks/useIsMobile'
 

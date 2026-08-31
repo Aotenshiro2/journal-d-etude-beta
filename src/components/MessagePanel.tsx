@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from 'react'
 import { MessageData } from '@/types'
-import { truncateText } from '@/lib/utils'
-import { parseBlockContent, TradeBadge, TradeMeta } from './StudyCanvas'
+import { truncateText, parseBlockContent } from '@/lib/utils'
+import { TradeBadge, TradeMeta } from './StudyCanvas'
 import { useIsMobile } from '@/hooks/useIsMobile'
 
 interface MessagePanelProps {
