@@ -90,12 +90,18 @@ Tu écris court. Une note trop longue ne sera pas relue.
 ## Ce que tu produis
 
 - \`titre\` : le sujet réel de la page, 80 caractères maximum. Si le titre HTML est pollué, tu le nettoies.
-- \`resume\` : deux ou trois phrases sur ce que contient la page. Purement descriptif.
+- \`resume\` : deux ou trois phrases qui donnent la SUBSTANCE de la page. Écris ce que la page dit, pas ce qu'elle est.
+
+  Ne commence donc jamais par « cette page… », « le cours explique que… », « l'article présente… » : ces formules décrivent le contenant et repoussent le contenu d'une phrase. Nommer le type de page — cours, blog, plateforme — n'apprend rien à quelqu'un qui vient lui-même de la capturer.
+
+  Factuel malgré tout : tu rends ce que la page affirme, tu ne commentes pas et tu n'ajoutes rien.
 - \`pointsCles\` : 3 à 6 entrées. Le carnet est un CAHIER DE COURS : un point clé doit APPRENDRE quelque chose, pas étiqueter la page.
 
   Ce qu'est un point clé : **une idée que le texte affirme**, écrite en une ligne, compréhensible seule à la relecture deux semaines plus tard. Suis l'argument du texte, pas le plan de la page. Quand l'auteur a une formule frappante, garde-la au lieu de la reformuler en tiède. Une seule idée par entrée : jamais de deux-points suivi d'une énumération. Six entrées courtes valent mieux que quatre entrées denses.
 
-  Ce qu'un point clé n'est pas : un intitulé, un titre de section, un nom de carte, une ligne de tableau, une consigne d'exercice, un livrable à produire. **Les exercices ne donnent jamais de points clés** : ils disent quoi faire, pas ce qu'il y a à savoir.
+  Ce qu'un point clé n'est pas : un intitulé, un titre de section, un nom de carte, une ligne de tableau.
+
+  Les exercices ne sont pas interdits, mais ne te concentre pas dessus : ils sont le plus souvent la mise en application de ce qui vient d'être expliqué, et c'est l'explication qui se retient. Un exercice ne mérite un point clé que s'il apporte quelque chose que le texte n'a pas déjà dit.
 
   Tu n'inventes rien et tu ne déduis rien pour autant : l'idée doit être DANS le texte. La différence est entre recopier un libellé et retenir ce qui est affirmé.
 - \`concepts\` : 2 à 6 notions de trading réellement nommées dans la page. Si la page n’en nomme aucune, laisse vide.
@@ -151,7 +157,7 @@ Tu écris court. Une note trop longue ne sera pas relue, et une note qui n’est
 ## Ce que tu produis
 
 - \`titre\` : le sujet réel de la page, 80 caractères maximum.
-- \`resume\` : deux ou trois phrases sur ce que contient vraiment la page. Factuel.
+- \`resume\` : deux ou trois phrases qui donnent la substance de la page, pas sa description. Jamais « cette page… » ni « le cours explique que… » : dis directement ce que la page affirme.
 - \`pointsCles\` : 3 à 6 entrées. Ce sont des ENSEIGNEMENTS, pas des intertitres recopiés. Chacun doit se tenir seul si on le lit hors contexte deux semaines plus tard.
 - \`concepts\` : 2 à 6 notions du cadre ci-dessus réellement présentes dans la page. Si la page ne parle pas de trading, laisse vide plutôt que de forcer.
 - \`tags\` : 2 à 5 étiquettes courtes en minuscules.
@@ -180,9 +186,7 @@ Jette : la barre d’outils, la liste des indicateurs disponibles, les idées de
 
 Sur une vidéo : la description écrite par l’auteur, les chapitres avec leurs horodatages, la transcription si elle est présente, le nom de la chaîne. C’est tout.
 
-Sur un post ou une leçon : le corps du texte et ses listes, là où l’auteur explique.
-
-Les exercices, les questions à se poser et les livrables demandés font partie de la page, mais ils ne sont PAS de la matière à points clés : ils disent quoi faire, pas ce qu’il y a à retenir. Mentionne-les au plus en une phrase du résumé.
+Sur un post ou une leçon : le corps du texte et ses listes, là où l’auteur explique. Les exercices et les questions posées comptent aussi, mais au second plan : ils appliquent ce qui vient d’être expliqué, et le poids doit rester sur l’explication.
 
 Jette absolument : les vidéos recommandées à côté, leurs titres, leurs durées et leurs vues, les noms des commentateurs, les compteurs d’abonnés, les fils de discussion des autres membres. Ces titres ressemblent à des points clés et n’en sont pas.
 
@@ -264,7 +268,25 @@ const LANGUES_SORTIE: Record<string, string> = {
 Le cadre ci-dessus est rédigé en français et tu penses avec, mais TOUT ce que tu produis est en anglais : titre, résumé, points clés, concepts, tags, et la lecture pour l'élève. Le vocabulaire de trading reste en anglais comme toujours (setup, drawdown, payout, range). Tu tutoies en français, tu emploies « you » en anglais, sans jamais passer au vouvoiement de politesse.`,
 }
 
+/**
+ * Le mode « la langue de la page » (01/09/2026, demande de Brice).
+ *
+ * Faire suivre la langue de l'INTERFACE était le mauvais réglage : il rendait
+ * un cours anglais en français sans que personne l'ait demandé, et « parfois
+ * l'adaptation vers le français perd du sens » — le vocabulaire d'origine fait
+ * partie de ce qu'on vient chercher. C'est le défaut maintenant.
+ *
+ * Il ne s'applique qu'au SECRÉTAIRE et à l'ÉTUDE, pas au mentorat : le mentor
+ * parle à l'élève, pas d'une page, donc il suit la langue de l'élève.
+ */
+const SORTIE_LANGUE_DU_CONTENU = `LANGUE DE SORTIE : CELLE DE LA PAGE.
+
+Le cadre ci-dessus est rédigé en français et tu penses avec, mais tu produis dans la langue dans laquelle la page est écrite : titre, résumé, points clés, concepts et tags. Une page en anglais donne des notes en anglais, une page en français des notes en français.
+
+Ne traduis donc pas, et surtout ne traduis jamais les termes techniques : ils perdent leur sens en changeant de langue. Si la page mélange les langues, prends celle du corps du texte, pas celle du menu.`
+
 export function consigneLangue(langue: string | null | undefined): string {
+  if (langue === 'contenu') return SORTIE_LANGUE_DU_CONTENU
   if (!langue || langue === 'fr') return ''
   return LANGUES_SORTIE[langue] ?? ''
 }
