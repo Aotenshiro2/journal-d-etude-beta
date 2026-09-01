@@ -108,12 +108,14 @@ Tu écris court. Une note trop longue ne sera pas relue.
 
   Le test : **ce mot reviendra-t-il dans une autre note, et voudra-t-il dire la même chose ?** Un concept qui ne ressert jamais est du bruit. Le vocabulaire est PARTAGÉ entre les membres, pas privé à cette note.
 
-  Refuse donc les noms de DOMAINE : « trading », « styling », « psychologie », « marketing ». Ils se collent à tout et ne rapprochent rien. Prends toujours le terme précis que la page emploie — « runway styling » plutôt que « styling », « order block » plutôt que « price action ».
+  **Un nom de SUJET n’est pas un concept.** « trading », « styling », « psychologie », « marketing » disent de quoi la note parle, pas ce qu’elle enseigne — ils se colleraient à toutes les leçons d’un même cours sans jamais rien rapprocher. Ils ne sont pas à jeter pour autant : leur place est dans \`tags\`, qui sert précisément à ranger la note.
+
+  Le concept, lui, est la notion nommée DANS le contenu et qu’on retrouvera ailleurs : « runway styling » et non « styling », « order block » et non « price action ».
 
   **Ne traduis JAMAIS un concept**, même quand le reste de ta sortie suit la langue de la page. Reprends le terme tel que la page le nomme. Un même concept écrit dans deux langues ferait deux entrées qui ne se rencontreraient jamais.
 
   Si la page n’en nomme aucun, laisse vide plutôt que d’en fabriquer.
-- \`tags\` : 2 à 5 étiquettes courtes en minuscules, pour retrouver la note.
+- \`tags\` : 2 à 5 étiquettes courtes en minuscules, pour RETROUVER la note. C’est ici que va le sujet général — « styling », « trading », « psychologie » — celui qui dit de quoi la note parle sans être une notion à étudier. Un mot trop large pour tenir en concept est souvent un bon tag.
 - \`manquant\` : ce que tu n’as pas pu lire ou ce qui était partiel dans la page. Chaîne vide s’il n’y a rien à signaler.`
 
 // ── 2. Socle de l'étude ──────────────────────────────────────────────────────
@@ -168,7 +170,7 @@ Tu écris court. Une note trop longue ne sera pas relue, et une note qui n’est
 - \`resume\` : deux ou trois phrases qui donnent la substance de la page, pas sa description. Jamais « cette page… » ni « le cours explique que… » : dis directement ce que la page affirme.
 - \`pointsCles\` : 3 à 6 entrées. Ce sont des ENSEIGNEMENTS, pas des intertitres recopiés. Chacun doit se tenir seul si on le lit hors contexte deux semaines plus tard.
 - \`concepts\` : 2 à 6 notions du cadre ci-dessus réellement présentes dans la page. Jamais un nom de domaine (« trading », « psychologie ») : le terme précis, celui qu’on irait chercher dans un index. Ne traduis jamais un concept, même si le reste suit la langue de la page. Si la page ne parle pas de trading, laisse vide plutôt que de forcer.
-- \`tags\` : 2 à 5 étiquettes courtes en minuscules.
+- \`tags\` : 2 à 5 étiquettes courtes en minuscules, pour retrouver la note. C’est ici que va le sujet général, celui qui est trop large pour tenir en concept.
 - \`pourToi\` : le cœur de la note. Deux ou trois phrases sur ce que cette page change concrètement pour sa pratique, puis UNE question qu’il devra se poser à la relecture. Sois précis et sois honnête. **Si la page n’apporte rien à sa pratique, dis-le franchement et n’invente pas d’enseignement.** C’est un service, pas un aveu d’échec.`
 
 // ── 3. Où regarder, par famille (les deux temps) ─────────────────────────────
