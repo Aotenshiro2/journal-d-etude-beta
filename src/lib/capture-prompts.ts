@@ -104,7 +104,15 @@ Tu écris court. Une note trop longue ne sera pas relue.
   Les exercices ne sont pas interdits, mais ne te concentre pas dessus : ils sont le plus souvent la mise en application de ce qui vient d'être expliqué, et c'est l'explication qui se retient. Un exercice ne mérite un point clé que s'il apporte quelque chose que le texte n'a pas déjà dit.
 
   Tu n'inventes rien et tu ne déduis rien pour autant : l'idée doit être DANS le texte. La différence est entre recopier un libellé et retenir ce qui est affirmé.
-- \`concepts\` : 2 à 6 notions de trading réellement nommées dans la page. Si la page n’en nomme aucune, laisse vide.
+- \`concepts\` : 2 à 6 notions réellement nommées dans la page — celles qu’on irait chercher dans un index.
+
+  Le test : **ce mot reviendra-t-il dans une autre note, et voudra-t-il dire la même chose ?** Un concept qui ne ressert jamais est du bruit. Le vocabulaire est PARTAGÉ entre les membres, pas privé à cette note.
+
+  Refuse donc les noms de DOMAINE : « trading », « styling », « psychologie », « marketing ». Ils se collent à tout et ne rapprochent rien. Prends toujours le terme précis que la page emploie — « runway styling » plutôt que « styling », « order block » plutôt que « price action ».
+
+  **Ne traduis JAMAIS un concept**, même quand le reste de ta sortie suit la langue de la page. Reprends le terme tel que la page le nomme. Un même concept écrit dans deux langues ferait deux entrées qui ne se rencontreraient jamais.
+
+  Si la page n’en nomme aucun, laisse vide plutôt que d’en fabriquer.
 - \`tags\` : 2 à 5 étiquettes courtes en minuscules, pour retrouver la note.
 - \`manquant\` : ce que tu n’as pas pu lire ou ce qui était partiel dans la page. Chaîne vide s’il n’y a rien à signaler.`
 
@@ -159,7 +167,7 @@ Tu écris court. Une note trop longue ne sera pas relue, et une note qui n’est
 - \`titre\` : le sujet réel de la page, 80 caractères maximum.
 - \`resume\` : deux ou trois phrases qui donnent la substance de la page, pas sa description. Jamais « cette page… » ni « le cours explique que… » : dis directement ce que la page affirme.
 - \`pointsCles\` : 3 à 6 entrées. Ce sont des ENSEIGNEMENTS, pas des intertitres recopiés. Chacun doit se tenir seul si on le lit hors contexte deux semaines plus tard.
-- \`concepts\` : 2 à 6 notions du cadre ci-dessus réellement présentes dans la page. Si la page ne parle pas de trading, laisse vide plutôt que de forcer.
+- \`concepts\` : 2 à 6 notions du cadre ci-dessus réellement présentes dans la page. Jamais un nom de domaine (« trading », « psychologie ») : le terme précis, celui qu’on irait chercher dans un index. Ne traduis jamais un concept, même si le reste suit la langue de la page. Si la page ne parle pas de trading, laisse vide plutôt que de forcer.
 - \`tags\` : 2 à 5 étiquettes courtes en minuscules.
 - \`pourToi\` : le cœur de la note. Deux ou trois phrases sur ce que cette page change concrètement pour sa pratique, puis UNE question qu’il devra se poser à la relecture. Sois précis et sois honnête. **Si la page n’apporte rien à sa pratique, dis-le franchement et n’invente pas d’enseignement.** C’est un service, pas un aveu d’échec.`
 
