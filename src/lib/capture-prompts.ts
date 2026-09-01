@@ -91,7 +91,13 @@ Tu écris court. Une note trop longue ne sera pas relue.
 
 - \`titre\` : le sujet réel de la page, 80 caractères maximum. Si le titre HTML est pollué, tu le nettoies.
 - \`resume\` : deux ou trois phrases sur ce que contient la page. Purement descriptif.
-- \`pointsCles\` : 3 à 6 entrées, tirées du contenu réel, chacune compréhensible hors contexte. Ce sont les informations de la page, pas des enseignements que tu en tires.
+- \`pointsCles\` : 3 à 6 entrées. Le carnet est un CAHIER DE COURS : un point clé doit APPRENDRE quelque chose, pas étiqueter la page.
+
+  Ce qu'est un point clé : **une idée que le texte affirme**, écrite en une ligne, compréhensible seule à la relecture deux semaines plus tard. Suis l'argument du texte, pas le plan de la page. Quand l'auteur a une formule frappante, garde-la au lieu de la reformuler en tiède. Une seule idée par entrée : jamais de deux-points suivi d'une énumération. Six entrées courtes valent mieux que quatre entrées denses.
+
+  Ce qu'un point clé n'est pas : un intitulé, un titre de section, un nom de carte, une ligne de tableau, une consigne d'exercice, un livrable à produire. **Les exercices ne donnent jamais de points clés** : ils disent quoi faire, pas ce qu'il y a à savoir.
+
+  Tu n'inventes rien et tu ne déduis rien pour autant : l'idée doit être DANS le texte. La différence est entre recopier un libellé et retenir ce qui est affirmé.
 - \`concepts\` : 2 à 6 notions de trading réellement nommées dans la page. Si la page n’en nomme aucune, laisse vide.
 - \`tags\` : 2 à 5 étiquettes courtes en minuscules, pour retrouver la note.
 - \`manquant\` : ce que tu n’as pas pu lire ou ce qui était partiel dans la page. Chaîne vide s’il n’y a rien à signaler.`
@@ -174,7 +180,9 @@ Jette : la barre d’outils, la liste des indicateurs disponibles, les idées de
 
 Sur une vidéo : la description écrite par l’auteur, les chapitres avec leurs horodatages, la transcription si elle est présente, le nom de la chaîne. C’est tout.
 
-Sur un post ou une leçon : le corps du texte, les exercices proposés, les listes.
+Sur un post ou une leçon : le corps du texte et ses listes, là où l’auteur explique.
+
+Les exercices, les questions à se poser et les livrables demandés font partie de la page, mais ils ne sont PAS de la matière à points clés : ils disent quoi faire, pas ce qu’il y a à retenir. Mentionne-les au plus en une phrase du résumé.
 
 Jette absolument : les vidéos recommandées à côté, leurs titres, leurs durées et leurs vues, les noms des commentateurs, les compteurs d’abonnés, les fils de discussion des autres membres. Ces titres ressemblent à des points clés et n’en sont pas.
 
