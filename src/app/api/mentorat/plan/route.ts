@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getUserId } from '@/lib/api-auth'
-import { buildMentoratBrief } from '@/lib/mentorat-brief'
+import { buildMentoratBrief, lireCadrage } from '@/lib/mentorat-brief'
 import { aiClient, AI_MODEL, logAiUsage, textOf, aiErrorMessage } from '@/lib/ai'
 import { checkMentoratAccess } from '@/lib/entitlements'
 
@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const brief = await buildMentoratBrief(userId, days)
+    const brief = await buildMentoratBrief(userId, days, lireCadrage(body.dossiers))
     const model = AI_MODEL.mentorat
     const response = await client.messages.create({
       model,

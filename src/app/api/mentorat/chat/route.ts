@@ -18,7 +18,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getUserId } from '@/lib/api-auth'
 import { aiClient, AI_MODEL, logAiUsage, textOf, aiErrorMessage } from '@/lib/ai'
-import { buildMentoratBrief } from '@/lib/mentorat-brief'
+import { buildMentoratBrief, lireCadrage } from '@/lib/mentorat-brief'
 import { resoudreNiveauIA } from '@/lib/ia-niveau'
 import { verifierBudget } from '@/lib/ia-budget'
 import { consigneLangue } from '@/lib/capture-prompts'
@@ -130,7 +130,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const brief = await buildMentoratBrief(userId, days)
+    const brief = await buildMentoratBrief(userId, days, lireCadrage(body.dossiers))
     const model = AI_MODEL.mentorat
     const reponse = await client.messages.create({
       model,

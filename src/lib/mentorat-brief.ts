@@ -56,26 +56,95 @@ const CAUSE_LABEL: Record<Cause, string> = {
 function isGrade(g: unknown): g is Grade { return g === 'A' || g === 'B' || g === 'C' }
 function isCause(c: unknown): c is Cause { return c === 'technique' || c === 'connaissance' || c === 'emotionnel' }
 
-export async function buildMentoratBrief(userId: string, periodDays = 90): Promise<MentoratBrief> {
+/**
+ * Lit le cadrage envoyé par le client : un tableau, ou une chaîne séparée par
+ * des virgules pour le GET. Borné à 50 : un carnet n'a pas cinquante dossiers,
+ * et une liste non bornée serait un `IN (...)` que n'importe qui peut faire
+ * grossir. Vide = pas de cadrage, donc tout le carnet.
+ */
+export function lireCadrage(brut: unknown): string[] {
+  const liste = Array.isArray(brut)
+    ? brut
+    : typeof brut === 'string' ? brut.split(',') : []
+  return liste
+    .filter((d): d is string => typeof d === 'string')
+    .map(d => d.trim())
+    .filter(Boolean)
+    .slice(0, 50)
+}
+
+/**
+ * Étend un cadrage aux sous-dossiers des dossiers cochés.
+ *
+ * Cocher un dossier racine doit emporter ses sous-dossiers : sans ça, l'élève
+ * devrait cocher son arborescence à la main et le cadrage deviendrait lui-même
+ * un travail. La profondeur est de 1 côté extension, une seule requête suffit.
+ */
+async function dossiersAvecEnfants(userId: string, choisis: string[]): Promise<string[]> {
+  const enfants = await prisma.folder.findMany({
+    where: { userId, parentId: { in: choisis } },
+    select: { id: true },
+  })
+  return Array.from(new Set([...choisis, ...enfants.map(f => f.id)]))
+}
+
+/**
+ * @param dossiers Cadrage demandé par l'élève (01/09/2026). Les carnets
+ *   mélangent le trading et le perso ; le mentor doit pouvoir ne regarder
+ *   qu'une partie. Vide ou absent = tout le carnet, c'est le défaut.
+ */
+export async function buildMentoratBrief(
+  userId: string,
+  periodDays = 90,
+  dossiers?: string[]
+): Promise<MentoratBrief> {
   const since = Date.now() - periodDays * 86_400_000
   const sinceDate = new Date(since)
 
-  const [notes, annotations, reviewBacklog] = await Promise.all([
+  const cadre = Array.isArray(dossiers) && dossiers.length > 0
+  const idsDossiers = cadre ? await dossiersAvecEnfants(userId, dossiers!) : null
+
+  const [notes, annotationsBrutes, backlogBrut] = await Promise.all([
     // Les trades/warmups vivent en JSONB sur les notes : on prend toutes les
     // notes de l'utilisateur (volume faible) et on filtre par date de trade,
     // pas par date de note (une note peut vivre plus longtemps que sa séance).
+    // Cadrer les notes cadre donc les trades et les warmups sans travail en plus.
     prisma.note.findMany({
-      where: { userId, deletedAt: null },
+      where: {
+        userId,
+        deletedAt: null,
+        ...(idsDossiers ? { folderId: { in: idsDossiers } } : {}),
+      },
       select: { id: true, trades: true, warmups: true, concepts: true, lastModifiedAt: true },
     }),
     prisma.annotation.findMany({
       where: { userId, createdAt: { gte: sinceDate } },
       orderBy: { createdAt: 'asc' },
     }),
-    prisma.annotation.count({
+    // Le retard de relecture se cadre lui aussi, sinon le mentor reprocherait
+    // un retard sur des notes qu'on lui a demandé d'ignorer.
+    prisma.annotation.findMany({
       where: { userId, reviewedAt: null, reviewDueAt: { lte: new Date() } },
+      select: { noteId: true, tradeRef: true },
     }),
   ])
+
+  // Une annotation est dans le cadre si elle porte sur une note du cadre, ou
+  // sur un trade d'une de ces notes. `noteId` est nullable en base : un filtre
+  // SQL dessus perdrait les jugements de trade qui n'en portent pas.
+  const idsNotes = new Set(notes.map(n => n.id))
+  const refsTrades = new Set<string>()
+  for (const n of notes) {
+    const list = Array.isArray(n.trades) ? (n.trades as unknown as TradeSegment[]) : []
+    for (const t of list) if (t?.id) refsTrades.add(t.id)
+  }
+  const dansLeCadre = (a: { noteId: string | null; tradeRef: string | null }) =>
+    !cadre
+    || (a.noteId !== null && idsNotes.has(a.noteId))
+    || (a.tradeRef !== null && refsTrades.has(a.tradeRef))
+
+  const annotations = annotationsBrutes.filter(dansLeCadre)
+  const reviewBacklog = backlogBrut.filter(dansLeCadre).length
 
   // ── Trades de la période ──
   interface TradeWithNote extends TradeSegment { noteId: string }

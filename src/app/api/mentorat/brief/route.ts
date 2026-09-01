@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getUserId } from '@/lib/api-auth'
-import { buildMentoratBrief } from '@/lib/mentorat-brief'
+import { buildMentoratBrief, lireCadrage } from '@/lib/mentorat-brief'
 import { checkMentoratAccess } from '@/lib/entitlements'
 
 /**
- * GET /api/mentorat/brief?days=90 — le brief compressé de l'élève connecté.
+ * GET /api/mentorat/brief?days=90&dossiers=id1,id2 — le brief compressé de l'élève connecté.
  * Étape 1 du mode mentorat : calcul pur depuis la base, aucun jeton IA.
  *
  * Auth : Bearer (extension) ou session SSR (journal), comme les autres routes.
@@ -28,7 +28,8 @@ export async function GET(req: NextRequest) {
   const days = Number.isFinite(raw) ? Math.min(365, Math.max(7, Math.round(raw))) : 90
 
   try {
-    const brief = await buildMentoratBrief(userId, days)
+    const dossiers = lireCadrage(req.nextUrl.searchParams.get('dossiers'))
+    const brief = await buildMentoratBrief(userId, days, dossiers)
     return NextResponse.json(brief)
   } catch (err) {
     console.error('[mentorat/brief]', err)
