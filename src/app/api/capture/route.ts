@@ -15,6 +15,7 @@ import { resoudreNiveauIA } from '@/lib/ia-niveau'
 import { verifierBudget } from '@/lib/ia-budget'
 import { appelerCapture, MAX_CARACTERES_CONTENU } from '@/lib/capture-appel'
 import { familleDeLUrl, FAMILLES_AVEC_IMAGE, type SortieSecretaire } from '@/lib/capture-prompts'
+import { resoudreCanvasJournal } from '@/lib/journal-canvas'
 
 export const maxDuration = 30
 
@@ -59,13 +60,37 @@ export async function POST(req: NextRequest) {
   // coûte ~1 200 jetons pour redire le texte qu'on envoie déjà.
   const imageUtile = FAMILLES_AVEC_IMAGE.includes(famille) ? image : null
 
+  // Canvas du journal : la maison LIT ses propres notes. L'extension envoie
+  // les ids des cartes visibles, on les résout en contenu réel — de CE compte
+  // uniquement (le where userId est la cloison). Le texte d'écran passe en
+  // secondaire : il ne portait que des titres tronqués.
+  let contenuFinal = contenu
+  const journalNoteIds: string[] = Array.isArray(body.journalNoteIds)
+    ? body.journalNoteIds.filter((x: unknown): x is string => typeof x === 'string').slice(0, 40)
+    : []
+  const journalLiens: [string, string][] = Array.isArray(body.journalLiens)
+    ? body.journalLiens.filter((l: unknown): l is [string, string] =>
+        Array.isArray(l) && l.length === 2 && typeof l[0] === 'string' && typeof l[1] === 'string')
+    : []
+  if (famille === 'maison' && journalNoteIds.length > 0) {
+    try {
+      const resolu = await resoudreCanvasJournal(userId, journalNoteIds, journalLiens)
+      if (resolu) {
+        contenuFinal = `${resolu}\n\n--- Texte visible à l'écran (secondaire, souvent tronqué) ---\n${contenu.slice(0, 2000)}`
+      }
+    } catch (err) {
+      console.error('[capture] résolution canvas journal:', err)
+      // On continue avec le texte d'écran : moins bon, jamais bloquant
+    }
+  }
+
   try {
     const r = await appelerCapture<SortieSecretaire>({
       userId,
       niveau: acces.niveau,
       famille,
       temps: 'secretaire',
-      contenu,
+      contenu: contenuFinal,
       langue: typeof body.langue === 'string' ? body.langue : null,
       image: imageUtile,
     })

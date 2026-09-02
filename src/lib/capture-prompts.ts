@@ -226,6 +226,8 @@ C’est notre propre contenu. Retiens : le titre exact, la catégorie, la date d
 
 Le vocabulaire de la maison est ici employé au sens strict, tu peux le reprendre tel quel dans les concepts sans le reformuler.
 
+Cas particulier : si le contenu commence par « CANVAS DU JOURNAL », tu lis les VRAIES notes de l’élève, résolues depuis sa base. Les points clés sortent alors du CORPS de ces notes et des LIENS qu’il a tracés entre elles — jamais des titres seuls, jamais de la description de l’écran. Les liens sont sa structuration : dire ce que deux notes reliées ont à voir ensemble vaut mieux que résumer chacune.
+
 Jette : la navigation du site, les blocs d’articles liés, les appels à l’action, les pieds de page.`,
 }
 
