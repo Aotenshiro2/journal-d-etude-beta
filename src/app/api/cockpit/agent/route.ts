@@ -55,7 +55,7 @@ Les tables et vues du cockpit (schéma public, PostgreSQL) :
 - "AiUsage" (guillemets obligatoires, colonnes camelCase entre guillemets) : "userId", product, model, "inputTokens", "outputTokens", "createdAt"
 - cockpit_releves_audience : relevés d'audience par compte (colonnes à découvrir au besoin)
 - cockpit_top_items : snapshot_date, kind, rank, label, sublabel, metrics (jsonb). kind = youtube_top_watchtime | youtube_traffic_sources | gsc_top_queries | kit_broadcasts | stripe_by_product | audience_par_compte. TOUJOURS filtrer sur le dernier snapshot_date, sinon la même vidéo revient une fois par semaine collectée.
-- cockpit_ia_usage (vue) : user_id, email, produit, appels, tokens_entree, tokens_sortie, dernier_appel, appels_30j. Le coût de l'IA PAR MEMBRE, que la console Anthropic ne donne pas.
+- cockpit_ia_usage (vue) : user_id, email, produit, appels, tokens_entree, tokens_sortie, dernier_appel, appels_30j, tokens_cache_ecrits, tokens_cache_lus, cout_micros (millionièmes d'euro, figé à l'écriture). Le coût de l'IA PAR MEMBRE, que la console Anthropic ne donne pas.
 - cockpit_concepts_journal (vue) : concept, occurrences, eleves, depuis_capture, depuis_tags. Ce que les élèves travaillent dans le journal, AGRÉGÉ SANS IDENTITÉ. Un concept qui revient et qu'aucun contenu ne couvre est un trou de contenu.
 - cockpit_activite_journal (vue) : user_id, email, notes, notes_30j, derniere_activite, premiere_note, trades, dols, annotations, grade_a, relectures_dues. dols = niveaux Draw on Liquidity posés.
 - cockpit_mentorat_acces (vue) : id, email, note, accorde_le, retire_le, actif. Les accès mentorat posés à la main. Les droits automatiques (Live Club actif, Skool premium/vip) ne sont PAS là, ils se déduisent des vues membres.
@@ -110,12 +110,39 @@ Règles :
 const SQL_INTERDIT = /\b(insert|update|delete|drop|alter|create|grant|revoke|truncate|vacuum|copy|call|do|into|listen|notify|set|reset|begin|commit|rollback)\b/i
 const SCHEMAS_INTERDITS = /\b(auth|storage|vault|extensions|pgsodium|graphql[a-z_]*|realtime|supabase_[a-z_]*)\s*\.|pg_|information_schema/i
 
+// ⚠️ CE VERROU-CI N'EST PAS DU MEME ORDRE QUE LES DEUX AUTRES, ET IL COMPTE.
+//
+// Le raisonnement de la denylist ci-dessus est ecrit plus haut : « les seuls
+// utilisateurs sont Brice, Melanie et Adil, deja admins de CES donnees ». C'est
+// vrai des paiements, des membres et des abonnements — ce sont leurs affaires.
+//
+// Ca cesse d'etre vrai avec l'archive Telegram. Ces tables portent huit ans de
+// conversations privees de 1 277 TIERS : leur famille, leur sante, leur argent,
+// leurs ruptures. Ce ne sont pas les donnees de Brice, ce sont celles des gens
+// a qui il a parle. Elles n'ont rien a faire dans le contexte d'un modele, meme
+// interroge par lui.
+//
+// ET IL Y A UN SECOND MOTIF, MOINS EVIDENT : cette route interroge par PRISMA,
+// donc avec le role proprietaire, qui TRAVERSE LA RLS. Aucune policy ne protege
+// ce chemin — le verrou doit donc etre ici, dans le code, ou nulle part.
+//
+// Troisieme motif enfin : l'archive est du TEXTE NON FIABLE, ecrit par 1 277
+// personnes qui n'ont jamais su qu'un modele le lirait un jour. Le mettre dans
+// un schema qu'un LLM interroge ouvre une surface d'injection indirecte.
+//
+// Consulter l'archive se fait dans les fiches du cockpit, jamais par l'agent.
+const TABLES_INTERDITES = /\bcockpit_arch_[a-z_]*/i
+
 function verrouSql(sql: string): string | null {
   const s = sql.trim()
   if (!/^(select|with)\b/i.test(s)) return 'Seul un SELECT (ou WITH … SELECT) est accepté.'
   if (s.includes(';')) return 'Une seule requête, sans point-virgule.'
   if (SQL_INTERDIT.test(s)) return 'Requête refusée : lecture seule.'
   if (SCHEMAS_INTERDITS.test(s)) return 'Requête refusée : uniquement les tables du cockpit (schéma public).'
+  if (TABLES_INTERDITES.test(s)) {
+    return 'Requête refusée : l’archive Telegram porte les conversations privées de tiers, '
+      + 'elle ne passe pas par l’agent. Elle se consulte dans les fiches du cockpit.'
+  }
   return null
 }
 
