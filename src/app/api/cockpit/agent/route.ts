@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { getUserId } from '@/lib/api-auth'
 import { aiClient, AI_MODEL, logAiUsage, textOf, aiErrorMessage } from '@/lib/ai'
 import { corsHeaders, corsPreflight } from '@/lib/support-cors'
+import { validerAction, resumeAction, cleAgent, type ActionAgent } from '@/lib/stripe-actions'
 import type Anthropic from '@anthropic-ai/sdk'
 
 // L'agent du cockpit (decision Brice du 29/08) : un assistant prive pour
@@ -48,6 +49,7 @@ Les tables et vues du cockpit (schéma public, PostgreSQL) :
 - cockpit_offres : offre_id, nom, nature, recurrence, actif
 - cockpit_actions (vue, ce qui demande un geste) : membre_id, nom, email_principal, tier_skool, produits, fin_proche, annule_le, total_paye, dernier_paiement, motif (retirer_live_club|fin_de_droits|paiement_en_echec|resiliation_demandee|echeance_proche|acces_sans_paiement), urgence, fin_droits, acces_conserves, acces_offert, prochaine_tentative, nb_tentatives, telegram
 - cockpit_actions_traitees : membre_id, motif, traite_le, traite_par, note (ce que Brice/Mélanie ont marqué fait depuis le cockpit)
+- cockpit_acces_manuel : membre_id, acces_jusquau (date), note, pose_par, pose_le. Une date d'accès posée À LA MAIN (geste commercial, arrangement) : elle PRIME sur ce que disent les abonnements. Vérifie-la avant de dire qu'un accès doit être coupé.
 ⚠️ Ne confonds jamais retirer_live_club et fin_de_droits. Le second veut dire : la personne a résilié, mais sa période payée court encore, et la colonne fin_droits dit jusqu'à quand. On ne retire RIEN avant cette date — c'est de l'argent déjà encaissé. Le premier ne sort qu'une fois la date passée. Avant le 30/08/2026 la vue ne faisait pas la différence et visait 18 clients sur 76 qui avaient encore des jours payés.
 ⚠️ « retirer_live_club » est une SUGGESTION À VÉRIFIER, jamais un ordre. Un accès peut être ouvert par GESTE COMMERCIAL, décidé à la main et daté nulle part en base : un tier Skool premium ou vip sans abonnement actif en face n'est donc pas forcément une anomalie, et le tier de l'export peut être en retard sur ce qui a été accordé depuis. Avant de dire « à révoquer », regarde cockpit_actions_traitees — la personne a peut-être déjà été traitée, et « note » porte la raison. Présente toujours cette liste comme des gestes à confirmer par Brice ou Mélanie, jamais comme des révocations à exécuter : couper quelqu'un à qui un geste a été fait coûte plus cher que de laisser un accès ouvert une semaine de trop.
 - cockpit_kpis : snapshot_date, key, value_num, value_text (agrégats hebdo : audience_cumul, audience_indice, ns1_kit_cumul, ns2_skool_cumul…)
@@ -99,9 +101,18 @@ On peut joindre un PDF, une capture d'écran, un export CSV, un relevé bancaire
 - rappelle-toi qu'un remboursement est un paiement négatif chez nous, et que tout le récurrent est sur le Stripe de Mélanie ;
 - si le document est illisible, tronqué, ou sans rapport avec ce qu'on te demande, dis-le au lieu de deviner. Tu n'inventes jamais une ligne que tu n'as pas lue.
 
+LES ACTIONS STRIPE (03/09) :
+Tu disposes de trois outils d'action : proposer_code_promo, proposer_remboursement, proposer_produit. Un appel N'EXÉCUTE RIEN : il affiche une carte de confirmation que Brice ou Mélanie doit cliquer — dis-le dans ta réponse. Règles strictes :
+- N'appelle un outil d'action QUE si on te le demande explicitement. Jamais de ta propre initiative, jamais « pendant que j'y suis ».
+- Une seule action proposée à la fois.
+- Le compte doit être certain : melanie = tout le récurrent (Live Club), aoknowledge = le comptant. En cas de doute, demande.
+- Pour un remboursement, retrouve d'abord le charge_id exact dans cockpit_paiements (paiement_id sans le préfixe stripe:) et vérifie le montant avec une requête. Ne devine jamais un identifiant.
+- S'il manque un paramètre (montant ? durée ? code ?), pose la question au lieu d'inventer.
+- Les autres gestes (marquer traité, répondre au support, envoyer un email) ne sont pas encore outillés : dis où le faire à la main dans le cockpit.
+
 Règles :
 - Réponds en TEXTE BRUT : l'écran n'interprète pas le markdown. Jamais de **, de tableaux avec |, de titres #. Pour aligner des données, fais des lignes simples : « Tristan Gautier · 6 tentatives · prochaine le 29/08 ».
-- LECTURE SEULE. Si on te demande d'agir (marquer traité, répondre à un membre, envoyer un email), réponds que les actions arrivent dans une prochaine version et indique où le faire à la main dans le cockpit.
+- La base est en LECTURE SEULE : requete_sql ne modifie jamais rien ; seules les trois actions Stripe ci-dessus existent, et elles passent par confirmation humaine.
 - Ne montre le SQL que si on te le demande.
 - Si une question est ambiguë (quel mois ? quel compte ?), pose la question plutôt que de choisir en silence.`
 
@@ -184,7 +195,66 @@ const OUTILS: Anthropic.Tool[] = [
       required: ['sql'],
     },
   },
+  // Les trois outils d'action : un appel n'execute RIEN, il est intercepte par
+  // la route qui renvoie une carte de confirmation a l'ecran. L'execution ne
+  // se fait qu'au clic, par /api/cockpit/agent/action, hors du modele.
+  {
+    name: 'proposer_code_promo',
+    description:
+      "Propose la création d'un bon de réduction Stripe (coupon + code promotionnel). N'exécute rien : une carte de confirmation s'affiche pour Brice/Mélanie. Exactement un de pourcentage OU montant.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        compte: { type: 'string', enum: ['aoknowledge', 'melanie'] },
+        code: { type: 'string', description: 'Le code tapé par le client, 3-30 caractères A-Z 0-9 - _.' },
+        pourcentage: { type: 'number', description: 'Réduction en % (1-100). Exclusif avec montant.' },
+        montant: { type: 'number', description: 'Réduction fixe en devise. Exclusif avec pourcentage.' },
+        devise: { type: 'string', enum: ['eur', 'usd'], description: 'Pour un montant fixe. Défaut eur.' },
+        duree: { type: 'string', enum: ['once', 'forever', 'repeating'], description: 'once = une facture, forever = à vie, repeating = N mois. Défaut once.' },
+        duree_mois: { type: 'number', description: 'Obligatoire si duree=repeating (1-24).' },
+        max_utilisations: { type: 'number', description: 'Plafond de rachats. Vide = illimité.' },
+        expire_le: { type: 'string', description: 'YYYY-MM-DD. Vide = jamais.' },
+      },
+      required: ['compte', 'code'],
+    },
+  },
+  {
+    name: 'proposer_remboursement',
+    description:
+      "Propose le remboursement d'un paiement Stripe. N'exécute rien : carte de confirmation. Retrouve d'abord le charge_id exact dans cockpit_paiements (paiement_id, sans le préfixe stripe:).",
+    input_schema: {
+      type: 'object',
+      properties: {
+        compte: { type: 'string', enum: ['aoknowledge', 'melanie'] },
+        charge_id: { type: 'string', description: 'ch_..., depuis cockpit_paiements.paiement_id.' },
+        montant: { type: 'number', description: 'Montant partiel en devise du paiement. Vide = remboursement intégral.' },
+      },
+      required: ['compte', 'charge_id'],
+    },
+  },
+  {
+    name: 'proposer_produit',
+    description:
+      "Propose la création d'un produit Stripe avec son tarif. N'exécute rien : carte de confirmation.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        compte: { type: 'string', enum: ['aoknowledge', 'melanie'] },
+        nom: { type: 'string', description: 'Nom du produit (3-80 caractères).' },
+        montant: { type: 'number', description: 'Prix en devise.' },
+        devise: { type: 'string', enum: ['eur', 'usd'], description: 'Défaut eur.' },
+        recurrence: { type: 'string', enum: ['month', 'year'], description: 'Vide = paiement comptant.' },
+      },
+      required: ['compte', 'nom', 'montant'],
+    },
+  },
 ]
+
+const TYPE_PAR_OUTIL: Record<string, ActionAgent['type']> = {
+  proposer_code_promo: 'code_promo',
+  proposer_remboursement: 'remboursement',
+  proposer_produit: 'produit',
+}
 
 type PieceEntrante = { nom?: unknown; type?: unknown; data?: unknown }
 type MessageEntrant = { role?: unknown; content?: unknown; pieces?: unknown }
@@ -358,6 +428,35 @@ export async function POST(req: NextRequest) {
       const resultats: Anthropic.ToolResultBlockParam[] = []
       for (const bloc of response.content) {
         if (bloc.type !== 'tool_use') continue
+
+        // Un outil d'action n'est JAMAIS execute ici : s'il est valide, la
+        // boucle s'arrete et la carte de confirmation part a l'ecran. S'il est
+        // invalide, l'erreur retourne au modele pour qu'il corrige.
+        const typeAction = TYPE_PAR_OUTIL[bloc.name]
+        if (typeAction) {
+          const entree = bloc.input as { compte?: unknown } & Record<string, unknown>
+          const action = validerAction({
+            type: typeAction, compte: entree?.compte, params: entree,
+          })
+          if (typeof action === 'string') {
+            resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify({ erreur: action }), is_error: true })
+            continue
+          }
+          return NextResponse.json(
+            {
+              reply: textOf(response)
+                || 'Voilà ce que je te propose — à toi de confirmer :',
+              etapes,
+              action: {
+                ...action,
+                resume: resumeAction(action),
+                cle_presente: cleAgent(action.compte) !== null,
+              },
+            },
+            { headers: cors },
+          )
+        }
+
         const sql = String((bloc.input as { sql?: string })?.sql ?? '')
         const resultat = await executerSql(sql)
         etapes.push({ sql, resultat_tronque: resultat.endsWith(']') === false })
