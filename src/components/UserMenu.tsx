@@ -14,7 +14,9 @@ export default function UserMenu({ user }: UserMenuProps) {
 
   const handleSignOut = async () => {
     const supabase = createClient()
-    await supabase.auth.signOut()
+    // scope 'local' : le defaut ('global') revoque les sessions de TOUS les
+    // appareils et de toutes les apps AOK — cockpit et extension compris.
+    await supabase.auth.signOut({ scope: 'local' })
     router.push('/auth')
     router.refresh()
   }

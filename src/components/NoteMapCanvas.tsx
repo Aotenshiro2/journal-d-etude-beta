@@ -244,7 +244,8 @@ function AvatarBubble({ user }: { user: { email: string; name: string; avatarUrl
 
   const handleSignOut = async () => {
     const supabase = createClient()
-    await supabase.auth.signOut()
+    // scope 'local' : le defaut ('global') deconnecterait tous les appareils.
+    await supabase.auth.signOut({ scope: 'local' })
     router.push('/auth')
     router.refresh()
   }
