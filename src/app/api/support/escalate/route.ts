@@ -63,6 +63,31 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // ESCALADE IMMÉDIATE (« parler à un humain » sans avoir parlé à l'IA) : il
+  // n'y a pas encore de fil. Il faut le CRÉER, sinon l'email part mais le
+  // cockpit n'a rien à afficher — c'est le trou constaté au test d'Adil le
+  // 04/09 (email reçu, onglet Support vide). Le message d'ouverture dit d'où
+  // vient le fil pour que la liste du cockpit ait quelque chose à montrer.
+  if (!thread) {
+    const app = typeof body.app === 'string' && body.app.trim()
+      ? body.app.trim().slice(0, 40)
+      : 'site'
+    thread = await prisma.supportThread.create({
+      data: {
+        userId,
+        app,
+        escalatedAt: new Date(),
+        messages: [{
+          role: 'user',
+          content: contactEmail
+            ? `(a demandé un humain sans passer par l'IA — contact laissé : ${contactEmail})`
+            : "(a demandé un humain sans passer par l'IA)",
+          at: new Date().toISOString(),
+        }],
+      },
+    })
+  }
+
   let notified = false
   const apiKey = process.env.RESEND_API_KEY_SUPPORT ?? process.env.RESEND_API_KEY
   if (apiKey) {
@@ -113,5 +138,10 @@ export async function POST(req: NextRequest) {
   }
 
   // `email` reste pour les clients v1 (mailto de secours quand notified=false).
-  return NextResponse.json({ email: CONTACT_EMAIL, notified }, { headers: cors })
+  // `threadId` : le fil (peut-être créé à l'instant), pour que le widget
+  // continue la conversation dessus au lieu d'en ouvrir un deuxième.
+  return NextResponse.json(
+    { email: CONTACT_EMAIL, notified, threadId: thread.id },
+    { headers: cors },
+  )
 }
