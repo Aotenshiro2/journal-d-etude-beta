@@ -73,7 +73,7 @@ async function stripePost(
 // ---------------------------------------------------------------------------
 
 export type ActionAgent = {
-  type: 'code_promo' | 'remboursement' | 'produit'
+  type: 'code_promo' | 'remboursement' | 'produit' | 'revoquer_code'
   compte: CompteStripe
   params: Record<string, unknown>
 }
@@ -134,6 +134,12 @@ export function validerAction(brut: unknown): ActionAgent | string {
     return { type: 'remboursement', compte: a.compte, params: { charge_id: charge, montant } }
   }
 
+  if (a.type === 'revoquer_code') {
+    const code = String(p.code ?? '').trim()
+    if (!/^[A-Za-z0-9_-]{2,40}$/.test(code)) return 'Code à révoquer invalide.'
+    return { type: 'revoquer_code', compte: a.compte, params: { code } }
+  }
+
   if (a.type === 'produit') {
     const nom = String(p.nom ?? '').trim()
     if (nom.length < 3 || nom.length > 80) return 'Nom du produit : 3 à 80 caractères.'
@@ -168,6 +174,10 @@ export function resumeAction(a: ActionAgent): string {
   }
   if (a.type === 'remboursement') {
     return `Rembourser ${p.montant != null ? `${p.montant} ` : 'INTÉGRALEMENT '}le paiement ${p.charge_id} sur le compte ${a.compte}.`
+  }
+  if (a.type === 'revoquer_code') {
+    return `Désactiver le code ${p.code} sur le compte ${a.compte} : plus personne ne pourra le taper. `
+      + `Les réductions déjà appliquées aux abonnés continuent, elles.`
   }
   return `Créer le produit « ${p.nom} » à ${p.montant} ${String(p.devise).toUpperCase()}${p.recurrence ? `/${p.recurrence === 'month' ? 'mois' : 'an'}` : ' (comptant)'} sur le compte ${a.compte}.`
 }
@@ -219,6 +229,27 @@ export async function executerAction(a: ActionAgent): Promise<string> {
     const centimes = Number((remb as { amount?: number }).amount ?? 0)
     return `Remboursement de ${(centimes / 100).toFixed(2)} ${String((remb as { currency?: string }).currency ?? '').toUpperCase()} créé `
       + `(${(remb as { id?: string }).id}). Le paiement passera en remboursé à la prochaine collecte.`
+  }
+
+  if (a.type === 'revoquer_code') {
+    // On retrouve le code vivant par son texte, puis on le desactive. Le
+    // coupon sous-jacent n'est PAS supprime : les reductions deja appliquees
+    // aux abonnes continuent — couper un avantage accorde est un autre geste,
+    // qui ne passe pas par l'agent.
+    const reponse = await fetch(
+      `${API}/v1/promotion_codes?${new URLSearchParams({
+        code: String(p.code), active: 'true', limit: '1',
+      })}`,
+      { headers: { Authorization: `Bearer ${cle}`, 'Stripe-Version': STRIPE_VERSION } },
+    )
+    const liste = (await reponse.json()) as { data?: { id: string }[] }
+    const vivant = liste.data?.[0]
+    if (!vivant) {
+      throw new Error(`Aucun code actif « ${p.code} » sur le compte ${a.compte}.`)
+    }
+    await stripePost(cle, `/v1/promotion_codes/${vivant.id}`, { active: 'false' })
+    return `Code ${p.code} désactivé sur ${a.compte}. Les réductions déjà en cours `
+      + `chez les abonnés continuent. Visible dans le cockpit après la prochaine collecte.`
   }
 
   // produit

@@ -102,7 +102,7 @@ On peut joindre un PDF, une capture d'écran, un export CSV, un relevé bancaire
 - si le document est illisible, tronqué, ou sans rapport avec ce qu'on te demande, dis-le au lieu de deviner. Tu n'inventes jamais une ligne que tu n'as pas lue.
 
 LES ACTIONS STRIPE (03/09) :
-Tu disposes de trois outils d'action : proposer_code_promo, proposer_remboursement, proposer_produit. Un appel N'EXÉCUTE RIEN : il affiche une carte de confirmation que Brice ou Mélanie doit cliquer — dis-le dans ta réponse. Règles strictes :
+Tu disposes de quatre outils d'action : proposer_code_promo, proposer_revoquer_code, proposer_remboursement, proposer_produit. Un appel N'EXÉCUTE RIEN : il affiche une carte de confirmation que Brice ou Mélanie doit cliquer — dis-le dans ta réponse. Règles strictes :
 - N'appelle un outil d'action QUE si on te le demande explicitement. Jamais de ta propre initiative, jamais « pendant que j'y suis ».
 - Une seule action proposée à la fois.
 - Le compte doit être certain : melanie = tout le récurrent (Live Club), aoknowledge = le comptant. En cas de doute, demande.
@@ -233,6 +233,19 @@ const OUTILS: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'proposer_revoquer_code',
+    description:
+      "Propose la désactivation d'un bon de réduction (le code ne pourra plus être tapé ; les réductions déjà appliquées aux abonnés continuent). N'exécute rien : carte de confirmation. Vérifie d'abord dans cockpit_coupons que le code existe et est actif.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        compte: { type: 'string', enum: ['aoknowledge', 'melanie'] },
+        code: { type: 'string', description: 'Le code à désactiver, tel qu’il apparaît dans cockpit_coupons.' },
+      },
+      required: ['compte', 'code'],
+    },
+  },
+  {
     name: 'proposer_produit',
     description:
       "Propose la création d'un produit Stripe avec son tarif. N'exécute rien : carte de confirmation.",
@@ -254,6 +267,7 @@ const TYPE_PAR_OUTIL: Record<string, ActionAgent['type']> = {
   proposer_code_promo: 'code_promo',
   proposer_remboursement: 'remboursement',
   proposer_produit: 'produit',
+  proposer_revoquer_code: 'revoquer_code',
 }
 
 type PieceEntrante = { nom?: unknown; type?: unknown; data?: unknown }
