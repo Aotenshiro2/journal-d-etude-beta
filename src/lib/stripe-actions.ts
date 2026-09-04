@@ -184,7 +184,11 @@ export async function executerAction(a: ActionAgent): Promise<string> {
   const p = a.params
 
   if (a.type === 'code_promo') {
-    const coupon: Record<string, string> = { duration: String(p.duree) }
+    // `name` = le code : sans lui, la liste « Bons de reduction » de Stripe
+    // affiche l'identifiant aleatoire du coupon (retour Brice 04/09).
+    const coupon: Record<string, string> = {
+      duration: String(p.duree), name: String(p.code),
+    }
     if (p.pourcentage != null) coupon.percent_off = String(p.pourcentage)
     else {
       coupon.amount_off = String(Math.round(Number(p.montant) * 100))
