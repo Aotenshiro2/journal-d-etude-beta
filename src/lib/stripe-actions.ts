@@ -18,6 +18,13 @@
 
 const API = 'https://api.stripe.com'
 
+// Version d'API EPINGLEE : les deux comptes n'ont pas le meme defaut (celui de
+// Melanie est sur « clover », l'autre non), et clover a change la creation des
+// codes promo (promotion[type]+promotion[coupon] au lieu de coupon) — le
+// premier essai reel du 04/09 est tombe sur « Received unknown parameter:
+// coupon ». Epingler rend le comportement identique partout, pour toujours.
+const STRIPE_VERSION = '2025-09-30.clover'
+
 export type CompteStripe = 'aoknowledge' | 'melanie'
 
 const ENV_PAR_COMPTE: Record<CompteStripe, string> = {
@@ -47,6 +54,7 @@ async function stripePost(
     headers: {
       Authorization: `Bearer ${cle}`,
       'Content-Type': 'application/x-www-form-urlencoded',
+      'Stripe-Version': STRIPE_VERSION,
     },
     body: new URLSearchParams(corps).toString(),
   })
@@ -185,8 +193,11 @@ export async function executerAction(a: ActionAgent): Promise<string> {
     if (p.duree === 'repeating') coupon.duration_in_months = String(p.duree_mois)
     const cree = await stripePost(cle, '/v1/coupons', coupon)
 
+    // Forme « clover » : le coupon se reference dans un hash promotion.
     const promo: Record<string, string> = {
-      coupon: String(cree.id), code: String(p.code),
+      'promotion[type]': 'coupon',
+      'promotion[coupon]': String(cree.id),
+      code: String(p.code),
     }
     if (p.max_utilisations != null) promo.max_redemptions = String(p.max_utilisations)
     if (p.expire_le) {
