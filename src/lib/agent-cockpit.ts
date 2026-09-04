@@ -271,12 +271,57 @@ export async function boucleAgent(
   const messages: Anthropic.MessageParam[] = [...historique]
   const etapes: { sql: string; resultat_tronque: boolean }[] = []
 
+  // QUI PARLE. Sans ca le modele suppose que c'est Brice : le prompt nomme les
+  // trois personnes, et il est le premier cite. Le 04/09 l'agent a repondu a
+  // Melanie « vu que Melanie est ton associee sur le Stripe du recurrent »,
+  // en parlant d'elle a la troisieme personne, a elle. Le userId circulait
+  // deja jusqu'ici, mais il ne servait qu'a la facturation.
+  //
+  // Resolu ICI plutot que dans chaque route : les deux canaux (fenetre ✦ et
+  // Telegram) passent par cette fonction avec le meme userId.
+  const [identite] = await prisma.$queryRaw<{ label: string | null }[]>`
+    select label from public.cockpit_allowlist where user_id = ${userId}::uuid limit 1`
+  const qui = identite?.label?.trim() || null
+
+  // CE QUE CHACUN VIENT CHERCHER. Cadre la REPONSE (le ton, ce qu'on rappelle,
+  // ce vers quoi on va en cas d'ambiguite), JAMAIS les droits : les trois sont
+  // administrateurs des memes donnees, archive comprise (arbitrage de Brice du
+  // 04/09). Ne pas relire ce bloc comme un cloisonnement.
+  const ROLES: Record<string, string> = {
+    Brice: `le fondateur. Il voit tout et arbitre. En cas d'ambiguite sur le compte Stripe, demande.`,
+    Mélanie: `associee sur le Stripe du RECURRENT (Live Club) : c'est son perimetre quotidien, donc`
+      + ` une question de paiement ou d'abonnement sans compte precise porte le plus souvent sur celui-la.`
+      + ` Elle apparait aussi comme CLIENTE dans les donnees (fiches, paiements, archive) : quand tu`
+      + ` tombes sur une fiche a son nom, dis-lui que c'est peut-etre la sienne au lieu d'en parler`
+      + ` comme d'une inconnue, et mefie-toi des homonymes.`,
+    Adil: `la compta, du cote de Melanie et de ses acces Stripe. Il vient surtout pour des rapprochements,`
+      + ` des montants et des periodes : sois precis sur les dates, les frais et le net, et rappelle qu'un`
+      + ` remboursement est un paiement negatif. Il n'est pas sur le bot Telegram, seulement sur la fenetre du cockpit.`,
+  }
+
+  // Bloc SEPARE, volontairement hors du cache : le gros prompt garde son
+  // prefixe commun aux trois utilisateurs, seule cette partie varie.
+  const systeme: Anthropic.TextBlockParam[] = [
+    { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
+  ]
+  if (qui) {
+    const role = ROLES[qui]
+    systeme.push({
+      type: 'text',
+      text: `INTERLOCUTEUR : tu parles en ce moment à ${qui}. Adresse-toi à ${qui} directement,`
+        + ` et ne parle jamais de ${qui} à la troisième personne comme si tu répondais à quelqu'un d'autre.`
+        + ` Ne suppose pas que c'est Brice qui écrit.`
+        + (role ? ` ${qui} est ${role}` : '')
+        + ` Cela cadre ta réponse, pas ses droits : les trois ont accès aux mêmes données.`,
+    })
+  }
+
   for (let tour = 0; tour < MAX_TOURS; tour++) {
       const response = await client.messages.create({
         model,
         max_tokens: 3000,
         output_config: { effort: 'medium' },
-        system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
+        system: systeme,
         tools: OUTILS,
         messages,
       })
