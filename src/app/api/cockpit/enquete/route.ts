@@ -121,6 +121,14 @@ export async function POST(req: NextRequest) {
   const salons = await prisma.$queryRaw<{ nom: string }[]>`
     select s.nom from public.cockpit_arch_presences p join public.cockpit_arch_salons s using (salon_id)
     where p.personne_id = ${personneId} order by p.messages desc nulls last limit 5`
+  // LES NOTES DICTÉES SONT L'ANCRAGE LE PLUS FORT. Premier essai sur James :
+  // la ligne personne disait « James, élève, 466 messages » et le modèle a
+  // refusé de chercher, à raison — un prénom seul n'ancre rien. Or les notes
+  // portaient déjà « James Marshall, @Jamesineurope, The Natural Lifestyles ».
+  // Ce que Brice sait doit partir avec la demande.
+  const notes = await prisma.$queryRaw<{ rubrique: string | null; texte: string }[]>`
+    select rubrique, texte from public.cockpit_arch_notes
+    where personne_id = ${personneId} order by ecrit_le desc limit 8`
   const refusees = await prisma.$queryRaw<{ champ: string; valeur: string }[]>`
     select champ, valeur from public.cockpit_arch_propositions
     where personne_id = ${personneId} and statut = 'refusee'`
@@ -138,6 +146,9 @@ export async function POST(req: NextRequest) {
       ? `Profils qu'il ou elle a POSTÉS dans les conversations (l'ancrage le plus fort — vérifie qu'ils sont bien les siens) :\n${reseaux.map((r) => `  - ${r.reseau} : ${r.profil} (${r.fois} fois)`).join('\n')}`
       : null,
     lieux.length ? `Ce qu'il ou elle a dit de sa vie (extraits bruts) :\n${lieux.map((l) => `  - « ${l.extrait.slice(0, 200)} »`).join('\n')}` : null,
+    notes.length
+      ? `CE QUE L'ÉQUIPE SAIT DÉJÀ DE CETTE PERSONNE, écrit à la main (c'est l'ancrage le plus fiable, pars de là) :\n${notes.map((n) => `  - [${n.rubrique ?? 'note'}] ${n.texte.replace(/\s+/g, ' ').slice(0, 700)}`).join('\n')}`
+      : null,
     acceptees.length ? `Déjà vérifié et accepté par un humain (ne pas reproposer) : ${acceptees.map((a) => `${a.champ}=${a.valeur}`).join(' ; ')}` : null,
     refusees.length ? `Déjà REFUSÉ par un humain (ne pas reproposer, c'était faux ou hors sujet) : ${refusees.map((a) => `${a.champ}=${a.valeur}`).join(' ; ')}` : null,
   ].filter(Boolean).join('\n')
