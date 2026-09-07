@@ -94,16 +94,43 @@ async function ancrageDe(pid) {
   return { p, texte, deja }
 }
 
+/**
+ * LE PRIX D'UNE ENQUÊTE, MESURÉ LE 07/09 : Boris, 98 614 jetons, 79 pages,
+ * 0 proposition — environ 0,30 EUR pour conclure « rien ». Brice : « 30 c par
+ * personne c'est énorme ». Ce ne sont pas les mots du modèle qui coûtent, ce
+ * sont les PAGES : chaque recherche rend dix résultats qui entrent dans le
+ * contexte et se paient comme du texte. Deux leviers, ici même :
+ *   1. NE PAS CHERCHER SANS ANCRAGE. Sans note, sans profil posté, sans pseudo
+ *      et sans nom d'état civil, le web ne peut rien relier : le résultat sera
+ *      « rien » à coup sûr, et il coûtera autant qu'une vraie trouvaille.
+ *   2. MOINS DE RECHERCHES. 4 au lieu de 10 : une personne qui existe en ligne
+ *      se trouve en deux ou trois requêtes ; au-delà, on paie des homonymes.
+ * Estimation après : ~0,02 EUR pour écarter, ~0,10 EUR pour une enquête réelle.
+ */
+const MAX_RECHERCHES = Number(arg('--recherches', '4'))
+
+function ancrageSuffisant(a) {
+  const notes = /CE QUE L'ÉQUIPE SAIT/.test(a.texte)
+  const profils = /Profils POSTÉS/.test(a.texte)
+  const pseudo = !!a.p.telegram
+  const etatCivil = /Nom à l'état civil/.test(a.texte)
+  return notes || profils || pseudo || etatCivil
+}
+
 async function enqueter(pid) {
   const a = await ancrageDe(pid)
   if (!a) { log(`${pid} : inconnu`); return }
+  if (!ancrageSuffisant(a)) {
+    log(`${pid} (${a.p.nom}) : passé — aucun ancrage (ni note, ni profil posté, ni pseudo, ni nom d'état civil), une recherche ne relierait rien`)
+    return
+  }
   const t0 = Date.now()
   const messages = [{ role: 'user', content: `Voici ce que le fonds sait déjà :\n\n${a.texte}\n\nEnquête, puis rends ton compte rendu.` }]
   let cr = ''; const sources = new Set(); let usage = 0
   for (let tour = 0; tour < 6; tour++) {
     const r = await client.messages.create({
       model: MODELE, max_tokens: 16000, system: CONSIGNE,
-      tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 10, blocked_domains: BLOQUES }],
+      tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: MAX_RECHERCHES, blocked_domains: BLOQUES }],
       messages,
     })
     usage += (r.usage?.input_tokens ?? 0) + (r.usage?.output_tokens ?? 0)

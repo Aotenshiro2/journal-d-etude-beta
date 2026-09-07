@@ -186,7 +186,11 @@ export async function POST(req: NextRequest) {
         model: modele,
         max_tokens: 16000,
         system: consigne,
-        tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 12, blocked_domains: BLOQUES }],
+        // 6 recherches, pas 12 : le coût d'une enquête, ce sont les pages
+        // rendues par chaque recherche (mesuré le 07/09 : 79 pages, 98 000
+        // jetons pour un « rien »). Une personne qui existe en ligne se
+        // trouve en deux ou trois requêtes ; au-delà on paie des homonymes.
+        tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 6, blocked_domains: BLOQUES }],
         messages,
       })
       // Un tour peut s'arrêter en pause quand la recherche est longue : on
