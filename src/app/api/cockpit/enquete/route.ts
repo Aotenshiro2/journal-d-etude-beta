@@ -65,7 +65,7 @@ const SCHEMA_PROPOSITIONS = {
         additionalProperties: false,
         required: ['champ', 'valeur', 'source_url', 'extrait', 'pourquoi_lui', 'confiance'],
         properties: {
-          champ: { type: 'string', enum: ['reseau', 'site', 'societe', 'localisation', 'activite', 'biographie', 'autre'] },
+          champ: { type: 'string', enum: ['reseau', 'site', 'societe', 'localisation', 'activite', 'biographie', 'coordonnees', 'autre'] },
           reseau: { type: 'string', description: 'instagram, youtube, tiktok, linkedin, x, facebook, twitch… quand champ = reseau' },
           valeur: { type: 'string' },
           source_url: { type: 'string' },
@@ -155,10 +155,13 @@ export async function POST(req: NextRequest) {
 
   const consigne = [
     'Tu enquêtes sur une personne pour enrichir la fiche d’un CRM privé, à partir de sources publiques uniquement.',
-    'Ce qu’on cherche : ses réseaux sociaux (Instagram, YouTube, TikTok, LinkedIn, X, Facebook, Twitch), un site ou blog, une société (nom, rôle, ville du siège — registres publics comme Pappers, societe.com, Infogreffe sont bienvenus), une chaîne ou un podcast, son activité professionnelle, sa ville ou région.',
+    'Ce qu’on cherche : ses réseaux sociaux (Instagram, YouTube, TikTok, LinkedIn, X, Facebook, Twitch), un site ou blog, une société (nom, rôle, siège, SIREN — registres publics comme Pappers, societe.com, Infogreffe sont bienvenus), une chaîne ou un podcast, son activité professionnelle, où il ou elle vit, et ses coordonnées publiques quand une page légitime les porte (mentions légales d’un site, fiche de société, page de contact professionnelle) : adresse, téléphone, email.',
+    // Brice, 07/09 : « si tu les trouves, donne-les-moi ». Les coordonnées
+    // trouvées sur une page publique légitime entrent donc en proposition,
+    // comme tout le reste : sourcées, et tranchées par un humain.
     'RÈGLES FERMES :',
-    '- La localisation s’arrête à la ville ou à la région. Jamais d’adresse postale, jamais de numéro de téléphone, jamais d’email, jamais de date de naissance complète, jamais d’information sur des mineurs.',
-    '- Pas d’annuaires de personnes ni de courtiers de données. Pas de pages derrière une connexion.',
+    '- Rapporte les coordonnées UNIQUEMENT si une page publique légitime les porte, avec la source. Jamais d’information sur des mineurs.',
+    '- Pas d’annuaires de personnes ni de courtiers de données (leurs fiches sont compilées, souvent fausses, et invérifiables). Pas de pages derrière une connexion.',
     '- L’ANCRAGE avant tout : pour chaque information, dis explicitement ce qui relie la page à CETTE personne (même pseudo que celui posté dans les salons, même ville que celle citée, même activité de trading, photo cohérente, lien depuis un profil déjà sûr). Une page qui ne peut pas être reliée n’est pas une trouvaille, c’est un homonyme : écarte-la et dis-le.',
     '- Cite la source de chaque affirmation et le fragment exact de la page qui la fonde.',
     '- Ne conclus rien sur la personnalité, la situation financière ou la vie privée. Tu rapportes des faits publics, tu ne juges pas.',
