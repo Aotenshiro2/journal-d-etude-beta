@@ -154,14 +154,16 @@ export async function POST(req: NextRequest) {
   ].filter(Boolean).join('\n')
 
   const consigne = [
-    'Tu enquêtes sur une personne pour enrichir la fiche d’un CRM privé, à partir de sources publiques uniquement.',
-    'Ce qu’on cherche : ses réseaux sociaux (Instagram, YouTube, TikTok, LinkedIn, X, Facebook, Twitch), un site ou blog, une société (nom, rôle, siège, SIREN — registres publics comme Pappers, societe.com, Infogreffe sont bienvenus), une chaîne ou un podcast, son activité professionnelle, où il ou elle vit, et ses coordonnées publiques quand une page légitime les porte (mentions légales d’un site, fiche de société, page de contact professionnelle) : adresse, téléphone, email.',
-    // Brice, 07/09 : « si tu les trouves, donne-les-moi ». Les coordonnées
-    // trouvées sur une page publique légitime entrent donc en proposition,
-    // comme tout le reste : sourcées, et tranchées par un humain.
+    // Brice, 07/09 : « je veux le plus d'infos possible ». Ce qui rapporte le
+    // plus, c'est la PRÉSENCE PUBLIQUE : ce que la personne publie, et les
+    // coordonnées qu'une page pro affiche elle-même. Formulé « dossier sur un
+    // particulier » (domicile, téléphone), le modèle refuse en bloc — Sonnet a
+    // rendu 0 page sur Boris. Formulé « ce qu'il publie », il cherche.
+    'Tu documentes la présence publique en ligne d’une personne pour la fiche d’un CRM d’école de trading : elle est élève ou contact de cette communauté, et l’équipe veut savoir ce qu’elle publie et fait professionnellement.',
+    'Ce qu’on cherche : ses comptes publics (Instagram, YouTube, TikTok, LinkedIn, X, Facebook, Twitch), un site ou blog, une chaîne ou un podcast, son activité et son métier, une société qu’elle dirige ou représente (nom, rôle, ville du siège, SIREN — registres publics Pappers, societe.com, Infogreffe bienvenus), la ville ou région qu’elle affiche publiquement, et les coordonnées professionnelles qu’elle publie elle-même (mentions légales de son site, fiche de sa société, page de contact pro) : téléphone, adresse, email y compris.',
     'RÈGLES FERMES :',
-    '- Rapporte les coordonnées UNIQUEMENT si une page publique légitime les porte, avec la source. Jamais d’information sur des mineurs.',
-    '- Pas d’annuaires de personnes ni de courtiers de données (leurs fiches sont compilées, souvent fausses, et invérifiables). Pas de pages derrière une connexion.',
+    '- Uniquement ce que la personne ou sa société a rendu public, avec la source. Jamais d’information sur des mineurs.',
+    '- Pas d’annuaires de personnes ni de courtiers de données (fiches compilées, souvent fausses, invérifiables). Pas de pages derrière une connexion.',
     '- L’ANCRAGE avant tout : pour chaque information, dis explicitement ce qui relie la page à CETTE personne (même pseudo que celui posté dans les salons, même ville que celle citée, même activité de trading, photo cohérente, lien depuis un profil déjà sûr). Une page qui ne peut pas être reliée n’est pas une trouvaille, c’est un homonyme : écarte-la et dis-le.',
     '- Cite la source de chaque affirmation et le fragment exact de la page qui la fonde.',
     '- Ne conclus rien sur la personnalité, la situation financière ou la vie privée. Tu rapportes des faits publics, tu ne juges pas.',

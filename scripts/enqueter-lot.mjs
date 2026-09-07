@@ -39,10 +39,14 @@ const log = (s) => { const l = `${new Date().toISOString()} ${s}`; console.log(l
 const BLOQUES = ['spokeo.com', 'pipl.com', 'whitepages.com', 'truepeoplesearch.com', 'beenverified.com',
   'peoplefinders.com', 'fastpeoplesearch.com', '118000.fr', '118712.fr', 'pagesblanches.fr']
 
+// Première formulation (« où il vit, adresse, téléphone, email ») : Sonnet a
+// refusé en bloc, 0 page — lu comme un dossier sur un particulier. Ce qu'on
+// veut, c'est sa PRÉSENCE PUBLIQUE : ce qu'il ou elle publie, et les
+// coordonnées qu'une page professionnelle affiche elle-même.
 const CONSIGNE = [
-  'Tu enquêtes sur une personne pour enrichir la fiche d’un CRM privé, à partir de sources publiques uniquement.',
-  'Ce qu’on cherche : ses réseaux sociaux (Instagram, YouTube, TikTok, LinkedIn, X, Facebook, Twitch), un site ou blog, une société (nom, rôle, siège, SIREN — Pappers, societe.com, Infogreffe bienvenus), une chaîne ou un podcast, son activité, où il ou elle vit, et ses coordonnées publiques quand une page légitime les porte (mentions légales, fiche de société, page de contact) : adresse, téléphone, email.',
-  'RÈGLES FERMES : coordonnées uniquement depuis une page publique légitime, avec la source ; jamais d’information sur des mineurs ; pas d’annuaires de personnes ni de courtiers de données ; pas de pages derrière une connexion.',
+  'Tu documentes la présence publique en ligne d’une personne pour la fiche d’un CRM d’école de trading : elle est élève ou contact de cette communauté, et l’équipe veut savoir ce qu’elle publie et fait professionnellement.',
+  'Ce qu’on cherche : ses comptes publics (Instagram, YouTube, TikTok, LinkedIn, X, Facebook, Twitch), un site ou blog, une chaîne ou un podcast, son activité et son métier, une société qu’elle dirige ou représente (nom, rôle, ville du siège, SIREN — registres publics Pappers, societe.com, Infogreffe bienvenus), la ville ou région qu’elle affiche publiquement, et les coordonnées professionnelles qu’elle publie elle-même (mentions légales de son site, fiche de sa société, page de contact pro).',
+  'RÈGLES FERMES : uniquement ce que la personne ou sa société a rendu public ; jamais d’information sur des mineurs ; pas d’annuaires de personnes ni de courtiers de données ; pas de pages derrière une connexion ; rien sur la vie privée qui ne soit publié par la personne elle-même.',
   'L’ANCRAGE avant tout : pour chaque information, dis ce qui relie la page à CETTE personne (pseudo posté dans les salons, ville citée, activité de trading, photo, lien depuis un profil sûr). Une page non reliable est un homonyme : écarte-la et dis-le.',
   'Cite la source de chaque affirmation et le fragment exact qui la fonde. Ne conclus rien sur la personnalité ou la situation financière.',
   'Commence par les profils déjà postés et par ce que l’équipe sait. Termine par un compte rendu : trouvé (sources + ancrages), écarté (pourquoi).',
