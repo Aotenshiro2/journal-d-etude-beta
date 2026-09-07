@@ -146,7 +146,16 @@ const cibles = UNE ? [{ personne_id: UNE }] : await prisma.$queryRawUnsafe(
    order by v.messages desc limit ${MAX}`)
 log(`lot : ${cibles.length} personne(s), modèle ${MODELE}`)
 for (const c of cibles) {
-  try { await enqueter(c.personne_id) } catch (e) { log(`${c.personne_id} : ERREUR ${String(e.message).slice(0, 200)}`) }
+  try { await enqueter(c.personne_id) } catch (e) {
+    const msg = String(e.message)
+    log(`${c.personne_id} : ERREUR ${msg.slice(0, 200)}`)
+    // Le 07/09, le crédit du workspace cockpit s'est épuisé après la première
+    // personne : 49 erreurs identiques en 17 secondes. Une erreur de crédit ou
+    // d'authentification ne se répare pas en passant au suivant — on s'arrête,
+    // et la relance reprendra là où on en était (les personnes sans
+    // proposition récente sont reprises d'office).
+    if (/credit balance|authentication|invalid x-api-key/i.test(msg)) { log('arrêt : le compte API ne répond plus, relancer après rechargement'); break }
+  }
 }
 log('lot terminé')
 await prisma.$disconnect()
