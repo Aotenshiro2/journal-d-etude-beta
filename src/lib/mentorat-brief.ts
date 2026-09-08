@@ -9,7 +9,7 @@ import { prisma } from './db'
 
 // Miroirs des types extension (source de vérité : academic.ts, JSONB en base)
 interface TradeCooldown { emotion?: string; error?: string; lesson?: string; doneAt?: number }
-interface TradeSegment { id: string; startedAt: number; closedAt?: number; outcome?: 'gain' | 'perte' | 'be'; cooldown?: TradeCooldown }
+interface TradeSegment { id: string; startedAt: number; closedAt?: number; outcome?: 'gain' | 'perte' | 'be'; r?: number; cooldown?: TradeCooldown }
 interface NoteWarmup { id?: string; startedAt?: number; emotionLevel?: number }
 
 type Grade = 'A' | 'B' | 'C'
@@ -36,7 +36,26 @@ export interface MentoratBrief {
     causes: Record<Cause, number>
     /** grade × résultat : le découplage (un A peut perdre, un C peut gagner) */
     calibration: Record<Grade, { gain: number; perte: number; be: number }>
+    /** Répartition des issues par jour de semaine et heure d'entrée (Paris).
+     *  Données déjà présentes (startedAt) — c'est ce qui permet au mentor de
+     *  voir « vendredi : 0 gagnant sur 5 » sans aucune saisie nouvelle. */
+    parJour: { jour: string; gain: number; perte: number; be: number }[]
+    parHeure: { heure: number; gain: number; perte: number; be: number }[]
+    /** Résultats en R quand l'élève les saisit (1.8.7) : la couche espérance,
+     *  inspirée du rapport perso de Florent (08/09). Null si aucun R saisi. */
+    enR: {
+      saisis: number
+      total: number
+      gagnantMoyen: number | null
+      perdantMoyen: number | null
+      /** win rate d'équilibre au ratio observé, en % (null si échantillon < 3+3) */
+      seuilEquilibre: number | null
+      parGrade: Record<Grade, { somme: number; n: number }>
+    } | null
   }
+  /** Derniers jugements B/C, dans les mots de l'élève — l'équivalent de ses
+   *  « MAIS » écrits avant l'entrée. Date Paris, grade avec nuance, phrase. */
+  extraitsJugements: { date: string; grade: string; phrase: string }[]
   warmups: {
     count: number
     avgEmotion: number | null
@@ -177,9 +196,16 @@ export async function buildMentoratBrief(
   // dernier fait foi, annotations déjà triées par createdAt croissant)
   const tradeAnnotation = new Map<string, { grade: Grade; ordinal: number; nuance: '+' | '-' | ''; cause: Cause | null; createdAt: Date }>()
   const noteAnnotation = new Map<string, Grade>()
+  // Les phrases des jugements B/C : la matière que l'élève écrit AVANT ou au
+  // moment du trade (ses « MAIS »). Le mentor lit ses mots, pas juste des
+  // comptes. Annotations triées par date croissante : les 5 dernières.
+  const extraitsBruts: { quand: Date; grade: string; phrase: string }[] = []
   for (const a of annotations) {
     const lettre = lettreDe(a.grade)
     if (!lettre) continue
+    if (lettre !== 'A' && typeof a.phrase === 'string' && a.phrase.trim()) {
+      extraitsBruts.push({ quand: a.createdAt, grade: a.grade.replace('-', '−'), phrase: a.phrase.trim().slice(0, 140) })
+    }
     if (a.tradeRef) {
       tradeAnnotation.set(a.tradeRef, {
         grade: lettre,
@@ -204,10 +230,33 @@ export async function buildMentoratBrief(
   const nuances = { plus: 0, moins: 0 }
   const ordinaux: { quand: number; valeur: number }[] = []
 
+  // Jour de semaine et heure d'entrée en heure de Paris (les élèves sont
+  // français ; startedAt est un epoch, l'UTC décalerait les séances du soir).
+  const fmtJour = new Intl.DateTimeFormat('fr-FR', { weekday: 'long', timeZone: 'Europe/Paris' })
+  const fmtHeure = new Intl.DateTimeFormat('fr-FR', { hour: 'numeric', hour12: false, timeZone: 'Europe/Paris' })
+  const jourMap = new Map<string, { gain: number; perte: number; be: number }>()
+  const heureMap = new Map<number, { gain: number; perte: number; be: number }>()
+  const rSaisis: { r: number; grade: Grade | null }[] = []
+
   for (const t of trades) {
     if (t.outcome) counts[t.outcome]++
     else counts.open++
     const ann = tradeAnnotation.get(t.id)
+    if (t.outcome) {
+      const jour = fmtJour.format(t.startedAt)
+      const j = jourMap.get(jour) ?? { gain: 0, perte: 0, be: 0 }
+      j[t.outcome]++
+      jourMap.set(jour, j)
+      const heure = parseInt(fmtHeure.format(t.startedAt), 10)
+      if (Number.isFinite(heure)) {
+        const h = heureMap.get(heure) ?? { gain: 0, perte: 0, be: 0 }
+        h[t.outcome]++
+        heureMap.set(heure, h)
+      }
+    }
+    if (typeof t.r === 'number' && Number.isFinite(t.r)) {
+      rSaisis.push({ r: t.r, grade: ann?.grade ?? null })
+    }
     if (ann) {
       grades[ann.grade]++
       if (ann.nuance === '+') nuances.plus++
@@ -222,6 +271,37 @@ export async function buildMentoratBrief(
     }
   }
   const graded = grades.A + grades.B + grades.C
+
+  const ORDRE_JOURS = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche']
+  const parJour = ORDRE_JOURS.filter(j => jourMap.has(j)).map(j => ({ jour: j, ...jourMap.get(j)! }))
+  const parHeure = [...heureMap.entries()].sort((a, b) => a[0] - b[0]).map(([heure, v]) => ({ heure, ...v }))
+
+  // La couche R : espérance et coût par grade. Le win rate d'équilibre est
+  // perte moyenne / (gain moyen + perte moyenne) — la formule du rapport de
+  // Florent. On ne la sort qu'à partir de 3 gagnants et 3 perdants saisis.
+  let enR: MentoratBrief['trades']['enR'] = null
+  if (rSaisis.length > 0) {
+    const gagnants = rSaisis.filter(x => x.r > 0).map(x => x.r)
+    const perdants = rSaisis.filter(x => x.r < 0).map(x => -x.r)
+    const moyenne = (xs: number[]) => xs.reduce((s, x) => s + x, 0) / xs.length
+    const gagnantMoyen = gagnants.length ? moyenne(gagnants) : null
+    const perdantMoyen = perdants.length ? moyenne(perdants) : null
+    const seuilEquilibre = gagnants.length >= 3 && perdants.length >= 3 && gagnantMoyen && perdantMoyen
+      ? (perdantMoyen / (gagnantMoyen + perdantMoyen)) * 100
+      : null
+    const parGrade: Record<Grade, { somme: number; n: number }> = {
+      A: { somme: 0, n: 0 }, B: { somme: 0, n: 0 }, C: { somme: 0, n: 0 },
+    }
+    for (const x of rSaisis) if (x.grade) { parGrade[x.grade].somme += x.r; parGrade[x.grade].n++ }
+    enR = {
+      saisis: rSaisis.length,
+      total: rSaisis.reduce((s, x) => s + x.r, 0),
+      gagnantMoyen,
+      perdantMoyen,
+      seuilEquilibre,
+      parGrade,
+    }
+  }
 
   // Qualité ordinale : moyenne sur C− = 1 … A+ = 9, et tendance première
   // moitié contre seconde moitié de la période (chronologie des trades).
@@ -309,7 +389,12 @@ export async function buildMentoratBrief(
   const brief: MentoratBrief = {
     periodDays,
     generatedAt: new Date().toISOString(),
-    trades: { total: trades.length, ...counts, graded, grades, nuances, qualite, causes, calibration },
+    trades: { total: trades.length, ...counts, graded, grades, nuances, qualite, causes, calibration, parJour, parHeure, enR },
+    extraitsJugements: extraitsBruts.slice(-5).map(e => ({
+      date: new Intl.DateTimeFormat('fr-FR', { day: '2-digit', month: '2-digit', timeZone: 'Europe/Paris' }).format(e.quand),
+      grade: e.grade,
+      phrase: e.phrase,
+    })),
     warmups: {
       count: warmupsAll.length,
       avgEmotion,
@@ -377,6 +462,40 @@ function renderBriefText(b: MentoratBrief): string {
     } else {
       L.push(`Aucun trade noté A/B/C sur la période (${t.total} trades non jugés).`)
     }
+
+    // La couche R (quand l'élève la saisit) : l'espérance, le vrai coût des
+    // grades — ce que le rapport perso de Florent avait et pas le mentor.
+    const fmtR = (x: number) =>
+      `${x > 0 ? '+' : x < 0 ? '−' : ''}${Math.abs(x).toFixed(1).replace('.', ',')}`
+    if (t.enR) {
+      const morceauxR = [`total ${fmtR(t.enR.total)} R sur ${t.enR.saisis} trades saisis`]
+      if (t.enR.gagnantMoyen !== null) morceauxR.push(`gagnant moyen ${fmtR(t.enR.gagnantMoyen)} R`)
+      if (t.enR.perdantMoyen !== null) morceauxR.push(`perdant moyen ${fmtR(-t.enR.perdantMoyen)} R`)
+      L.push(`Résultats en R : ${morceauxR.join(' ; ')}.`)
+      if (t.enR.seuilEquilibre !== null) {
+        L.push(`À ce ratio gain/perte, le win rate d'équilibre est ${t.enR.seuilEquilibre.toFixed(0)} %.`)
+      }
+      const enR = t.enR
+      const avecR = (Object.keys(enR.parGrade) as Grade[]).filter(g => enR.parGrade[g].n > 0)
+      if (avecR.length > 0) {
+        L.push(`R par grade : ${avecR.map(g => `${g} ${fmtR(enR.parGrade[g].somme)} R (${enR.parGrade[g].n} trade${enR.parGrade[g].n > 1 ? 's' : ''})`).join(' · ')}.`)
+      }
+    }
+
+    // Jour et heure : « vendredi, 0 gagnant sur 5 » se voit ici.
+    const fmtIssues = (v: { gain: number; perte: number; be: number }) =>
+      [
+        v.gain ? `${v.gain} gain${v.gain > 1 ? 's' : ''}` : '',
+        v.perte ? `${v.perte} perte${v.perte > 1 ? 's' : ''}` : '',
+        v.be ? `${v.be} BE` : '',
+      ].filter(Boolean).join(', ')
+    if (t.parJour.length > 1) {
+      L.push(`Par jour de semaine : ${t.parJour.map(j => `${j.jour} ${fmtIssues(j)}`).join(' · ')}.`)
+    }
+    const heures = t.parHeure.filter(h => h.gain + h.perte + h.be >= 2)
+    if (heures.length > 0) {
+      L.push(`Par heure d'entrée (heure de Paris) : ${heures.map(h => `${h.heure} h ${fmtIssues(h)}`).join(' · ')}.`)
+    }
   }
 
   if (b.warmups.count > 0) {
@@ -398,8 +517,19 @@ function renderBriefText(b: MentoratBrief): string {
   }
 
   if (b.monthly.length > 1) {
-    const prog = b.monthly.map(m => `${m.month} : ${m.A}A/${m.B}B/${m.C}C`).join(' · ')
+    // Le % de A par mois = la sélectivité, le signal que les comptes bruts
+    // cachent (« 61 % de A en juillet, 77 % en août » du rapport de Florent).
+    const prog = b.monthly.map(m => {
+      const total = m.A + m.B + m.C
+      const pctA = total > 0 ? Math.round((m.A / total) * 100) : 0
+      return `${m.month} : ${m.A}A/${m.B}B/${m.C}C (${pctA} % de A)`
+    }).join(' · ')
     L.push(`Progression mensuelle des jugements : ${prog}.`)
+  }
+
+  if (b.extraitsJugements.length > 0) {
+    const ex = b.extraitsJugements.map(e => `${e.date} ${e.grade} « ${e.phrase} »`).join(' · ')
+    L.push(`Derniers jugements B/C, dans les mots de l'élève : ${ex}.`)
   }
 
   if (b.concepts.length > 0) {
