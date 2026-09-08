@@ -65,10 +65,10 @@ export default function NoteReader({ note }: NoteReaderProps) {
         )}
         {noteAnnotation && (
           <span
-            className={`flex items-center justify-center w-5 h-5 rounded-full text-[11px] font-semibold flex-shrink-0 ${GRADE_CLASS[noteAnnotation.grade] ?? ''}`}
+            className={`flex items-center justify-center min-w-5 h-5 px-0.5 rounded-full text-[11px] font-semibold flex-shrink-0 ${GRADE_CLASS[noteAnnotation.grade[0]] ?? ''}`}
             title={noteAnnotation.phrase}
           >
-            {noteAnnotation.grade}
+            {noteAnnotation.grade.replace('-', '−')}
           </span>
         )}
       </div>
@@ -105,8 +105,8 @@ export default function NoteReader({ note }: NoteReaderProps) {
                   <span className="flex-1" />
                   {outcome && <span className={`font-medium ${outcome.cls}`}>{outcome.label}</span>}
                   {tradeAnnotation && (
-                    <span className={`flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-semibold ${GRADE_CLASS[tradeAnnotation.grade] ?? ''}`}>
-                      {tradeAnnotation.grade}
+                    <span className={`flex items-center justify-center min-w-4 h-4 px-0.5 rounded-full text-[10px] font-semibold ${GRADE_CLASS[tradeAnnotation.grade[0]] ?? ''}`}>
+                      {tradeAnnotation.grade.replace('-', '−')}
                     </span>
                   )}
                 </div>

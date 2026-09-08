@@ -46,7 +46,8 @@ export default async function ConceptsPage() {
   const stats: ConceptStat[] = tags.map(t => {
     const noteIds = noteIdsByTag.get(t.id) ?? new Set<string>()
     const grades = { A: 0, B: 0, C: 0 } as Record<string, number>
-    for (const a of annotations) if (a.noteId && noteIds.has(a.noteId) && grades[a.grade] !== undefined) grades[a.grade]++
+    // Agrégation par lettre : 'B+' et 'B-' comptent comme B (nuances 1.8.6).
+    for (const a of annotations) if (a.noteId && noteIds.has(a.noteId) && grades[a.grade?.[0] ?? ''] !== undefined) grades[a.grade[0]]++
     // Co-occurrence : autres concepts partageant une note
     const co = new Map<string, number>()
     for (const nid of noteIds) {

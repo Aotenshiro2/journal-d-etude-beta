@@ -26,6 +26,13 @@ export interface MentoratBrief {
     open: number
     graded: number
     grades: Record<Grade, number>
+    /** Nuances +/− (1.8.6) : combien de jugements portent un + ou un −. */
+    nuances: { plus: number; moins: number }
+    /** Qualité ordinale (C− = 1 … A+ = 9) : la tendance fine que les lettres
+     *  seules ne montrent pas — un élève qui passe de B− à B+ progresse sans
+     *  changer de lettre. Décision Brice 08/09 : les stats restent PAR LETTRE,
+     *  la nuance est un signal séparé. */
+    qualite: { moyenne: number; tendance: 'progression' | 'recul' | 'stable' | null } | null
     causes: Record<Cause, number>
     /** grade × résultat : le découplage (un A peut perdre, un C peut gagner) */
     calibration: Record<Grade, { gain: number; perte: number; be: number }>
@@ -53,7 +60,17 @@ const CAUSE_LABEL: Record<Cause, string> = {
   emotionnel: 'mental et émotionnel',
 }
 
-function isGrade(g: unknown): g is Grade { return g === 'A' || g === 'B' || g === 'C' }
+/** Depuis la 1.8.6 un grade peut porter une nuance ('B+', 'A-'…). La lettre
+ *  porte les stats ; l'ordinal (C− = 1 … A+ = 9) porte la tendance. */
+function lettreDe(g: unknown): Grade | null {
+  if (typeof g !== 'string' || g.length === 0) return null
+  const l = g[0]
+  return l === 'A' || l === 'B' || l === 'C' ? l : null
+}
+function ordinalDe(g: string): number {
+  const base = g[0] === 'A' ? 8 : g[0] === 'B' ? 5 : 2
+  return base + (g[1] === '+' ? 1 : g[1] === '-' ? -1 : 0)
+}
 function isCause(c: unknown): c is Cause { return c === 'technique' || c === 'connaissance' || c === 'emotionnel' }
 
 /**
@@ -158,14 +175,21 @@ export async function buildMentoratBrief(
 
   // Dernier jugement par trade (les re-jugements sont un historique : le
   // dernier fait foi, annotations déjà triées par createdAt croissant)
-  const tradeAnnotation = new Map<string, { grade: Grade; cause: Cause | null; createdAt: Date }>()
+  const tradeAnnotation = new Map<string, { grade: Grade; ordinal: number; nuance: '+' | '-' | ''; cause: Cause | null; createdAt: Date }>()
   const noteAnnotation = new Map<string, Grade>()
   for (const a of annotations) {
-    if (!isGrade(a.grade)) continue
+    const lettre = lettreDe(a.grade)
+    if (!lettre) continue
     if (a.tradeRef) {
-      tradeAnnotation.set(a.tradeRef, { grade: a.grade, cause: isCause(a.causeCategory) ? a.causeCategory : null, createdAt: a.createdAt })
+      tradeAnnotation.set(a.tradeRef, {
+        grade: lettre,
+        ordinal: ordinalDe(a.grade),
+        nuance: a.grade[1] === '+' ? '+' : a.grade[1] === '-' ? '-' : '',
+        cause: isCause(a.causeCategory) ? a.causeCategory : null,
+        createdAt: a.createdAt,
+      })
     } else if (a.noteId && !a.messageRef) {
-      noteAnnotation.set(a.noteId, a.grade)
+      noteAnnotation.set(a.noteId, lettre)
     }
   }
 
@@ -177,12 +201,18 @@ export async function buildMentoratBrief(
   }
   const monthlyMap = new Map<string, Record<Grade, number>>()
 
+  const nuances = { plus: 0, moins: 0 }
+  const ordinaux: { quand: number; valeur: number }[] = []
+
   for (const t of trades) {
     if (t.outcome) counts[t.outcome]++
     else counts.open++
     const ann = tradeAnnotation.get(t.id)
     if (ann) {
       grades[ann.grade]++
+      if (ann.nuance === '+') nuances.plus++
+      if (ann.nuance === '-') nuances.moins++
+      ordinaux.push({ quand: t.startedAt, valeur: ann.ordinal })
       if (ann.cause) causes[ann.cause]++
       if (t.outcome) calibration[ann.grade][t.outcome]++
       const month = new Date(t.startedAt).toISOString().slice(0, 7)
@@ -192,6 +222,23 @@ export async function buildMentoratBrief(
     }
   }
   const graded = grades.A + grades.B + grades.C
+
+  // Qualité ordinale : moyenne sur C− = 1 … A+ = 9, et tendance première
+  // moitié contre seconde moitié de la période (chronologie des trades).
+  // La tendance demande au moins 6 jugements, sinon c'est du bruit.
+  let qualite: { moyenne: number; tendance: 'progression' | 'recul' | 'stable' | null } | null = null
+  if (ordinaux.length > 0) {
+    const moyenne = ordinaux.reduce((s, o) => s + o.valeur, 0) / ordinaux.length
+    let tendance: 'progression' | 'recul' | 'stable' | null = null
+    if (ordinaux.length >= 6) {
+      const tries = [...ordinaux].sort((a, b) => a.quand - b.quand)
+      const moitie = Math.floor(tries.length / 2)
+      const avant = tries.slice(0, moitie).reduce((s, o) => s + o.valeur, 0) / moitie
+      const apres = tries.slice(moitie).reduce((s, o) => s + o.valeur, 0) / (tries.length - moitie)
+      tendance = apres - avant >= 0.5 ? 'progression' : avant - apres >= 0.5 ? 'recul' : 'stable'
+    }
+    qualite = { moyenne, tendance }
+  }
 
   // ── Warmups : émotion au départ × qualité des trades qui suivent ──
   const warmupsAll: { noteId: string; startedAt: number; emotionLevel: number }[] = []
@@ -262,7 +309,7 @@ export async function buildMentoratBrief(
   const brief: MentoratBrief = {
     periodDays,
     generatedAt: new Date().toISOString(),
-    trades: { total: trades.length, ...counts, graded, grades, causes, calibration },
+    trades: { total: trades.length, ...counts, graded, grades, nuances, qualite, causes, calibration },
     warmups: {
       count: warmupsAll.length,
       avgEmotion,
@@ -298,7 +345,20 @@ function renderBriefText(b: MentoratBrief): string {
     if (t.open) parts.push(`${t.open} sans résultat saisi`)
     L.push(`Trades : ${t.total} au total (${parts.join(', ')}).`)
     if (t.graded > 0) {
-      L.push(`Jugements : ${t.graded} trades notés sur ${t.total} : ${t.grades.A} A, ${t.grades.B} B, ${t.grades.C} C.`)
+      const nuancesTxt = (t.nuances.plus || t.nuances.moins)
+        ? ` (dont ${[t.nuances.plus ? `${t.nuances.plus} nuancés +` : '', t.nuances.moins ? `${t.nuances.moins} nuancés −` : ''].filter(Boolean).join(' et ')})`
+        : ''
+      L.push(`Jugements : ${t.graded} trades notés sur ${t.total} : ${t.grades.A} A, ${t.grades.B} B, ${t.grades.C} C${nuancesTxt}.`)
+      if (t.qualite) {
+        const tendanceTxt = t.qualite.tendance === 'progression'
+          ? ', en progression sur la période'
+          : t.qualite.tendance === 'recul'
+            ? ', en recul sur la période'
+            : t.qualite.tendance === 'stable'
+              ? ', stable sur la période'
+              : ''
+        L.push(`Qualité moyenne des jugements : ${t.qualite.moyenne.toFixed(1)} sur une échelle de C− = 1 à A+ = 9${tendanceTxt}.`)
+      }
       const causesTotal = t.causes.technique + t.causes.connaissance + t.causes.emotionnel
       if (causesTotal > 0) {
         const cs = (Object.keys(CAUSE_LABEL) as Cause[])

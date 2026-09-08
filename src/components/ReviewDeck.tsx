@@ -93,15 +93,33 @@ function VerdictRow({ v, onJudged }: { v: AnnotationData; onJudged: (grade: stri
       {/* A/B/C : le geste central de la relecture, et celui qu'on fait au pouce.
           32 px suffisaient à la souris, pas au doigt → 44 px sur téléphone. Les
           causes descendent sur leur propre ligne : sur 375 px, tout aligné
-          écrasait les deux (retour Brice, 25/07/2026). */}
+          écrasait les deux (retour Brice, 25/07/2026).
+          Depuis la 1.8.6 chaque bouton porte deux flancs − et + (nuances,
+          même geste que le popover de l'extension — labo du 08/09, option 2) ;
+          les boutons passent en flex-1 pour garder des flancs tapables. */}
       <div className="flex items-center gap-2 mb-2">
-        {GRADES.map(g => (
-          <button key={g} disabled={saved} onClick={() => setGrade(g)}
-            className={`w-11 h-11 sm:w-8 sm:h-8 rounded-lg border text-base sm:text-sm font-semibold transition-all ${grade === g ? GRADE_CLASS[g] : ''}`}
-            style={grade === g ? undefined : { borderColor: 'var(--node-border)', color: 'var(--node-meta)' }}>
-            {g}
-          </button>
-        ))}
+        {GRADES.map(g => {
+          const active = grade[0] === g
+          const mod = active && grade.length > 1 ? grade[1] : ''
+          return (
+            <div key={g}
+              className={`flex-1 h-11 sm:h-8 rounded-lg border flex items-stretch overflow-hidden transition-all ${active ? GRADE_CLASS[g] : ''}`}
+              style={active ? undefined : { borderColor: 'var(--node-border)', color: 'var(--node-meta)' }}>
+              <button disabled={saved} onClick={() => setGrade(`${g}-`)} aria-label={`${g} moins`}
+                className={`w-[26%] text-xs flex items-center justify-center transition-opacity ${mod === '-' ? 'opacity-100 font-bold' : 'opacity-40 hover:opacity-100'}`}>
+                −
+              </button>
+              <button disabled={saved} onClick={() => setGrade(g)} aria-label={`Grade ${g}`}
+                className={`flex-1 text-base sm:text-sm font-semibold flex items-center justify-center ${active && mod !== '' ? 'opacity-80' : ''}`}>
+                {g}
+              </button>
+              <button disabled={saved} onClick={() => setGrade(`${g}+`)} aria-label={`${g} plus`}
+                className={`w-[26%] text-xs flex items-center justify-center transition-opacity ${mod === '+' ? 'opacity-100 font-bold' : 'opacity-40 hover:opacity-100'}`}>
+                +
+              </button>
+            </div>
+          )
+        })}
       </div>
       <div className="flex flex-wrap gap-1.5 mb-2">
         {CAUSES.map(c => (
@@ -466,7 +484,8 @@ export default function ReviewDeck({ toRelire, toReorganize, library = [], focus
 
   const advance = () => setIdx(i => i + 1)
   const onSkip = () => { setSkipped(s => s + 1); advance() }
-  const onJudged = (grade: string) => setTally(t => ({ ...t, [grade]: (t[grade] ?? 0) + 1 }))
+  // Le décompte agrège par lettre : un B+ re-jugé compte comme un B.
+  const onJudged = (grade: string) => setTally(t => ({ ...t, [grade[0]]: (t[grade[0]] ?? 0) + 1 }))
 
   const onRead = async () => {
     if (current) await fetch(`/api/canvas/${current.canvasId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reviewed: true }) })

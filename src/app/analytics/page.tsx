@@ -37,16 +37,19 @@ export default async function AnalyticsPage() {
   const byMonth = new Map<string, { A: number; B: number; C: number }>()
 
   for (const a of annotations) {
-    if (grades[a.grade] !== undefined) grades[a.grade]++
+    // Depuis la 1.8.6 un grade peut porter une nuance ('B+', 'A-') : les
+    // stats agrègent PAR LETTRE, la nuance vit dans le brief mentorat.
+    const lettre = a.grade?.[0] ?? ''
+    if (grades[lettre] !== undefined) grades[lettre]++
     if (a.causeCategory && causes[a.causeCategory] !== undefined) causes[a.causeCategory]++
     if (a.tradeRef) {
       const oc = outcomeByTrade.get(a.tradeRef)
-      if (oc && calibration[a.grade]?.[oc] !== undefined) { calibration[a.grade][oc]++; tradeVerdicts++ }
+      if (oc && calibration[lettre]?.[oc] !== undefined) { calibration[lettre][oc]++; tradeVerdicts++ }
     }
     const m = new Date(a.createdAt).toISOString().slice(0, 7)
     if (!byMonth.has(m)) byMonth.set(m, { A: 0, B: 0, C: 0 })
     const bucket = byMonth.get(m)!
-    if (bucket[a.grade as 'A' | 'B' | 'C'] !== undefined) bucket[a.grade as 'A' | 'B' | 'C']++
+    if (bucket[lettre as 'A' | 'B' | 'C'] !== undefined) bucket[lettre as 'A' | 'B' | 'C']++
   }
 
   const timeline = [...byMonth.entries()]

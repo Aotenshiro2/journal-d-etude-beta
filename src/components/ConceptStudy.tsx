@@ -249,7 +249,7 @@ export default function ConceptStudy({ donnees }: { donnees: DonneesConcept }) {
                     {s.titre}
                   </Link>
                   {s.grades.map((g, i) => (
-                    <span key={i} className="text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: `${COULEUR_GRADE[g]}22`, color: COULEUR_GRADE[g] }}>{g}</span>
+                    <span key={i} className="text-[10px] font-bold min-w-5 h-5 px-0.5 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: `${COULEUR_GRADE[g[0]]}22`, color: COULEUR_GRADE[g[0]] }}>{g.replace('-', '−')}</span>
                   ))}
                   {s.date && <span className="text-[11px] flex-shrink-0" style={{ color: 'var(--node-meta)' }}>{s.date}</span>}
                 </div>

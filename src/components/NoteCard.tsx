@@ -67,10 +67,10 @@ export default function NoteCard({ note }: NoteCardProps) {
           <h3 className="flex-1 font-semibold text-sm leading-tight line-clamp-2" style={{ color: 'var(--node-title)' }}>{note.title}</h3>
           {annotation && (
             <span
-              className={`flex items-center justify-center w-5 h-5 rounded-full text-[11px] font-semibold flex-shrink-0 ${GRADE_CLASS[annotation.grade] ?? ''}`}
+              className={`flex items-center justify-center min-w-5 h-5 px-0.5 rounded-full text-[11px] font-semibold flex-shrink-0 ${GRADE_CLASS[annotation.grade[0]] ?? ''}`}
               title={annotation.phrase}
             >
-              {annotation.grade}
+              {annotation.grade.replace('-', '−')}
             </span>
           )}
         </div>
@@ -108,8 +108,8 @@ export default function NoteCard({ note }: NoteCardProps) {
               {trades.slice(0, 6).map(trade => {
                 const grade = tradeGrade(note, trade)
                 return grade ? (
-                  <span key={trade.id} className={`w-3.5 h-3.5 rounded-full text-[9px] font-semibold flex items-center justify-center ${GRADE_CLASS[grade] ?? ''}`}>
-                    {grade}
+                  <span key={trade.id} className={`min-w-3.5 h-3.5 px-px rounded-full text-[9px] font-semibold flex items-center justify-center ${GRADE_CLASS[grade[0]] ?? ''}`}>
+                    {grade.replace('-', '−')}
                   </span>
                 ) : (
                   <span

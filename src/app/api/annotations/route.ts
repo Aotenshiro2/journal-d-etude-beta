@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getUserId } from '@/lib/api-auth'
 
-const GRADES = new Set(['A', 'B', 'C'])
+// Nuances +/− depuis le 08/09/2026 (1.8.6). Stockage ASCII ('B-'), la lettre
+// porte les stats, le modificateur porte la tendance fine du brief mentorat.
+const GRADES = new Set(['A+', 'A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-'])
 const CAUSE_CATEGORIES = new Set(['technique', 'connaissance', 'emotionnel'])
 const REVIEW_DELAY_MS = 14 * 24 * 60 * 60 * 1000 // relecture à 2 semaines (masterclass edge)
 
@@ -48,7 +50,7 @@ export async function POST(req: NextRequest) {
     const { id, noteId, messageRef, tradeRef, grade, phrase, causeCategory, reviewDueAt, reviewedAt } = body
 
     if (!GRADES.has(grade)) {
-      return NextResponse.json({ error: 'grade doit être A, B ou C' }, { status: 400 })
+      return NextResponse.json({ error: 'grade doit être A, B ou C, avec + ou - optionnel' }, { status: 400 })
     }
     if (typeof phrase !== 'string' || !phrase.trim()) {
       return NextResponse.json({ error: 'phrase de justification requise' }, { status: 400 })
@@ -133,7 +135,7 @@ export async function PATCH(req: NextRequest) {
     if (!existing) return NextResponse.json({ error: 'Annotation introuvable' }, { status: 404 })
 
     if (grade != null && !GRADES.has(grade)) {
-      return NextResponse.json({ error: 'grade doit être A, B ou C' }, { status: 400 })
+      return NextResponse.json({ error: 'grade doit être A, B ou C, avec + ou - optionnel' }, { status: 400 })
     }
     if (causeCategory != null && !CAUSE_CATEGORIES.has(causeCategory)) {
       return NextResponse.json({ error: 'causeCategory invalide' }, { status: 400 })
