@@ -71,7 +71,7 @@ type Tool = 'select' | 'connect' | 'pan'
 const MODES = [
   { label: 'Étudier mes notes',     href: '/',          Icon: BookOpen,   match: (p: string) => p === '/' || p.startsWith('/study') || p.startsWith('/notes') },
   { label: 'Observer les concepts', href: '/concepts',  Icon: Lightbulb,  match: (p: string) => p === '/concepts' },
-  { label: 'Analyser mes données',  href: '/analytics', Icon: BarChart2,  match: (p: string) => p === '/analytics' },
+  { label: 'Analyser mes données',  href: '/analytics', Icon: BarChart2,  match: (p: string) => p === '/analytics' || p === '/imports' },
   { label: 'Pattern Maps',          href: '/patterns',  Icon: Compass,    match: (p: string) => p === '/patterns' },
   { label: 'Carte A/B/C-game',      href: '/game',      Icon: Layers,     match: (p: string) => p === '/game' },
   { label: 'Rituel de séance',      href: '/session',   Icon: Sunrise,    match: (p: string) => p === '/session' },

@@ -46,6 +46,10 @@ export interface MentoratBrief {
     enR: {
       saisis: number
       total: number
+      /** LA métrique de Brice (08/09) : somme des R gagnés / somme des R perdus.
+       *  Le payoff (RR) reste affiché pour parler aux traders, mais le profit
+       *  factor passe devant : il en apprend plus. */
+      profitFactor: number | null
       gagnantMoyen: number | null
       perdantMoyen: number | null
       /** win rate d'équilibre au ratio observé, en % (null si échantillon < 3+3) */
@@ -53,6 +57,18 @@ export interface MentoratBrief {
       parGrade: Record<Grade, { somme: number; n: number }>
     } | null
   }
+  /** Trades importés des plateformes (Tradovate…) : la réalité d'exécution.
+   *  Doctrine 08/09 : uniquement des RATIOS sans dimension vers l'IA (profit
+   *  factor, payoff, win rate) — jamais de montants, tant que le membre n'a
+   *  pas ouvert l'interrupteur (réglage à venir). */
+  imports: {
+    n: number
+    devise: string
+    winRate: number | null
+    profitFactor: number | null
+    payoff: number | null
+    parInstrument: { symbole: string; n: number; profitFactor: number | null }[]
+  } | null
   /** Derniers jugements B/C, dans les mots de l'élève — l'équivalent de ses
    *  « MAIS » écrits avant l'entrée. Date Paris, grade avec nuance, phrase. */
   extraitsJugements: { date: string; grade: string; phrase: string }[]
@@ -81,6 +97,46 @@ const CAUSE_LABEL: Record<Cause, string> = {
 
 /** Depuis la 1.8.6 un grade peut porter une nuance ('B+', 'A-'…). La lettre
  *  porte les stats ; l'ordinal (C− = 1 … A+ = 9) porte la tendance. */
+/** Les imports en RATIOS sans dimension (doctrine 08/09) : profit factor —
+ *  LA métrique de Brice —, payoff et win rate, sur la devise dominante pour ne
+ *  pas mélanger des sommes de monnaies différentes. Aucun montant n'en sort. */
+function calculerImports(rows: { symbole: string; pnl: number; devise: string }[]): MentoratBrief['imports'] {
+  if (rows.length === 0) return null
+  const parDevise = new Map<string, number>()
+  for (const t of rows) parDevise.set(t.devise, (parDevise.get(t.devise) ?? 0) + 1)
+  const devise = [...parDevise.entries()].sort((a, b) => b[1] - a[1])[0][0]
+  const dansDevise = rows.filter(t => t.devise === devise)
+
+  const pf = (xs: { pnl: number }[]): number | null => {
+    const gains = xs.filter(x => x.pnl > 0).reduce((s, x) => s + x.pnl, 0)
+    const pertes = xs.filter(x => x.pnl < 0).reduce((s, x) => s - x.pnl, 0)
+    return pertes > 0 ? gains / pertes : null
+  }
+  const gagnants = dansDevise.filter(t => t.pnl > 0)
+  const perdants = dansDevise.filter(t => t.pnl < 0)
+  const gagnantMoyen = gagnants.length ? gagnants.reduce((s, t) => s + t.pnl, 0) / gagnants.length : null
+  const perdantMoyen = perdants.length ? -perdants.reduce((s, t) => s + t.pnl, 0) / perdants.length : null
+
+  const parInstrument = new Map<string, { pnl: number }[]>()
+  for (const t of dansDevise) {
+    const l = parInstrument.get(t.symbole) ?? []
+    l.push(t)
+    parInstrument.set(t.symbole, l)
+  }
+
+  return {
+    n: rows.length,
+    devise,
+    winRate: dansDevise.length ? Math.round((gagnants.length / dansDevise.length) * 100) : null,
+    profitFactor: pf(dansDevise),
+    payoff: gagnantMoyen !== null && perdantMoyen ? gagnantMoyen / perdantMoyen : null,
+    parInstrument: [...parInstrument.entries()]
+      .sort((a, b) => b[1].length - a[1].length)
+      .slice(0, 6)
+      .map(([symbole, l]) => ({ symbole, n: l.length, profitFactor: pf(l) })),
+  }
+}
+
 function lettreDe(g: unknown): Grade | null {
   if (typeof g !== 'string' || g.length === 0) return null
   const l = g[0]
@@ -140,7 +196,7 @@ export async function buildMentoratBrief(
   const cadre = Array.isArray(dossiers) && dossiers.length > 0
   const idsDossiers = cadre ? await dossiersAvecEnfants(userId, dossiers!) : null
 
-  const [notes, annotationsBrutes, backlogBrut] = await Promise.all([
+  const [notes, annotationsBrutes, backlogBrut, tradesImportes] = await Promise.all([
     // Les trades/warmups vivent en JSONB sur les notes : on prend toutes les
     // notes de l'utilisateur (volume faible) et on filtre par date de trade,
     // pas par date de note (une note peut vivre plus longtemps que sa séance).
@@ -162,6 +218,12 @@ export async function buildMentoratBrief(
     prisma.annotation.findMany({
       where: { userId, reviewedAt: null, reviewDueAt: { lte: new Date() } },
       select: { noteId: true, tradeRef: true },
+    }),
+    // La réalité d'exécution importée des plateformes. Hors cadrage dossiers :
+    // les imports ne sont pas des notes. Seuls des ratios en sortiront.
+    prisma.tradeImport.findMany({
+      where: { userId, entreLe: { gte: sinceDate } },
+      select: { symbole: true, pnl: true, devise: true },
     }),
   ])
 
@@ -293,9 +355,12 @@ export async function buildMentoratBrief(
       A: { somme: 0, n: 0 }, B: { somme: 0, n: 0 }, C: { somme: 0, n: 0 },
     }
     for (const x of rSaisis) if (x.grade) { parGrade[x.grade].somme += x.r; parGrade[x.grade].n++ }
+    const sommeGains = gagnants.reduce((s, x) => s + x, 0)
+    const sommePertes = perdants.reduce((s, x) => s + x, 0)
     enR = {
       saisis: rSaisis.length,
       total: rSaisis.reduce((s, x) => s + x.r, 0),
+      profitFactor: sommePertes > 0 ? sommeGains / sommePertes : null,
       gagnantMoyen,
       perdantMoyen,
       seuilEquilibre,
@@ -390,6 +455,7 @@ export async function buildMentoratBrief(
     periodDays,
     generatedAt: new Date().toISOString(),
     trades: { total: trades.length, ...counts, graded, grades, nuances, qualite, causes, calibration, parJour, parHeure, enR },
+    imports: calculerImports(tradesImportes),
     extraitsJugements: extraitsBruts.slice(-5).map(e => ({
       date: new Intl.DateTimeFormat('fr-FR', { day: '2-digit', month: '2-digit', timeZone: 'Europe/Paris' }).format(e.quand),
       grade: e.grade,
@@ -468,7 +534,11 @@ function renderBriefText(b: MentoratBrief): string {
     const fmtR = (x: number) =>
       `${x > 0 ? '+' : x < 0 ? '−' : ''}${Math.abs(x).toFixed(1).replace('.', ',')}`
     if (t.enR) {
-      const morceauxR = [`total ${fmtR(t.enR.total)} R sur ${t.enR.saisis} trades saisis`]
+      // Profit factor DEVANT (choix Brice 08/09) : il en apprend plus que le
+      // ratio, même si le RR reste dans la ligne pour parler aux traders.
+      const morceauxR: string[] = []
+      if (t.enR.profitFactor !== null) morceauxR.push(`profit factor ${t.enR.profitFactor.toFixed(2).replace('.', ',')}`)
+      morceauxR.push(`total ${fmtR(t.enR.total)} R sur ${t.enR.saisis} trades saisis`)
       if (t.enR.gagnantMoyen !== null) morceauxR.push(`gagnant moyen ${fmtR(t.enR.gagnantMoyen)} R`)
       if (t.enR.perdantMoyen !== null) morceauxR.push(`perdant moyen ${fmtR(-t.enR.perdantMoyen)} R`)
       L.push(`Résultats en R : ${morceauxR.join(' ; ')}.`)
@@ -495,6 +565,21 @@ function renderBriefText(b: MentoratBrief): string {
     const heures = t.parHeure.filter(h => h.gain + h.perte + h.be >= 2)
     if (heures.length > 0) {
       L.push(`Par heure d'entrée (heure de Paris) : ${heures.map(h => `${h.heure} h ${fmtIssues(h)}`).join(' · ')}.`)
+    }
+  }
+
+  // La réalité d'exécution importée des plateformes — uniquement des ratios,
+  // jamais de montants (doctrine 08/09). Le profit factor mène.
+  if (b.imports) {
+    const imp = b.imports
+    const fmtRatio = (x: number | null) => (x === null ? 'non calculable' : x.toFixed(2).replace('.', ','))
+    const morceaux = [`${imp.n} trades`]
+    if (imp.profitFactor !== null) morceaux.push(`profit factor ${fmtRatio(imp.profitFactor)}`)
+    if (imp.winRate !== null) morceaux.push(`win rate ${imp.winRate} %`)
+    if (imp.payoff !== null) morceaux.push(`payoff (gain moyen / perte moyenne) ${fmtRatio(imp.payoff)}`)
+    L.push(`Exécution réelle importée des plateformes : ${morceaux.join(', ')}.`)
+    if (imp.parInstrument.length > 1) {
+      L.push(`Par instrument (imports) : ${imp.parInstrument.map(x => `${x.symbole} ${x.n} trade${x.n > 1 ? 's' : ''} (PF ${fmtRatio(x.profitFactor)})`).join(' · ')}.`)
     }
   }
 

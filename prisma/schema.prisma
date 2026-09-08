@@ -340,6 +340,37 @@ model AbcGame {
   updatedAt DateTime @updatedAt
 }
 
+// Trades importés des plateformes (Tradovate d'abord, TopstepX/Quantower ensuite) :
+// la réalité d'exécution, à côté du jugement du carnet. Go de Brice le 08/09/2026.
+// Doctrine : les montants restent en base dans leur MONNAIE D'ORIGINE (€/$/crypto) ;
+// le brief mentor ne transmet par défaut que des ratios sans dimension (profit
+// factor, payoff, win rate) — réglage par membre plus tard, rien dans le dur.
+// Déduplication : (userId, source, idExterne) — idExterne = ids de fills quand la
+// plateforme en donne, empreinte calculée sinon. Réimporter le même fichier = 0 doublon.
+model TradeImport {
+  id         String    @id @default(uuid())
+  userId     String
+  source     String // 'tradovate-performance' | 'topstepx' | ...
+  idExterne  String
+  compte     String?
+  symbole    String
+  direction  String? // 'long' | 'short'
+  quantite   Int       @default(1)
+  prixEntree Float?
+  prixSortie Float?
+  entreLe    DateTime // heure telle qu'exportée par la plateforme
+  sortiLe    DateTime?
+  pnl        Float // analytique, pas comptable : Float suffit
+  devise     String    @default("USD")
+  frais      Float?
+  dureeSec   Int?
+  fichier    String? // nom du fichier d'origine, pour s'y retrouver
+  createdAt  DateTime  @default(now())
+
+  @@unique([userId, source, idExterne])
+  @@index([userId, entreLe])
+}
+
 // Fiche « Pattern Map » (Tendler) : l'escalade d'un problème récurrent + la correction
 model Pattern {
   id              String   @id @default(uuid())
