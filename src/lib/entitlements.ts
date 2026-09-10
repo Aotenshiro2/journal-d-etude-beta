@@ -1,7 +1,14 @@
 // Droits d'accès au mode mentorat (décision Brice 28/08) : réservé aux
-// membres — Live Club actif, Skool premium ou vip, ou accès accordé à la main
-// (anciens formats « tout inclus », cas particuliers). Un simple inscrit
-// newsletter n'y a pas droit.
+// membres — statut ETM, Live Club actif, Skool premium ou vip, ou accès
+// accordé à la main (anciens formats « tout inclus », cas particuliers). Un
+// simple inscrit newsletter n'y a pas droit.
+//
+// ETM (règle Brice 09/09/2026) : le mentorat privé (~4 000 € / 3 mois, payé
+// par virement, très peu d'élèves) est un STATUT posé sur le membre depuis la
+// fiche du cockpit (table cockpit_statut_etm). Il ouvre les apps et le ring
+// VIP Skool ; il N'OUVRE PAS le Live Club, qui est un abonnement à part et se
+// cumule. Ce n'est pas un grant manuel : le grant est un geste commercial
+// posé sur un email, l'ETM dit qui la personne est pour nous.
 //
 // Source de vérité : les tables cockpit_* du même Postgres, alimentées chaque
 // matin par AOK-Push-Membres (Stripe Mélanie + Skool). cockpit_membre_emails
@@ -10,7 +17,7 @@
 // l'extension.
 import { prisma } from './db'
 
-export type MentoratReason = 'manuel' | 'liveclub' | 'skool-vip' | 'skool-premium' | 'carnet-premium'
+export type MentoratReason = 'etm' | 'manuel' | 'liveclub' | 'skool-vip' | 'skool-premium' | 'carnet-premium'
 
 // Le produit « Carnet Premium » (5,99 €/mois) sur le Stripe aoknowledge —
 // créé le 28/08/2026. La vérification en direct donne l'accès IMMÉDIAT après
@@ -65,7 +72,19 @@ export async function checkMentoratAccess(userId: string): Promise<MentoratAcces
   const email = users[0]?.email?.toLowerCase().trim() ?? null
   if (!email) return { entitled: false, reason: null, email: null }
 
-  // 1. Accès accordé à la main (prioritaire : couvre les cas hors cockpit)
+  // 0. Statut ETM actif sur le membre, par n'importe lequel de ses emails.
+  // Lu en premier : c'est le statut le plus haut, et il ne dépend ni de
+  // Stripe ni du tier Skool exporté.
+  const etm = await prisma.$queryRaw<{ un: number }[]>`
+    select 1 as un
+    from cockpit_statut_etm s
+    join cockpit_membre_emails me on me.membre_id = s.membre_id
+    where s.retire_le is null and lower(me.email) = ${email}
+    limit 1
+  `
+  if (etm.length > 0) return { entitled: true, reason: 'etm', email }
+
+  // 1. Accès accordé à la main (couvre les cas hors cockpit)
   const grant = await prisma.mentoratGrant.findFirst({
     where: { email, revokedAt: null },
   })

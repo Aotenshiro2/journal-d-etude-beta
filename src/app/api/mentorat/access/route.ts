@@ -4,7 +4,7 @@ import { checkMentoratAccess } from '@/lib/entitlements'
 
 /**
  * GET /api/mentorat/access — l'utilisateur connecté a-t-il le mode mentorat ?
- * { entitled, reason: 'manuel'|'liveclub'|'skool-vip'|'skool-premium'|null }
+ * { entitled, reason: 'etm'|'manuel'|'liveclub'|'skool-vip'|'skool-premium'|'carnet-premium'|null }
  * L'extension AFFICHE selon cette réponse ; les routes brief/plan RE-VÉRIFIENT
  * côté serveur (un client bidouillé ne contourne rien).
  */
