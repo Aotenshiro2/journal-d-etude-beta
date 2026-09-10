@@ -28,7 +28,7 @@ Les tables et vues du cockpit (schéma public, PostgreSQL) :
 - cockpit_paiements : paiement_id, source (stripe|paypal|skool|virement|autre), date_paiement (date), montant, frais (frais Stripe, null = inconnu), net (après frais, null = inconnu), devise, libelle_source, membre_id, offre_id, rembourse (bool). Un remboursement = paiement négatif. Pour un taux de frais, ne compte que les lignes où frais n'est pas null.
 - cockpit_catalogue : produit_id, compte (aoknowledge|melanie), nom, actif (bool, faux = archivé), tarifs (jsonb, liste de {price_id, montant, devise, recurrence, actif}), cree_le. Ce qui est EN VENTE chez Stripe — à distinguer de cockpit_offres, la nomenclature interne.
 - cockpit_coupons : code, compte, reduction (texte lisible), pourcentage, montant, devise, duree (forever|once|repeating), utilisations, max_utilisations (null = illimité), expire_le (null = jamais), actif (bool). Les bons de réduction Stripe et leurs conditions.
-- cockpit_abonnements : abonnement_id, compte (melanie|aoknowledge), membre_id, offre_id, statut (active|trialing|past_due|unpaid|incomplete|canceled|ended), montant, periodicite (month|quarter|year), debut, fin_periode, annule_le, annule_a_la_fin (bool)
+- cockpit_abonnements : abonnement_id, compte (melanie|aoknowledge), membre_id, offre_id, statut (active|trialing|past_due|unpaid|incomplete|canceled|ended), montant, periodicite (month|quarter|year), debut, fin_periode, annule_le, annule_a_la_fin (bool), pause_jusquau (date — abonnement EN PAUSE : plus de prélèvement jusqu'à cette date, reprise automatique ; null = pas en pause. Un abonnement en pause reste « active » chez Stripe : regarde toujours cette colonne avant de parler de statut)
 - cockpit_offres : offre_id, nom, nature, recurrence, actif
 - cockpit_actions (vue, ce qui demande un geste) : membre_id, nom, email_principal, tier_skool, produits, fin_proche, annule_le, total_paye, dernier_paiement, motif (retirer_live_club|fin_de_droits|paiement_en_echec|resiliation_demandee|echeance_proche|acces_sans_paiement), urgence, fin_droits, acces_conserves, acces_offert, prochaine_tentative, nb_tentatives, telegram
 - cockpit_actions_traitees : membre_id, motif, traite_le, traite_par, note (ce que Brice/Mélanie ont marqué fait depuis le cockpit)
@@ -103,8 +103,9 @@ On peut joindre un PDF, une capture d'écran, un export CSV, un relevé bancaire
 - si le document est illisible, tronqué, ou sans rapport avec ce qu'on te demande, dis-le au lieu de deviner. Tu n'inventes jamais une ligne que tu n'as pas lue.
 
 LES ACTIONS STRIPE (03/09) :
-Tu disposes de six outils d'action : proposer_code_promo, proposer_revoquer_code, proposer_remboursement, proposer_produit, proposer_retirer_telegram, proposer_reintegrer_telegram. Un appel N'EXÉCUTE RIEN : il affiche une carte de confirmation que Brice ou Mélanie doit cliquer — dis-le dans ta réponse. Règles strictes :
+Tu disposes de huit outils d'action : proposer_code_promo, proposer_revoquer_code, proposer_remboursement, proposer_produit, proposer_pause_abonnement, proposer_reprise_abonnement, proposer_retirer_telegram, proposer_reintegrer_telegram. Un appel N'EXÉCUTE RIEN : il affiche une carte de confirmation que Brice ou Mélanie doit cliquer — dis-le dans ta réponse. Règles strictes :
 - TELEGRAM, un maître par geste : Metricgram sort les désinscrits tout seul — ne propose JAMAIS de retirer quelqu'un pour un simple désabonnement. Le retrait ne sert qu'aux ÉCARTS avérés (présent dans le groupe sans aucun droit : ni abonnement actif, ni accès manuel, ni statut ETM, ni action déjà traitée). Vérifie tout ça par requêtes AVANT de proposer.
+- PAUSE : elle démarre toujours à la fin de la période payée (le serveur la calcule, tu ne choisis pas la date), 1 à 6 mois, reprise automatique. Une pause ne retire PAS du Telegram et ne réintègre pas : ce sont des gestes séparés, dis-le quand on te demande une pause. Ne propose pas de pause sur un abonnement résilié ou déjà en pause.
 - N'appelle un outil d'action QUE si on te le demande explicitement. Jamais de ta propre initiative, jamais « pendant que j'y suis ».
 - Une seule action proposée à la fois.
 - Le compte doit être certain : melanie = tout le récurrent (Live Club), aoknowledge = le comptant. En cas de doute, demande.
@@ -234,6 +235,35 @@ const OUTILS: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'proposer_pause_abonnement',
+    description:
+      "Propose de mettre un abonnement Live Club en PAUSE (1 à 6 mois). N'exécute rien : carte de confirmation. La pause démarre à la fin de la période déjà payée (jamais en milieu de cycle, aucun remboursement) : les prélèvements s'arrêtent puis reprennent automatiquement. Retrouve l'abonnement_id exact dans cockpit_abonnements (statut actif) et vérifie qu'il n'est pas déjà en pause (pause_jusquau).",
+    input_schema: {
+      type: 'object',
+      properties: {
+        compte: { type: 'string', enum: ['aoknowledge', 'melanie'] },
+        abonnement_id: { type: 'string', description: 'sub_..., depuis cockpit_abonnements.abonnement_id sans le préfixe stripe:.' },
+        nb_mois: { type: 'number', description: 'Durée de la pause en mois entiers (1 à 6).' },
+        qui: { type: 'string', description: 'Nom du membre, pour que la carte soit lisible.' },
+      },
+      required: ['compte', 'abonnement_id', 'nb_mois', 'qui'],
+    },
+  },
+  {
+    name: 'proposer_reprise_abonnement',
+    description:
+      "Propose de lever la pause d'un abonnement Live Club avant son terme : les prélèvements reprennent au prochain cycle. N'exécute rien : carte de confirmation.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        compte: { type: 'string', enum: ['aoknowledge', 'melanie'] },
+        abonnement_id: { type: 'string', description: 'sub_..., depuis cockpit_abonnements.' },
+        qui: { type: 'string', description: 'Nom du membre.' },
+      },
+      required: ['compte', 'abonnement_id', 'qui'],
+    },
+  },
+  {
     name: 'proposer_retirer_telegram',
     description:
       "Propose de retirer quelqu'un du groupe Telegram Live Club (bannissement jusqu'à réintégration). N'exécute rien : carte de confirmation. RÉSERVÉ AUX ÉCARTS (présent dans le groupe sans droit) — les désinscrits sont retirés par Metricgram, pas par toi. Retrouve le telegram_id dans cockpit_telegram_membres et vérifie cockpit_acces_manuel et cockpit_actions_traitees avant (geste commercial possible).",
@@ -284,6 +314,8 @@ const TYPE_PAR_OUTIL: Record<string, ActionAgent['type']> = {
   proposer_revoquer_code: 'revoquer_code',
   proposer_retirer_telegram: 'retirer_telegram',
   proposer_reintegrer_telegram: 'reintegrer_telegram',
+  proposer_pause_abonnement: 'pause_abonnement',
+  proposer_reprise_abonnement: 'reprise_abonnement',
 }
 
 /** Ce que la boucle renvoie, quel que soit le canal. */

@@ -44,6 +44,18 @@ function estCompte(v: unknown): v is CompteStripe {
   return v === 'aoknowledge' || v === 'melanie'
 }
 
+async function stripeGet(cle: string, chemin: string): Promise<Record<string, unknown>> {
+  const reponse = await fetch(`${API}${chemin}`, {
+    headers: { Authorization: `Bearer ${cle}`, 'Stripe-Version': STRIPE_VERSION },
+  })
+  const json = (await reponse.json()) as Record<string, unknown>
+  if (!reponse.ok) {
+    const err = json?.error as { message?: string } | undefined
+    throw new Error(err?.message?.slice(0, 300) || `Stripe a répondu ${reponse.status}`)
+  }
+  return json
+}
+
 async function stripePost(
   cle: string,
   chemin: string,
@@ -75,6 +87,7 @@ async function stripePost(
 export type ActionAgent = {
   type: 'code_promo' | 'remboursement' | 'produit' | 'revoquer_code'
     | 'retirer_telegram' | 'reintegrer_telegram'
+    | 'pause_abonnement' | 'reprise_abonnement'
   // 'telegram' pour les deux actions du groupe Live Club — pas un compte
   // Stripe, mais la carte de confirmation affiche d'ou vient le pouvoir.
   compte: CompteStripe | 'telegram'
@@ -127,6 +140,23 @@ export function validerAction(brut: unknown): ActionAgent | string {
   }
 
   if (!estCompte(a.compte)) return 'Compte inconnu : aoknowledge ou melanie.'
+
+  if (a.type === 'pause_abonnement' || a.type === 'reprise_abonnement') {
+    const abo = String(p.abonnement_id ?? '').replace(/^stripe:/, '')
+    if (!/^sub_[A-Za-z0-9]{8,}$/.test(abo)) {
+      return 'abonnement_id invalide (sub_..., depuis cockpit_abonnements sans le préfixe stripe:).'
+    }
+    const qui = String(p.qui ?? '').trim().slice(0, 80)
+    if (!qui) return 'Précise QUI pour que la carte de confirmation soit lisible.'
+    if (a.type === 'reprise_abonnement') {
+      return { type: a.type, compte: a.compte, params: { abonnement_id: abo, qui } }
+    }
+    const mois = Number(p.nb_mois)
+    if (!(Number.isInteger(mois) && mois >= 1 && mois <= 6)) {
+      return 'nb_mois : entier entre 1 et 6.'
+    }
+    return { type: a.type, compte: a.compte, params: { abonnement_id: abo, qui, nb_mois: mois } }
+  }
 
   if (a.type === 'code_promo') {
     const code = String(p.code ?? '').toUpperCase()
@@ -222,6 +252,14 @@ export function resumeAction(a: ActionAgent): string {
     return `Désactiver le code ${p.code} sur le compte ${a.compte} : plus personne ne pourra le taper. `
       + `Les réductions déjà appliquées aux abonnés continuent, elles.`
   }
+  if (a.type === 'pause_abonnement') {
+    return `Mettre l'abonnement de ${p.qui} en pause ${p.nb_mois} mois : la période déjà payée `
+      + `va à son terme, puis plus aucun prélèvement jusqu'à la reprise automatique. `
+      + `Le retrait du Telegram reste un geste séparé.`
+  }
+  if (a.type === 'reprise_abonnement') {
+    return `Lever la pause de l'abonnement de ${p.qui} : les prélèvements reprennent au prochain cycle.`
+  }
   if (a.type === 'retirer_telegram') {
     return `Retirer ${p.qui} (u${p.telegram_id}) du groupe Telegram Live Club. `
       + `Il ne pourra pas revenir par un ancien lien (bannissement) tant qu'il n'est pas réintégré.`
@@ -273,6 +311,44 @@ export async function executerAction(a: ActionAgent): Promise<string> {
     )
   }
   const p = a.params
+
+  if (a.type === 'pause_abonnement' || a.type === 'reprise_abonnement') {
+    const abo = String(p.abonnement_id)
+
+    if (a.type === 'reprise_abonnement') {
+      // Vider pause_collection = lever la pause. Le prochain cycle preleve.
+      await stripePost(cle, `/v1/subscriptions/${abo}`, { pause_collection: '' })
+      return `Pause levée pour ${p.qui} : les prélèvements reprennent au prochain cycle. `
+        + `La réintégration Telegram reste un geste séparé (proposer_reintegrer_telegram).`
+    }
+
+    // REGLE (Brice, 10/09) : la pause demarre a la date de renouvellement,
+    // jamais en milieu de periode payee. pause_collection ne touche que les
+    // factures FUTURES : posee maintenant, la periode payee va a son terme,
+    // puis behavior=void annule chaque facture jusqu'a resumes_at — calcule
+    // ici depuis la vraie fin de periode, jamais depuis une date du modele.
+    const sub = await stripeGet(cle, `/v1/subscriptions/${abo}`)
+    const statut = String(sub.status ?? '')
+    if (!['active', 'trialing', 'past_due'].includes(statut)) {
+      throw new Error(`L'abonnement est « ${statut} » : on ne met en pause qu'un abonnement vivant.`)
+    }
+    const items = (sub.items as { data?: { current_period_end?: number }[] })?.data ?? []
+    const finPeriode = items[0]?.current_period_end
+      ?? (sub as { current_period_end?: number }).current_period_end
+    if (!finPeriode) throw new Error('Fin de période introuvable sur l’abonnement.')
+
+    const reprise = new Date(finPeriode * 1000)
+    reprise.setUTCMonth(reprise.getUTCMonth() + Number(p.nb_mois))
+    await stripePost(cle, `/v1/subscriptions/${abo}`, {
+      'pause_collection[behavior]': 'void',
+      'pause_collection[resumes_at]': String(Math.floor(reprise.getTime() / 1000)),
+    })
+    const fmt = (d: Date) => d.toISOString().slice(0, 10)
+    return `Abonnement de ${p.qui} en pause : payé jusqu'au ${fmt(new Date(finPeriode * 1000))}, `
+      + `reprise automatique des prélèvements le ${fmt(reprise)}. Visible dans le cockpit après la `
+      + `prochaine collecte. ⚠️ Le retrait du Telegram à la fin de la période payée reste un geste `
+      + `séparé tant que le raccord n'est pas construit.`
+  }
 
   if (a.type === 'code_promo') {
     // `name` = le code : sans lui, la liste « Bons de reduction » de Stripe
