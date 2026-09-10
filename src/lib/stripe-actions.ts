@@ -269,7 +269,7 @@ export async function executerAction(a: ActionAgent): Promise<string> {
   if (!cle) {
     throw new Error(
       `La clé d'écriture du compte ${a.compte} n'existe pas encore `
-      + `(variable ${nomVariableCle(a.compte)} sur le projet journal).`,
+      + `(variable ${nomVariableCle(a.compte as CompteStripe)} sur le projet journal).`,
     )
   }
   const p = a.params
