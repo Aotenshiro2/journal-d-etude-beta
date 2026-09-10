@@ -55,11 +55,20 @@ export async function POST(req: NextRequest) {
   const nomAffiche = [u.first_name, u.last_name].filter(Boolean).join(' ') || null
   const quand = new Date((cm.date ?? Math.floor(Date.now() / 1000)) * 1000)
 
+  // QUI a fait le geste : `from` est l'auteur du changement. Lui-meme = un
+  // depart volontaire ou une entree par lien ; un bot (Metricgram, le notre)
+  // ou un admin = un geste execute. C'est la matiere de la regle « un maitre
+  // par geste » : sans l'auteur, tous les departs se ressemblent.
+  const acteur = cm.from
+  const parQui = !acteur ? null
+    : acteur.id === u.id ? 'lui-même'
+    : (acteur.username ? `@${acteur.username}` : [acteur.first_name, acteur.last_name].filter(Boolean).join(' ')) || null
+
   await prisma.$executeRaw`
     insert into public.cockpit_telegram_membres
-      (telegram_id, pseudo, nom_affiche, present, entre_le, sorti_le, source, maj_le)
+      (telegram_id, pseudo, nom_affiche, present, entre_le, sorti_le, source, par_qui, maj_le)
     values (${u.id}, ${pseudo}, ${nomAffiche}, ${present},
-            ${present ? quand : null}, ${present ? null : quand}, 'evenement', now())
+            ${present ? quand : null}, ${present ? null : quand}, 'evenement', ${parQui}, now())
     on conflict (telegram_id) do update set
       pseudo = coalesce(excluded.pseudo, cockpit_telegram_membres.pseudo),
       nom_affiche = coalesce(excluded.nom_affiche, cockpit_telegram_membres.nom_affiche),
@@ -69,6 +78,7 @@ export async function POST(req: NextRequest) {
                       else cockpit_telegram_membres.entre_le end,
       sorti_le = case when excluded.present then null else ${quand} end,
       source = 'evenement',
+      par_qui = ${parQui},
       maj_le = now()`
 
   return NextResponse.json({ ok: true })
