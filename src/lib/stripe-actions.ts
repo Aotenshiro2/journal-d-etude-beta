@@ -74,16 +74,59 @@ async function stripePost(
 
 export type ActionAgent = {
   type: 'code_promo' | 'remboursement' | 'produit' | 'revoquer_code'
-  compte: CompteStripe
+    | 'retirer_telegram' | 'reintegrer_telegram'
+  // 'telegram' pour les deux actions du groupe Live Club — pas un compte
+  // Stripe, mais la carte de confirmation affiche d'ou vient le pouvoir.
+  compte: CompteStripe | 'telegram'
   params: Record<string, unknown>
+}
+
+// ---------------------------------------------------------------------------
+// Actions TELEGRAM (groupe Live Club, 10/09). Regles gravees dans la roadmap :
+// UN MAITRE PAR GESTE — Metricgram sort les desinscrits de son circuit, nos
+// actions ne servent qu'aux ECARTS et a la pause ; toute reintegration fait
+// unban AVANT le lien (un retrait peut etre un bannissement) ; le lien est a
+// usage unique et expire sous 14 jours.
+// ---------------------------------------------------------------------------
+
+const API_TG = 'https://api.telegram.org'
+
+export function cleTelegramPresente(): boolean {
+  return Boolean(process.env.TELEGRAM_LIVECLUB_BOT_TOKEN?.trim()
+    && process.env.TELEGRAM_LIVECLUB_CHAT_ID?.trim())
+}
+
+async function telegramPost(methode: string, corps: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const jeton = process.env.TELEGRAM_LIVECLUB_BOT_TOKEN?.trim()
+  if (!jeton) throw new Error('TELEGRAM_LIVECLUB_BOT_TOKEN absent du projet journal.')
+  const reponse = await fetch(`${API_TG}/bot${jeton}/${methode}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(corps),
+  })
+  const json = (await reponse.json()) as { ok?: boolean; description?: string; result?: unknown }
+  if (!json.ok) throw new Error(`Telegram ${methode} : ${String(json.description ?? '?').slice(0, 200)}`)
+  return json as Record<string, unknown>
 }
 
 export function validerAction(brut: unknown): ActionAgent | string {
   const a = brut as ActionAgent
   if (!a || typeof a !== 'object') return 'Action illisible.'
-  if (!estCompte(a.compte)) return 'Compte inconnu : aoknowledge ou melanie.'
   if (!a.params || typeof a.params !== 'object') return 'Paramètres manquants.'
   const p = a.params
+
+  // Les actions du groupe Telegram n'ont pas de compte Stripe.
+  if (a.type === 'retirer_telegram' || a.type === 'reintegrer_telegram') {
+    const brutId = String(p.telegram_id ?? '').replace(/^u/i, '').trim()
+    if (!/^\d{5,15}$/.test(brutId)) {
+      return 'telegram_id invalide (le numéro u… de cockpit_telegram_membres, sans le u).'
+    }
+    const qui = String(p.qui ?? '').trim().slice(0, 80)
+    if (!qui) return 'Précise QUI (nom ou pseudo) pour que la carte de confirmation soit lisible.'
+    return { type: a.type, compte: 'telegram', params: { telegram_id: Number(brutId), qui } }
+  }
+
+  if (!estCompte(a.compte)) return 'Compte inconnu : aoknowledge ou melanie.'
 
   if (a.type === 'code_promo') {
     const code = String(p.code ?? '').toUpperCase()
@@ -179,12 +222,50 @@ export function resumeAction(a: ActionAgent): string {
     return `Désactiver le code ${p.code} sur le compte ${a.compte} : plus personne ne pourra le taper. `
       + `Les réductions déjà appliquées aux abonnés continuent, elles.`
   }
+  if (a.type === 'retirer_telegram') {
+    return `Retirer ${p.qui} (u${p.telegram_id}) du groupe Telegram Live Club. `
+      + `Il ne pourra pas revenir par un ancien lien (bannissement) tant qu'il n'est pas réintégré.`
+  }
+  if (a.type === 'reintegrer_telegram') {
+    return `Réintégrer ${p.qui} (u${p.telegram_id}) dans le groupe Live Club : levée du bannissement `
+      + `+ lien d'invitation à usage unique (14 jours) à lui transmettre.`
+  }
   return `Créer le produit « ${p.nom} » à ${p.montant} ${String(p.devise).toUpperCase()}${p.recurrence ? `/${p.recurrence === 'month' ? 'mois' : 'an'}` : ' (comptant)'} sur le compte ${a.compte}.`
 }
 
 /** Execute une action DEJA validee. Renvoie une phrase de resultat. */
 export async function executerAction(a: ActionAgent): Promise<string> {
-  const cle = cleAgent(a.compte)
+  // ── Groupe Telegram ───────────────────────────────────────────────────────
+  if (a.type === 'retirer_telegram' || a.type === 'reintegrer_telegram') {
+    const chatId = process.env.TELEGRAM_LIVECLUB_CHAT_ID?.trim()
+    if (!chatId) throw new Error('TELEGRAM_LIVECLUB_CHAT_ID absent du projet journal.')
+    const id = Number(a.params.telegram_id)
+
+    if (a.type === 'retirer_telegram') {
+      // Ban DURABLE : pas de unban derriere, sinon n'importe quel vieux lien
+      // le fait revenir. La reintegration est le geste inverse, explicite.
+      await telegramPost('banChatMember', { chat_id: Number(chatId), user_id: id })
+      return `${a.params.qui} (u${id}) retiré du groupe Live Club (banni jusqu'à réintégration). `
+        + `La table cockpit_telegram_membres l'enregistrera au prochain événement.`
+    }
+
+    // Reintegration : unban D'ABORD (regle 3 — le retrait a pu etre un ban,
+    // le notre ou celui de Metricgram), puis lien a usage unique, 14 jours.
+    await telegramPost('unbanChatMember', {
+      chat_id: Number(chatId), user_id: id, only_if_banned: true,
+    })
+    const lien = await telegramPost('createChatInviteLink', {
+      chat_id: Number(chatId),
+      member_limit: 1,
+      expire_date: Math.floor(Date.now() / 1000) + 14 * 86400,
+      name: `réintégration u${id}`,
+    })
+    const url = (lien.result as { invite_link?: string })?.invite_link
+    return `${a.params.qui} (u${id}) peut revenir : bannissement levé. `
+      + `Lien à lui transmettre (usage unique, expire dans 14 jours) : ${url}`
+  }
+
+  const cle = cleAgent(a.compte as CompteStripe)
   if (!cle) {
     throw new Error(
       `La clé d'écriture du compte ${a.compte} n'existe pas encore `

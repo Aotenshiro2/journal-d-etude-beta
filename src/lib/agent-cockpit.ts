@@ -1,6 +1,9 @@
 import { prisma } from '@/lib/db'
 import { aiClient, AI_MODEL, logAiUsage, textOf } from '@/lib/ai'
-import { validerAction, resumeAction, cleAgent, type ActionAgent } from '@/lib/stripe-actions'
+import {
+  validerAction, resumeAction, cleAgent, cleTelegramPresente,
+  type ActionAgent, type CompteStripe,
+} from '@/lib/stripe-actions'
 import type Anthropic from '@anthropic-ai/sdk'
 
 // LE CERVEAU de l'agent cockpit, sans interface : prompt systeme, outil SQL
@@ -100,7 +103,8 @@ On peut joindre un PDF, une capture d'écran, un export CSV, un relevé bancaire
 - si le document est illisible, tronqué, ou sans rapport avec ce qu'on te demande, dis-le au lieu de deviner. Tu n'inventes jamais une ligne que tu n'as pas lue.
 
 LES ACTIONS STRIPE (03/09) :
-Tu disposes de quatre outils d'action : proposer_code_promo, proposer_revoquer_code, proposer_remboursement, proposer_produit. Un appel N'EXÉCUTE RIEN : il affiche une carte de confirmation que Brice ou Mélanie doit cliquer — dis-le dans ta réponse. Règles strictes :
+Tu disposes de six outils d'action : proposer_code_promo, proposer_revoquer_code, proposer_remboursement, proposer_produit, proposer_retirer_telegram, proposer_reintegrer_telegram. Un appel N'EXÉCUTE RIEN : il affiche une carte de confirmation que Brice ou Mélanie doit cliquer — dis-le dans ta réponse. Règles strictes :
+- TELEGRAM, un maître par geste : Metricgram sort les désinscrits tout seul — ne propose JAMAIS de retirer quelqu'un pour un simple désabonnement. Le retrait ne sert qu'aux ÉCARTS avérés (présent dans le groupe sans aucun droit : ni abonnement actif, ni accès manuel, ni statut ETM, ni action déjà traitée). Vérifie tout ça par requêtes AVANT de proposer.
 - N'appelle un outil d'action QUE si on te le demande explicitement. Jamais de ta propre initiative, jamais « pendant que j'y suis ».
 - Une seule action proposée à la fois.
 - Le compte doit être certain : melanie = tout le récurrent (Live Club), aoknowledge = le comptant. En cas de doute, demande.
@@ -230,6 +234,32 @@ const OUTILS: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'proposer_retirer_telegram',
+    description:
+      "Propose de retirer quelqu'un du groupe Telegram Live Club (bannissement jusqu'à réintégration). N'exécute rien : carte de confirmation. RÉSERVÉ AUX ÉCARTS (présent dans le groupe sans droit) — les désinscrits sont retirés par Metricgram, pas par toi. Retrouve le telegram_id dans cockpit_telegram_membres et vérifie cockpit_acces_manuel et cockpit_actions_traitees avant (geste commercial possible).",
+    input_schema: {
+      type: 'object',
+      properties: {
+        telegram_id: { type: 'number', description: 'Le numéro u… (sans le u), depuis cockpit_telegram_membres.' },
+        qui: { type: 'string', description: 'Nom ou pseudo, pour que la carte soit lisible.' },
+      },
+      required: ['telegram_id', 'qui'],
+    },
+  },
+  {
+    name: 'proposer_reintegrer_telegram',
+    description:
+      "Propose de réintégrer quelqu'un dans le groupe Live Club : levée du bannissement puis lien d'invitation à usage unique (14 jours) que Brice/Mélanie transmettent. N'exécute rien : carte de confirmation.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        telegram_id: { type: 'number', description: 'Le numéro u… (sans le u), depuis cockpit_telegram_membres.' },
+        qui: { type: 'string', description: 'Nom ou pseudo, pour que la carte soit lisible.' },
+      },
+      required: ['telegram_id', 'qui'],
+    },
+  },
+  {
     name: 'proposer_produit',
     description:
       "Propose la création d'un produit Stripe avec son tarif. N'exécute rien : carte de confirmation.",
@@ -252,6 +282,8 @@ const TYPE_PAR_OUTIL: Record<string, ActionAgent['type']> = {
   proposer_remboursement: 'remboursement',
   proposer_produit: 'produit',
   proposer_revoquer_code: 'revoquer_code',
+  proposer_retirer_telegram: 'retirer_telegram',
+  proposer_reintegrer_telegram: 'reintegrer_telegram',
 }
 
 /** Ce que la boucle renvoie, quel que soit le canal. */
@@ -362,7 +394,9 @@ export async function boucleAgent(
             action: {
               ...action,
               resume: resumeAction(action),
-              cle_presente: cleAgent(action.compte) !== null,
+              cle_presente: action.compte === 'telegram'
+                ? cleTelegramPresente()
+                : cleAgent(action.compte as CompteStripe) !== null,
             },
           }
         }
