@@ -16,12 +16,13 @@
 // étapes de pédagogie ni du diagnostic ETM, et 20 000 jetons à froid coûteraient
 // dix centimes par appel. Si la doctrine évolue, cet extrait suit.
 
-export type Famille = 'plateforme' | 'graphique' | 'cours' | 'calendrier' | 'lecture' | 'maison'
+export type Famille = 'plateforme' | 'graphique' | 'cours' | 'calendrier' | 'lecture' | 'maison' | 'relecture'
 
 /** Familles où le screenshot vaut plus que le DOM. Sur TradingView, 36 % des
  *  captures réelles, le texte de la page ne contient QUE des métadonnées et des
- *  lectures d'horloge : tout le travail de l'élève est dans l'image. */
-export const FAMILLES_AVEC_IMAGE: Famille[] = ['graphique', 'plateforme']
+ *  lectures d'horloge : tout le travail de l'élève est dans l'image.
+ *  « relecture » aussi : les images d'une note de cours portent la leçon. */
+export const FAMILLES_AVEC_IMAGE: Famille[] = ['graphique', 'plateforme', 'relecture']
 
 const ROUTES: { motif: RegExp; famille: Famille }[] = [
   // Contenu maison en premier : skool.com/ao-knowledge est à nous, le reste de
@@ -31,6 +32,9 @@ const ROUTES: { motif: RegExp; famille: Famille }[] = [
   { motif: /tradingview\.com/i, famille: 'graphique' },
   { motif: /youtube\.com|youtu\.be|skool\.com|vimeo\.com/i, famille: 'cours' },
   { motif: /forexfactory\.com|investing\.com|myfxbook\.com/i, famille: 'calendrier' },
+  // Pseudo-URL de l'extension pour « tags auto » (17/09/2026) : pas une page
+  // capturée, une note DÉJÀ écrite qu'on relit pour la classer.
+  { motif: /note-locale\.carnet/i, famille: 'relecture' },
 ]
 
 /** Famille d'une URL. Défaut « lecture » : c'est le cas le plus général, et
@@ -229,6 +233,14 @@ Le vocabulaire de la maison est ici employé au sens strict, tu peux le reprendr
 Cas particulier : si le contenu commence par « CANVAS DU JOURNAL », tu lis les VRAIES notes de l’élève, résolues depuis sa base. Les points clés sortent alors du CORPS de ces notes et des LIENS qu’il a tracés entre elles — jamais des titres seuls, jamais de la description de l’écran. Les liens sont sa structuration : dire ce que deux notes reliées ont à voir ensemble vaut mieux que résumer chacune.
 
 Jette : la navigation du site, les blocs d’articles liés, les appels à l’action, les pieds de page.`,
+
+  relecture: `OÙ REGARDER : une note DÉJÀ ÉCRITE par l’élève dans son carnet — pas une page web. Il demande à la classer pour la retrouver plus tard dans son journal.
+
+Le texte que tu reçois est le contenu de sa note, dans l’ordre où il l’a écrite. Les images jointes sont un échantillon de ses captures : le début, le milieu et la fin de la note — une leçon peut changer de sujet en route, tiens compte des trois.
+
+Ce qui compte ici, ce sont les TAGS et les CONCEPTS : des étiquettes courtes et réutilisables (le vocabulaire de la maison au sens strict quand il s’applique), qui décrivent DE QUOI parle la note — pas ce qu’elle vaut. Le résumé et les points clés restent utiles mais secondaires.
+
+Ne réécris rien, ne complète rien, ne juge rien : la note est à lui, tu ne fais que poser des étiquettes dessus.`,
 }
 
 // ── 4. Comment lire, par famille (étude seulement) ───────────────────────────
@@ -261,6 +273,8 @@ Si le texte promet des gains ou parle en signaux, c’est un fait à noter, pas 
   maison: `COMMENT LIRE : c’est notre propre enseignement, donc il n’y a pas d’écart à signaler entre la page et notre façon de voir : la page EST la référence.
 
 Bascule sur l’application. Pas « qu’est-ce que ça raconte », mais « qu’est-ce que tu en fais demain, et qu’est-ce que tu ne fais pas encore ». Si le contenu propose un exercice, la question de relecture porte sur le fait de l’avoir mené ou non.`,
+
+  relecture: `COMMENT LIRE : c’est sa propre note, relue pour être classée. La question n’est pas ce qu’elle vaut mais où elle se range : quels concepts elle travaille, à côté de quelles autres notes elle devrait remonter.`,
 }
 
 /**

@@ -46,8 +46,13 @@ export async function POST(req: NextRequest) {
   const url: string | null = typeof body.url === 'string' ? body.url : null
   const contenu: string = typeof body.contenu === 'string' ? body.contenu : ''
   const image: string | null = typeof body.image === 'string' ? body.image : null
+  // Plusieurs images (tags auto, 17/09) : 3 max, bornées individuellement —
+  // un data URL de 8 Mo n'a rien à faire ici.
+  const images: string[] = Array.isArray(body.images)
+    ? body.images.filter((x: unknown): x is string => typeof x === 'string' && x.length < 3_000_000).slice(0, 3)
+    : []
 
-  if (contenu.trim().length < 40 && !image) {
+  if (contenu.trim().length < 40 && !image && images.length === 0) {
     return NextResponse.json(
       { error: 'contenu_insuffisant', message: 'Rien d’exploitable dans cette page.' },
       { status: 422 }
@@ -59,6 +64,7 @@ export async function POST(req: NextRequest) {
   // une plateforme, elle contient ce que le DOM n'a pas. Sur un article, elle
   // coûte ~1 200 jetons pour redire le texte qu'on envoie déjà.
   const imageUtile = FAMILLES_AVEC_IMAGE.includes(famille) ? image : null
+  const imagesUtiles = FAMILLES_AVEC_IMAGE.includes(famille) ? images : []
 
   // Canvas du journal : la maison LIT ses propres notes. L'extension envoie
   // les ids des cartes visibles, on les résout en contenu réel — de CE compte
@@ -93,6 +99,7 @@ export async function POST(req: NextRequest) {
       contenu: contenuFinal,
       langue: typeof body.langue === 'string' ? body.langue : null,
       image: imageUtile,
+      images: imagesUtiles,
     })
     return NextResponse.json({
       ...r.sortie,

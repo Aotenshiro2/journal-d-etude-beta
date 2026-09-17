@@ -41,6 +41,10 @@ export interface DemandeCapture {
   contenu: string
   /** data URL ou URL publique du screenshot, si la famille le justifie */
   image?: string | null
+  /** Plusieurs images (17/09/2026, tags auto sur note existante) : un
+   *  échantillon début/milieu/fin des captures de la note. 3 max — un clic
+   *  reste UN appel au coût borné, quelle que soit la taille de la note. */
+  images?: string[] | null
   /** modèle imposé par l'appelant, DÉJÀ VALIDÉ contre le palier. Sert au
    *  sélecteur de l'écran « Configurer son IA ». Absent = modèle du produit. */
   modele?: string | null
@@ -68,8 +72,13 @@ export async function appelerCapture<T>(d: DemandeCapture): Promise<ResultatCapt
   const client = aiClient(produit)
 
   const bloc: Anthropic.ContentBlockParam[] = []
-  const img = d.image ? blocImage(d.image) : null
-  if (img) bloc.push(img)
+  const sources = [...(d.images ?? []), ...(d.image ? [d.image] : [])]
+  let imagesJointes = 0
+  for (const src of sources) {
+    if (imagesJointes >= 3) break
+    const img = blocImage(src)
+    if (img) { bloc.push(img); imagesJointes++ }
+  }
   bloc.push({ type: 'text', text: d.contenu.slice(0, MAX_CARACTERES_CONTENU) })
 
   const output_config: Record<string, unknown> = {
@@ -99,5 +108,5 @@ export async function appelerCapture<T>(d: DemandeCapture): Promise<ResultatCapt
 
   const brut = textOf(reponse)
   if (!brut) throw new Error('Réponse vide du modèle.')
-  return { sortie: JSON.parse(brut) as T, modele, avecImage: Boolean(img) }
+  return { sortie: JSON.parse(brut) as T, modele, avecImage: imagesJointes > 0 }
 }
