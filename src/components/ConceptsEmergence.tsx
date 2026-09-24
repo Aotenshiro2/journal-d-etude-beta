@@ -15,11 +15,13 @@ export type ConceptStat = {
   related: { name: string; color: string; shared: number }[]
 }
 
-const GRADE_COLOR: Record<string, string> = { A: '#22c55e', B: '#f59e0b', C: '#ef4444' }
+const GRADE_COLOR: Record<string, string> = { A: '#22c55e', B: '#f59e0b', C: '#ef4444', D: '#991b1b' }
 
 // Barre de tendance A/B/C d'un concept (se remplit à mesure que tu juges)
 function GradeLean({ grades }: { grades: Record<string, number> }) {
-  const total = grades.A + grades.B + grades.C
+  // Le D (opt-in extension, 24/09/2026) ne s'affiche que s'il existe.
+  const lettres: readonly string[] = (grades.D ?? 0) > 0 ? ['A', 'B', 'C', 'D'] : ['A', 'B', 'C']
+  const total = grades.A + grades.B + grades.C + (grades.D ?? 0)
   if (total === 0) {
     return (
       <p className="text-[11px]" style={{ color: 'var(--node-meta)', opacity: 0.8 }}>
@@ -30,12 +32,12 @@ function GradeLean({ grades }: { grades: Record<string, number> }) {
   return (
     <div>
       <div className="flex h-2 rounded-full overflow-hidden" style={{ background: 'var(--canvas-bg)' }}>
-        {(['A', 'B', 'C'] as const).map(g => grades[g] > 0 && (
+        {lettres.map(g => grades[g] > 0 && (
           <div key={g} style={{ width: `${(grades[g] / total) * 100}%`, background: GRADE_COLOR[g] }} title={`${grades[g]} ${g}`} />
         ))}
       </div>
       <div className="flex gap-3 mt-1.5">
-        {(['A', 'B', 'C'] as const).map(g => (
+        {lettres.map(g => (
           <span key={g} className="text-[10px] flex items-center gap-1" style={{ color: 'var(--node-meta)' }}>
             <span className="w-1.5 h-1.5 rounded-full" style={{ background: GRADE_COLOR[g] }} />{g} {grades[g]}
           </span>

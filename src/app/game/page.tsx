@@ -45,7 +45,10 @@ export default async function GamePage() {
   const levels: Record<'A' | 'B' | 'C', ReturnType<typeof empty>> = { A: empty(), B: empty(), C: empty() }
 
   for (const a of annotations) {
-    const lvl = levels[a.grade as 'A' | 'B' | 'C']
+    // Par PREMIÈRE LETTRE : depuis les nuances (1.8.6), « B+ » ne matche plus
+    // la clé entière et les jugements nuancés disparaissaient de la carte.
+    // Le D reste hors carte : le modèle de Tendler s'arrête au C-game.
+    const lvl = levels[a.grade?.[0] as 'A' | 'B' | 'C']
     if (!lvl) continue
     lvl.count++
     if (a.causeCategory && lvl.causes[a.causeCategory] !== undefined) lvl.causes[a.causeCategory]++

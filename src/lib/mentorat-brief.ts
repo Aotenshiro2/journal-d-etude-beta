@@ -12,7 +12,9 @@ interface TradeCooldown { emotion?: string; error?: string; lesson?: string; don
 interface TradeSegment { id: string; startedAt: number; closedAt?: number; outcome?: 'gain' | 'perte' | 'be'; r?: number; cooldown?: TradeCooldown }
 interface NoteWarmup { id?: string; startedAt?: number; emotionLevel?: number }
 
-type Grade = 'A' | 'B' | 'C'
+// D sous le C depuis le 24/09/2026 : opt-in côté extension, présent ici dès
+// qu'un élève l'utilise (le serveur l'accepte toujours).
+type Grade = 'A' | 'B' | 'C' | 'D'
 type Cause = 'technique' | 'connaissance' | 'emotionnel'
 
 export interface MentoratBrief {
@@ -28,7 +30,8 @@ export interface MentoratBrief {
     grades: Record<Grade, number>
     /** Nuances +/− (1.8.6) : combien de jugements portent un + ou un −. */
     nuances: { plus: number; moins: number }
-    /** Qualité ordinale (C− = 1 … A+ = 9) : la tendance fine que les lettres
+    /** Qualité ordinale (C− = 1 … A+ = 9, D− = −2 … D+ = 0 quand l'élève a
+     *  activé le D) : la tendance fine que les lettres
      *  seules ne montrent pas — un élève qui passe de B− à B+ progresse sans
      *  changer de lettre. Décision Brice 08/09 : les stats restent PAR LETTRE,
      *  la nuance est un signal séparé. */
@@ -82,13 +85,13 @@ export interface MentoratBrief {
   cooldowns: { count: number; topErrors: { text: string; count: number }[] }
   noteGrades: Record<Grade, number>
   concepts: { name: string; count: number }[]
-  monthly: { month: string; A: number; B: number; C: number }[]
+  monthly: { month: string; A: number; B: number; C: number; D: number }[]
   reviewBacklog: number
   /** Le brief en texte, prêt à joindre à une conversation IA (~15 lignes) */
   text: string
 }
 
-const GRADES: Grade[] = ['A', 'B', 'C']
+const GRADES: Grade[] = ['A', 'B', 'C', 'D']
 const CAUSE_LABEL: Record<Cause, string> = {
   technique: 'technique et exécution',
   connaissance: 'connaissance',
@@ -140,10 +143,14 @@ function calculerImports(rows: { symbole: string; pnl: number; devise: string }[
 function lettreDe(g: unknown): Grade | null {
   if (typeof g !== 'string' || g.length === 0) return null
   const l = g[0]
-  return l === 'A' || l === 'B' || l === 'C' ? l : null
+  return l === 'A' || l === 'B' || l === 'C' || l === 'D' ? l : null
 }
+/** Échelle ordinale : A = 8, B = 5, C = 2, nuance ±1 (C− = 1 … A+ = 9). Le D
+ *  (24/09/2026) s'étend EN DESSOUS au lieu de décaler l'échelle : base −1, donc
+ *  D+ = 0, D = −1, D− = −2. Les valeurs A/B/C ne bougent pas, et les moyennes
+ *  des briefs d'avant le D restent comparables à celles d'après. */
 function ordinalDe(g: string): number {
-  const base = g[0] === 'A' ? 8 : g[0] === 'B' ? 5 : 2
+  const base = g[0] === 'A' ? 8 : g[0] === 'B' ? 5 : g[0] === 'C' ? 2 : -1
   return base + (g[1] === '+' ? 1 : g[1] === '-' ? -1 : 0)
 }
 function isCause(c: unknown): c is Cause { return c === 'technique' || c === 'connaissance' || c === 'emotionnel' }
@@ -282,10 +289,11 @@ export async function buildMentoratBrief(
   }
 
   const counts = { gain: 0, perte: 0, be: 0, open: 0 }
-  const grades: Record<Grade, number> = { A: 0, B: 0, C: 0 }
+  const grades: Record<Grade, number> = { A: 0, B: 0, C: 0, D: 0 }
   const causes: Record<Cause, number> = { technique: 0, connaissance: 0, emotionnel: 0 }
   const calibration: Record<Grade, { gain: number; perte: number; be: number }> = {
     A: { gain: 0, perte: 0, be: 0 }, B: { gain: 0, perte: 0, be: 0 }, C: { gain: 0, perte: 0, be: 0 },
+    D: { gain: 0, perte: 0, be: 0 },
   }
   const monthlyMap = new Map<string, Record<Grade, number>>()
 
@@ -327,12 +335,12 @@ export async function buildMentoratBrief(
       if (ann.cause) causes[ann.cause]++
       if (t.outcome) calibration[ann.grade][t.outcome]++
       const month = new Date(t.startedAt).toISOString().slice(0, 7)
-      const m = monthlyMap.get(month) ?? { A: 0, B: 0, C: 0 }
+      const m = monthlyMap.get(month) ?? { A: 0, B: 0, C: 0, D: 0 }
       m[ann.grade]++
       monthlyMap.set(month, m)
     }
   }
-  const graded = grades.A + grades.B + grades.C
+  const graded = grades.A + grades.B + grades.C + grades.D
 
   const ORDRE_JOURS = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche']
   const parJour = ORDRE_JOURS.filter(j => jourMap.has(j)).map(j => ({ jour: j, ...jourMap.get(j)! }))
@@ -352,7 +360,7 @@ export async function buildMentoratBrief(
       ? (perdantMoyen / (gagnantMoyen + perdantMoyen)) * 100
       : null
     const parGrade: Record<Grade, { somme: number; n: number }> = {
-      A: { somme: 0, n: 0 }, B: { somme: 0, n: 0 }, C: { somme: 0, n: 0 },
+      A: { somme: 0, n: 0 }, B: { somme: 0, n: 0 }, C: { somme: 0, n: 0 }, D: { somme: 0, n: 0 },
     }
     for (const x of rSaisis) if (x.grade) { parGrade[x.grade].somme += x.r; parGrade[x.grade].n++ }
     const sommeGains = gagnants.reduce((s, x) => s + x, 0)
@@ -411,7 +419,9 @@ export async function buildMentoratBrief(
     if (!prior) continue
     const b = prior.emotionLevel > 60 ? bucket.high : bucket.low
     b.total++
-    if (ann.grade === 'C') b.c++
+    // D compte avec C : un D après une émotion forte est LE signal que cette
+    // corrélation existe pour mesurer (24/09).
+    if (ann.grade === 'C' || ann.grade === 'D') b.c++
   }
   const share = (b: { c: number; total: number }) => (b.total >= 3 ? Math.round((b.c / b.total) * 100) : null)
 
@@ -430,7 +440,7 @@ export async function buildMentoratBrief(
   const topErrors = [...errorFreq.values()].sort((a, b) => b.count - a.count).slice(0, 3)
 
   // ── Notes de journée/réflexion jugées au niveau note ──
-  const noteGrades: Record<Grade, number> = { A: 0, B: 0, C: 0 }
+  const noteGrades: Record<Grade, number> = { A: 0, B: 0, C: 0, D: 0 }
   for (const g of noteAnnotation.values()) noteGrades[g]++
 
   // ── Concepts les plus journalisés (notes actives sur la période) ──
@@ -499,7 +509,10 @@ function renderBriefText(b: MentoratBrief): string {
       const nuancesTxt = (t.nuances.plus || t.nuances.moins)
         ? ` (dont ${[t.nuances.plus ? `${t.nuances.plus} nuancés +` : '', t.nuances.moins ? `${t.nuances.moins} nuancés −` : ''].filter(Boolean).join(' et ')})`
         : ''
-      L.push(`Jugements : ${t.graded} trades notés sur ${t.total} : ${t.grades.A} A, ${t.grades.B} B, ${t.grades.C} C${nuancesTxt}.`)
+      // Le D n'apparaît que s'il existe : un élève qui ne l'a pas activé garde
+      // exactement le brief d'avant le 24/09.
+      const dTxt = t.grades.D > 0 ? `, ${t.grades.D} D` : ''
+      L.push(`Jugements : ${t.graded} trades notés sur ${t.total} : ${t.grades.A} A, ${t.grades.B} B, ${t.grades.C} C${dTxt}${nuancesTxt}.`)
       if (t.qualite) {
         const tendanceTxt = t.qualite.tendance === 'progression'
           ? ', en progression sur la période'
@@ -508,7 +521,8 @@ function renderBriefText(b: MentoratBrief): string {
             : t.qualite.tendance === 'stable'
               ? ', stable sur la période'
               : ''
-        L.push(`Qualité moyenne des jugements : ${t.qualite.moyenne.toFixed(1)} sur une échelle de C− = 1 à A+ = 9${tendanceTxt}.`)
+        const echelle = t.grades.D > 0 ? 'D− = −2 à A+ = 9' : 'C− = 1 à A+ = 9'
+        L.push(`Qualité moyenne des jugements : ${t.qualite.moyenne.toFixed(1)} sur une échelle de ${echelle}${tendanceTxt}.`)
       }
       const causesTotal = t.causes.technique + t.causes.connaissance + t.causes.emotionnel
       if (causesTotal > 0) {
@@ -519,10 +533,12 @@ function renderBriefText(b: MentoratBrief): string {
       }
       const aPerdants = t.calibration.A.perte
       const cGagnants = t.calibration.C.gain
-      if (aPerdants || cGagnants) {
+      const dGagnants = t.calibration.D.gain
+      if (aPerdants || cGagnants || dGagnants) {
         const cal: string[] = []
         if (aPerdants) cal.push(`${aPerdants} A perdant${aPerdants > 1 ? 's' : ''} (bien joués, mauvais résultat)`)
         if (cGagnants) cal.push(`${cGagnants} gain${cGagnants > 1 ? 's' : ''} noté${cGagnants > 1 ? 's' : ''} C (résultat qui récompense une mauvaise décision)`)
+        if (dGagnants) cal.push(`${dGagnants} gain${dGagnants > 1 ? 's' : ''} noté${dGagnants > 1 ? 's' : ''} D (résultat qui récompense une décision à proscrire)`)
         L.push(`Calibration : ${cal.join(' ; ')}.`)
       }
     } else {
@@ -586,7 +602,7 @@ function renderBriefText(b: MentoratBrief): string {
   if (b.warmups.count > 0) {
     let line = `Warmups : ${b.warmups.count} sur la période, émotion moyenne au départ ${b.warmups.avgEmotion}/100.`
     if (b.warmups.cShareAfterHighEmotion !== null && b.warmups.cShareAfterLowEmotion !== null) {
-      line += ` Après un warmup au-dessus de 60 : ${b.warmups.cShareAfterHighEmotion} % de trades C, contre ${b.warmups.cShareAfterLowEmotion} % sinon.`
+      line += ` Après un warmup au-dessus de 60 : ${b.warmups.cShareAfterHighEmotion} % de trades C ou D, contre ${b.warmups.cShareAfterLowEmotion} % sinon.`
     }
     L.push(line)
   }
@@ -597,17 +613,17 @@ function renderBriefText(b: MentoratBrief): string {
   }
 
   const ng = b.noteGrades
-  if (ng.A + ng.B + ng.C > 0) {
-    L.push(`Journées/réflexions jugées : ${ng.A} A, ${ng.B} B, ${ng.C} C.`)
+  if (ng.A + ng.B + ng.C + ng.D > 0) {
+    L.push(`Journées/réflexions jugées : ${ng.A} A, ${ng.B} B, ${ng.C} C${ng.D > 0 ? `, ${ng.D} D` : ''}.`)
   }
 
   if (b.monthly.length > 1) {
     // Le % de A par mois = la sélectivité, le signal que les comptes bruts
     // cachent (« 61 % de A en juillet, 77 % en août » du rapport de Florent).
     const prog = b.monthly.map(m => {
-      const total = m.A + m.B + m.C
+      const total = m.A + m.B + m.C + m.D
       const pctA = total > 0 ? Math.round((m.A / total) * 100) : 0
-      return `${m.month} : ${m.A}A/${m.B}B/${m.C}C (${pctA} % de A)`
+      return `${m.month} : ${m.A}A/${m.B}B/${m.C}C${m.D > 0 ? `/${m.D}D` : ''} (${pctA} % de A)`
     }).join(' · ')
     L.push(`Progression mensuelle des jugements : ${prog}.`)
   }

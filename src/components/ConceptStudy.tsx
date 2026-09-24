@@ -72,7 +72,7 @@ export type DonneesConcept = {
 /** En dessous, on n'affiche aucun pourcentage. Voir l'en-tête du fichier. */
 const SEUIL_POURCENTAGE = 10
 
-const COULEUR_GRADE: Record<string, string> = { A: '#22c55e', B: '#f59e0b', C: '#ef4444' }
+const COULEUR_GRADE: Record<string, string> = { A: '#22c55e', B: '#f59e0b', C: '#ef4444', D: '#991b1b' }
 const COULEUR_RESULTAT: Record<string, string> = { gain: '#22c55e', perte: '#ef4444', be: 'var(--node-meta)' }
 const NOM_CAUSE: Record<string, string> = { technique: 'Technique', connaissance: 'Connaissance', emotionnel: 'Émotionnel' }
 

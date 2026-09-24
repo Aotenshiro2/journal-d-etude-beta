@@ -28,13 +28,16 @@ export default async function AnalyticsPage() {
     for (const t of ts) if (t?.id && t?.outcome) outcomeByTrade.set(t.id, t.outcome)
   }
 
-  const grades: Record<string, number> = { A: 0, B: 0, C: 0 }
+  // D sous le C (24/09/2026, opt-in extension) : la clé existe toujours, la vue
+  // ne l'affiche que si l'élève en a posé.
+  const grades: Record<string, number> = { A: 0, B: 0, C: 0, D: 0 }
   const causes: Record<string, number> = { technique: 0, connaissance: 0, emotionnel: 0 }
   const calibration: Record<string, Record<string, number>> = {
     A: { gain: 0, perte: 0, be: 0 }, B: { gain: 0, perte: 0, be: 0 }, C: { gain: 0, perte: 0, be: 0 },
+    D: { gain: 0, perte: 0, be: 0 },
   }
   let tradeVerdicts = 0
-  const byMonth = new Map<string, { A: number; B: number; C: number }>()
+  const byMonth = new Map<string, { A: number; B: number; C: number; D: number }>()
 
   for (const a of annotations) {
     // Depuis la 1.8.6 un grade peut porter une nuance ('B+', 'A-') : les
@@ -47,9 +50,9 @@ export default async function AnalyticsPage() {
       if (oc && calibration[lettre]?.[oc] !== undefined) { calibration[lettre][oc]++; tradeVerdicts++ }
     }
     const m = new Date(a.createdAt).toISOString().slice(0, 7)
-    if (!byMonth.has(m)) byMonth.set(m, { A: 0, B: 0, C: 0 })
+    if (!byMonth.has(m)) byMonth.set(m, { A: 0, B: 0, C: 0, D: 0 })
     const bucket = byMonth.get(m)!
-    if (bucket[lettre as 'A' | 'B' | 'C'] !== undefined) bucket[lettre as 'A' | 'B' | 'C']++
+    if (bucket[lettre as 'A' | 'B' | 'C' | 'D'] !== undefined) bucket[lettre as 'A' | 'B' | 'C' | 'D']++
   }
 
   const timeline = [...byMonth.entries()]

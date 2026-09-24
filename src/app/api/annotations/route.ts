@@ -4,7 +4,10 @@ import { getUserId } from '@/lib/api-auth'
 
 // Nuances +/− depuis le 08/09/2026 (1.8.6). Stockage ASCII ('B-'), la lettre
 // porte les stats, le modificateur porte la tendance fine du brief mentorat.
-const GRADES = new Set(['A+', 'A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-'])
+// Grade D sous le C depuis le 24/09/2026 (décision Brice après l'entretien avec
+// Florent) : opt-in côté extension, mais le serveur l'accepte toujours. Un
+// grade valide ne se refuse pas, le réglage reste l'affaire de l'extension.
+const GRADES = new Set(['A+', 'A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-', 'D+', 'D', 'D-'])
 const CAUSE_CATEGORIES = new Set(['technique', 'connaissance', 'emotionnel'])
 const REVIEW_DELAY_MS = 14 * 24 * 60 * 60 * 1000 // relecture à 2 semaines (masterclass edge)
 
@@ -36,7 +39,7 @@ export async function GET(req: NextRequest) {
 
 /**
  * POST /api/annotations
- * Body : { id?, noteId?, messageRef?, grade: 'A'|'B'|'C', phrase, causeCategory?, reviewDueAt?, reviewedAt? }
+ * Body : { id?, noteId?, messageRef?, grade: 'A'|'B'|'C'|'D' (+/- optionnel), phrase, causeCategory?, reviewDueAt?, reviewedAt? }
  * noteId accepte aussi un extensionNoteId (résolu côté serveur).
  * `id` client (uuid extension) → upsert idempotent : la re-sync ne duplique pas.
  * reviewDueAt est posé automatiquement à +14 jours si absent.
@@ -50,7 +53,7 @@ export async function POST(req: NextRequest) {
     const { id, noteId, messageRef, tradeRef, grade, phrase, causeCategory, reviewDueAt, reviewedAt } = body
 
     if (!GRADES.has(grade)) {
-      return NextResponse.json({ error: 'grade doit être A, B ou C, avec + ou - optionnel' }, { status: 400 })
+      return NextResponse.json({ error: 'grade doit être A, B, C ou D, avec + ou - optionnel' }, { status: 400 })
     }
     if (typeof phrase !== 'string' || !phrase.trim()) {
       return NextResponse.json({ error: 'phrase de justification requise' }, { status: 400 })
@@ -135,7 +138,7 @@ export async function PATCH(req: NextRequest) {
     if (!existing) return NextResponse.json({ error: 'Annotation introuvable' }, { status: 404 })
 
     if (grade != null && !GRADES.has(grade)) {
-      return NextResponse.json({ error: 'grade doit être A, B ou C, avec + ou - optionnel' }, { status: 400 })
+      return NextResponse.json({ error: 'grade doit être A, B, C ou D, avec + ou - optionnel' }, { status: 400 })
     }
     if (causeCategory != null && !CAUSE_CATEGORIES.has(causeCategory)) {
       return NextResponse.json({ error: 'causeCategory invalide' }, { status: 400 })

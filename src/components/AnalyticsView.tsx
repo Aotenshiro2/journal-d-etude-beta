@@ -1,7 +1,10 @@
 import { TrendingDown, Crosshair, LineChart, BarChart2 } from 'lucide-react'
 
+// Le D (24/09/2026) est opt-in côté extension : ses colonnes n'apparaissent
+// que si l'élève en a posé, pour ne pas polluer les stats de ceux qui n'en ont pas.
 const GRADES = ['A', 'B', 'C'] as const
-const GRADE_COLOR: Record<string, string> = { A: '#22c55e', B: '#f59e0b', C: '#ef4444' }
+const GRADES_AVEC_D = ['A', 'B', 'C', 'D'] as const
+const GRADE_COLOR: Record<string, string> = { A: '#22c55e', B: '#f59e0b', C: '#ef4444', D: '#991b1b' }
 const CAUSES = [
   { key: 'technique', label: 'Technique' },
   { key: 'connaissance', label: 'Connaissance' },
@@ -19,7 +22,7 @@ export type AnalyticsStats = {
   causes: Record<string, number>
   calibration: Record<string, Record<string, number>>
   tradeVerdicts: number
-  timeline: { month: string; A: number; B: number; C: number }[]
+  timeline: { month: string; A: number; B: number; C: number; D: number }[]
 }
 
 function Section({ icon: Icon, title, subtitle, children }: { icon: React.ElementType; title: string; subtitle: string; children: React.ReactNode }) {
@@ -37,10 +40,11 @@ function Section({ icon: Icon, title, subtitle, children }: { icon: React.Elemen
 
 export default function AnalyticsView({ stats }: { stats: AnalyticsStats }) {
   const g = stats.grades
-  const gradeTotal = g.A + g.B + g.C
+  const lettres: readonly ('A' | 'B' | 'C' | 'D')[] = (g.D ?? 0) > 0 ? GRADES_AVEC_D : GRADES
+  const gradeTotal = g.A + g.B + g.C + (g.D ?? 0)
   const causeTotal = CAUSES.reduce((s, c) => s + (stats.causes[c.key] ?? 0), 0)
   const maxCause = Math.max(1, ...CAUSES.map(c => stats.causes[c.key] ?? 0))
-  const maxMonth = Math.max(1, ...stats.timeline.map(t => t.A + t.B + t.C))
+  const maxMonth = Math.max(1, ...stats.timeline.map(t => t.A + t.B + t.C + t.D))
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -64,7 +68,7 @@ export default function AnalyticsView({ stats }: { stats: AnalyticsStats }) {
         {/* ── Où je perds ── */}
         <Section icon={TrendingDown} title="Où je perds" subtitle="La répartition de tes notes et, surtout, la cause de tes B et C — ton levier n°1.">
           <div className="flex items-end gap-3 mb-5">
-            {GRADES.map(grade => (
+            {lettres.map(grade => (
               <div key={grade} className="flex-1 text-center">
                 <div className="text-2xl font-bold" style={{ color: GRADE_COLOR[grade] }}>{g[grade]}</div>
                 <div className="text-[11px]" style={{ color: 'var(--node-meta)' }}>{grade}</div>
@@ -73,7 +77,7 @@ export default function AnalyticsView({ stats }: { stats: AnalyticsStats }) {
           </div>
           {gradeTotal > 0 && (
             <div className="flex h-2 rounded-full overflow-hidden mb-5" style={{ background: 'var(--canvas-bg)' }}>
-              {GRADES.map(grade => g[grade] > 0 && <div key={grade} style={{ width: `${(g[grade] / gradeTotal) * 100}%`, background: GRADE_COLOR[grade] }} />)}
+              {lettres.map(grade => g[grade] > 0 && <div key={grade} style={{ width: `${(g[grade] / gradeTotal) * 100}%`, background: GRADE_COLOR[grade] }} />)}
             </div>
           )}
           {causeTotal > 0 ? (
@@ -106,7 +110,7 @@ export default function AnalyticsView({ stats }: { stats: AnalyticsStats }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {GRADES.map(grade => (
+                  {lettres.map(grade => (
                     <tr key={grade}>
                       <td className="px-3 py-1.5 font-semibold" style={{ color: GRADE_COLOR[grade] }}>{grade}</td>
                       {OUTCOMES.map(o => {
@@ -128,11 +132,11 @@ export default function AnalyticsView({ stats }: { stats: AnalyticsStats }) {
           {stats.timeline.length >= 2 ? (
             <div className="flex items-end gap-2" style={{ height: 120 }}>
               {stats.timeline.map(t => {
-                const tot = t.A + t.B + t.C
+                const tot = t.A + t.B + t.C + t.D
                 return (
                   <div key={t.month} className="flex-1 flex flex-col items-center gap-1">
                     <div className="w-full flex flex-col-reverse rounded-md overflow-hidden" style={{ height: 90, background: 'var(--canvas-bg)' }}>
-                      {GRADES.map(grade => t[grade] > 0 && <div key={grade} title={`${t[grade]} ${grade}`} style={{ height: `${(t[grade] / maxMonth) * 100}%`, background: GRADE_COLOR[grade] }} />)}
+                      {lettres.map(grade => t[grade] > 0 && <div key={grade} title={`${t[grade]} ${grade}`} style={{ height: `${(t[grade] / maxMonth) * 100}%`, background: GRADE_COLOR[grade] }} />)}
                     </div>
                     <span className="text-[9px]" style={{ color: 'var(--node-meta)' }}>{t.month.slice(5)}/{t.month.slice(2, 4)}</span>
                     <span className="text-[9px]" style={{ color: 'var(--node-meta)', opacity: 0.6 }}>{tot}</span>

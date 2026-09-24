@@ -11,6 +11,7 @@ const GRADE_CLASS: Record<string, string> = {
   A: 'bg-green-400/10 text-green-500',
   B: 'bg-amber-400/10 text-amber-500',
   C: 'bg-red-400/10 text-red-500',
+  D: 'bg-red-800/10 text-red-700 dark:text-red-300', // D opt-in extension, 24/09/2026
 }
 
 const OUTCOME_DOT: Record<string, string> = {

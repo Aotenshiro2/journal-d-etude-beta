@@ -28,8 +28,12 @@ const GRADE_CLASS: Record<string, string> = {
   A: 'bg-green-400/10 text-green-500 border-green-500/30',
   B: 'bg-amber-400/10 text-amber-500 border-amber-500/30',
   C: 'bg-red-400/10 text-red-500 border-red-500/30',
+  D: 'bg-red-800/10 text-red-700 dark:text-red-300 border-red-800/30',
 }
+// Le D (24/09/2026) est opt-in côté extension, et le journal ne connaît pas ce
+// réglage : il n'est jamais proposé d'office, seulement quand il existe déjà.
 const GRADES = ['A', 'B', 'C'] as const
+const GRADES_AVEC_D = ['A', 'B', 'C', 'D'] as const
 const CAUSES: { key: string; label: string }[] = [
   { key: 'technique', label: 'Technique' },
   { key: 'connaissance', label: 'Connaissance' },
@@ -71,6 +75,9 @@ function VerdictRow({ v, onJudged }: { v: AnnotationData; onJudged: (grade: stri
   const [saved, setSaved] = useState(!!v.reviewedAt)
   const [saving, setSaving] = useState(false)
   const changed = grade !== v.grade || phrase.trim() !== v.phrase || (cause ?? null) !== (v.causeCategory ?? null)
+  // Le bouton D n'apparaît que si le verdict d'origine est un D : un élève qui
+  // ne l'a pas activé n'en voit jamais, un verdict D reste modifiable.
+  const lettres: readonly string[] = v.grade[0] === 'D' ? GRADES_AVEC_D : GRADES
 
   const submit = async () => {
     if (saving) return
@@ -98,7 +105,7 @@ function VerdictRow({ v, onJudged }: { v: AnnotationData; onJudged: (grade: stri
           même geste que le popover de l'extension — labo du 08/09, option 2) ;
           les boutons passent en flex-1 pour garder des flancs tapables. */}
       <div className="flex items-center gap-2 mb-2">
-        {GRADES.map(g => {
+        {lettres.map(g => {
           const active = grade[0] === g
           const mod = active && grade.length > 1 ? grade[1] : ''
           return (
@@ -474,7 +481,7 @@ export default function ReviewDeck({ toRelire, toReorganize, library = [], focus
   // + les autres sections) ne doit PAS réordonner le parcours en cours.
   const [queue] = useState(toRelire)
   const [idx, setIdx] = useState(0)
-  const [tally, setTally] = useState<Record<string, number>>({ A: 0, B: 0, C: 0 })
+  const [tally, setTally] = useState<Record<string, number>>({ A: 0, B: 0, C: 0, D: 0 })
   const [readCount, setReadCount] = useState(0)
   const [skipped, setSkipped] = useState(0)
 
@@ -503,8 +510,10 @@ export default function ReviewDeck({ toRelire, toReorganize, library = [], focus
     router.refresh()
   }
 
-  const judgedTotal = tally.A + tally.B + tally.C
-  const maxTally = Math.max(1, tally.A, tally.B, tally.C)
+  const judgedTotal = tally.A + tally.B + tally.C + tally.D
+  const maxTally = Math.max(1, tally.A, tally.B, tally.C, tally.D)
+  // Le D ne rejoint le bilan que s'il a été posé pendant la relecture.
+  const lettresBilan: readonly string[] = tally.D > 0 ? GRADES_AVEC_D : GRADES
 
   // 0.1.7 — la carte à deux colonnes ne tient pas dans les 672 px du deck : la
   // colonne de re-jugement en prendrait 340 et il resterait MOINS de place au
@@ -542,11 +551,11 @@ export default function ReviewDeck({ toRelire, toReorganize, library = [], focus
             </p>
             {judgedTotal > 0 && (
               <div className="space-y-2.5 mb-8 text-left max-w-md mx-auto">
-                {GRADES.map(g => (
+                {lettresBilan.map(g => (
                   <div key={g} className="flex items-center gap-3">
                     <span className={`flex items-center justify-center w-6 h-6 rounded-full text-xs font-semibold ${GRADE_CLASS[g]}`}>{g}</span>
                     <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: 'var(--node-bg)' }}>
-                      <div className="h-full rounded-full" style={{ width: `${(tally[g] / maxTally) * 100}%`, background: g === 'A' ? '#22c55e' : g === 'B' ? '#f59e0b' : '#ef4444' }} />
+                      <div className="h-full rounded-full" style={{ width: `${(tally[g] / maxTally) * 100}%`, background: g === 'A' ? '#22c55e' : g === 'B' ? '#f59e0b' : g === 'C' ? '#ef4444' : '#991b1b' }} />
                     </div>
                     <span className="text-xs w-5 text-right" style={{ color: 'var(--node-meta)' }}>{tally[g]}</span>
                   </div>
