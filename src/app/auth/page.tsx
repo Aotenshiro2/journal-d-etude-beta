@@ -23,12 +23,46 @@ function AuthPage() {
   const [newsletter, setNewsletter] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
+  // Le callback sert à Google ET au lien magique : message neutre.
   const [error, setError] = useState<string | null>(
     searchParams.get('error') === 'auth_callback_failed'
-      ? 'Connexion Google échouée. Réessaie.'
+      ? 'La connexion a échoué. Si tu as utilisé un lien reçu par email, redemande-le et ouvre-le depuis ce navigateur.'
       : null
   )
   const [success, setSuccess] = useState<string | null>(null)
+  // Lien magique : messages séparés, affichés sous son bouton.
+  const [linkLoading, setLinkLoading] = useState(false)
+  const [linkError, setLinkError] = useState<string | null>(null)
+  const [linkSentTo, setLinkSentTo] = useState<string | null>(null)
+
+  // Lien magique : crée le compte s'il n'existe pas et marche aussi pour un compte Google.
+  // Même callback PKCE que Google (échange du code côté serveur).
+  const handleMagicLink = async () => {
+    const target = email.trim()
+    if (!target) return
+    setLinkLoading(true)
+    setLinkError(null)
+    setLinkSentTo(null)
+    setError(null)
+    setSuccess(null)
+    const supabase = createClient()
+    const { error } = await supabase.auth.signInWithOtp({
+      email: target,
+      options: {
+        emailRedirectTo: `${window.location.origin}/auth/callback`,
+      },
+    })
+    if (error) {
+      setLinkError(
+        error.status === 429
+          ? "Trop de demandes d'affilée. Attends quelques minutes et réessaie."
+          : error.message
+      )
+    } else {
+      setLinkSentTo(target)
+    }
+    setLinkLoading(false)
+  }
 
   const handleGoogleLogin = async () => {
     setLoading(true)
@@ -52,7 +86,14 @@ function AuthPage() {
     const supabase = createClient()
     const { error } = await supabase.auth.signInWithPassword({ email, password })
     if (error) {
-      setError(error.message)
+      // Cas typique : compte créé avec Google, donc sans mot de passe.
+      const invalidCredentials =
+        error.code === 'invalid_credentials' || error.message === 'Invalid login credentials'
+      setError(
+        invalidCredentials
+          ? "Aucun compte ne correspond à ce mot de passe. Si tu t'es inscrit avec Google, utilise « Continuer avec Google ». Sinon, demande un lien de connexion par email ou clique « Mot de passe oublié ? »."
+          : error.message
+      )
       setLoading(false)
     } else {
       router.push('/')
@@ -63,7 +104,7 @@ function AuthPage() {
     setLoading(true)
     setError(null)
     const supabase = createClient()
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -76,6 +117,9 @@ function AuthPage() {
     })
     if (error) {
       setError(error.message)
+    } else if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+      // Anti-énumération Supabase : succès factice, aucun email ne part.
+      setError('Un compte existe déjà avec cet email : connecte-toi avec Google, ton mot de passe, ou un lien de connexion par email.')
     } else {
       if (newsletter) {
         await fetch('/api/newsletter/subscribe', {
@@ -125,10 +169,52 @@ function AuthPage() {
           <p className="text-sm mt-1" style={{ color: 'var(--node-meta)' }}>Journal d&#39;Études</p>
         </div>
 
+        {/* Aide : les clients existants retrouvent leurs accès par l'email d'achat */}
+        <p className="text-xs mb-4 text-center" style={{ color: 'var(--node-meta)' }}>
+          Déjà client AOKnowledge (Live Club, formation, Skool...) ? Utilise l&#39;email de ton achat : tes accès s&#39;ouvrent automatiquement.
+        </p>
+
+        {/* Lien magique : chemin principal (sert aussi au formulaire mot de passe plus bas) */}
+        <div className="space-y-3">
+          <input
+            type="email"
+            placeholder="Email"
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && !linkLoading && handleMagicLink()}
+            className="w-full px-3 py-2.5 rounded-lg text-sm placeholder-gray-400 focus:outline-none"
+            style={inputStyle}
+          />
+          <button
+            onClick={handleMagicLink}
+            disabled={linkLoading || loading || !email.trim()}
+            className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl
+              font-medium text-sm transition-opacity
+              disabled:opacity-40 disabled:cursor-not-allowed"
+            style={{ background: '#fcdf3e', color: '#1a1a1a' }}
+          >
+            {linkLoading && <span className="w-4 h-4 border-2 border-gray-700 border-t-transparent rounded-full animate-spin" />}
+            Recevoir un lien de connexion
+          </button>
+          {linkError && <p className="text-sm text-red-400">{linkError}</p>}
+          {linkSentTo && (
+            <p className="text-sm text-green-500">
+              Lien envoyé à {linkSentTo}. Ouvre-le depuis ce navigateur.
+            </p>
+          )}
+        </div>
+
+        {/* Séparateur */}
+        <div className="flex items-center gap-3 my-5">
+          <div className="flex-1 h-px" style={{ background: 'var(--float-border)' }} />
+          <span className="text-xs" style={{ color: 'var(--node-meta)' }}>ou</span>
+          <div className="flex-1 h-px" style={{ background: 'var(--float-border)' }} />
+        </div>
+
         {/* Google */}
         <button
           onClick={handleGoogleLogin}
-          disabled={loading}
+          disabled={loading || linkLoading}
           className="w-full flex items-center justify-center gap-3 px-4 py-3 rounded-xl
             bg-white text-gray-900 font-medium text-sm
             hover:bg-gray-100 transition-colors
@@ -150,7 +236,7 @@ function AuthPage() {
         {/* Séparateur */}
         <div className="flex items-center gap-3 my-5">
           <div className="flex-1 h-px" style={{ background: 'var(--float-border)' }} />
-          <span className="text-xs" style={{ color: 'var(--node-meta)' }}>ou</span>
+          <span className="text-xs" style={{ color: 'var(--node-meta)' }}>ou avec un mot de passe</span>
           <div className="flex-1 h-px" style={{ background: 'var(--float-border)' }} />
         </div>
 
@@ -190,14 +276,7 @@ function AuthPage() {
               style={inputStyle}
             />
           )}
-          <input
-            type="email"
-            placeholder="Email"
-            value={email}
-            onChange={e => setEmail(e.target.value)}
-            className="w-full px-3 py-2.5 rounded-lg text-sm placeholder-gray-400 focus:outline-none"
-            style={inputStyle}
-          />
+          {/* L'email est le champ unique en haut, partagé avec le lien magique */}
           <div className="relative">
             <input
               type={showPassword ? 'text' : 'password'}
@@ -240,15 +319,16 @@ function AuthPage() {
           {error && <p className="text-sm text-red-400">{error}</p>}
           {success && <p className="text-sm text-green-500">{success}</p>}
 
+          {/* Bouton secondaire : le jaune est réservé au lien magique, chemin principal */}
           <button
             onClick={mode === 'signin' ? handleEmailSignIn : handleEmailSignUp}
-            disabled={loading || !email || !password || (mode === 'signup' && !name)}
+            disabled={loading || linkLoading || !email || !password || (mode === 'signup' && !name)}
             className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl
               font-medium text-sm transition-opacity
               disabled:opacity-40 disabled:cursor-not-allowed"
-            style={{ background: '#fcdf3e', color: '#1a1a1a' }}
+            style={{ background: 'transparent', color: 'var(--node-title)', border: '1px solid var(--float-border)' }}
           >
-            {loading && <span className="w-4 h-4 border-2 border-gray-700 border-t-transparent rounded-full animate-spin" />}
+            {loading && <span className="w-4 h-4 border-2 border-gray-500 border-t-transparent rounded-full animate-spin" />}
             {mode === 'signin' ? 'Se connecter' : 'Créer mon compte'}
           </button>
 
