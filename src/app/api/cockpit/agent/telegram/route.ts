@@ -192,10 +192,22 @@ export async function POST(req: NextRequest) {
     .filter((m) => m.content)
     .map((m) => ({ role: m.role, content: m.content }))
 
+  // SIGNE DE VIE (retour Brice 25/09) : sur une question lourde l'agent peut
+  // prendre une ou deux minutes, et un silence de deux minutes ressemble a une
+  // panne. Un accuse court part tout de suite, puis l'indicateur « en train
+  // d'ecrire » est rafraichi toutes les 4 s (Telegram l'efface au bout de 5)
+  // jusqu'a la reponse. L'accuse n'entre pas dans l'historique du modele.
+  await tg('sendMessage', { chat_id: chatId, text: 'Je vérifie…' })
+  await tg('sendChatAction', { chat_id: chatId, action: 'typing' })
+  const battement = setInterval(() => {
+    void tg('sendChatAction', { chat_id: chatId, action: 'typing' })
+  }, 4000)
+
   let reponse
   try {
     reponse = await boucleAgent(historique, compte[0].user_id)
   } catch (err) {
+    clearInterval(battement)
     console.error('[cockpit/telegram]', err)
     await tg('sendMessage', {
       chat_id: chatId,
@@ -204,6 +216,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true })
   }
 
+  clearInterval(battement)
   messages.push({ role: 'assistant', content: reponse.reply })
 
   if (reponse.action) {
