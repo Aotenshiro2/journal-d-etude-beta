@@ -70,6 +70,13 @@ export function repriseFaite(a: AbonnementResume, sortiLe: Date): boolean {
  * periode (incomplete_expired sans ended_at). null = on ne sait pas, on ne
  * sort personne.
  *
+ * « Ce qui est paye est du » (Brice, 29/09) : si la derniere facture est
+ * payee APRES la resiliation (paiement en retard, voir finPayeeTerminee) et
+ * couvre une periode qui finit apres cette date, la fin retenue est la fin de cette periode payee
+ * (payeJusquau). La grace part donc de max(fin, fin payee). payeJusquau ne
+ * remplace jamais une fin inconnue : sans fin datee, on ne sort toujours
+ * personne.
+ *
  * 'unpaid' a part : l'abonnement reste en place chez Stripe et continue
  * d'emettre des factures (non tentees), donc sa periode avance a chaque cycle
  * et current_period_end tombe presque toujours dans le futur. On date alors
@@ -77,8 +84,9 @@ export function repriseFaite(a: AbonnementResume, sortiLe: Date): boolean {
  * debutSerieImpayee), jamais sur la periode.
  */
 export function finAbonnement(a: AbonnementResume, debutImpaye: string | null = null): string | null {
-  if (a.statut === 'unpaid') return debutImpaye
-  return a.termineLe ?? a.finPeriode ?? null
+  const fin = a.statut === 'unpaid' ? debutImpaye : a.termineLe ?? a.finPeriode ?? null
+  if (!fin || !a.payeJusquau) return fin
+  return Date.parse(a.payeJusquau) > Date.parse(fin) ? a.payeJusquau : fin
 }
 
 /** Abonnement termine depuis plus de graceJours jours (GRACE_JOURS de config.ts, 7 comme Metricgram). */

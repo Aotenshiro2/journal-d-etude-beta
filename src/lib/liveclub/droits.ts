@@ -11,7 +11,7 @@ import { prisma } from '@/lib/db'
 import { exemptionActive } from '@/lib/stripe-actions'
 import { rattachementActif, membreParEmail } from './rattacher'
 import { abonnementsLiveClubDuClient, abonnementsLiveClubParEmail } from './stripe'
-import { dateIso, meilleurAbonnement, messageErreur, relationAbsente } from './pur'
+import { dateIso, finDuDroit, meilleurAbonnement, messageErreur, relationAbsente } from './pur'
 
 export { meilleurAbonnement }
 
@@ -72,12 +72,15 @@ export async function droitLiveClub(telegramId: number): Promise<Droit> {
         // ne sait pas, et un 'non' ferait refuser ou sortir un payeur.
         erreurs.push('stripe: client rattache hors du compte melanie, sans email')
       }
+      // Un abonnement termine dont la derniere facture payee couvre encore
+      // aujourd'hui compte aussi (meilleurAbonnement) : fin = fin payee.
       if (abo) {
+        const fin = finDuDroit(abo)
         return {
           statut: 'oui', raison: 'abonnement', ...base,
           abonnementId: abo.id,
           ...(abo.clientStripe ? { clientStripe: abo.clientStripe } : {}),
-          ...(abo.finPeriode ? { fin: abo.finPeriode } : {}),
+          ...(fin ? { fin } : {}),
         }
       }
     } catch (err) {

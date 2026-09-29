@@ -866,6 +866,8 @@ async function tacheDesabonnes(ctx: Contexte, abonnements: AbonnementResume[], p
       }
       if (!debutImpaye) { s.inconnus++; continue }
     }
+    // La grace part de max(fin, fin payee) : un membre qui a paye en retard
+    // apres la resiliation garde sa periode payee, puis 7 jours (finAbonnement).
     if (!desabonneHorsGrace(a, ctx.maintenant, GRACE_JOURS, debutImpaye)) continue
     for (const r of rattaches) {
       if (tempsEcoule(ctx)) return
@@ -894,7 +896,10 @@ async function tacheDesabonnes(ctx: Contexte, abonnements: AbonnementResume[], p
       if (droit === 'oui') { s.gardes++; continue }
       vus.add(r.telegramId)
 
-      const details = { statut: a.statut, fin: finAbonnement(a, debutImpaye)?.slice(0, 10) ?? null, statut_tg: p.statut }
+      const details = {
+        statut: a.statut, fin: finAbonnement(a, debutImpaye)?.slice(0, 10) ?? null,
+        paye_jusquau: a.payeJusquau?.slice(0, 10) ?? null, statut_tg: p.statut,
+      }
       const contexte = { telegramId: r.telegramId, membreId: r.membreId, abonnementId: a.id }
       if (!reel) {
         await tracer(ctx, { geste: 'retrait', resultat: 'simule', regle: 'desabonne', details }, contexte)

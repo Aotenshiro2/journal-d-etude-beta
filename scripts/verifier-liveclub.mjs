@@ -8,11 +8,14 @@ import {
   dateIso, ajouterJours, joursEntre, formaterDateFr,
   finPeriodeAbonnement, calculerReprisePause, nbMoisPauseValide,
   statutDonneDroit, statutTermine, resumerAbonnement, abonnementOuvreLeGroupe,
+  abonnementOuvreLeGroupeLe, finPayeeTerminee, finDuDroit,
   meilleurAbonnement, memePayeur, metadonneesPause, preparerPoseDePause, metadonneesAdoption,
   effacementMetadonneesPause,
   genererJeton, jetonBienForme, normaliserEmail, decouperEmails, requeteRechercheEmail,
   nomLienInvitation, callbackDataValide, echapperHtml, relationAbsente,
 } from '../src/lib/liveclub/pur.ts'
+import { desabonneHorsGrace, finAbonnement } from '../src/lib/liveclub/passage-regles.ts'
+import { GRACE_JOURS } from '../src/lib/liveclub/config.ts'
 
 const PRODUITS = ['prod_UcOraPncQlbrW4', 'prod_UynMpOvBtGTsIw']
 let n = 0
@@ -127,7 +130,12 @@ test('resume d un abonnement', () => {
   // Arret par date (cancel_at, Dashboard) : compte comme arret prevu.
   assert.ok(resumerAbonnement(abo({ cancel_at: futur }), PRODUITS).arretPrevu)
 
-  const fini = resumerAbonnement(abo({ status: 'canceled', ended_at: 1_780_000_000 }), PRODUITS)
+  // Termine, derniere facture impayee : plus de droit (le cas « payee apres
+  // la resiliation » a son propre bloc plus bas).
+  const fini = resumerAbonnement(abo({
+    status: 'canceled', ended_at: 1_780_000_000,
+    latest_invoice: { status: 'open', status_transitions: {} },
+  }), PRODUITS)
   assert.equal(fini.termineLe, new Date(1_780_000_000 * 1000).toISOString())
   assert.ok(!abonnementOuvreLeGroupe(fini))
 })
@@ -239,10 +247,134 @@ test('levee de pause et metadonnees (constats relecteur 29/09)', () => {
 test('meilleur abonnement', () => {
   const a = resumerAbonnement(abo({ id: 'sub_A' }), PRODUITS)
   const b = resumerAbonnement(abo({ id: 'sub_B', items: { data: [{ current_period_end: futur + 86400, price: { product: PRODUITS[0] } }] } }), PRODUITS)
-  const c = resumerAbonnement(abo({ id: 'sub_C', status: 'canceled' }), PRODUITS)
+  const c = resumerAbonnement(abo({ id: 'sub_C', status: 'canceled', latest_invoice: { status: 'open', status_transitions: {} } }), PRODUITS)
   assert.equal(meilleurAbonnement([a, b, c]).id, 'sub_B')
   assert.equal(meilleurAbonnement([c]), null)
   assert.equal(meilleurAbonnement([]), null)
+})
+
+test('cas reel 29/09 : resilie par Stripe le 21/09, paye en retard le 28/09 pour la periode 07/09 -> 07/10', () => {
+  const sec = iso => Date.parse(iso) / 1000
+  const ms = iso => Date.parse(iso)
+  const debut = sec('2026-09-07T14:00:00Z')
+  const fin = sec('2026-10-07T14:00:00Z')
+  const resilie = sec('2026-09-21T14:05:00Z')
+  const facturePayee = {
+    status: 'paid',
+    amount_paid: 4900,
+    post_payment_credit_notes_amount: 0,
+    status_transitions: { paid_at: sec('2026-09-28T19:30:00Z') },
+    lines: { data: [{ amount: 4900, period: { start: debut, end: fin } }] },
+  }
+  const brut = abo({
+    id: 'sub_REEL12345678', status: 'canceled', canceled_at: resilie, ended_at: resilie,
+    items: { data: [{ current_period_end: fin, price: { product: PRODUITS[1] } }] },
+    latest_invoice: facturePayee,
+  })
+  const r = resumerAbonnement(brut, PRODUITS)
+  assert.equal(r.termineLe, '2026-09-21T14:05:00.000Z')
+  assert.equal(r.payeJusquau, '2026-10-07T14:00:00.000Z')
+  assert.equal(finDuDroit(r), '2026-10-07T14:00:00.000Z')
+
+  // Droit 'oui' le 29/09 (raison abonnement, fin = fin payee), 'non' apres le 07/10.
+  assert.ok(abonnementOuvreLeGroupeLe(r, ms('2026-09-29T07:00:00Z')))
+  assert.equal(meilleurAbonnement([r], ms('2026-09-29T07:00:00Z')).id, 'sub_REEL12345678')
+  assert.ok(abonnementOuvreLeGroupeLe(r, ms('2026-10-07T13:59:00Z')))
+  assert.ok(!abonnementOuvreLeGroupeLe(r, ms('2026-10-07T14:00:00Z')))
+  assert.ok(!abonnementOuvreLeGroupeLe(r, ms('2026-10-08T07:00:00Z')))
+  assert.equal(meilleurAbonnement([r], ms('2026-10-08T07:00:00Z')), null)
+
+  // Passage quotidien (cron 7 h UTC) : grace de 7 jours depuis la fin payee,
+  // pas depuis ended_at. Simulation de sortie seulement apres le 14/10.
+  assert.equal(GRACE_JOURS, 7)
+  assert.equal(finAbonnement(r), '2026-10-07T14:00:00.000Z')
+  for (const jour of ['2026-09-29', '2026-10-07', '2026-10-08', '2026-10-14']) {
+    assert.ok(!desabonneHorsGrace(r, new Date(`${jour}T07:00:00Z`), GRACE_JOURS), jour)
+  }
+  assert.ok(desabonneHorsGrace(r, new Date('2026-10-15T07:00:00Z'), GRACE_JOURS))
+
+  // Meme abonnement SANS le paiement du 28/09 (derniere facture impayee) :
+  // l'ancien comportement reste, droit 'non' et grace depuis ended_at (sortie
+  // simulee des le 29/09). On ne prolonge jamais sur une facture impayee.
+  for (const statut of ['open', 'uncollectible', 'void', 'draft']) {
+    const impaye = resumerAbonnement({ ...brut, latest_invoice: { ...facturePayee, status: statut, status_transitions: {} } }, PRODUITS)
+    assert.equal(impaye.payeJusquau, null, statut)
+    assert.ok(!abonnementOuvreLeGroupeLe(impaye, ms('2026-09-29T07:00:00Z')), statut)
+    assert.equal(finAbonnement(impaye), '2026-09-21T14:05:00.000Z', statut)
+    assert.ok(desabonneHorsGrace(impaye, new Date('2026-09-29T07:00:00Z'), GRACE_JOURS), statut)
+  }
+  assert.equal(resumerAbonnement({ ...brut, latest_invoice: 'in_TEST' }, PRODUITS).payeJusquau, null)
+
+  // Facture payee sans ses lignes : repli sur items.data[].current_period_end.
+  const sansLignes = { ...brut, latest_invoice: { status: 'paid', amount_paid: 4900, status_transitions: facturePayee.status_transitions } }
+  assert.equal(finPayeeTerminee(sansLignes), fin)
+  // Lignes presentes mais aucune positive (avoir de prorata, ligne a zero) : rien de paye.
+  assert.equal(finPayeeTerminee({ ...brut, latest_invoice: { ...facturePayee, lines: { data: [
+    { amount: -1200, period: { start: resilie, end: fin } }, { amount: 0, period: { start: resilie, end: fin } },
+  ] } } }), null)
+  // La plus lointaine des lignes positives.
+  assert.equal(finPayeeTerminee({ ...brut, latest_invoice: { ...facturePayee, lines: { data: [
+    { amount: 4900, period: { start: debut, end: fin } }, { amount: 300, period: { start: debut, end: fin + 86400 } },
+  ] } } }), fin + 86400)
+  // Fin de l'abonnement posterieure au paiement : pas un paiement en retard,
+  // rien a prolonger, la grace part de ended_at.
+  const vieux = resumerAbonnement({ ...brut, ended_at: sec('2026-10-20T00:00:00Z') }, PRODUITS)
+  assert.equal(vieux.payeJusquau, null)
+  assert.equal(finAbonnement(vieux), '2026-10-20T00:00:00.000Z')
+
+  // Constat relecteur 29/09 : seule une facture payee APRES la resiliation prolonge.
+  // a) Resiliation immediate par l'admin le 10/09 avec remboursement : la
+  //    facture reste 'paid' (payee le 07/09, avant la resiliation). Pas de
+  //    prolongation, sortie a ended_at + 7 jours comme avant.
+  const le10 = sec('2026-09-10T10:00:00Z')
+  const immediate = resumerAbonnement({
+    ...brut, canceled_at: le10, ended_at: le10,
+    latest_invoice: { ...facturePayee, status_transitions: { paid_at: debut } },
+  }, PRODUITS)
+  assert.equal(immediate.payeJusquau, null)
+  assert.ok(!abonnementOuvreLeGroupeLe(immediate, ms('2026-09-11T07:00:00Z')))
+  assert.equal(finAbonnement(immediate), '2026-09-10T10:00:00.000Z')
+  assert.ok(!desabonneHorsGrace(immediate, new Date('2026-09-17T07:00:00Z'), GRACE_JOURS))
+  assert.ok(desabonneHorsGrace(immediate, new Date('2026-09-18T07:00:00Z'), GRACE_JOURS))
+  // b) Facture a 0 payee apres la resiliation (coupon a 100 %, solde crediteur) : rien d'encaisse.
+  assert.equal(finPayeeTerminee({ ...brut, latest_invoice: { ...facturePayee, amount_paid: 0 } }), null)
+  const factureSansMontant = { ...facturePayee }
+  delete factureSansMontant.amount_paid
+  assert.equal(finPayeeTerminee({ ...brut, latest_invoice: factureSansMontant }), null)
+  // c) Paiement en retard puis avoir (remboursement total ou partiel) : pas de prolongation.
+  assert.equal(finPayeeTerminee({ ...brut, latest_invoice: { ...facturePayee, post_payment_credit_notes_amount: 4900 } }), null)
+  assert.equal(finPayeeTerminee({ ...brut, latest_invoice: { ...facturePayee, post_payment_credit_notes_amount: 100 } }), null)
+  // d) Date de paiement absente, ou pile a la resiliation : pas de prolongation.
+  assert.equal(finPayeeTerminee({ ...brut, latest_invoice: { ...facturePayee, status_transitions: {} } }), null)
+  assert.equal(finPayeeTerminee({ ...brut, latest_invoice: { ...facturePayee, status_transitions: { paid_at: resilie } } }), null)
+  // e) Aucune date de fin (ni canceled_at ni ended_at) : pas de prolongation.
+  assert.equal(finPayeeTerminee({ ...brut, status: 'unpaid', canceled_at: null, ended_at: null }), null)
+  // f) Resiliation en fin de periode demandee le 15/09, facture payee le 07/09 :
+  //    payeJusquau null, rien de perdu, la fin reste ended_at = 07/10.
+  const finDePeriode = resumerAbonnement({
+    ...brut, canceled_at: sec('2026-09-15T09:00:00Z'), ended_at: fin,
+    latest_invoice: { ...facturePayee, status_transitions: { paid_at: debut } },
+  }, PRODUITS)
+  assert.equal(finDePeriode.payeJusquau, null)
+  assert.equal(finAbonnement(finDePeriode), '2026-10-07T14:00:00.000Z')
+  // g) Paiement apres canceled_at mais avant ended_at : la borne est la plus tardive des deux.
+  assert.equal(finPayeeTerminee({
+    ...brut, canceled_at: sec('2026-09-15T09:00:00Z'), ended_at: sec('2026-09-30T00:00:00Z'),
+  }), null)
+
+  // 'unpaid' et 'incomplete_expired' suivent la meme regle ; un abonnement
+  // vivant n'a pas de payeJusquau (son droit vient de son statut).
+  const unpaid = resumerAbonnement({ ...brut, status: 'unpaid', ended_at: null }, PRODUITS)
+  assert.equal(unpaid.payeJusquau, '2026-10-07T14:00:00.000Z')
+  assert.ok(abonnementOuvreLeGroupeLe(unpaid, ms('2026-09-29T07:00:00Z')))
+  assert.equal(finAbonnement(unpaid, '2026-09-07T14:00:00.000Z'), '2026-10-07T14:00:00.000Z')
+  assert.equal(finAbonnement(unpaid, null), null)
+  assert.equal(resumerAbonnement({ ...brut, status: 'incomplete_expired' }, PRODUITS).payeJusquau, '2026-10-07T14:00:00.000Z')
+  assert.equal(resumerAbonnement({ ...brut, status: 'active', canceled_at: null, ended_at: null }, PRODUITS).payeJusquau, null)
+  assert.equal(finPayeeTerminee({ ...brut, status: 'past_due' }), null)
+
+  // Le callback a un parametre ne prend pas l'index du tableau pour une date.
+  assert.equal([r].some(abonnementOuvreLeGroupe), Date.now() < ms('2026-10-07T14:00:00Z'))
 })
 
 test('meme payeur', () => {

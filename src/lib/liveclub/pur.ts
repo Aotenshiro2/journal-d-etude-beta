@@ -129,6 +129,18 @@ export type AbonnementResume = {
   clientStripe: string | null
   /** Fin reelle (ended_at), ISO, pour les abonnements termines. */
   termineLe: string | null
+  /**
+   * Abonnement TERMINE (canceled, unpaid, incomplete_expired) dont la derniere
+   * facture est payee : fin de la periode que cette facture couvre (ISO).
+   * Regle de Brice (29/09) : « ce qui est paye est du ». Le droit court
+   * jusque-la meme si Stripe a resilie avant (paiement en retard apres la
+   * resiliation), et la grace du passage quotidien part de cette date.
+   * null pour un abonnement vivant, si la derniere facture n'est pas payee
+   * (on ne prolonge jamais sur une facture impayee), si elle a ete payee
+   * avant la resiliation (resiliation immediate, remboursement), si elle n'a
+   * rien encaisse ou si un avoir l'a suivie. Voir finPayeeTerminee.
+   */
+  payeJusquau: string | null
   derniereFacture: { statut: string; payeeLe: string | null } | null
 }
 
@@ -318,6 +330,57 @@ export function metadonneesAdoption(sub: Record<string, unknown>, maintenantMs: 
   }
 }
 
+type LigneFacture = { amount?: number; period?: { start?: number; end?: number } | null }
+
+/**
+ * Fin de la periode payee d'un abonnement TERMINE, en secondes, ou null.
+ * Seulement si la derniere facture (latest_invoice expand) est 'paid' ET a
+ * ete payee APRES la fin de l'abonnement (status_transitions.paid_at
+ * posterieur a canceled_at et a ended_at) : c'est le paiement en retard d'un
+ * abonnement deja resilie. Une facture payee avant la resiliation ne
+ * prolonge rien : une resiliation immediate (exclusion, remboursement) garde
+ * la sortie a ended_at + grace, et une resiliation en fin de periode a deja
+ * ended_at = fin payee. Aucune date de fin connue = pas de prolongation.
+ * Refus aussi si rien n'a ete encaisse (amount_paid absent ou nul : coupon a
+ * 100 %, solde crediteur) ou si un avoir a suivi le paiement
+ * (post_payment_credit_notes_amount > 0 : remboursement total ou partiel).
+ * Limite : un remboursement fait sur la charge, sans avoir, ne se voit pas
+ * sur la facture. La fin vient des lignes de cette facture (lines.data[].period.end, la plus
+ * lointaine parmi les lignes de montant positif : un avoir de prorata ou une
+ * ligne a zero ne paie rien). Si la facture ne porte pas ses lignes, repli
+ * sur la fin de periode de l'abonnement (items.data[].current_period_end,
+ * API clover). Lignes presentes mais aucune positive = null : rien de paye a
+ * prolonger.
+ */
+export function finPayeeTerminee(sub: Record<string, unknown>): number | null {
+  if (!statutTermine(String(sub.status ?? ''))) return null
+  const f = sub.latest_invoice && typeof sub.latest_invoice === 'object'
+    ? sub.latest_invoice as {
+      status?: string
+      amount_paid?: number
+      post_payment_credit_notes_amount?: number
+      status_transitions?: { paid_at?: number | null } | null
+      lines?: { data?: LigneFacture[] } | null
+    }
+    : null
+  if (f?.status !== 'paid') return null
+  if (typeof f.amount_paid !== 'number' || f.amount_paid <= 0) return null
+  if (typeof f.post_payment_credit_notes_amount === 'number' && f.post_payment_credit_notes_amount > 0) return null
+  const payeeLe = f.status_transitions?.paid_at
+  if (typeof payeeLe !== 'number' || payeeLe <= 0) return null
+  const bornes = [sub.canceled_at, sub.ended_at].filter((t): t is number => typeof t === 'number' && t > 0)
+  if (!bornes.length || payeeLe <= Math.max(...bornes)) return null
+  const lignes = f.lines?.data
+  if (Array.isArray(lignes)) {
+    const fins = lignes
+      .filter(l => typeof l.amount === 'number' && l.amount > 0)
+      .map(l => l.period?.end)
+      .filter((e): e is number => typeof e === 'number' && e > 0)
+    return fins.length ? Math.max(...fins) : null
+  }
+  return finPeriodeAbonnement(sub)
+}
+
 /**
  * Resume d'un abonnement Stripe brut (latest_invoice expand ou non). null si
  * aucun de ses items ne porte un des produits donnes : ce n'est pas un
@@ -368,23 +431,49 @@ export function resumerAbonnement(
     produit,
     clientStripe: client,
     termineLe: isoDepuisSec(sub.ended_at),
+    payeJusquau: isoDepuisSec(finPayeeTerminee(sub)),
     derniereFacture,
   }
 }
 
 /**
- * L'abonnement ouvre-t-il le groupe aujourd'hui ? Statut vivant ET pas en
- * pause effective (une pause laisse 'active' chez Stripe).
+ * L'abonnement ouvre-t-il le groupe a cet instant ? Statut vivant ET pas en
+ * pause effective (une pause laisse 'active' chez Stripe), OU abonnement
+ * termine dont la derniere facture, payee apres la resiliation, couvre encore
+ * cet instant (payeJusquau).
+ */
+export function abonnementOuvreLeGroupeLe(a: AbonnementResume, maintenantMs: number): boolean {
+  if (a.pauseEffective) return false
+  if (statutDonneDroit(a.statut)) return true
+  if (!statutTermine(a.statut) || !a.payeJusquau) return false
+  const fin = Date.parse(a.payeJusquau)
+  return Number.isFinite(fin) && fin > maintenantMs
+}
+
+/**
+ * Meme chose, maintenant. Un seul parametre, expres : elle sert de callback
+ * (.some, .filter) et l'index du tableau ne doit pas devenir une date.
  */
 export function abonnementOuvreLeGroupe(a: AbonnementResume): boolean {
-  return statutDonneDroit(a.statut) && !a.pauseEffective
+  return abonnementOuvreLeGroupeLe(a, Date.now())
+}
+
+/**
+ * Fin du droit que donne l'abonnement (ISO) : la fin payee pour un
+ * abonnement termine, la fin de la periode en cours sinon.
+ */
+export function finDuDroit(a: AbonnementResume): string | null {
+  return statutTermine(a.statut) ? a.payeJusquau : a.finPeriode
 }
 
 /** L'abonnement qui ouvre le groupe, le plus lointain en premier. */
-export function meilleurAbonnement(abonnements: AbonnementResume[]): AbonnementResume | null {
+export function meilleurAbonnement(
+  abonnements: AbonnementResume[],
+  maintenantMs: number = Date.now(),
+): AbonnementResume | null {
   return abonnements
-    .filter(abonnementOuvreLeGroupe)
-    .sort((a, b) => (b.finPeriode ?? '').localeCompare(a.finPeriode ?? ''))[0] ?? null
+    .filter(a => abonnementOuvreLeGroupeLe(a, maintenantMs))
+    .sort((a, b) => (finDuDroit(b) ?? '').localeCompare(finDuDroit(a) ?? ''))[0] ?? null
 }
 
 /**
