@@ -20,6 +20,9 @@ import { prisma } from '@/lib/db'
 
 export const maxDuration = 30
 
+// Les six statuts de ChatMember, ceux qu'accepte la contrainte de statut_tg.
+const STATUTS_TG: unknown[] = ['creator', 'administrator', 'member', 'restricted', 'left', 'kicked']
+
 export async function POST(req: NextRequest) {
   const secret = process.env.TELEGRAM_LIVECLUB_WEBHOOK_SECRET?.trim()
   if (!secret || req.headers.get('x-telegram-bot-api-secret-token') !== secret) {
@@ -80,6 +83,29 @@ export async function POST(req: NextRequest) {
       source = 'evenement',
       par_qui = ${parQui},
       maj_le = now()`
+
+  // Le statut Telegram BRUT (29/09, chantier sortie de Metricgram) : `present`
+  // ne distingue pas un depart volontaire (left) d'un bannissement (kicked),
+  // ni un admin d'un membre. La colonne statut_tg le garde tel quel. Un statut
+  // hors de la liste connue n'est pas ecrit, plutot que de buter sur la
+  // contrainte check (Telegram rejouerait l'update en boucle).
+  // Ecrit A PART de l'upsert, en best effort : la colonne vient de la
+  // migration 20260929190300, et si le code part avant elle, la presence
+  // (l'upsert ci-dessus) doit continuer d'etre tenue. Colonne absente
+  // (42703) = on passe, avec un avertissement dans les logs.
+  const statutTg = STATUTS_TG.includes(nouveau.status) ? String(nouveau.status) : null
+  if (statutTg) {
+    try {
+      await prisma.$executeRaw`
+        update public.cockpit_telegram_membres
+        set statut_tg = ${statutTg}
+        where telegram_id = ${u.id}`
+    } catch (err) {
+      const texte = err instanceof Error ? err.message : String(err)
+      if (!/42703|column .*statut_tg.* does not exist/i.test(texte)) throw err
+      console.warn('[liveclub/telegram] colonne statut_tg absente (migration 20260929190300 pas appliquee) : statut non ecrit.')
+    }
+  }
 
   return NextResponse.json({ ok: true })
 }

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getUserId } from '@/lib/api-auth'
 import { corsHeaders, corsPreflight } from '@/lib/support-cors'
-import { validerAction, executerAction } from '@/lib/stripe-actions'
+import { validerAction, executerAction, RefusAction } from '@/lib/stripe-actions'
 
 // Execution d'une action Stripe proposee par l'agent du cockpit — APRES le
 // clic de confirmation de Brice ou Melanie. Le modele ne passe jamais par
@@ -33,11 +33,16 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const resultat = await executerAction(action)
+    const resultat = await executerAction(action, `agent:${userId}`)
     // Trace en clair dans les logs Vercel : qui a confirme quoi, quand.
     console.log(`[cockpit/agent/action] ${userId} ${action.type} ${action.compte}`, action.params)
     return NextResponse.json({ resultat }, { headers: cors })
   } catch (err) {
+    // Refus par une regle (exempte, admin, deja dehors) : rien n'a ete fait.
+    // 409 et pas 200, sinon la fenetre du cockpit le coche comme execute.
+    if (err instanceof RefusAction) {
+      return NextResponse.json({ error: `Rien n'a été fait. ${err.message}` }, { status: 409, headers: cors })
+    }
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "L'action a échoué" },
       { status: 502, headers: cors },

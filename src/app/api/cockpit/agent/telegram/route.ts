@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { randomUUID } from 'node:crypto'
 import { prisma } from '@/lib/db'
 import { boucleAgent } from '@/lib/agent-cockpit'
-import { validerAction, executerAction } from '@/lib/stripe-actions'
+import { validerAction, executerAction, RefusAction, expurgerLiensInvitation } from '@/lib/stripe-actions'
 import type Anthropic from '@anthropic-ai/sdk'
 
 // Le canal TELEGRAM de l'agent cockpit (go Brice 04/09) : meme cerveau que la
@@ -116,10 +116,12 @@ export async function POST(req: NextRequest) {
         issue = `Action refusée : ${action}`
       } else {
         try {
-          issue = `✓ ${await executerAction(action)}`
+          issue = `✓ ${await executerAction(action, `agent:${compte[0].user_id}`)}`
           console.log(`[cockpit/telegram/action] ${compte[0].user_id} ${action.type} ${action.compte}`, action.params)
         } catch (err) {
-          issue = `L’action a échoué : ${err instanceof Error ? err.message : '?'}`
+          issue = err instanceof RefusAction
+            ? `Rien n’a été fait. ${err.message}`
+            : `L’action a échoué : ${err instanceof Error ? err.message : '?'}`
         }
       }
     } else {
@@ -127,7 +129,9 @@ export async function POST(req: NextRequest) {
     }
 
     const messages = (Array.isArray(conv.messages) ? conv.messages : []) as MessageStocke[]
-    messages.push({ role: 'assistant', content: issue })
+    // L'humain recoit le lien d'invitation (sendMessage plus bas), la
+    // conversation conservee en base n'en garde qu'une mention.
+    messages.push({ role: 'assistant', content: expurgerLiensInvitation(issue) })
     await prisma.$executeRaw`
       update public.cockpit_agent_conversations
       set action_en_attente = null, nonce = null,

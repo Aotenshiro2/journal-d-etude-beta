@@ -16,6 +16,8 @@
 // Produits = ecriture (couvre les tarifs). Tant que la cle manque, la carte
 // de confirmation le dit au lieu d'un bouton Confirmer.
 
+import { prisma } from '@/lib/db'
+
 const API = 'https://api.stripe.com'
 
 // Version d'API EPINGLEE : les deux comptes n'ont pas le meme defaut (celui de
@@ -95,11 +97,21 @@ export type ActionAgent = {
 }
 
 // ---------------------------------------------------------------------------
-// Actions TELEGRAM (groupe Live Club, 10/09). Regles gravees dans la roadmap :
-// UN MAITRE PAR GESTE — Metricgram sort les desinscrits de son circuit, nos
-// actions ne servent qu'aux ECARTS et a la pause ; toute reintegration fait
-// unban AVANT le lien (un retrait peut etre un bannissement) ; le lien est a
-// usage unique et expire sous 14 jours.
+// Actions TELEGRAM (groupe Live Club, 10/09, revues le 29/09). Regles gravees
+// dans la roadmap : UN MAITRE PAR GESTE (Metricgram sort encore les
+// desinscrits de son circuit, nos actions ne servent qu'aux ECARTS et a la
+// pause, jusqu'a la bascule) ; toute reintegration fait unban AVANT le lien
+// (Metricgram, lui, bannit) ; le lien est a usage unique et expire sous 14
+// jours.
+//
+// 29/09, decision de Brice : JAMAIS DE BANNISSEMENT pour une sortie. Retirer =
+// unbanChatMember SANS only_if_banned sur un membre present, ce qui le sort du
+// groupe sans le bannir (doc Telegram). Jamais un admin ou le createur du
+// groupe (verifie par getChatMember), jamais un exempte actif
+// (cockpit_liveclub_exemptions). Les deux gestes vivent ici, dans
+// retirerDuLiveClub et reintegrerAuLiveClub : l'agent (carte de confirmation)
+// et le bouton du cockpit (/api/cockpit/liveclub/membre) passent par les
+// memes fonctions, donc par les memes refus.
 // ---------------------------------------------------------------------------
 
 const API_TG = 'https://api.telegram.org'
@@ -109,7 +121,8 @@ export function cleTelegramPresente(): boolean {
     && process.env.TELEGRAM_LIVECLUB_CHAT_ID?.trim())
 }
 
-async function telegramPost(methode: string, corps: Record<string, unknown>): Promise<Record<string, unknown>> {
+/** Appel brut a l'API Bot du groupe Live Club. Jette si Telegram refuse. */
+export async function telegramPost(methode: string, corps: Record<string, unknown>): Promise<Record<string, unknown>> {
   const jeton = process.env.TELEGRAM_LIVECLUB_BOT_TOKEN?.trim()
   if (!jeton) throw new Error('TELEGRAM_LIVECLUB_BOT_TOKEN absent du projet journal.')
   const reponse = await fetch(`${API_TG}/bot${jeton}/${methode}`, {
@@ -122,6 +135,251 @@ async function telegramPost(methode: string, corps: Record<string, unknown>): Pr
   return json as Record<string, unknown>
 }
 
+/**
+ * Le numero Telegram tel qu'il arrive (nombre, "123456789" ou "u123456789").
+ * null = illisible : on refuse plutot que de deviner.
+ */
+export function lireTelegramId(brut: unknown): number | null {
+  const s = String(brut ?? '').trim().replace(/^u/i, '')
+  if (!/^\d{5,15}$/.test(s)) return null
+  const n = Number(s)
+  return Number.isSafeInteger(n) ? n : null
+}
+
+export type GesteLiveClub = 'retirer' | 'reintegrer'
+
+/**
+ * L'issue d'un geste sur le groupe. `regle` est le code du motif, repris tel
+ * quel dans cockpit_liveclub_gestes (manuel, exempte, admin_du_groupe,
+ * absent_du_groupe, telegram, config, exemptions_illisibles). `details` part
+ * dans la meme ligne : JAMAIS de lien d'invitation ni de texte de message.
+ */
+export type IssueGesteLiveClub =
+  | {
+    ok: true
+    geste: GesteLiveClub
+    message: string
+    /** Reintegration seulement. Rendu a l'humain, jamais journalise ni loggue. */
+    invite_link?: string
+    regle: string
+    details: Record<string, unknown>
+  }
+  | {
+    ok: false
+    geste: GesteLiveClub
+    resultat: 'refuse' | 'echec'
+    erreur: string
+    regle: string
+    statutHttp: number
+    details: Record<string, unknown>
+  }
+
+function chatLiveClub(): number | null {
+  const brut = process.env.TELEGRAM_LIVECLUB_CHAT_ID?.trim()
+  return brut ? Number(brut) : null
+}
+
+function messageErreur(err: unknown): string {
+  return (err instanceof Error ? err.message : String(err)).split('\n')[0].slice(0, 200)
+}
+
+// La table n'existe pas encore (migration pas appliquee) : code Postgres 42P01.
+function relationAbsente(err: unknown): boolean {
+  return /42P01|relation .* does not exist/i.test(err instanceof Error ? err.message : String(err))
+}
+
+/**
+ * L'exemption active d'un compte Telegram (fondateur, admin, equipe,
+ * favorise), posee depuis le cockpit. Active = pas retiree, et sans date ou
+ * date pas encore passee. Table absente = aucune exemption lue (avant la
+ * migration il ne peut pas y en avoir), toute autre erreur remonte : on ne
+ * retire personne sur une lecture ratee.
+ */
+async function exemptionActive(telegramId: number): Promise<{ motif: string } | null> {
+  try {
+    const lignes = await prisma.$queryRaw<{ motif: string }[]>`
+      select motif from public.cockpit_liveclub_exemptions
+      where telegram_id = ${telegramId}
+        and retire_le is null
+        and (jusquau is null or jusquau >= current_date)
+      limit 1`
+    return lignes[0] ?? null
+  } catch (err) {
+    if (relationAbsente(err)) {
+      console.warn('[liveclub] cockpit_liveclub_exemptions absente (migration 20260929190100 pas appliquee) : aucune exemption lue.')
+      return null
+    }
+    throw err
+  }
+}
+
+/**
+ * Sortir quelqu'un du groupe SANS le bannir. Dans l'ordre : exemption active
+ * = refus ; getChatMember ; createur ou admin = refus ; absent (left, kicked,
+ * restricted hors du groupe) = on ne fait RIEN, et surtout pas un unban qui
+ * leverait le ban d'un banni ; sinon unbanChatMember sans only_if_banned.
+ */
+export async function retirerDuLiveClub(telegramId: number): Promise<IssueGesteLiveClub> {
+  const geste: GesteLiveClub = 'retirer'
+  const chatId = chatLiveClub()
+  if (!chatId || !process.env.TELEGRAM_LIVECLUB_BOT_TOKEN?.trim()) {
+    return {
+      ok: false, geste, resultat: 'echec', regle: 'config', statutHttp: 503, details: {},
+      erreur: 'TELEGRAM_LIVECLUB_BOT_TOKEN ou TELEGRAM_LIVECLUB_CHAT_ID absent du projet journal.',
+    }
+  }
+
+  let exemption: { motif: string } | null
+  try {
+    exemption = await exemptionActive(telegramId)
+  } catch (err) {
+    return {
+      ok: false, geste, resultat: 'echec', regle: 'exemptions_illisibles', statutHttp: 503,
+      details: { erreur: messageErreur(err) },
+      erreur: 'Impossible de lire les exemptions : rien n’a été fait, par prudence.',
+    }
+  }
+  if (exemption) {
+    return {
+      ok: false, geste, resultat: 'refuse', regle: 'exempte', statutHttp: 409,
+      details: { motif: exemption.motif },
+      erreur: `u${telegramId} est exempté (${exemption.motif}) : on ne le retire pas. `
+        + `Si c’est voulu, retire d’abord l’exemption dans le cockpit.`,
+    }
+  }
+
+  let statut = ''
+  let estMembre: boolean | undefined
+  try {
+    const reponse = await telegramPost('getChatMember', { chat_id: chatId, user_id: telegramId })
+    const membre = reponse.result as { status?: string; is_member?: boolean } | undefined
+    statut = String(membre?.status ?? '')
+    estMembre = membre?.is_member
+  } catch (err) {
+    return {
+      ok: false, geste, resultat: 'echec', regle: 'telegram', statutHttp: 502,
+      details: { etape: 'getChatMember', erreur: messageErreur(err) },
+      erreur: `Telegram ne dit pas si u${telegramId} est dans le groupe : ${messageErreur(err)}`,
+    }
+  }
+
+  if (statut === 'creator' || statut === 'administrator') {
+    return {
+      ok: false, geste, resultat: 'refuse', regle: 'admin_du_groupe', statutHttp: 409,
+      details: { statut_tg: statut },
+      erreur: `u${telegramId} est ${statut === 'creator' ? 'le créateur' : 'administrateur'} du groupe : on ne le retire jamais.`,
+    }
+  }
+
+  const present = statut === 'member' || (statut === 'restricted' && estMembre === true)
+  if (!present) {
+    return {
+      ok: false, geste, resultat: 'refuse', regle: 'absent_du_groupe', statutHttp: 409,
+      details: { statut_tg: statut || null },
+      erreur: statut === 'kicked'
+        ? `u${telegramId} n’est pas dans le groupe (banni, sans doute par Metricgram) : rien à retirer, et son ban reste en place.`
+        : `u${telegramId} n’est pas dans le groupe (statut Telegram « ${statut || 'inconnu'} ») : rien à retirer.`,
+    }
+  }
+
+  try {
+    await telegramPost('unbanChatMember', { chat_id: chatId, user_id: telegramId })
+  } catch (err) {
+    return {
+      ok: false, geste, resultat: 'echec', regle: 'telegram', statutHttp: 502,
+      details: { etape: 'unbanChatMember', statut_tg: statut, erreur: messageErreur(err) },
+      erreur: `Telegram a refusé la sortie de u${telegramId} : ${messageErreur(err)}`,
+    }
+  }
+  return {
+    ok: true, geste, regle: 'manuel', details: { statut_tg: statut },
+    message: `u${telegramId} est sorti du groupe Live Club, sans bannissement : `
+      + `un lien d’invitation valide suffirait à le faire revenir.`,
+  }
+}
+
+/**
+ * Reintegrer : unban avec only_if_banned D'ABORD (leve un ban, le notre avant
+ * le 29/09 ou celui de Metricgram, sans toucher a un membre present), puis un
+ * lien a usage unique valable 14 jours. Le lien revient dans invite_link et
+ * nulle part ailleurs.
+ */
+export async function reintegrerAuLiveClub(telegramId: number): Promise<IssueGesteLiveClub> {
+  const geste: GesteLiveClub = 'reintegrer'
+  const chatId = chatLiveClub()
+  if (!chatId || !process.env.TELEGRAM_LIVECLUB_BOT_TOKEN?.trim()) {
+    return {
+      ok: false, geste, resultat: 'echec', regle: 'config', statutHttp: 503, details: {},
+      erreur: 'TELEGRAM_LIVECLUB_BOT_TOKEN ou TELEGRAM_LIVECLUB_CHAT_ID absent du projet journal.',
+    }
+  }
+
+  try {
+    await telegramPost('unbanChatMember', { chat_id: chatId, user_id: telegramId, only_if_banned: true })
+  } catch (err) {
+    return {
+      ok: false, geste, resultat: 'echec', regle: 'telegram', statutHttp: 502,
+      details: { etape: 'unbanChatMember', erreur: messageErreur(err) },
+      erreur: `Telegram a refusé de lever le ban de u${telegramId} : ${messageErreur(err)}`,
+    }
+  }
+
+  const expire = Math.floor(Date.now() / 1000) + 14 * 86400
+  let lien: string | undefined
+  try {
+    const reponse = await telegramPost('createChatInviteLink', {
+      chat_id: chatId,
+      member_limit: 1,
+      expire_date: expire,
+      name: `reintegration u${telegramId}`,
+    })
+    lien = (reponse.result as { invite_link?: string } | undefined)?.invite_link
+  } catch (err) {
+    return {
+      ok: false, geste, resultat: 'echec', regle: 'telegram', statutHttp: 502,
+      details: { etape: 'createChatInviteLink', ban_leve: true, erreur: messageErreur(err) },
+      erreur: `Ban levé pour u${telegramId}, mais Telegram n’a pas créé le lien : ${messageErreur(err)}`,
+    }
+  }
+  if (!lien) {
+    return {
+      ok: false, geste, resultat: 'echec', regle: 'telegram', statutHttp: 502,
+      details: { etape: 'createChatInviteLink', ban_leve: true },
+      erreur: `Ban levé pour u${telegramId}, mais Telegram n’a renvoyé aucun lien.`,
+    }
+  }
+  return {
+    ok: true, geste, regle: 'manuel', invite_link: lien,
+    details: { lien_expire_le: new Date(expire * 1000).toISOString() },
+    message: `u${telegramId} peut revenir : ban levé s’il y en avait un. `
+      + `Lien à lui transmettre, usage unique, expire dans 14 jours.`,
+  }
+}
+
+/**
+ * Une ligne par tentative dans cockpit_liveclub_gestes (SQL brut, comme les
+ * autres ecritures serveur). Ne jette JAMAIS : si la table manque (migration
+ * 20260929190200 pas appliquee) ou si l'insert echoue, on le loggue et le
+ * geste garde sa reponse. Ni le lien ni le message ne sont ecrits.
+ */
+export async function journaliserGesteLiveClub(
+  issue: IssueGesteLiveClub,
+  contexte: { telegramId: number | null; membreId?: string | null; acteur: string },
+): Promise<void> {
+  const geste = issue.geste === 'retirer' ? 'retrait' : 'reintegration'
+  const resultat = issue.ok ? 'fait' : issue.resultat
+  try {
+    await prisma.$executeRaw`
+      insert into public.cockpit_liveclub_gestes
+        (telegram_id, membre_id, geste, resultat, acteur, regle, details)
+      values (${contexte.telegramId}, ${contexte.membreId ?? null}::uuid, ${geste}, ${resultat},
+              ${contexte.acteur}, ${issue.regle}, ${JSON.stringify(issue.details)}::jsonb)`
+  } catch (err) {
+    console.warn(`[liveclub/gestes] journalisation impossible (${geste} u${contexte.telegramId ?? '?'} ${resultat})`
+      + `${relationAbsente(err) ? ' : table absente, migration 20260929190200 pas appliquee' : ` : ${messageErreur(err)}`}`)
+  }
+}
+
 export function validerAction(brut: unknown): ActionAgent | string {
   const a = brut as ActionAgent
   if (!a || typeof a !== 'object') return 'Action illisible.'
@@ -130,13 +388,13 @@ export function validerAction(brut: unknown): ActionAgent | string {
 
   // Les actions du groupe Telegram n'ont pas de compte Stripe.
   if (a.type === 'retirer_telegram' || a.type === 'reintegrer_telegram') {
-    const brutId = String(p.telegram_id ?? '').replace(/^u/i, '').trim()
-    if (!/^\d{5,15}$/.test(brutId)) {
+    const telegramId = lireTelegramId(p.telegram_id)
+    if (telegramId === null) {
       return 'telegram_id invalide (le numéro u… de cockpit_telegram_membres, sans le u).'
     }
     const qui = String(p.qui ?? '').trim().slice(0, 80)
     if (!qui) return 'Précise QUI (nom ou pseudo) pour que la carte de confirmation soit lisible.'
-    return { type: a.type, compte: 'telegram', params: { telegram_id: Number(brutId), qui } }
+    return { type: a.type, compte: 'telegram', params: { telegram_id: telegramId, qui } }
   }
 
   if (!estCompte(a.compte)) return 'Compte inconnu : aoknowledge ou melanie.'
@@ -261,46 +519,65 @@ export function resumeAction(a: ActionAgent): string {
     return `Lever la pause de l'abonnement de ${p.qui} : les prélèvements reprennent au prochain cycle.`
   }
   if (a.type === 'retirer_telegram') {
-    return `Retirer ${p.qui} (u${p.telegram_id}) du groupe Telegram Live Club. `
-      + `Il ne pourra pas revenir par un ancien lien (bannissement) tant qu'il n'est pas réintégré.`
+    return `Retirer ${p.qui} (u${p.telegram_id}) du groupe Telegram Live Club, SANS le bannir : `
+      + `il sort, et un lien d'invitation valide suffirait à le faire revenir. `
+      + `Refusé d'office si c'est un admin du groupe ou un exempté.`
   }
   if (a.type === 'reintegrer_telegram') {
-    return `Réintégrer ${p.qui} (u${p.telegram_id}) dans le groupe Live Club : levée du bannissement `
-      + `+ lien d'invitation à usage unique (14 jours) à lui transmettre.`
+    return `Réintégrer ${p.qui} (u${p.telegram_id}) dans le groupe Live Club : levée du ban s'il y en a un `
+      + `(celui de Metricgram compris) + lien d'invitation à usage unique (14 jours) à lui transmettre.`
   }
   return `Créer le produit « ${p.nom} » à ${p.montant} ${String(p.devise).toUpperCase()}${p.recurrence ? `/${p.recurrence === 'month' ? 'mois' : 'an'}` : ' (comptant)'} sur le compte ${a.compte}.`
 }
 
-/** Execute une action DEJA validee. Renvoie une phrase de resultat. */
-export async function executerAction(a: ActionAgent): Promise<string> {
+/**
+ * Une action refusee par une regle (exempte, admin du groupe, deja dehors) :
+ * rien n'a ete execute, et ce n'est pas une panne. Les routes de l'agent la
+ * distinguent d'un echec et ne l'affichent jamais comme un succes.
+ */
+export class RefusAction extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'RefusAction'
+  }
+}
+
+/**
+ * Remplace les liens d'invitation Telegram d'un texte avant de le conserver
+ * (historique de conversation) : le lien part a l'humain, pas en base.
+ */
+export function expurgerLiensInvitation(texte: string): string {
+  return texte.replace(/https?:\/\/(?:t\.me|telegram\.me)\/(?:\+|joinchat\/)\S+/gi, '[lien transmis]')
+}
+
+/**
+ * Execute une action DEJA validee. Renvoie une phrase de resultat, jette
+ * RefusAction si une regle a bloque le geste, Error sur une panne.
+ * `acteur` signe la ligne de cockpit_liveclub_gestes pour les gestes Telegram
+ * (agent:<uuid> depuis les deux canaux de l'agent).
+ */
+export async function executerAction(a: ActionAgent, acteur = 'agent'): Promise<string> {
   // ── Groupe Telegram ───────────────────────────────────────────────────────
+  // Memes fonctions que le bouton du cockpit : memes refus (admin, exempte),
+  // meme journal. Le lien d'invitation revient a l'humain dans la phrase de
+  // resultat, jamais dans le journal.
   if (a.type === 'retirer_telegram' || a.type === 'reintegrer_telegram') {
-    const chatId = process.env.TELEGRAM_LIVECLUB_CHAT_ID?.trim()
-    if (!chatId) throw new Error('TELEGRAM_LIVECLUB_CHAT_ID absent du projet journal.')
     const id = Number(a.params.telegram_id)
+    const issue = a.type === 'retirer_telegram'
+      ? await retirerDuLiveClub(id)
+      : await reintegrerAuLiveClub(id)
+    await journaliserGesteLiveClub(issue, { telegramId: id, acteur })
 
-    if (a.type === 'retirer_telegram') {
-      // Ban DURABLE : pas de unban derriere, sinon n'importe quel vieux lien
-      // le fait revenir. La reintegration est le geste inverse, explicite.
-      await telegramPost('banChatMember', { chat_id: Number(chatId), user_id: id })
-      return `${a.params.qui} (u${id}) retiré du groupe Live Club (banni jusqu'à réintégration). `
-        + `La table cockpit_telegram_membres l'enregistrera au prochain événement.`
+    if (!issue.ok) {
+      // Refus (exempte, admin, deja dehors) : rien n'a ete fait, ce n'est pas
+      // une panne. Erreur a part, pour que les canaux de l'agent ne l'affichent
+      // ni comme un succes ni comme un echec.
+      if (issue.resultat === 'refuse') throw new RefusAction(`${a.params.qui} : ${issue.erreur}`)
+      throw new Error(issue.erreur)
     }
-
-    // Reintegration : unban D'ABORD (regle 3 — le retrait a pu etre un ban,
-    // le notre ou celui de Metricgram), puis lien a usage unique, 14 jours.
-    await telegramPost('unbanChatMember', {
-      chat_id: Number(chatId), user_id: id, only_if_banned: true,
-    })
-    const lien = await telegramPost('createChatInviteLink', {
-      chat_id: Number(chatId),
-      member_limit: 1,
-      expire_date: Math.floor(Date.now() / 1000) + 14 * 86400,
-      name: `réintégration u${id}`,
-    })
-    const url = (lien.result as { invite_link?: string })?.invite_link
-    return `${a.params.qui} (u${id}) peut revenir : bannissement levé. `
-      + `Lien à lui transmettre (usage unique, expire dans 14 jours) : ${url}`
+    return issue.invite_link
+      ? `${a.params.qui} : ${issue.message} Lien : ${issue.invite_link}`
+      : `${a.params.qui} : ${issue.message} La table cockpit_telegram_membres l'enregistrera au prochain événement.`
   }
 
   const cle = cleAgent(a.compte as CompteStripe)
