@@ -6,7 +6,9 @@ import { passageQuotidien } from '@/lib/liveclub/passage'
  * GET /api/cron/liveclub : le passage quotidien du Live Club (29/09), lance
  * par le cron Vercel (vercel.json, 7 h UTC). Pauses, acces broker,
  * desabonnes (SIMULES tant que LIVECLUB_SORTIES_ACTIVES n'est pas '1'),
- * purge des conversations : toute la logique vit dans
+ * rappel J-3 avant chaque prelevement, sorties abusives de Metricgram
+ * (signalees, lien de retour en prive), purge des conversations : toute la
+ * logique vit dans
  * src/lib/liveclub/passage.ts.
  *
  * Garde : en-tete Authorization: Bearer <CRON_SECRET>, que Vercel envoie tout

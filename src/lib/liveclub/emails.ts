@@ -10,8 +10,8 @@
 // l'adresse dans un log.
 
 import { Resend } from 'resend'
-import { SUPPORT, URL_ABONNEMENT, MOIS_ACCES_BROKER } from './config'
-import { echapperHtml, formaterDateFr, messageErreur, normaliserEmail } from './pur'
+import { SUPPORT, URL_PORTAIL_CARTE, MOIS_ACCES_BROKER, lienBotAccueil, texteAbonnement } from './config'
+import { echapperHtml, formaterDateFr, formaterMontant, messageErreur, normaliserEmail } from './pur'
 
 export type ResultatEmail = { ok: true; id: string | null } | { ok: false; erreur: string }
 
@@ -108,6 +108,11 @@ export function modeleRetour(lienBot: string): ModeleMessage {
   }
 }
 
+// Les messages « abonne-toi » donnent les DEUX portes (Brice, 29/09) dans le
+// texte, par texteAbonnement() : pas de bouton qui en mettrait une seule en
+// avant. Les adresses deviennent des liens dans l'email (paragrapheHtml), et
+// Telegram les rend cliquables tout seul.
+
 export function modeleRappelFinBroker(jusquau: string): ModeleMessage {
   return {
     sujet: 'Ton accès au Live Club se termine dans une semaine',
@@ -115,9 +120,9 @@ export function modeleRappelFinBroker(jusquau: string): ModeleMessage {
       'Salut !',
       `Ton accès offert au Live Club se termine le ${formaterDateFr(jusquau)}. Il n'est pas renouvelable.`,
       "Si tu veux rester dans le groupe, abonne-toi avant cette date avec la même adresse email, et tu n'auras rien d'autre à faire.",
+      texteAbonnement(),
       `Une question ? Écris à ${SUPPORT}.`,
     ],
-    bouton: { texte: "M'abonner au Live Club", url: URL_ABONNEMENT },
   }
 }
 
@@ -127,16 +132,90 @@ export function modeleFinBroker(): ModeleMessage {
     paragraphes: [
       'Salut !',
       "Ton accès offert au Live Club est arrivé à son terme, donc tu sors du groupe Telegram. Merci d'avoir été là.",
-      "Tu veux revenir ? Abonne-toi, et on t'envoie de quoi rentrer dans le groupe.",
+      "Tu veux revenir ? Abonne-toi avec la même adresse email, et on t'envoie de quoi rentrer dans le groupe.",
+      texteAbonnement(),
       `Une question ? Écris à ${SUPPORT}.`,
     ],
-    bouton: { texte: "M'abonner au Live Club", url: URL_ABONNEMENT },
+  }
+}
+
+/**
+ * Sortie d'un desabonne (seulement quand LIVECLUB_SORTIES_ACTIVES vaut '1') :
+ * pourquoi, et comment revenir.
+ */
+export function modeleSortieDesabonne(): ModeleMessage {
+  return {
+    sujet: 'Ton abonnement au Live Club est terminé',
+    paragraphes: [
+      'Salut !',
+      "Ton abonnement au Live Club est terminé, donc tu sors du groupe Telegram. Merci d'avoir été là.",
+      "Tu veux revenir ? Abonne-toi avec la même adresse email, et on t'envoie de quoi rentrer dans le groupe.",
+      texteAbonnement(),
+      `Tu penses que c'est une erreur ? Écris à ${SUPPORT} avec l'email de ton paiement, on regarde tout de suite.`,
+    ],
+  }
+}
+
+/**
+ * Rappel 3 jours avant un prelevement. echeance = jour du prelevement a
+ * l'heure de Paris (jourParis). montant null = on ne le connait pas (apercu
+ * de facture illisible) : le message ne donne que la date. lienBot : donne
+ * seulement quand le message part par email (en prive, le membre est deja
+ * dans le bot). Pause et arret se font par le bot : le support ne reste que
+ * pour le reste.
+ */
+export function modeleRappelPrelevement(
+  echeance: string,
+  montant: { centimes: number; devise: string } | null,
+  lienBot?: string,
+): ModeleMessage {
+  const date = formaterDateFr(echeance)
+  const bot = "Tu veux faire une pause ou arrêter avant cette date ? Écris au bot du Live Club, il s'en occupe"
+  return {
+    sujet: `Ton prochain prélèvement Live Club, le ${date}`,
+    paragraphes: [
+      'Salut !',
+      montant
+        ? `Petit rappel : ton abonnement au Live Club se renouvelle le ${date}. ${formaterMontant(montant.centimes, montant.devise)} seront prélevés sur ta carte habituelle.`
+        : `Petit rappel : ton abonnement au Live Club se renouvelle le ${date}, avec un prélèvement sur ta carte habituelle.`,
+      "Ta carte a changé ou arrive en fin de validité ? Mets-la à jour avant cette date avec le bouton ci-dessous. Tu te connectes avec l'email de ton paiement.",
+      lienBot ? `${bot} : ${lienBot}` : `${bot}.`,
+      `Pour le reste, écris à ${SUPPORT}.`,
+    ],
+    bouton: { texte: 'Mettre à jour ma carte', url: URL_PORTAIL_CARTE },
+  }
+}
+
+/**
+ * Lien de retour apres une sortie a tort par Metricgram (transition). En
+ * PRIVE seulement : c'est un lien de demande d'adhesion, jamais dans un email.
+ */
+export function modeleRetourSortieAbusive(lienGroupe: string): ModeleMessage {
+  return {
+    sujet: 'Ton retour dans le Live Club',
+    paragraphes: [
+      'Salut ! Tu as été sorti du groupe Live Club par erreur, alors que ton accès est toujours valable. Désolé pour ça.',
+      "Pour revenir, appuie sur le bouton ci-dessous et demande à rejoindre : c'est accepté tout seul. Le lien marche pendant 14 jours.",
+      `Un souci ? Écris à ${SUPPORT}.`,
+    ],
+    bouton: { texte: 'Revenir dans le groupe', url: lienGroupe },
   }
 }
 
 // ---------------------------------------------------------------------------
 // Rendu
 // ---------------------------------------------------------------------------
+
+/**
+ * Un paragraphe echappe, ses adresses https en liens. La ponctuation collee a
+ * la fin d'une adresse reste hors du lien.
+ */
+export function paragrapheHtml(p: string): string {
+  return echapperHtml(p).replace(/https:\/\/[^\s<]+/g, brut => {
+    const url = brut.replace(/[.,;:!?)]+$/, '')
+    return `<a href="${url}" style="color:#111827">${url}</a>${brut.slice(url.length)}`
+  })
+}
 
 /** Le modele en texte brut (email texte, ou message prive Telegram sans HTML). */
 export function texteTelegram(m: ModeleMessage): string {
@@ -145,7 +224,7 @@ export function texteTelegram(m: ModeleMessage): string {
 
 export function htmlEmail(m: ModeleMessage): string {
   const corps = m.paragraphes
-    .map(p => `<p style="margin:0 0 16px;line-height:1.5">${echapperHtml(p)}</p>`)
+    .map(p => `<p style="margin:0 0 16px;line-height:1.5">${paragrapheHtml(p)}</p>`)
     .join('\n')
   const bouton = m.bouton
     ? `<p style="margin:24px 0"><a href="${echapperHtml(m.bouton.url)}" style="display:inline-block;padding:12px 20px;border-radius:8px;background:#111827;color:#ffffff;text-decoration:none;font-weight:600">${echapperHtml(m.bouton.texte)}</a></p>
@@ -206,4 +285,14 @@ export function emailRappelFinBroker(email: string, jusquau: string): Promise<Re
 
 export function emailFinBroker(email: string): Promise<ResultatEmail> {
   return envoyerModele(email, modeleFinBroker())
+}
+
+export function emailSortieDesabonne(email: string): Promise<ResultatEmail> {
+  return envoyerModele(email, modeleSortieDesabonne())
+}
+
+export function emailRappelPrelevement(
+  email: string, echeance: string, montant: { centimes: number; devise: string } | null,
+): Promise<ResultatEmail> {
+  return envoyerModele(email, modeleRappelPrelevement(echeance, montant, lienBotAccueil()))
 }

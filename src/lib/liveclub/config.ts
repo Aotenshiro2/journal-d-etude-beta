@@ -6,8 +6,25 @@
 
 export const PRODUITS_LIVECLUB = ['prod_UcOraPncQlbrW4', 'prod_UynMpOvBtGTsIw'] as const
 
-export const URL_ABONNEMENT = 'https://aoknowledge.com/live-club'
+/**
+ * Les DEUX portes d'abonnement (Brice, 29/09) : tout message « abonne-toi »
+ * propose les deux. Meme offre, meme compte Stripe (melanie).
+ */
+export const URLS_ABONNEMENT = ['https://aoknowledge.com/live-club', 'https://melaniechart.com'] as const
+/** Premiere porte seule, gardee pour les appelants d'avant le 29/09. Preferer texteAbonnement(). */
+export const URL_ABONNEMENT = URLS_ABONNEMENT[0]
+/** Portail client Stripe du compte melanie : le membre y met sa carte a jour (connexion par son email). */
+export const URL_PORTAIL_CARTE = 'https://billing.stripe.com/p/login/bJecN48kK4Vc4vr70Sbsc00'
 export const SUPPORT = 'support@aoknowledge.com'
+
+/**
+ * La phrase « abonne-toi », avec les deux adresses, reprise partout (bot,
+ * agent, emails). Pas de ponctuation apres la derniere adresse : Telegram et
+ * les clients mail l'avaleraient dans le lien.
+ */
+export function texteAbonnement(): string {
+  return `Pour t'abonner, c'est au choix sur ${URLS_ABONNEMENT[0]} ou sur ${URLS_ABONNEMENT[1]}`
+}
 
 /** Jours de grace apres la fin d'un abonnement, comme Metricgram. */
 export const GRACE_JOURS = 7
@@ -37,6 +54,11 @@ export function nomBot(): string {
 /** Lien personnel vers le bot : t.me/<bot>?start=<jeton> (jeton de 24 caracteres). */
 export function lienBot(jeton: string): string {
   return `https://t.me/${nomBot()}?start=${encodeURIComponent(jeton)}`
+}
+
+/** Lien vers le bot, sans jeton : pour « ecris au bot » dans un email. */
+export function lienBotAccueil(): string {
+  return `https://t.me/${nomBot()}`
 }
 
 /**

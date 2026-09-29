@@ -11,14 +11,17 @@
 // pour l'equipe (support@).
 
 import { journaliserGesteLiveClub, type GesteJournal } from '@/lib/stripe-actions'
-import { SUPPORT, URL_ABONNEMENT } from './config'
+import { SUPPORT, URLS_ABONNEMENT, texteAbonnement } from './config'
 import { droitLiveClub } from './droits'
 import { rattachementActif, type Rattachement } from './rattacher'
 import {
   abonnementsLiveClubDuClient, clientsStripeParEmail, lireAbonnement,
   pauser, programmerArret, annulerArret, type AbonnementResume,
 } from './stripe'
-import { calculerReprisePause, formaterDateFr, messageErreur, nbMoisPauseValide, statutDonneDroit } from './pur'
+import {
+  abonnementOuvreLeGroupe, calculerReprisePause, formaterDateFr, messageErreur, nbMoisPauseValide,
+  statutDonneDroit, statutTermine,
+} from './pur'
 import type { ActionMembre } from './conversations'
 import type { Bouton } from './telegram'
 
@@ -83,8 +86,20 @@ function phraseAbonnement(a: AbonnementResume): string {
   if (a.statut === 'past_due') {
     return `Ton dernier paiement n'est pas passé. Stripe va réessayer : vérifie ta carte. Tu gardes le groupe pendant ce temps. Besoin d'aide ? ${SUPPORT}`
   }
-  const termine = a.termineLe ? formaterDateFr(a.termineLe) : null
+  // Resilie mais paye jusqu'a une date encore a venir (regle « ce qui est
+  // paye est du ») : il est ACTIF jusque-la, pas « termine ».
+  if (statutTermine(a.statut) && a.payeJusquau && Date.parse(a.payeJusquau) > Date.now()) {
+    return `Ton abonnement est actif jusqu'au ${formaterDateFr(a.payeJusquau)} : ta dernière période est payée, tu gardes le groupe jusque-là. Il ne se renouvelle pas, et rien ne sera plus prélevé.`
+  }
+  // Terminé : la date la plus tardive entre la fin reelle et la fin payee.
+  const finReelle = [a.termineLe, a.payeJusquau].filter((d): d is string => Boolean(d)).sort().pop()
+  const termine = finReelle ? formaterDateFr(finReelle) : null
   return `Ton abonnement est terminé${termine ? ` depuis le ${termine}` : ''}.`
+}
+
+/** L'abonnement a-t-il une phrase « en cours » ? Vivant chez Stripe, ou resilie mais encore paye. */
+function abonnementEnCours(a: AbonnementResume): boolean {
+  return statutDonneDroit(a.statut) || abonnementOuvreLeGroupe(a)
 }
 
 export type Situation =
@@ -109,15 +124,18 @@ export async function situationDuMembre(telegramId: number): Promise<Situation> 
     return { etat: 'illisible' }
   }
 
-  const vivants = abonnements.filter(a => statutDonneDroit(a.statut))
+  const vivants = abonnements.filter(abonnementEnCours)
   if (vivants.length) {
     return {
       etat: 'ok',
       texte: vivants.map(phraseAbonnement).join('\n\n'),
       faits: {
         abonnements: vivants.map(a => ({
-          statut: a.pauseEffective ? 'en_pause' : a.statut,
+          statut: a.pauseEffective ? 'en_pause'
+            : statutDonneDroit(a.statut) ? a.statut
+            : 'resilie_mais_paye',
           fin_periode: a.finPeriode ? formaterDateFr(a.finPeriode) : null,
+          actif_jusquau: statutDonneDroit(a.statut) ? null : a.payeJusquau ? formaterDateFr(a.payeJusquau) : null,
           arret_programme: a.arretPrevu,
           pause_prevue_ou_en_cours: a.pauseActive,
           reprise_apres_pause: a.pauseJusquau ? formaterDateFr(a.pauseJusquau) : null,
@@ -132,7 +150,7 @@ export async function situationDuMembre(telegramId: number): Promise<Situation> 
   if (droit.statut === 'oui' && droit.raison === 'acces_broker') {
     return {
       etat: 'ok',
-      texte: `Tu as un accès offert au Live Club${fin ? ` jusqu'au ${fin}` : ''}, grâce à ton compte chez notre broker partenaire. Il n'est pas renouvelable : pour rester après, il suffira de t'abonner (${URL_ABONNEMENT}).`,
+      texte: `Tu as un accès offert au Live Club${fin ? ` jusqu'au ${fin}` : ''}, grâce à ton compte chez notre broker partenaire. Il n'est pas renouvelable : pour rester après, il suffira de t'abonner.\n\n${texteAbonnement()}`,
       faits: { acces: 'offert_broker', jusquau: fin, renouvelable: false },
     }
   }
@@ -147,7 +165,7 @@ export async function situationDuMembre(telegramId: number): Promise<Situation> 
   const dernier = abonnements[0]
   return {
     etat: 'ok',
-    texte: `${dernier ? phraseAbonnement(dernier) : "Je ne trouve pas d'abonnement Live Club à ton nom."} Pour revenir, abonne-toi ici : ${URL_ABONNEMENT}`,
+    texte: `${dernier ? phraseAbonnement(dernier) : "Je ne trouve pas d'abonnement Live Club à ton nom."}\n\n${texteAbonnement()}`,
     faits: { acces: 'aucun', abonnement_termine: Boolean(dernier) },
   }
 }
@@ -161,7 +179,7 @@ export type Preparation =
   | { ok: false; raison: string }
 
 const PANNE = `Je n'arrive pas à lire ton abonnement en ce moment. Réessaie dans un moment, ou écris à ${SUPPORT}.`
-const NON_RATTACHE = `Je ne sais pas encore à quel abonnement ton compte Telegram est lié. Utilise le lien reçu par email après ton paiement, ou écris à ${SUPPORT}.`
+const NON_RATTACHE = `Je ne sais pas encore à quel abonnement ton compte Telegram est lié. Envoie-moi ici l'email de ton paiement : je t'envoie un code pour vérifier, et je te relie à ton abonnement.`
 
 /**
  * Prepare une pause (1 a 6 mois), un arret ou l'annulation d'un arret sur
@@ -188,6 +206,10 @@ export async function preparerAction(
   }
   const vivants = abonnements.filter(a => statutDonneDroit(a.statut))
   if (vivants.length === 0) {
+    const paye = abonnements.find(abonnementEnCours)
+    if (paye?.payeJusquau) {
+      return { ok: false, raison: `Ton abonnement est déjà arrêté : il reste actif jusqu'au ${formaterDateFr(paye.payeJusquau)}, puis il s'arrête, et rien ne sera plus prélevé. Rien à changer de ce côté.` }
+    }
     return { ok: false, raison: `Je ne trouve pas d'abonnement Live Club en cours à ton nom, donc rien à changer. Une question ? ${SUPPORT}` }
   }
   if (vivants.length > 1) {
@@ -351,10 +373,23 @@ export function clavierMenu(): Bouton[][] {
   ]
 }
 
-/** Menu d'un compte pas encore rattache : s'abonner ou ecrire a l'equipe. */
+/** « aoknowledge.com », « melaniechart.com » : le domaine d'une porte d'abonnement, pour un bouton. */
+function domaine(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '')
+  } catch {
+    return url
+  }
+}
+
+/**
+ * Menu d'un compte pas encore rattache : verifier son email (decision 4),
+ * s'abonner par l'une des deux portes (decision 1), ou appeler l'equipe.
+ */
 export function clavierSansRattachement(): Bouton[][] {
   return [
-    [{ texte: "M'abonner au Live Club", url: URL_ABONNEMENT }],
+    [{ texte: "J'ai payé : vérifier mon email", data: 'v:email' }],
+    ...URLS_ABONNEMENT.map(url => [{ texte: `M'abonner sur ${domaine(url)}`, url }]),
     [{ texte: "Contacter l'équipe", data: 'm:equipe' }],
   ]
 }
@@ -370,10 +405,33 @@ export function clavierConfirmation(nonce: string): Bouton[][] {
   return [[{ texte: 'Oui, je confirme', data: `c:${nonce}` }, { texte: 'Non, laisse tomber', data: `x:${nonce}` }]]
 }
 
-export const TEXTE_EQUIPE = `Pour tout le reste (facture, moyen de paiement, question sur l'offre), écris à l'équipe : ${SUPPORT}. Donne l'email de ton paiement, ça va plus vite.`
+/**
+ * Le bouton « Contacter l'equipe » : le fil passe en « veut un humain » dans
+ * l'ecran Support du cockpit, et la reponse de l'equipe arrive ici, par le bot.
+ */
+export const TEXTE_EQUIPE = `C'est noté, je préviens l'équipe : quelqu'un va te répondre ici, dans cette conversation.\n\n`
+  + `Écris ta question juste en dessous, en quelques mots.`
+
+/**
+ * « Contacter l'equipe » quand le fil Support n'a pas pu passer en attente
+ * (pont en panne, migration pas appliquee) : personne ne verrait le message
+ * ici, donc on donne l'adresse de l'equipe au lieu de promettre une reponse.
+ */
+export const TEXTE_EQUIPE_INDISPONIBLE = `Je n'arrive pas à prévenir l'équipe d'ici pour le moment.\n\n`
+  + `Écris-lui à ${SUPPORT}, avec l'email de ton paiement : elle te répond par email.`
+
+/**
+ * Ajoute a une reponse qui promet l'equipe, quand le fil Support n'a pas pu
+ * passer en attente : le membre a toujours une porte qui marche.
+ */
+export const TEXTE_SECOURS_EQUIPE = `Si personne ne te répond ici, écris à ${SUPPORT} avec l'email de ton paiement.`
+
+/** Pendant qu'un humain de l'equipe a la main : le bot ne repond pas a sa place. */
+export const TEXTE_ATTENTE_HUMAIN = `J'ai transmis ton message à l'équipe : quelqu'un te répond ici, dans cette conversation.\n\n`
+  + `En attendant, les boutons marchent toujours :`
 
 export const TEXTE_NON_RATTACHE = `Je ne sais pas encore qui tu es côté abonnement.\n\n`
-  + `Si tu viens de payer, utilise le lien personnel reçu par email (ou sur la page après le paiement) : il me relie à ton abonnement. `
-  + `Sinon, écris à ${SUPPORT} avec l'email de ton paiement.`
+  + `Tu as payé ? Envoie-moi ici l'email de ton paiement : je t'envoie un code à 6 chiffres pour vérifier, puis je te relie à ton abonnement.\n\n`
+  + `Pas encore abonné ? ${texteAbonnement()}`
 
 export const TEXTE_PANNE = PANNE

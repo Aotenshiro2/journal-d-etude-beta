@@ -142,6 +142,21 @@ export type AbonnementResume = {
    */
   payeJusquau: string | null
   derniereFacture: { statut: string; payeeLe: string | null } | null
+  /**
+   * Prix d'une periode d'apres les items (unit_amount x quantity, en
+   * centimes), AVANT remise. null si un item n'a pas de prix unitaire (palier,
+   * prix a l'usage) ou si les devises different. Voir montantPeriodeAbonnement.
+   */
+  montantPeriode: { centimes: number; devise: string } | null
+  /** Une remise (coupon, code promo) est posee sur l'abonnement ou un de ses items. */
+  aRemise: boolean
+  /** Stripe preleve tout seul (charge_automatically), pas une facture envoyee a payer. */
+  prelevementAuto: boolean
+  /**
+   * Debut de l'abonnement (start_date, sinon created), ISO. Sert a dire si un
+   * droit d'aujourd'hui existait deja a une date passee (sortie Metricgram).
+   */
+  debutLe: string | null
 }
 
 function isoDepuisSec(s: unknown): string | null {
@@ -381,6 +396,54 @@ export function finPayeeTerminee(sub: Record<string, unknown>): number | null {
   return finPeriodeAbonnement(sub)
 }
 
+type ItemPrix = {
+  quantity?: number | null
+  price?: { unit_amount?: number | null; currency?: string | null } | null
+  discounts?: unknown[] | null
+}
+
+/**
+ * Prix d'une periode d'apres les items d'un abonnement brut, AVANT remise :
+ * somme des unit_amount x quantity (quantite 1 par defaut). null si aucun
+ * item, si un prix unitaire manque (palier, usage) ou si les devises
+ * different : on n'affiche jamais un montant devine.
+ */
+export function montantPeriodeAbonnement(sub: Record<string, unknown>): { centimes: number; devise: string } | null {
+  const items = (sub.items as { data?: ItemPrix[] } | undefined)?.data ?? []
+  if (!items.length) return null
+  let centimes = 0
+  let devise: string | null = null
+  for (const i of items) {
+    const unitaire = i.price?.unit_amount
+    const cur = String(i.price?.currency ?? '').toLowerCase()
+    if (typeof unitaire !== 'number' || !cur) return null
+    if (devise && devise !== cur) return null
+    devise = cur
+    const quantite = typeof i.quantity === 'number' && i.quantity >= 0 ? i.quantity : 1
+    centimes += unitaire * quantite
+  }
+  return devise ? { centimes, devise } : null
+}
+
+/** Une remise est posee : discounts (API recente) ou discount (ancienne), sur l'abonnement ou un item. */
+export function abonnementARemise(sub: Record<string, unknown>): boolean {
+  const posee = (v: unknown) => (Array.isArray(v) && v.length > 0) || Boolean(v && typeof v === 'object' && !Array.isArray(v))
+  if (posee(sub.discounts) || posee(sub.discount)) return true
+  const items = (sub.items as { data?: ItemPrix[] } | undefined)?.data ?? []
+  return items.some(i => posee(i.discounts))
+}
+
+/**
+ * 4900 + 'eur' -> '49 €', 4990 -> '49,90 €'. Autre devise : code en
+ * majuscules apres le montant ('49 USD').
+ */
+export function formaterMontant(centimes: number, devise: string): string {
+  const entier = Number.isInteger(centimes / 100)
+  const nombre = entier ? String(centimes / 100) : (centimes / 100).toFixed(2).replace('.', ',')
+  const d = devise.toLowerCase()
+  return d === 'eur' ? `${nombre} €` : `${nombre} ${d.toUpperCase()}`
+}
+
 /**
  * Resume d'un abonnement Stripe brut (latest_invoice expand ou non). null si
  * aucun de ses items ne porte un des produits donnes : ce n'est pas un
@@ -433,6 +496,10 @@ export function resumerAbonnement(
     termineLe: isoDepuisSec(sub.ended_at),
     payeJusquau: isoDepuisSec(finPayeeTerminee(sub)),
     derniereFacture,
+    montantPeriode: montantPeriodeAbonnement(sub),
+    aRemise: abonnementARemise(sub),
+    prelevementAuto: sub.collection_method !== 'send_invoice',
+    debutLe: isoDepuisSec(sub.start_date) ?? isoDepuisSec(sub.created),
   }
 }
 

@@ -125,6 +125,150 @@ export function debutSerieImpayee(factures: FactureBreve[]): string | null {
 }
 
 // ---------------------------------------------------------------------------
+// Rappel avant prelevement (Brice, 29/09) : 3 jours avant chaque prelevement,
+// montant et date, et le lien pour mettre sa carte a jour. Une fois par
+// echeance (geste 'rappel', regle 'prelevement_j3', details.echeance).
+// ---------------------------------------------------------------------------
+
+export const RAPPEL_PRELEVEMENT_JOURS = 3
+
+/** Cle « une fois par echeance » : abonnement + jour du prelevement ('YYYY-MM-DD'). */
+export function clePrelevement(abonnementId: string, echeance: string): string {
+  return `${abonnementId}:${echeance.slice(0, 10)}`
+}
+
+/**
+ * Jour du prochain prelevement ('YYYY-MM-DD') s'il faut prevenir aujourd'hui,
+ * sinon null. Seulement un abonnement qui va VRAIMENT etre preleve :
+ * active ou trialing (past_due est deja en relance chez Stripe), prelevement
+ * automatique (pas une facture envoyee), aucune pause posee (programmee ou en
+ * cours : les factures sont annulees), aucun arret programme, et un montant
+ * connu non nul (coupon a 100 %). La date vient de finPeriode
+ * (items.data[].current_period_end, API clover). Fenetre : de J-3 a J-1, pour
+ * rattraper un passage qui aurait saute ; l'unicite par echeance vient de
+ * dejaFaits (journal) et de la reservation en base.
+ */
+export function prelevementAPrevenir(
+  a: AbonnementResume,
+  maintenant: Date,
+  dejaFaits: ReadonlySet<string> = new Set(),
+): string | null {
+  if (a.statut !== 'active' && a.statut !== 'trialing') return null
+  if (!a.prelevementAuto || a.pauseActive || a.arretPrevu || !a.finPeriode) return null
+  if (a.montantPeriode && a.montantPeriode.centimes === 0 && !a.aRemise) return null
+  const n = jours(maintenant, a.finPeriode)
+  if (n < 1 || n > RAPPEL_PRELEVEMENT_JOURS) return null
+  const echeance = a.finPeriode.slice(0, 10)
+  return dejaFaits.has(clePrelevement(a.id, echeance)) ? null : echeance
+}
+
+/**
+ * Montant a annoncer, en centimes : celui de l'apercu de la prochaine facture
+ * (POST /v1/invoices/create_preview, amount_due : apres remise, taxe et
+ * solde du client) s'il est lisible. Sans apercu, null : le message ne donne
+ * que la date. Pas de repli sur le prix des items : il ignore la taxe, le
+ * solde crediteur et une remise posee sur le client, et annoncerait un
+ * montant faux.
+ */
+export function montantAAnnoncer(
+  apercu: { amount_due?: unknown; currency?: unknown } | null,
+): { centimes: number; devise: string } | null {
+  if (apercu && typeof apercu.amount_due === 'number' && apercu.amount_due >= 0 && typeof apercu.currency === 'string' && apercu.currency) {
+    return { centimes: apercu.amount_due, devise: apercu.currency.toLowerCase() }
+  }
+  return null
+}
+
+/**
+ * Jour ('YYYY-MM-DD') d'un instant a l'heure de Paris : c'est le jour que le
+ * membre vit. Un abonnement pris a 0 h 30 a Paris finit sa periode a 22 h 30
+ * UTC la veille : le jour UTC annoncerait le prelevement un jour trop tot.
+ * La cle « une fois par echeance » reste sur le jour UTC (stable).
+ */
+export function jourParis(iso: string): string {
+  const t = Date.parse(iso)
+  if (!Number.isFinite(t)) return iso.slice(0, 10)
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date(t))
+  const v = (type: string) => parts.find(p => p.type === type)?.value ?? ''
+  return `${v('year')}-${v('month')}-${v('day')}`
+}
+
+// ---------------------------------------------------------------------------
+// Sorties abusives de Metricgram (transition, Brice 29/09)
+// ---------------------------------------------------------------------------
+
+/** L'auteur de la sortie (par_qui du webhook) est le bot Metricgram. */
+export function sortiParMetricgram(parQui: string | null | undefined): boolean {
+  return /metric/i.test(String(parQui ?? ''))
+}
+
+/** Cle « une fois par sortie » : compte Telegram + instant de la sortie (ISO). */
+export function cleSortieAbusive(telegramId: number, sortiLe: Date | string): string {
+  const iso = typeof sortiLe === 'string' ? new Date(sortiLe).toISOString() : sortiLe.toISOString()
+  return `${telegramId}:${iso}`
+}
+
+/**
+ * Le droit d'aujourd'hui existait-il deja au moment de la sortie ? debut =
+ * debut de ce droit : start_date de l'abonnement (ISO), debut d'un acces
+ * broker ('YYYY-MM-DD', jour entier), pose d'un acces manuel ou d'une
+ * exemption (ISO). null ou illisible = 'inconnu', et on ne signale pas. La fin
+ * du droit n'est pas relue : un droit qui vaut 'oui' aujourd'hui finit apres
+ * aujourd'hui, donc apres la sortie.
+ */
+export function droitCouvraitLaSortie(debut: string | null | undefined, sortiLe: Date | string): 'oui' | 'non' | 'inconnu' {
+  const sortiMs = typeof sortiLe === 'string' ? Date.parse(sortiLe) : sortiLe.getTime()
+  if (!debut || !Number.isFinite(sortiMs)) return 'inconnu'
+  if (/^\d{4}-\d{2}-\d{2}$/.test(debut)) {
+    return debut <= new Date(sortiMs).toISOString().slice(0, 10) ? 'oui' : 'non'
+  }
+  const t = Date.parse(debut)
+  if (!Number.isFinite(t)) return 'inconnu'
+  return t <= sortiMs ? 'oui' : 'non'
+}
+
+/**
+ * Une sortie Metricgram a signaler : le compte est sorti ou banni par le bot
+ * Metricgram, n'est pas revenu (presence lue en direct), notre droit vaut
+ * 'oui' (abonnement actif, periode payee, exemption, broker, acces manuel)
+ * ET ce droit existait deja le jour de la sortie (couverture, voir
+ * droitCouvraitLaSortie) : un desabonne sorti a juste titre puis reabonne
+ * n'est pas une sortie abusive. Jamais sur un droit ou une couverture
+ * 'inconnu', ni sur une presence inconnue ; une fois par sortie (dejaSignales).
+ */
+export function sortieAbusiveASignaler(
+  s: { telegramId: number; sortiLe: Date | string; parQui: string | null },
+  presence: 'oui' | 'non' | 'inconnu',
+  droit: 'oui' | 'non' | 'inconnu',
+  couverture: 'oui' | 'non' | 'inconnu',
+  dejaSignales: ReadonlySet<string> = new Set(),
+): boolean {
+  if (!sortiParMetricgram(s.parQui)) return false
+  if (presence !== 'non' || droit !== 'oui' || couverture !== 'oui') return false
+  return !dejaSignales.has(cleSortieAbusive(s.telegramId, s.sortiLe))
+}
+
+/** Liens de retour automatiques retentes au plus 2 fois apres une panne passagere. */
+export const MAX_ESSAIS_RETOUR = 2
+
+/**
+ * Le lien de retour d'une sortie abusive deja signalee est-il a retenter ?
+ * Seulement apres une panne passagere (echec_levee_ban, echec_lien,
+ * echec_envoi, conversations_illisibles, config), au plus MAX_ESSAIS_RETOUR
+ * fois. Jamais apres 'envoye', 'bot_jamais_demarre', 'bot_bloque',
+ * 'droit_vu_par_email_seul', 'rebanni_metricgram' ni 'en_cours' (un autre
+ * passage s'en occupe, ou s'est arrete en route : on ne renvoie pas).
+ */
+export function retourARetenter(retour: string | null | undefined, essais: number | string | null | undefined): boolean {
+  const r = String(retour ?? '')
+  if (!/^echec_/.test(r) && r !== 'conversations_illisibles' && r !== 'config') return false
+  const n = Number(essais ?? 0)
+  return Number.isFinite(n) && n < MAX_ESSAIS_RETOUR
+}
+
+// ---------------------------------------------------------------------------
 // Acces broker ('YYYY-MM-DD', inclusif : l'acces vaut encore le jour jusquau)
 // ---------------------------------------------------------------------------
 

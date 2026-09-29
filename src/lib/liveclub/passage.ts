@@ -1,12 +1,25 @@
 // Passage quotidien du Live Club (29/09), appele par GET /api/cron/liveclub
-// (cron Vercel, 7 h UTC). Quatre taches, dans cet ordre :
+// (cron Vercel, 7 h UTC). Six taches, dans cet ordre :
 //   (a) PAUSES : adoption d'une pause posee hors du bot (Dashboard Stripe),
 //       sortie quand la pause commence, rappel J-7 avant la reprise,
 //       lien de retour quand les prelevements ont repris ;
 //   (b) ACCES BROKER : rappel J-7, sortie a l'echeance sans abonnement ;
 //   (c) DESABONNES : SIMULES tant que Metricgram tourne (un maitre par geste),
 //       sauf LIVECLUB_SORTIES_ACTIVES === '1' ;
+//   (e) RAPPEL J-3 avant chaque prelevement (Brice, 29/09) : montant, date,
+//       lien du portail Stripe pour la carte, une fois par echeance ;
+//   (f) SORTIES ABUSIVES DE METRICGRAM (transition, 29/09) : un compte sorti
+//       ou banni par Metricgram alors que notre droit vaut 'oui' ET existait
+//       deja le jour de la sortie est signale une fois par sortie (geste
+//       'refus', regle 'sortie_abusive_metricgram'), et s'il a deja parle au
+//       bot, le bot lui envoie un lien de retour, un seul par 30 jours (un
+//       membre rebanni est signale 'rebanni_metricgram', sans second lien) ;
+//       un lien rate sur une panne est retente 2 fois ;
 //   (d) purge des conversations privees de plus de 7 jours.
+//
+// A CHAQUE SORTIE REELLE (pause, fin d'acces broker, desabonne quand les
+// sorties sont actives), le membre recoit un message : pourquoi, et comment
+// revenir. En prive s'il a deja demarre le bot, sinon par email.
 //
 // Metricgram ne voit ni les pauses (Stripe laisse 'active') ni les acces
 // broker (aucun abonnement) : sur ces deux-la, on AGIT pour de vrai.
@@ -31,26 +44,31 @@
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db'
 import {
-  retirerDuLiveClub, journaliserGesteLiveClub, stripeGet,
+  retirerDuLiveClub, journaliserGesteLiveClub, stripeGet, stripePost,
   type EntreeJournalLiveClub, type GesteJournal,
 } from '@/lib/stripe-actions'
 import { GRACE_JOURS, PLAFOND_SORTIES_PASSAGE, chatId, cleStripeLecture, lienBot, sortiesActives } from './config'
 import {
   listerAbonnementsLiveClub, clientsStripeParEmail, abonnementsLiveClubParEmail, adopterPause, effacerMetadonneesPause,
+  lireAbonnement,
   type AbonnementResume,
 } from './stripe'
-import { droitLiveClub } from './droits'
+import { droitLiveClub, type Droit } from './droits'
 import { creerJeton, jetonExistant } from './jetons'
-import { appelTelegram, envoyer } from './telegram'
+import { appelTelegram, envoyer, lienDemandeAdhesion } from './telegram'
 import {
   emailRappelPause, emailDebutPauseSansReprise, emailRetour, emailRappelFinBroker, emailFinBroker,
+  emailSortieDesabonne, emailRappelPrelevement,
   modeleRappelPause, modeleDebutPauseSansReprise, modeleRetour, modeleRappelFinBroker, modeleFinBroker,
+  modeleSortieDesabonne, modeleRappelPrelevement, modeleRetourSortieAbusive,
   type ModeleMessage, type ResultatEmail,
 } from './emails'
 import { abonnementOuvreLeGroupe, dateIso, messageErreur, normaliserEmail, relationAbsente, statutDonneDroit, statutTermine } from './pur'
 import {
   PlafondSorties, pauseASortir, repriseAPrevenir, repriseFaite, desabonneHorsGrace, finAbonnement,
   debutSerieImpayee, brokerAPrevenir, brokerFini, lirePresence, estIntouchable,
+  prelevementAPrevenir, montantAAnnoncer, clePrelevement, jourParis, sortieAbusiveASignaler, cleSortieAbusive,
+  droitCouvraitLaSortie, retourARetenter,
   FENETRE_FIN_BROKER_JOURS, FENETRE_RAPPEL_JOURS,
   type FactureBreve, type Presence,
 } from './passage-regles'
@@ -71,8 +89,27 @@ export type SynthesePassage = {
   plafond_atteint: boolean
   /** resorties : deja sortis pour cette pause mais revenus (Metricgram), ressortis sans message. */
   pauses: { adoptees: number; metadonnees_effacees: number; sorties: number; resorties: number; rappels_j7: number; retours: number; boucles_closes: number; deja_faits: number; ignores: number; inconnus: number; echecs: number }
-  broker: { rappels_j7: number; sorties: number; termines_sans_sortie: number; ignores: number; inconnus: number; echecs: number }
-  desabonnes: { simules: number; sorties: number; deja_traites: number; gardes: number; absents: number; inconnus: number; echecs: number }
+  /** messages_fin : messages de fin d'acces partis (dont ceux rattrapes apres un echec). */
+  broker: { rappels_j7: number; sorties: number; messages_fin: number; termines_sans_sortie: number; ignores: number; inconnus: number; echecs: number }
+  /**
+   * messages : messages de sortie partis (seulement quand les sorties sont
+   * actives), dont ceux rattrapes apres un echec (7 jours au plus).
+   */
+  desabonnes: { simules: number; sorties: number; messages: number; deja_traites: number; gardes: number; absents: number; inconnus: number; echecs: number }
+  /** Rappel J-3 avant prelevement. montants_inconnus : partis avec la date seule. */
+  prelevements: { rappels_j3: number; montants_inconnus: number; apercus_illisibles: number; deja_faits: number; ignores: number; inconnus: number; echecs: number }
+  /**
+   * Sorties par Metricgram d'un compte qui avait droit au groupe.
+   * signalees : nouvelles lignes 'sortie_abusive_metricgram' ; liens_envoyes :
+   * lien de retour parti en prive ; sans_lien : signalees mais pas de lien
+   * automatique (bot jamais demarre, bot bloque, droit vu par l'email seul,
+   * panne Telegram, rebanni) : a reintegrer depuis le cockpit.
+   * rebannis : Metricgram l'a ressorti apres un lien deja envoye (30 jours) :
+   * pas de second lien, a corriger dans Metricgram. droit_posterieur : droit
+   * pris apres la sortie (reabonne), pas une sortie abusive, rien d'ecrit.
+   * retours_retentes : liens retentes apres une panne passagere.
+   */
+  metricgram: { signalees: number; liens_envoyes: number; sans_lien: number; rebannis: number; retours_retentes: number; deja_signalees: number; revenus: number; sans_droit: number; droit_posterieur: number; inconnus: number; echecs: number }
   purge: { conversations: number }
   /** Lignes de journal perdues (table ou contrainte pas encore migree). */
   journal_echecs: number
@@ -255,7 +292,10 @@ async function debutImpayes(abonnementId: string): Promise<string | null> {
  * Club portes par les emails connus du payeur (un nouvel abonnement pris sous
  * un autre client Stripe avec la meme adresse). Toute panne = inconnu.
  */
-async function droitAvantSortie(telegramId: number, emails: (string | null)[]): Promise<'oui' | 'non' | 'inconnu'> {
+async function droitAvantSortie(
+  telegramId: number,
+  emails: (string | null)[],
+): Promise<'oui' | 'non' | 'inconnu'> {
   const d = await droitLiveClub(telegramId)
   if (d.statut !== 'non') return d.statut
   const propres = [...new Set(emails.map(e => normaliserEmail(e)).filter((e): e is string => Boolean(e)))]
@@ -746,6 +786,7 @@ type LigneAcces = { acces_id: string; email: string; jusquau: Date; telegram_id:
 
 async function tacheBroker(ctx: Contexte) {
   const s = ctx.s.broker
+  await rattraperMessagesFinBroker(ctx)
   let lignes: LigneAcces[]
   try {
     lignes = await prisma.$queryRaw<LigneAcces[]>`
@@ -835,7 +876,73 @@ async function tacheBroker(ctx: Contexte) {
     } catch (err) {
       erreur(ctx, 'acces_broker_ecriture', err)
     }
-    await prevenir(ctx, [tid], l.email, modeleFinBroker(), e => emailFinBroker(e))
+    if (await messageFinBroker(ctx, l.acces_id, tid, l.email)) s.messages_fin++
+  }
+}
+
+/**
+ * Message de fin d'acces broker (pourquoi, comment revenir), une fois par
+ * acces, reserve avant l'envoi (geste 'rappel', regle 'broker_fin_message').
+ * Un envoi rate laisse la ligne en 'echec' : rattraperMessagesFinBroker le
+ * retente. true = parti.
+ */
+async function messageFinBroker(ctx: Contexte, accesId: string, telegramId: number, email: string | null): Promise<boolean> {
+  let reserve: bigint | null
+  try {
+    reserve = await reserverGeste({
+      cle: `liveclub:broker_fin_message:${accesId}`,
+      deja: Prisma.sql`
+        select 1 from public.cockpit_liveclub_gestes d
+        where d.geste = 'rappel' and d.regle = 'broker_fin_message' and d.resultat = 'fait'
+          and d.details->>'acces_id' = ${accesId}`,
+      geste: 'rappel', regle: 'broker_fin_message', telegramId, abonnementId: null,
+      details: { acces_id: accesId },
+    })
+  } catch (err) {
+    erreur(ctx, 'journal_reservation', err)
+    return false
+  }
+  if (reserve === null) return false
+  const envoi = await prevenir(ctx, [telegramId], email, modeleFinBroker(), e => emailFinBroker(e))
+  await cloreReservation(ctx, reserve, envoi)
+  return envoi !== null
+}
+
+/**
+ * Messages de fin d'acces broker rates (ligne 'echec', aucune 'fait') pour
+ * un acces sorti depuis moins de 7 jours : on retente. Seuls les echecs
+ * notes comptent : une sortie d'avant cette reservation, qui n'a aucune
+ * ligne de message, n'est pas reprise (le message etait deja parti sans
+ * trace, on ne l'envoie pas deux fois).
+ */
+async function rattraperMessagesFinBroker(ctx: Contexte) {
+  const s = ctx.s.broker
+  let lignes: { acces_id: string; email: string; telegram_id: bigint }[]
+  try {
+    lignes = await prisma.$queryRaw`
+      select a.acces_id::text as acces_id, a.email, a.telegram_id
+      from public.cockpit_liveclub_acces a
+      where a.motif = 'broker' and a.telegram_id is not null
+        and a.sorti_le > now() - interval '7 days'
+        and exists (
+          select 1 from public.cockpit_liveclub_gestes e
+          where e.geste = 'rappel' and e.regle = 'broker_fin_message' and e.resultat = 'echec'
+            and e.details->>'acces_id' = a.acces_id::text)
+        and not exists (
+          select 1 from public.cockpit_liveclub_gestes f
+          where f.geste = 'rappel' and f.regle = 'broker_fin_message' and f.resultat = 'fait'
+            and f.details->>'acces_id' = a.acces_id::text)
+      limit 100`
+  } catch (err) {
+    erreur(ctx, relationAbsente(err) ? 'acces_broker_table_absente' : 'acces_broker_illisibles', err)
+    return
+  }
+  for (const l of lignes) {
+    if (tempsEcoule(ctx)) return
+    const tid = Number(l.telegram_id)
+    if (!Number.isSafeInteger(tid)) continue
+    if (await messageFinBroker(ctx, l.acces_id, tid, l.email)) s.messages_fin++
+    else s.echecs++
   }
 }
 
@@ -846,6 +953,7 @@ async function tacheBroker(ctx: Contexte) {
 async function tacheDesabonnes(ctx: Contexte, abonnements: AbonnementResume[], parClient: Map<string, Rattache[]>) {
   const s = ctx.s.desabonnes
   const reel = sortiesActives()
+  if (reel) await rattraperMessagesSortieDesabonne(ctx, abonnements, parClient)
   const connues = await presencesConnues(ctx)
   const vus = new Set<number>()
 
@@ -907,8 +1015,513 @@ async function tacheDesabonnes(ctx: Contexte, abonnements: AbonnementResume[], p
         continue
       }
       const issue = await sortir(ctx, r.telegramId, { geste: 'retrait', regle: 'desabonne', abonnementId: a.id, membreId: r.membreId, details })
-      if (issue === 'fait') s.sorties++
-      else if (issue !== 'plafond') s.echecs++
+      if (issue === 'plafond') continue
+      if (issue !== 'fait') { s.echecs++; continue }
+      s.sorties++
+      if (await messageSortieDesabonne(ctx, a, r)) s.messages++
+    }
+  }
+}
+
+/**
+ * Le message de sortie d'un desabonne (pourquoi, comment revenir), une fois
+ * par abonnement et par compte, reserve avant l'envoi. true = parti.
+ */
+async function messageSortieDesabonne(ctx: Contexte, a: AbonnementResume, r: Rattache): Promise<boolean> {
+  let reserve: bigint | null
+  try {
+    reserve = await reserverGeste({
+      cle: `liveclub:sortie_desabonne:${a.id}:${r.telegramId}`,
+      deja: Prisma.sql`
+        select 1 from public.cockpit_liveclub_gestes d
+        where d.geste = 'rappel' and d.regle = 'sortie_desabonne' and d.resultat = 'fait'
+          and d.abonnement_id = ${a.id} and d.telegram_id = ${r.telegramId}::bigint`,
+      geste: 'rappel', regle: 'sortie_desabonne', telegramId: r.telegramId, membreId: r.membreId,
+      abonnementId: a.id, details: { statut: a.statut },
+    })
+  } catch (err) {
+    erreur(ctx, 'journal_reservation', err)
+    return false
+  }
+  if (reserve === null) return false
+  const email = r.email ?? await emailClient(ctx, a.clientStripe)
+  const envoi = await prevenir(ctx, [r.telegramId], email, modeleSortieDesabonne(), e => emailSortieDesabonne(e))
+  await cloreReservation(ctx, reserve, envoi)
+  return envoi !== null
+}
+
+/**
+ * Desabonnes sortis pour de vrai depuis moins de 7 jours dont le message de
+ * sortie n'est jamais parti (prive et email en echec) : le lendemain, le
+ * compte est absent du groupe et la boucle principale l'ecarte avant tout
+ * message. On le retente ici, sauf s'il est revenu dans le groupe (ou si sa
+ * presence est illisible). La reservation garde l'unicite.
+ */
+async function rattraperMessagesSortieDesabonne(
+  ctx: Contexte,
+  abonnements: AbonnementResume[],
+  parClient: Map<string, Rattache[]>,
+) {
+  const s = ctx.s.desabonnes
+  let lignes: { abonnement_id: string; telegram_id: bigint; membre_id: string | null }[]
+  try {
+    lignes = await prisma.$queryRaw`
+      select distinct on (g.abonnement_id, g.telegram_id) g.abonnement_id, g.telegram_id, g.membre_id::text as membre_id
+      from public.cockpit_liveclub_gestes g
+      where g.geste = 'retrait' and g.regle = 'desabonne' and g.resultat = 'fait'
+        and g.abonnement_id is not null and g.telegram_id is not null
+        and g.fait_le > now() - interval '7 days'
+        and not exists (
+          select 1 from public.cockpit_liveclub_gestes m
+          where m.geste = 'rappel' and m.regle = 'sortie_desabonne' and m.resultat = 'fait'
+            and m.abonnement_id = g.abonnement_id and m.telegram_id = g.telegram_id)
+      order by g.abonnement_id, g.telegram_id, g.fait_le desc
+      limit 100`
+  } catch (err) {
+    erreur(ctx, 'journal_illisible', err)
+    return
+  }
+  const parId = new Map(abonnements.map(a => [a.id, a]))
+  for (const l of lignes) {
+    if (tempsEcoule(ctx)) return
+    const telegramId = Number(l.telegram_id)
+    const a = parId.get(l.abonnement_id)
+    if (!a || !Number.isSafeInteger(telegramId)) continue
+    const p = await presence(telegramId)
+    if (p.etat !== 'non') continue
+    const r = (a.clientStripe ? parClient.get(a.clientStripe) ?? [] : []).find(x => x.telegramId === telegramId)
+      ?? { telegramId, clientStripe: a.clientStripe, compte: null, email: null, membreId: l.membre_id }
+    if (await messageSortieDesabonne(ctx, a, r)) s.messages++
+    else s.echecs++
+  }
+}
+
+// ---------------------------------------------------------------------------
+// (e) Rappel J-3 avant chaque prelevement
+// ---------------------------------------------------------------------------
+
+/**
+ * Apercu de la prochaine facture (POST /v1/invoices/create_preview : rien
+ * n'est cree chez Stripe), pour le montant reel apres remise, taxe et solde.
+ * null sur une panne ou une cle sans ce droit : le rappel ne donne alors que
+ * la date (montantAAnnoncer).
+ */
+async function apercuProchaineFacture(ctx: Contexte, abonnementId: string): Promise<Record<string, unknown> | null> {
+  const cle = cleStripeLecture()
+  if (!cle) return null
+  try {
+    return await stripePost(cle, '/v1/invoices/create_preview', { subscription: abonnementId })
+  } catch (err) {
+    if (ctx.s.prelevements.apercus_illisibles === 0) {
+      console.warn(`[liveclub/passage] apercu de facture illisible : ${messageErreur(err)}`)
+    }
+    ctx.s.prelevements.apercus_illisibles++
+    return null
+  }
+}
+
+async function tachePrelevements(ctx: Contexte, abonnements: AbonnementResume[], parClient: Map<string, Rattache[]>) {
+  const s = ctx.s.prelevements
+  // Les rappels deja partis (une fois par echeance). Journal illisible = on
+  // ne rappelle personne aujourd'hui.
+  let dejaFaits: Set<string>
+  try {
+    const lignes = await prisma.$queryRaw<{ abonnement_id: string | null; echeance: string | null }[]>`
+      select abonnement_id, details->>'echeance' as echeance
+      from public.cockpit_liveclub_gestes
+      where geste = 'rappel' and regle = 'prelevement_j3' and resultat = 'fait'
+        and fait_le > now() - interval '15 days'`
+    dejaFaits = new Set(lignes
+      .filter((l): l is { abonnement_id: string; echeance: string } => Boolean(l.abonnement_id && l.echeance))
+      .map(l => clePrelevement(l.abonnement_id, l.echeance)))
+  } catch (err) {
+    erreur(ctx, 'journal_illisible', err)
+    return
+  }
+
+  for (const a of abonnements) {
+    if (tempsEcoule(ctx)) return
+    const echeance = prelevementAPrevenir(a, ctx.maintenant, dejaFaits)
+    if (!echeance) continue
+
+    const montant = montantAAnnoncer(await apercuProchaineFacture(ctx, a.id))
+    // Rien a prelever (coupon a 100 %, solde crediteur) : pas de rappel.
+    if (montant && montant.centimes === 0) { s.ignores++; continue }
+    // Le jour annonce est celui de Paris ; la cle reste sur le jour UTC.
+    const jour = a.finPeriode ? jourParis(a.finPeriode) : echeance
+
+    let reserve: bigint | null
+    try {
+      reserve = await reserverGeste({
+        cle: `liveclub:prelevement_j3:${a.id}:${echeance}`,
+        deja: Prisma.sql`
+          select 1 from public.cockpit_liveclub_gestes d
+          where d.geste = 'rappel' and d.regle = 'prelevement_j3' and d.resultat = 'fait'
+            and d.abonnement_id = ${a.id} and d.details->>'echeance' = ${echeance}`,
+        geste: 'rappel', regle: 'prelevement_j3',
+        telegramId: null, membreId: null, abonnementId: a.id,
+        details: { echeance, jour_annonce: jour, montant_centimes: montant?.centimes ?? null, devise: montant?.devise ?? null },
+      })
+    } catch (err) {
+      erreur(ctx, 'journal_reservation', err)
+      s.inconnus++
+      continue
+    }
+    if (reserve === null) { s.deja_faits++; continue }
+    dejaFaits.add(clePrelevement(a.id, echeance))
+
+    const rattaches = a.clientStripe ? parClient.get(a.clientStripe) ?? [] : []
+    const email = rattaches.find(r => r.email)?.email ?? await emailClient(ctx, a.clientStripe)
+    const envoi = await prevenir(ctx, rattaches.map(r => r.telegramId), email,
+      modeleRappelPrelevement(jour, montant), e => emailRappelPrelevement(e, jour, montant))
+    await cloreReservation(ctx, reserve, envoi)
+    if (!envoi) { s.echecs++; continue }
+    s.rappels_j3++
+    if (!montant) s.montants_inconnus++
+  }
+}
+
+// ---------------------------------------------------------------------------
+// (f) Sorties abusives de Metricgram (transition, jusqu'a la bascule)
+// ---------------------------------------------------------------------------
+
+/** Les sorties par Metricgram regardees : 30 derniers jours. */
+const FENETRE_SORTIES_METRICGRAM_JOURS = 30
+/**
+ * Un lien de retour automatique deja envoye a ce compte depuis moins de 30
+ * jours : Metricgram l'a ressorti, il le ressortira encore. Pas de second lien
+ * (retour 'rebanni_metricgram'), a corriger dans Metricgram.
+ */
+const FENETRE_REBANNI_JOURS = 30
+/** Exemptions qui tiennent a un role (poses a la creation de la table, le 29/09) : elles couvrent toute sortie. */
+const EXEMPTIONS_DE_ROLE = new Set(['fondateur', 'admin', 'equipe'])
+
+type SortieMetricgram = { telegram_id: bigint; sorti_le: Date; par_qui: string | null }
+
+type LigneSignalee = {
+  geste_id: bigint
+  telegram_id: bigint | null
+  sorti_le: string | null
+  retour: string | null
+  essais: string | null
+  fait_le: Date
+}
+
+type Couverture = 'oui' | 'non' | 'inconnu'
+
+/**
+ * Le droit d'AUJOURD'HUI existait-il le jour de la sortie ? Debut du droit
+ * lu selon sa raison : start_date de l'abonnement (liste du passage, sinon
+ * Stripe en direct), debut de l'acces broker, pose de l'acces manuel ou de
+ * l'exemption (une exemption de role couvre toujours). Toute panne ou date
+ * manquante = 'inconnu'. Un acces manuel prolonge apres la sortie peut avoir
+ * une pose recente : il n'est alors pas signale (prudent, pas de faux positif).
+ */
+async function couvertureDuDroit(
+  ctx: Contexte,
+  telegramId: number,
+  d: Droit,
+  sortiLe: Date,
+  parId: Map<string, AbonnementResume>,
+): Promise<{ couverture: Couverture; debut: string | null }> {
+  try {
+    let debut: string | null = null
+    if (d.raison === 'exemption') {
+      const lignes = await prisma.$queryRaw<{ motif: string; pose_le: Date }[]>`
+        select motif, pose_le from public.cockpit_liveclub_exemptions
+        where telegram_id = ${telegramId}::bigint and retire_le is null
+          and (jusquau is null or jusquau >= current_date)
+        order by pose_le
+        limit 1`
+      if (!lignes[0]) return { couverture: 'inconnu', debut: null }
+      if (EXEMPTIONS_DE_ROLE.has(lignes[0].motif)) return { couverture: 'oui', debut: null }
+      debut = lignes[0].pose_le.toISOString()
+    } else if (d.raison === 'abonnement' && d.abonnementId) {
+      const a = parId.get(d.abonnementId) ?? await lireAbonnement(d.abonnementId)
+      debut = a?.debutLe ?? null
+    } else if (d.raison === 'acces_broker' && d.accesId) {
+      const lignes = await prisma.$queryRaw<{ debut: string }[]>`
+        select to_char(debut, 'YYYY-MM-DD') as debut from public.cockpit_liveclub_acces
+        where acces_id = ${d.accesId}::uuid`
+      debut = lignes[0]?.debut ?? null
+    } else if (d.raison === 'acces_manuel' && d.membreId) {
+      const lignes = await prisma.$queryRaw<{ pose_le: Date }[]>`
+        select pose_le from public.cockpit_acces_manuel where membre_id = ${d.membreId}::uuid`
+      debut = lignes[0]?.pose_le ? lignes[0].pose_le.toISOString() : null
+    }
+    return { couverture: droitCouvraitLaSortie(debut, sortiLe), debut }
+  } catch (err) {
+    erreur(ctx, 'debut_du_droit_illisible', err)
+    return { couverture: 'inconnu', debut: null }
+  }
+}
+
+/**
+ * Le droit du compte (droitLiveClub, puis les abonnements portes par les
+ * emails connus du payeur, comme avant une sortie) et s'il couvrait la sortie.
+ */
+async function droitALaSortie(
+  ctx: Contexte,
+  telegramId: number,
+  siens: Rattache[],
+  sortiLe: Date,
+  parId: Map<string, AbonnementResume>,
+): Promise<{ droit: 'oui' | 'non' | 'inconnu'; couverture: Couverture; d: Droit; raison: string | null; debut: string | null; abonnementId: string | null }> {
+  const d = await droitLiveClub(telegramId)
+  const base = { d, abonnementId: d.abonnementId ?? null }
+  if (d.statut === 'inconnu') return { ...base, droit: 'inconnu', couverture: 'inconnu', raison: null, debut: null }
+  if (d.statut === 'oui') {
+    const c = await couvertureDuDroit(ctx, telegramId, d, sortiLe, parId)
+    return { ...base, droit: 'oui', couverture: c.couverture, raison: d.raison, debut: c.debut }
+  }
+  const emails: (string | null)[] = siens.map(r => r.email)
+  for (const r of siens) emails.push(await emailClient(ctx, r.clientStripe))
+  const propres = [...new Set(emails.map(e => normaliserEmail(e)).filter((e): e is string => Boolean(e)))]
+  const ouverts: AbonnementResume[] = []
+  for (const email of propres) {
+    try {
+      ouverts.push(...(await abonnementsLiveClubParEmail(email)).filter(abonnementOuvreLeGroupe))
+    } catch {
+      return { ...base, droit: 'inconnu', couverture: 'inconnu', raison: null, debut: null }
+    }
+  }
+  if (ouverts.length === 0) return { ...base, droit: 'non', couverture: 'inconnu', raison: null, debut: null }
+  // Un seul abonnement deja la le jour de la sortie suffit ; une date
+  // illisible sans autre preuve = inconnu.
+  const couvrant = ouverts.find(a => droitCouvraitLaSortie(a.debutLe, sortiLe) === 'oui')
+  const couverture: Couverture = couvrant
+    ? 'oui'
+    : ouverts.some(a => droitCouvraitLaSortie(a.debutLe, sortiLe) === 'inconnu') ? 'inconnu' : 'non'
+  const retenu = couvrant ?? ouverts[0]
+  return {
+    ...base, droit: 'oui', couverture, raison: 'abonnement_par_email',
+    debut: retenu.debutLe, abonnementId: retenu.id,
+  }
+}
+
+/**
+ * Lien de retour AUTOMATIQUE apres une sortie abusive, seulement si le membre
+ * a deja parle au bot (une ligne dans cockpit_liveclub_conversations) et si
+ * droitLiveClub dit 'oui' (c'est lui qui approuvera la demande d'adhesion).
+ * Dans l'ordre : levee du ban (only_if_banned, sans effet sur un non banni),
+ * lien de DEMANDE d'adhesion (le bot approuve a l'arrivee), message prive.
+ * Rend l'issue en code court, pour le journal. Le lien ne va nulle part
+ * ailleurs que dans le message.
+ */
+async function lienRetourAutomatique(ctx: Contexte, telegramId: number, droitBot: boolean): Promise<string> {
+  if (!droitBot) return 'droit_vu_par_email_seul'
+  try {
+    const lignes = await prisma.$queryRaw<{ ok: number }[]>`
+      select 1 as ok from public.cockpit_liveclub_conversations where telegram_id = ${telegramId}::bigint limit 1`
+    if (lignes.length === 0) return 'bot_jamais_demarre'
+  } catch (err) {
+    erreur(ctx, relationAbsente(err) ? 'conversations_table_absente' : 'conversations_illisibles', err)
+    return 'conversations_illisibles'
+  }
+  const c = chatId()
+  if (!c) return 'config'
+  const leve = await appelTelegram('unbanChatMember', { chat_id: c, user_id: telegramId, only_if_banned: true })
+  if (!leve.ok) return 'echec_levee_ban'
+  let lien: string
+  try {
+    lien = await lienDemandeAdhesion(`retour u${telegramId}`)
+  } catch {
+    return 'echec_lien'
+  }
+  const m = modeleRetourSortieAbusive(lien)
+  const envoi = await envoyer(telegramId, m.paragraphes.join('\n\n'),
+    m.bouton ? [[{ texte: m.bouton.texte, url: m.bouton.url }]] : undefined)
+  if (envoi.ok) return 'envoye'
+  return envoi.code === 403 ? 'bot_bloque' : 'echec_envoi'
+}
+
+async function tacheSortiesMetricgram(ctx: Contexte, rattaches: Rattache[], abonnements: AbonnementResume[] | null) {
+  const s = ctx.s.metricgram
+  let sorties: SortieMetricgram[]
+  let signalees: LigneSignalee[]
+  try {
+    sorties = await prisma.$queryRaw<SortieMetricgram[]>`
+      select telegram_id, sorti_le, par_qui
+      from public.cockpit_telegram_membres
+      where present = false and sorti_le is not null
+        and par_qui ilike '%metric%'
+        and sorti_le > now() - make_interval(days => ${FENETRE_SORTIES_METRICGRAM_JOURS}::int)
+      order by sorti_le desc
+      limit 200`
+    signalees = await prisma.$queryRaw<LigneSignalee[]>`
+      select geste_id, telegram_id, details->>'sorti_le' as sorti_le,
+             details->>'retour' as retour, details->>'essais_retour' as essais, fait_le
+      from public.cockpit_liveclub_gestes
+      where geste = 'refus' and regle = 'sortie_abusive_metricgram'
+        and resultat in ('fait', 'echec')
+        and fait_le > now() - make_interval(days => ${FENETRE_SORTIES_METRICGRAM_JOURS + 30}::int)`
+  } catch (err) {
+    erreur(ctx, 'sorties_metricgram_illisibles', err)
+    return
+  }
+  const dejaSignales = new Set(signalees
+    .filter(l => l.telegram_id != null && Boolean(l.sorti_le))
+    .map(l => cleSortieAbusive(Number(l.telegram_id), l.sorti_le as string)))
+  // Comptes qui ont deja recu un lien automatique (30 jours) : un nouveau ban
+  // Metricgram ne leur vaut pas un second lien.
+  const limiteRebanni = ctx.maintenant.getTime() - FENETRE_REBANNI_JOURS * 86_400_000
+  const dejaRelances = new Set(signalees
+    .filter(l => l.telegram_id != null && l.retour === 'envoye' && l.fait_le.getTime() > limiteRebanni)
+    .map(l => Number(l.telegram_id)))
+
+  const parId = new Map((abonnements ?? []).map(a => [a.id, a]))
+  const parCompte = new Map<number, Rattache[]>()
+  for (const r of rattaches) parCompte.set(r.telegramId, [...parCompte.get(r.telegramId) ?? [], r])
+  /** Comptes vus dans ce passage (nouvelle sortie) : pas de relance du lien en plus. */
+  const vus = new Set<number>()
+
+  for (const l of sorties) {
+    if (tempsEcoule(ctx)) return
+    const telegramId = Number(l.telegram_id)
+    if (!Number.isSafeInteger(telegramId)) continue
+    const sortie = { telegramId, sortiLe: l.sorti_le, parQui: l.par_qui }
+    const cle = cleSortieAbusive(telegramId, l.sorti_le)
+    if (dejaSignales.has(cle)) { s.deja_signalees++; continue }
+    vus.add(telegramId)
+
+    const p = await presence(telegramId)
+    if (p.etat === 'inconnu') { s.inconnus++; continue }
+    if (p.etat === 'oui') { s.revenus++; continue }
+
+    // Le droit d'aujourd'hui, et surtout : existait-il le jour de la sortie ?
+    // Un desabonne sorti a juste titre puis reabonne n'est pas une sortie
+    // abusive (rien d'ecrit, pas de message « par erreur »).
+    const lu = await droitALaSortie(ctx, telegramId, parCompte.get(telegramId) ?? [], l.sorti_le, parId)
+    if (!sortieAbusiveASignaler(sortie, p.etat, lu.droit, lu.couverture, dejaSignales)) {
+      if (lu.droit === 'inconnu' || (lu.droit === 'oui' && lu.couverture === 'inconnu')) s.inconnus++
+      else if (lu.droit === 'oui') s.droit_posterieur++
+      else s.sans_droit++
+      continue
+    }
+    const d = lu.d
+
+    const sortiLe = l.sorti_le.toISOString()
+    const rebanni = dejaRelances.has(telegramId)
+    let reserve: bigint | null
+    try {
+      reserve = await reserverGeste({
+        cle: `liveclub:sortie_abusive:${cle}`,
+        deja: Prisma.sql`
+          select 1 from public.cockpit_liveclub_gestes d
+          where d.geste = 'refus' and d.regle = 'sortie_abusive_metricgram'
+            and d.resultat in ('fait', 'echec')
+            and d.telegram_id = ${telegramId}::bigint and d.details->>'sorti_le' = ${sortiLe}`,
+        geste: 'refus', regle: 'sortie_abusive_metricgram',
+        telegramId, membreId: d.membreId ?? null, abonnementId: lu.abonnementId,
+        details: {
+          sorti_le: sortiLe, par_qui: l.par_qui, statut_tg: p.statut,
+          raison: lu.raison,
+          debut_du_droit: lu.debut ? lu.debut.slice(0, 10) : null,
+          fin_du_droit: d.statut === 'oui' && d.fin ? d.fin.slice(0, 10) : null,
+          ...(rebanni ? { a_corriger_dans_metricgram: true } : {}),
+        },
+      })
+    } catch (err) {
+      erreur(ctx, 'journal_reservation', err)
+      s.inconnus++
+      continue
+    }
+    if (reserve === null) { s.deja_signalees++; continue }
+    dejaSignales.add(cle)
+    s.signalees++
+
+    // Deja relance apres un ban precedent : Metricgram le ressort a chaque
+    // retour tant qu'il ne l'a pas dans sa base. Signale, sans second lien.
+    const retour = rebanni ? 'rebanni_metricgram' : await lienRetourAutomatique(ctx, telegramId, d.statut === 'oui')
+    await noterRetour(ctx, reserve, { retour })
+    if (retour === 'envoye') {
+      s.liens_envoyes++
+      dejaRelances.add(telegramId)
+      await tracer(ctx, {
+        geste: 'invitation', resultat: 'fait', regle: 'sortie_abusive_metricgram', details: { sorti_le: sortiLe },
+      }, { telegramId, membreId: d.membreId ?? null, abonnementId: lu.abonnementId })
+    } else {
+      s.sans_lien++
+      if (rebanni) s.rebannis++
+      else if (retourARetenter(retour, 0)) s.echecs++
+    }
+  }
+
+  const courantes = new Map(sorties.map(x => [Number(x.telegram_id), x.sorti_le.toISOString()]))
+  await retenterLiensRetour(ctx, signalees, courantes, vus, dejaRelances)
+}
+
+/** Ajoute des champs aux details d'une ligne du journal. Une panne est comptee. */
+async function noterRetour(ctx: Contexte, gesteId: bigint, champs: Record<string, unknown>) {
+  try {
+    await prisma.$executeRaw`
+      update public.cockpit_liveclub_gestes
+      set details = details || ${JSON.stringify(champs)}::jsonb
+      where geste_id = ${gesteId}`
+  } catch (err) {
+    ctx.s.journal_echecs++
+    erreur(ctx, 'journal_ecriture', err)
+  }
+}
+
+/**
+ * Un lien de retour rate sur une panne passagere (echec_levee_ban,
+ * echec_lien, echec_envoi, conversations_illisibles, config) est retente aux
+ * passages suivants, au plus MAX_ESSAIS_RETOUR fois (details.essais_retour),
+ * sans nouvelle ligne 'refus'. Seulement si cette sortie est toujours la
+ * derniere sortie Metricgram du compte (courantes), que le compte est absent,
+ * que droitLiveClub dit 'oui', et qu'aucun lien n'est deja parti vers lui.
+ * La ligne est prise par une mise a jour conditionnelle (retour 'en_cours')
+ * avant l'envoi : deux passages simultanes n'envoient pas deux liens.
+ */
+async function retenterLiensRetour(
+  ctx: Contexte,
+  signalees: LigneSignalee[],
+  courantes: ReadonlyMap<number, string>,
+  vus: ReadonlySet<number>,
+  dejaRelances: Set<number>,
+) {
+  const s = ctx.s.metricgram
+  const limite = ctx.maintenant.getTime() - FENETRE_SORTIES_METRICGRAM_JOURS * 86_400_000
+  for (const l of signalees) {
+    if (tempsEcoule(ctx)) return
+    if (!retourARetenter(l.retour, l.essais) || l.fait_le.getTime() <= limite) continue
+    const telegramId = Number(l.telegram_id)
+    if (!Number.isSafeInteger(telegramId) || vus.has(telegramId) || dejaRelances.has(telegramId)) continue
+    const sortiLe = l.sorti_le ? new Date(l.sorti_le) : null
+    if (!sortiLe || !Number.isFinite(sortiLe.getTime()) || courantes.get(telegramId) !== sortiLe.toISOString()) continue
+    const p = await presence(telegramId)
+    if (p.etat !== 'non') continue
+    const d = await droitLiveClub(telegramId)
+    if (d.statut !== 'oui') continue
+
+    const essais = Number(l.essais ?? 0) || 0
+    let pris: { geste_id: bigint }[]
+    try {
+      pris = await prisma.$queryRaw<{ geste_id: bigint }[]>`
+        update public.cockpit_liveclub_gestes
+        set details = details || ${JSON.stringify({ retour: 'en_cours', essais_retour: essais + 1 })}::jsonb
+        where geste_id = ${l.geste_id}
+          and details->>'retour' = ${l.retour}
+          and coalesce(details->>'essais_retour', '0') = ${String(essais)}
+        returning geste_id`
+    } catch (err) {
+      erreur(ctx, 'journal_ecriture', err)
+      continue
+    }
+    if (pris.length === 0) continue
+    s.retours_retentes++
+    const retour = await lienRetourAutomatique(ctx, telegramId, true)
+    await noterRetour(ctx, l.geste_id, { retour })
+    if (retour === 'envoye') {
+      s.liens_envoyes++
+      dejaRelances.add(telegramId)
+      await tracer(ctx, {
+        geste: 'invitation', resultat: 'fait', regle: 'sortie_abusive_metricgram',
+        details: { sorti_le: l.sorti_le, relance: essais + 1 },
+      }, { telegramId, membreId: d.membreId ?? null, abonnementId: d.abonnementId ?? null })
+    } else if (retourARetenter(retour, 0)) {
+      s.echecs++
     }
   }
 }
@@ -953,8 +1566,10 @@ export async function passageQuotidien(maintenant: Date = new Date()): Promise<S
       sorties_reelles: 0,
       plafond_atteint: false,
       pauses: { adoptees: 0, metadonnees_effacees: 0, sorties: 0, resorties: 0, rappels_j7: 0, retours: 0, boucles_closes: 0, deja_faits: 0, ignores: 0, inconnus: 0, echecs: 0 },
-      broker: { rappels_j7: 0, sorties: 0, termines_sans_sortie: 0, ignores: 0, inconnus: 0, echecs: 0 },
-      desabonnes: { simules: 0, sorties: 0, deja_traites: 0, gardes: 0, absents: 0, inconnus: 0, echecs: 0 },
+      broker: { rappels_j7: 0, sorties: 0, messages_fin: 0, termines_sans_sortie: 0, ignores: 0, inconnus: 0, echecs: 0 },
+      desabonnes: { simules: 0, sorties: 0, messages: 0, deja_traites: 0, gardes: 0, absents: 0, inconnus: 0, echecs: 0 },
+      prelevements: { rappels_j3: 0, montants_inconnus: 0, apercus_illisibles: 0, deja_faits: 0, ignores: 0, inconnus: 0, echecs: 0 },
+      metricgram: { signalees: 0, liens_envoyes: 0, sans_lien: 0, rebannis: 0, retours_retentes: 0, deja_signalees: 0, revenus: 0, sans_droit: 0, droit_posterieur: 0, inconnus: 0, echecs: 0 },
       purge: { conversations: 0 },
       journal_echecs: 0,
       messages_perdus: 0,
@@ -994,9 +1609,13 @@ export async function passageQuotidien(maintenant: Date = new Date()): Promise<S
     await etape('retours', () => tacheRetours(ctx, new Map(liste.map(a => [a.id, a]))))
     await etape('broker', () => tacheBroker(ctx))
     await etape('desabonnes', () => tacheDesabonnes(ctx, liste, parClient))
+    await etape('prelevements', () => tachePrelevements(ctx, liste, parClient))
   } else {
     await etape('broker', () => tacheBroker(ctx))
   }
+  // Le droit s'y relit en direct (droitLiveClub) : la liste Stripe du passage
+  // n'est pas necessaire, une panne Stripe donne 'inconnu' et rien ne part.
+  await etape('metricgram', () => tacheSortiesMetricgram(ctx, rattaches, abonnements))
   await etape('purge', () => tachePurge(ctx))
 
   ctx.s.sorties_reelles = ctx.plafond.faites

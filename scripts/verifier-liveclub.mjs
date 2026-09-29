@@ -13,9 +13,17 @@ import {
   effacementMetadonneesPause,
   genererJeton, jetonBienForme, normaliserEmail, decouperEmails, requeteRechercheEmail,
   nomLienInvitation, callbackDataValide, echapperHtml, relationAbsente,
+  montantPeriodeAbonnement, abonnementARemise, formaterMontant,
 } from '../src/lib/liveclub/pur.ts'
-import { desabonneHorsGrace, finAbonnement } from '../src/lib/liveclub/passage-regles.ts'
-import { GRACE_JOURS } from '../src/lib/liveclub/config.ts'
+import {
+  desabonneHorsGrace, finAbonnement,
+  prelevementAPrevenir, montantAAnnoncer, clePrelevement, jourParis, RAPPEL_PRELEVEMENT_JOURS,
+  sortieAbusiveASignaler, sortiParMetricgram, cleSortieAbusive,
+  droitCouvraitLaSortie, retourARetenter, MAX_ESSAIS_RETOUR,
+} from '../src/lib/liveclub/passage-regles.ts'
+import {
+  GRACE_JOURS, URLS_ABONNEMENT, URL_ABONNEMENT, URL_PORTAIL_CARTE, texteAbonnement,
+} from '../src/lib/liveclub/config.ts'
 
 const PRODUITS = ['prod_UcOraPncQlbrW4', 'prod_UynMpOvBtGTsIw']
 let n = 0
@@ -422,6 +430,164 @@ test('telegram', () => {
   assert.ok(relationAbsente(new Error('relation "public.cockpit_liveclub_jetons" does not exist')))
   assert.ok(relationAbsente(new Error('code: 42P01')))
   assert.ok(!relationAbsente(new Error('duplicate key')))
+})
+
+test('deux portes d abonnement et portail carte (Brice 29/09)', () => {
+  assert.deepEqual([...URLS_ABONNEMENT], ['https://aoknowledge.com/live-club', 'https://melaniechart.com'])
+  assert.equal(URL_ABONNEMENT, URLS_ABONNEMENT[0])
+  const t = texteAbonnement()
+  for (const u of URLS_ABONNEMENT) assert.ok(t.includes(u), u)
+  // Pas de ponctuation collee a la derniere adresse (elle entrerait dans le lien).
+  assert.ok(t.endsWith(URLS_ABONNEMENT[1]))
+  assert.ok(/^[\x20-\x7eÀ-ÿ]+$/.test(t), 'caracteres clavier seulement')
+  assert.ok(URL_PORTAIL_CARTE.startsWith('https://billing.stripe.com/p/login/'))
+})
+
+test('montant d une periode et remises', () => {
+  const sub = (items, extra = {}) => ({ items: { data: items }, ...extra })
+  assert.deepEqual(montantPeriodeAbonnement(sub([{ quantity: 1, price: { unit_amount: 4900, currency: 'eur' } }])), { centimes: 4900, devise: 'eur' })
+  assert.deepEqual(montantPeriodeAbonnement(sub([
+    { quantity: 2, price: { unit_amount: 1000, currency: 'EUR' } }, { price: { unit_amount: 500, currency: 'eur' } },
+  ])), { centimes: 2500, devise: 'eur' })
+  assert.equal(montantPeriodeAbonnement(sub([{ price: { unit_amount: null, currency: 'eur' } }])), null)
+  assert.equal(montantPeriodeAbonnement(sub([
+    { price: { unit_amount: 100, currency: 'eur' } }, { price: { unit_amount: 100, currency: 'usd' } },
+  ])), null)
+  assert.equal(montantPeriodeAbonnement(sub([])), null)
+  assert.ok(!abonnementARemise(sub([], { discounts: [], discount: null })))
+  assert.ok(abonnementARemise(sub([], { discounts: ['di_1'] })))
+  assert.ok(abonnementARemise(sub([], { discount: { id: 'di_1' } })))
+  assert.ok(abonnementARemise(sub([{ discounts: ['di_2'] }])))
+  assert.equal(formaterMontant(4900, 'eur'), '49 €')
+  assert.equal(formaterMontant(4990, 'eur'), '49,90 €')
+  assert.equal(formaterMontant(9900, 'usd'), '99 USD')
+})
+
+test('rappel J-3 avant prelevement', () => {
+  const maintenant = new Date('2026-10-01T07:00:00Z')
+  const sec = iso => Math.floor(Date.parse(iso) / 1000)
+  const brut = (finIso, extra = {}) => abo({
+    items: { data: [{ current_period_end: sec(finIso), quantity: 1, price: { product: PRODUITS[1], unit_amount: 9900, currency: 'eur' } }] },
+    discounts: [],
+    collection_method: 'charge_automatically',
+    ...extra,
+  })
+  const r = (finIso, extra) => resumerAbonnement(brut(finIso, extra), PRODUITS)
+  assert.equal(RAPPEL_PRELEVEMENT_JOURS, 3)
+
+  // Actif, prochain prelevement dans 3 jours : rappel, echeance du jour.
+  const a = r('2026-10-04T14:00:00Z')
+  assert.equal(a.prelevementAuto, true)
+  assert.deepEqual(a.montantPeriode, { centimes: 9900, devise: 'eur' })
+  assert.equal(prelevementAPrevenir(a, maintenant), '2026-10-04')
+  // Rattrapage a J-2 et J-1, rien a J-4, J0 ni apres.
+  assert.equal(prelevementAPrevenir(r('2026-10-03T14:00:00Z'), maintenant), '2026-10-03')
+  assert.equal(prelevementAPrevenir(r('2026-10-02T14:00:00Z'), maintenant), '2026-10-02')
+  assert.equal(prelevementAPrevenir(r('2026-10-05T14:00:00Z'), maintenant), null)
+  assert.equal(prelevementAPrevenir(r('2026-10-01T14:00:00Z'), maintenant), null)
+  assert.equal(prelevementAPrevenir(r('2026-09-30T14:00:00Z'), maintenant), null)
+
+  // Deja envoye pour cette echeance : rien. Autre echeance du meme abonnement : rappel.
+  assert.equal(prelevementAPrevenir(a, maintenant, new Set([clePrelevement(a.id, '2026-10-04')])), null)
+  assert.equal(prelevementAPrevenir(a, maintenant, new Set([clePrelevement(a.id, '2026-09-04')])), '2026-10-04')
+  assert.equal(clePrelevement('sub_X', '2026-10-04T14:00:00.000Z'), 'sub_X:2026-10-04')
+
+  // En pause (programmee ou en cours) : aucun prelevement a annoncer.
+  const programmee = r('2026-10-04T14:00:00Z', { pause_collection: { behavior: 'void', resumes_at: sec('2027-01-04T14:00:00Z') } })
+  assert.ok(programmee.pauseActive)
+  assert.equal(prelevementAPrevenir(programmee, maintenant), null)
+  // Arret programme (fin de periode ou date) : rien.
+  assert.equal(prelevementAPrevenir(r('2026-10-04T14:00:00Z', { cancel_at_period_end: true }), maintenant), null)
+  assert.equal(prelevementAPrevenir(r('2026-10-04T14:00:00Z', { cancel_at: sec('2026-10-04T14:00:00Z') }), maintenant), null)
+  // Facture envoyee (pas de prelevement), past_due, termine : rien.
+  assert.equal(prelevementAPrevenir(r('2026-10-04T14:00:00Z', { collection_method: 'send_invoice' }), maintenant), null)
+  assert.equal(prelevementAPrevenir(r('2026-10-04T14:00:00Z', { status: 'past_due' }), maintenant), null)
+  assert.equal(prelevementAPrevenir(r('2026-10-04T14:00:00Z', { status: 'canceled' }), maintenant), null)
+  // Essai gratuit qui se termine : le premier prelevement est annonce.
+  assert.equal(prelevementAPrevenir(r('2026-10-04T14:00:00Z', { status: 'trialing' }), maintenant), '2026-10-04')
+  // Prix a zero sans remise : rien a prelever.
+  const gratuit = resumerAbonnement(brut('2026-10-04T14:00:00Z', {
+    items: { data: [{ current_period_end: sec('2026-10-04T14:00:00Z'), price: { product: PRODUITS[1], unit_amount: 0, currency: 'eur' } }] },
+  }), PRODUITS)
+  assert.equal(prelevementAPrevenir(gratuit, maintenant), null)
+
+  // Montant : seulement l'apercu Stripe (apres remise, taxe, solde). Sans
+  // apercu lisible, inconnu (date seule) : jamais le prix des items, qui
+  // ignore taxe, avoir et remise client.
+  assert.deepEqual(montantAAnnoncer({ amount_due: 7900, currency: 'EUR' }), { centimes: 7900, devise: 'eur' })
+  assert.equal(montantAAnnoncer(null), null)
+  const avecRemise = r('2026-10-04T14:00:00Z', { discounts: ['di_TEST'] })
+  assert.ok(avecRemise.aRemise)
+  assert.deepEqual(montantAAnnoncer({ amount_due: 0, currency: 'eur' }), { centimes: 0, devise: 'eur' })
+  assert.equal(montantAAnnoncer({ amount_due: 'x', currency: 'eur' }), null)
+  assert.equal(montantAAnnoncer({ amount_due: 4900 }), null)
+
+  // Jour annonce : celui de Paris. Periode qui finit a 22 h 30 UTC le 1er
+  // octobre = 0 h 30 le 2 octobre a Paris.
+  assert.equal(jourParis('2026-10-01T22:30:00Z'), '2026-10-02')
+  assert.equal(jourParis('2026-10-01T14:00:00Z'), '2026-10-01')
+  // Hiver (UTC+1) : 23 h 30 UTC le 15 decembre = 16 decembre a Paris.
+  assert.equal(jourParis('2026-12-15T23:30:00Z'), '2026-12-16')
+  assert.equal(jourParis('2026-12-15T22:30:00Z'), '2026-12-15')
+})
+
+test('sorties abusives de Metricgram (transition)', () => {
+  const sortie = { telegramId: 123456789, sortiLe: new Date('2026-09-27T10:15:00Z'), parQui: '@MetricgramBot' }
+  assert.ok(sortiParMetricgram('@MetricgramBot') && sortiParMetricgram('metricgram_bot'))
+  assert.ok(!sortiParMetricgram('lui-même') && !sortiParMetricgram('@aok_liveclub_bot') && !sortiParMetricgram(null))
+
+  // Droit oui, deja la le jour de la sortie, absent du groupe : signale une fois.
+  assert.ok(sortieAbusiveASignaler(sortie, 'non', 'oui', 'oui'))
+  const deja = new Set([cleSortieAbusive(sortie.telegramId, sortie.sortiLe)])
+  assert.ok(!sortieAbusiveASignaler(sortie, 'non', 'oui', 'oui', deja))
+  // La cle relue du journal (texte ISO) est la meme que celle de la sortie.
+  assert.equal(cleSortieAbusive(123456789, '2026-09-27T10:15:00.000Z'), cleSortieAbusive(123456789, sortie.sortiLe))
+  // Nouvelle sortie du meme compte (banni a nouveau) : signalee a son tour
+  // (le passage ne renvoie pas de second lien, voir rebanni_metricgram).
+  assert.ok(sortieAbusiveASignaler({ ...sortie, sortiLe: new Date('2026-09-29T08:00:00Z') }, 'non', 'oui', 'oui', deja))
+
+  // Droit inconnu ou non : rien. Revenu ou presence inconnue : rien.
+  assert.ok(!sortieAbusiveASignaler(sortie, 'non', 'inconnu', 'inconnu'))
+  assert.ok(!sortieAbusiveASignaler(sortie, 'non', 'non', 'inconnu'))
+  assert.ok(!sortieAbusiveASignaler(sortie, 'oui', 'oui', 'oui'))
+  assert.ok(!sortieAbusiveASignaler(sortie, 'inconnu', 'oui', 'oui'))
+  // Sortie qui ne vient pas de Metricgram (depart volontaire, notre bot, un admin) : rien.
+  assert.ok(!sortieAbusiveASignaler({ ...sortie, parQui: 'lui-même' }, 'non', 'oui', 'oui'))
+  assert.ok(!sortieAbusiveASignaler({ ...sortie, parQui: null }, 'non', 'oui', 'oui'))
+
+  // Droit d'aujourd'hui pris APRES la sortie (desabonne sorti a juste titre
+  // le 15/09, reabonne le 28/09) : pas une sortie abusive. Couverture
+  // inconnue (date illisible) : rien non plus.
+  const juste = { ...sortie, sortiLe: new Date('2026-09-15T09:00:00Z') }
+  assert.equal(droitCouvraitLaSortie('2026-09-28T18:00:00.000Z', juste.sortiLe), 'non')
+  assert.ok(!sortieAbusiveASignaler(juste, 'non', 'oui', droitCouvraitLaSortie('2026-09-28T18:00:00.000Z', juste.sortiLe)))
+  assert.ok(!sortieAbusiveASignaler(sortie, 'non', 'oui', 'inconnu'))
+  assert.ok(!sortieAbusiveASignaler(sortie, 'non', 'oui', 'non'))
+  // Abonnement pris avant la sortie (le cas des deux abonnements) : couvre.
+  assert.equal(droitCouvraitLaSortie('2026-08-26T12:00:00.000Z', sortie.sortiLe), 'oui')
+  assert.equal(droitCouvraitLaSortie('2026-09-27T10:15:00.000Z', sortie.sortiLe), 'oui')
+  // Acces broker date au jour : le jour meme de la sortie couvre, le lendemain non.
+  assert.equal(droitCouvraitLaSortie('2026-09-27', sortie.sortiLe), 'oui')
+  assert.equal(droitCouvraitLaSortie('2026-09-28', sortie.sortiLe), 'non')
+  assert.equal(droitCouvraitLaSortie(null, sortie.sortiLe), 'inconnu')
+  assert.equal(droitCouvraitLaSortie('n importe quoi', sortie.sortiLe), 'inconnu')
+  assert.equal(droitCouvraitLaSortie('2026-08-26T12:00:00.000Z', '2026-09-27T10:15:00.000Z'), 'oui')
+  // Debut d'un abonnement : start_date, sinon created, sinon inconnu.
+  const debutSec = Date.parse('2026-08-26T12:00:00Z') / 1000
+  assert.equal(resumerAbonnement(abo({ start_date: debutSec, created: debutSec + 60 }), PRODUITS).debutLe, '2026-08-26T12:00:00.000Z')
+  assert.equal(resumerAbonnement(abo({ created: debutSec }), PRODUITS).debutLe, '2026-08-26T12:00:00.000Z')
+  assert.equal(resumerAbonnement(abo(), PRODUITS).debutLe, null)
+
+  // Lien de retour retente : seulement apres une panne passagere, 2 fois au plus.
+  assert.equal(MAX_ESSAIS_RETOUR, 2)
+  for (const r of ['echec_levee_ban', 'echec_lien', 'echec_envoi', 'conversations_illisibles', 'config']) {
+    assert.ok(retourARetenter(r, null), r)
+    assert.ok(retourARetenter(r, '1'), r)
+    assert.ok(!retourARetenter(r, '2'), r)
+  }
+  for (const r of ['envoye', 'bot_jamais_demarre', 'bot_bloque', 'droit_vu_par_email_seul', 'rebanni_metricgram', 'en_cours', null]) {
+    assert.ok(!retourARetenter(r, 0), String(r))
+  }
 })
 
 console.log(`\n${n} blocs verifies, tout est bon.`)

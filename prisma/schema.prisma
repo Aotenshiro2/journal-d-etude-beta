@@ -210,6 +210,12 @@ model AiUsage {
 // messages = [{role:'user'|'assistant', content, at}] ; escalatedAt posé quand
 // l'utilisateur demande un humain. Lu plus tard par le cockpit (questions
 // posées, suivi par membre).
+// Fils du bot Live Club (app = 'telegram', userId = 'telegram:<id>') : trois
+// colonnes existent en base HORS de ce modele, "telegramId" (bigint, unique),
+// "membreId" et "contactEmail" (migration 20260930090100). Lues et ecrites en
+// SQL brut par src/lib/liveclub/support-pont.ts, pour qu'un deploiement avant
+// la migration ne casse pas le support du site. Ne pas lancer db push sans
+// les ajouter ici d'abord : il les supprimerait.
 model SupportThread {
   id          String    @id @default(uuid())
   userId      String

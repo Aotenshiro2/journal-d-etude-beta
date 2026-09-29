@@ -19,8 +19,9 @@
 import { prisma } from '@/lib/db'
 import {
   finPeriodeAbonnement, calculerReprisePause, decouperEmails, normaliserEmail, preparerPoseDePause,
-  effacementMetadonneesPause,
+  effacementMetadonneesPause, resumerAbonnement,
 } from '@/lib/liveclub/pur'
+import { PRODUITS_LIVECLUB } from '@/lib/liveclub/config'
 
 // La regle de la pause vit dans liveclub/pur.ts (testable sans base) ; elle
 // est reexportee ici pour les appelants de stripe-actions (29/09).
@@ -716,6 +717,16 @@ export async function executerAction(a: ActionAgent, acteur = 'agent'): Promise<
 
   if (a.type === 'pause_abonnement' || a.type === 'reprise_abonnement') {
     const abo = String(p.abonnement_id)
+    const fmt = (d: Date) => d.toISOString().slice(0, 10)
+
+    // Lu AVANT tout geste, derniere facture comprise : pendant une pause,
+    // Stripe fait AVANCER current_period_end sans rien encaisser, donc la
+    // seule vraie fin payee est celle notee dans les metadonnees a la pose
+    // (pausePayeJusquau de resumerAbonnement, liveclub/pur.ts), dementie si
+    // une facture a ete payee apres elle. null = pas un abonnement Live Club
+    // (compte aoknowledge) : on ne parle alors que de ce que Stripe dit.
+    const sub = await stripeGet(cle, `/v1/subscriptions/${abo}?expand[]=latest_invoice`)
+    const resume = resumerAbonnement(sub, PRODUITS_LIVECLUB)
 
     if (a.type === 'reprise_abonnement') {
       // Vider pause_collection = lever la pause. Le prochain cycle preleve.
@@ -727,8 +738,10 @@ export async function executerAction(a: ActionAgent, acteur = 'agent'): Promise<
         pause_collection: '',
         ...effacementMetadonneesPause(),
       })
-      return `Pause levée pour ${p.qui} : les prélèvements reprennent au prochain cycle. `
-        + `La réintégration Telegram reste un geste séparé (proposer_reintegrer_telegram).`
+      const payee = resume?.pausePayeJusquau ?? null
+      return `Pause levée pour ${p.qui} : les prélèvements reprennent au prochain cycle.`
+        + (payee ? ` La période payée avant la pause allait jusqu'au ${fmt(new Date(payee))}.` : '')
+        + ` La réintégration Telegram reste un geste séparé (proposer_reintegrer_telegram).`
     }
 
     // REGLE (Brice, 10/09) : la pause demarre a la date de renouvellement,
@@ -736,24 +749,62 @@ export async function executerAction(a: ActionAgent, acteur = 'agent'): Promise<
     // factures FUTURES : posee maintenant, la periode payee va a son terme,
     // puis behavior=void annule chaque facture jusqu'a resumes_at — calcule
     // ici depuis la vraie fin de periode, jamais depuis une date du modele.
-    const sub = await stripeGet(cle, `/v1/subscriptions/${abo}`)
     const statut = String(sub.status ?? '')
     if (!['active', 'trialing', 'past_due'].includes(statut)) {
       throw new Error(`L'abonnement est « ${statut} » : on ne met en pause qu'un abonnement vivant.`)
+    }
+
+    // Deja en pause : refus, avec la VRAIE fin payee (metadonnee de pause),
+    // jamais la fin de periode Stripe, qui a avance pendant la pause.
+    const pause = sub.pause_collection as { resumes_at?: number | null } | null | undefined
+    if (pause && (pause.resumes_at == null || pause.resumes_at * 1000 > Date.now())) {
+      const payee = resume?.pausePayeJusquau ?? null
+      throw new RefusAction(`${p.qui} : une pause est déjà posée sur cet abonnement`
+        + (payee ? `, période payée jusqu'au ${fmt(new Date(payee))}` : ', fin payée pas encore datée par le bot')
+        + (typeof pause.resumes_at === 'number'
+          ? `, reprise des prélèvements le ${fmt(new Date(pause.resumes_at * 1000))}`
+          : ', sans date de reprise')
+        + `. Rien n'a été changé. Pour la modifier : lever la pause, puis en reposer une.`)
+    }
+
+    // MEME refus que pauser() du bot : un arret programme (fin de periode ou
+    // date d'arret) se croiserait avec la pause. On n'en pose pas par-dessus.
+    if (sub.cancel_at_period_end === true || typeof sub.cancel_at === 'number') {
+      const fin = typeof sub.cancel_at === 'number' ? sub.cancel_at : finPeriodeAbonnement(sub)
+      throw new RefusAction(`${p.qui} : un arrêt est déjà programmé sur cet abonnement`
+        + (fin ? ` (fin le ${fmt(new Date(fin * 1000))})` : '')
+        + `. Rien n'a été changé. Pour une pause, il faut d'abord annuler l'arrêt (le membre peut le faire`
+        + ` depuis le bot, ou au Dashboard Stripe).`)
     }
 
     // MEME pose que pauser() du bot (preparerPoseDePause, liveclub/pur.ts) :
     // pause_collection et les metadonnees qui datent le debut de la pause
     // (META_PAUSE_PAYE_JUSQUAU, META_PAUSE_REPRISE), dans le meme appel. Sans
     // elles, le bot du Live Club ne sait pas quand la periode payee se termine
-    // et ne sort personne. Refuse une pause deja posee.
+    // et ne sort personne.
     const pose = preparerPoseDePause(sub, Number(p.nb_mois))
     await stripePost(cle, `/v1/subscriptions/${abo}`, pose.corps)
-    const fmt = (d: Date) => d.toISOString().slice(0, 10)
+
+    // Trace au journal du Live Club, comme la pause posee par le bot : c'est
+    // la que l'agent relit la vraie fin payee pendant la pause (details
+    // paye_jusquau). Regle 'manuel', jamais 'pause_effective' que le passage
+    // quotidien suit ; pas de compte Telegram (inconnu ici). Ne jette pas.
+    if (resume) {
+      await journaliserGesteLiveClub({
+        geste: 'pause', resultat: 'fait', regle: 'manuel',
+        details: {
+          etape: 'pause_programmee', nb_mois: Number(p.nb_mois),
+          paye_jusquau: fmt(new Date(pose.finPeriodeSec * 1000)), reprise_le: fmt(pose.reprise),
+        },
+      }, { telegramId: null, acteur, abonnementId: abo })
+    }
+
     return `Abonnement de ${p.qui} en pause : payé jusqu'au ${fmt(new Date(pose.finPeriodeSec * 1000))}, `
       + `reprise automatique des prélèvements le ${fmt(pose.reprise)}. Visible dans le cockpit après la `
-      + `prochaine collecte. ⚠️ Le retrait du Telegram à la fin de la période payée reste un geste `
-      + `séparé tant que le raccord n'est pas construit.`
+      + `prochaine collecte.`
+      + (resume
+        ? ` Si son compte Telegram est rattaché, le passage quotidien le sortira du groupe à la fin de la période payée et le préviendra.`
+        : '')
   }
 
   if (a.type === 'code_promo') {

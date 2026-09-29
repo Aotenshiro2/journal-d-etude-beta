@@ -63,7 +63,11 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json()
   const message = typeof body.message === 'string' ? body.message.trim().slice(0, MAX_MESSAGE_LEN) : ''
-  const app = typeof body.app === 'string' && body.app ? body.app.slice(0, 32) : 'extension'
+  // 'telegram' est reserve aux fils du bot Live Club (ecrits par
+  // src/lib/liveclub/support-pont.ts) : un client du site ne peut pas s'en
+  // reclamer, sinon le cockpit le prendrait pour un fil Telegram.
+  const appBrute = typeof body.app === 'string' && body.app ? body.app.slice(0, 32) : 'extension'
+  const app = appBrute.trim().toLowerCase() === 'telegram' ? 'extension' : appBrute
   const threadId = typeof body.threadId === 'string' ? body.threadId : null
   if (!message) return NextResponse.json({ error: 'Message vide' }, { status: 400, headers: cors })
 

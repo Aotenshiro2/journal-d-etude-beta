@@ -69,9 +69,11 @@ export async function POST(req: NextRequest) {
   // 04/09 (email reçu, onglet Support vide). Le message d'ouverture dit d'où
   // vient le fil pour que la liste du cockpit ait quelque chose à montrer.
   if (!thread) {
-    const app = typeof body.app === 'string' && body.app.trim()
+    // 'telegram' est reserve aux fils du bot Live Club (support-pont.ts).
+    const appBrute = typeof body.app === 'string' && body.app.trim()
       ? body.app.trim().slice(0, 40)
       : 'site'
+    const app = appBrute.toLowerCase() === 'telegram' ? 'site' : appBrute
     thread = await prisma.supportThread.create({
       data: {
         userId,
