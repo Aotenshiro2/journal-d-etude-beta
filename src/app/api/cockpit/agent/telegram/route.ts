@@ -140,11 +140,24 @@ export async function POST(req: NextRequest) {
     // Contrepartie assumee : si l'execution tombe en panne, la carte est
     // perdue et il faut la redemander a l'agent. On ne rejoue jamais seul un
     // geste qui a pu partir a moitie.
+    // RETURNING d'un UPDATE rend la ligne APRES modification : il rendrait
+    // donc l'action deja remise a null (bug constate au premier test le 29/09,
+    // « Action illisible »). La CTE verrouille la ligne et garde l'ancienne
+    // valeur ; l'UPDATE qui suit la vide, et on rend la valeur gardee. Un
+    // second appel concurrent attend le verrou, relit la condition sur la
+    // ligne deja videe (nonce a null) et ne recupere rien.
     const consommee = await prisma.$queryRaw<{ action_en_attente: unknown }[]>`
-      update public.cockpit_agent_conversations
+      with carte as (
+        select chat_id, action_en_attente as action_avant
+        from public.cockpit_agent_conversations
+        where chat_id = ${chatId} and nonce = ${nonce} and action_en_attente is not null
+        for update
+      )
+      update public.cockpit_agent_conversations c
       set action_en_attente = null, nonce = null, maj_le = now()
-      where chat_id = ${chatId} and nonce = ${nonce} and action_en_attente is not null
-      returning action_en_attente`
+      from carte
+      where c.chat_id = carte.chat_id
+      returning carte.action_avant as action_en_attente`
     if (consommee.length === 0) {
       await acquitter('Cette action n\'est plus en attente.')
       return NextResponse.json({ ok: true })
