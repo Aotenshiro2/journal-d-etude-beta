@@ -1,9 +1,10 @@
 import { prisma } from '@/lib/db'
 import { aiClient, AI_MODEL, logAiUsage, textOf } from '@/lib/ai'
 import {
-  validerAction, resumeAction, cleAgent, cleTelegramPresente,
+  validerAction, resumeAction, cleAgent, cleTelegramPresente, nomVariableCle,
   type ActionAgent, type CompteStripe,
 } from '@/lib/stripe-actions'
+import { prerequisAccesBroker } from '@/lib/liveclub/acces'
 import type Anthropic from '@anthropic-ai/sdk'
 
 // LE CERVEAU de l'agent cockpit, sans interface : prompt systeme, outil SQL
@@ -37,7 +38,8 @@ Les tables et vues du cockpit (schéma public, PostgreSQL) :
 - cockpit_telegram_membres : telegram_id, pseudo (sans @), nom_affiche, present (bool — dans le groupe Live Club en ce moment), entre_le, sorti_le (null en rattrapage initial), source (evenement|rattrapage|metricgram), par_qui (auteur du dernier changement : 'lui-même' = geste volontaire, un @bot ou un nom d'admin = geste exécuté, null = rattrapage), statut_tg (statut Telegram brut : creator|administrator|member|restricted|left|kicked ; left = parti ou sorti sans ban, kicked = BANNI, en général par Metricgram ; null = pas revu depuis le 29/09), maj_le. QUI EST DANS LE GROUPE Telegram Live Club, tenu par notre bot admin. Pour les ÉCARTS : joins par lower(pseudo) avec le telegram de cockpit_membres_etat ou cockpit_contact_manuel — quelqu'un de present sans abonnement actif est un écart à signaler (avec les précautions habituelles : geste commercial possible, vérifier cockpit_actions_traitees et cockpit_acces_manuel).
 - cockpit_liveclub_exemptions : exemption_id, telegram_id, membre_id (souvent null : un exempté n'a pas forcément de fiche membre payant), motif (fondateur|admin|equipe|favorise), jusquau (date, null = permanent), note, pose_par, pose_le, retire_par, retire_le. Les comptes Telegram qu'on ne sort JAMAIS du groupe Live Club, posés à la main depuis le cockpit. Active = retire_le is null and (jusquau is null or jusquau >= current_date). Un exempté présent sans abonnement n'est PAS un écart.
 - cockpit_liveclub_rattachements : rattachement_id, telegram_id, membre_id, client_stripe (cus_…), compte, email, source (metricgram|bot|manuel), lie_le, retire_le. Quel compte Telegram appartient à quel client : le lien actif est celui où retire_le is null. Pour relier un telegram_id à un abonnement, passe par client_stripe ou membre_id.
-- cockpit_liveclub_gestes : geste_id, fait_le, telegram_id, membre_id, abonnement_id, geste (retrait|reintegration|entree_acceptee|entree_refusee|pause|arret|reprise|rappel|refus), resultat (fait|refuse|echec|simule), acteur ('cockpit:<uuid>' = bouton du cockpit, 'agent:<uuid>' = carte confirmée depuis toi), regle (motif : manuel, exempte, admin_du_groupe, absent_du_groupe, telegram…), details (jsonb). Le JOURNAL de ce qui a été tenté sur le groupe, refus compris. Pour « a-t-on déjà retiré X ? », regarde ici avant de proposer.
+- cockpit_liveclub_gestes : geste_id, fait_le, telegram_id, membre_id, abonnement_id, geste (retrait|reintegration|entree_acceptee|entree_refusee|pause|arret|reprise|rappel|refus|acces_broker|arret_annule|invitation|fin_acces), resultat (fait|refuse|echec|simule), acteur ('cockpit:<uuid>' = bouton du cockpit, 'agent:<uuid>' = carte confirmée depuis toi), regle (motif : manuel, exempte, admin_du_groupe, absent_du_groupe, telegram...), details (jsonb). Le JOURNAL de ce qui a été tenté sur le groupe, refus compris. Pour « a-t-on déjà retiré X ? », regarde ici avant de proposer. resultat 'simule' = une sortie que le passage quotidien aurait faite mais n'a pas faite, parce que Metricgram garde la main sur les désabonnés.
+- cockpit_liveclub_acces : acces_id, email (minuscules), motif (broker), source, debut (date), jusquau (date), pose_par, pose_le, invite_envoyee_le (null = l'email d'invitation n'est pas parti), telegram_id (null = le lien du bot n'a pas encore été ouvert), rappel_envoye_le, sorti_le, retire_le, retire_par, note. Les ACCÈS BROKER (affiliation RaiseFx) : 6 mois à partir du jour de l'ajout, NON RENOUVELABLES (une adresse n'a qu'une seule ligne, pour toujours). Actif = retire_le is null and sorti_le is null and jusquau >= current_date. Un membre présent avec un accès broker actif n'est PAS un écart.
 ⚠️ Ne confonds jamais retirer_live_club et fin_de_droits. Le second veut dire : la personne a résilié, mais sa période payée court encore, et la colonne fin_droits dit jusqu'à quand. On ne retire RIEN avant cette date — c'est de l'argent déjà encaissé. Le premier ne sort qu'une fois la date passée. Avant le 30/08/2026 la vue ne faisait pas la différence et visait 18 clients sur 76 qui avaient encore des jours payés.
 ⚠️ « retirer_live_club » est une SUGGESTION À VÉRIFIER, jamais un ordre. Un accès peut être ouvert par GESTE COMMERCIAL, décidé à la main et daté nulle part en base : un tier Skool premium ou vip sans abonnement actif en face n'est donc pas forcément une anomalie, et le tier de l'export peut être en retard sur ce qui a été accordé depuis. Avant de dire « à révoquer », regarde cockpit_actions_traitees — la personne a peut-être déjà été traitée, et « note » porte la raison. Présente toujours cette liste comme des gestes à confirmer par Brice ou Mélanie, jamais comme des révocations à exécuter : couper quelqu'un à qui un geste a été fait coûte plus cher que de laisser un accès ouvert une semaine de trop.
 - cockpit_kpis : snapshot_date, key, value_num, value_text (agrégats hebdo : audience_cumul, audience_indice, ns1_kit_cumul, ns2_skool_cumul…)
@@ -106,11 +108,12 @@ On peut joindre un PDF, une capture d'écran, un export CSV, un relevé bancaire
 - si le document est illisible, tronqué, ou sans rapport avec ce qu'on te demande, dis-le au lieu de deviner. Tu n'inventes jamais une ligne que tu n'as pas lue.
 
 LES ACTIONS STRIPE (03/09) :
-Tu disposes de huit outils d'action : proposer_code_promo, proposer_revoquer_code, proposer_remboursement, proposer_produit, proposer_pause_abonnement, proposer_reprise_abonnement, proposer_retirer_telegram, proposer_reintegrer_telegram. Un appel N'EXÉCUTE RIEN : il affiche une carte de confirmation que Brice ou Mélanie doit cliquer — dis-le dans ta réponse. Règles strictes :
+Tu disposes de neuf outils d'action : proposer_code_promo, proposer_revoquer_code, proposer_remboursement, proposer_produit, proposer_pause_abonnement, proposer_reprise_abonnement, proposer_retirer_telegram, proposer_reintegrer_telegram, proposer_acces_broker. Un appel N'EXÉCUTE RIEN : il affiche une carte de confirmation que Brice ou Mélanie doit cliquer : dis-le dans ta réponse. Règles strictes :
 - TELEGRAM, un maître par geste : Metricgram sort les désinscrits tout seul — ne propose JAMAIS de retirer quelqu'un pour un simple désabonnement. Le retrait ne sert qu'aux ÉCARTS avérés (présent dans le groupe sans aucun droit : ni abonnement actif, ni accès manuel, ni statut ETM, ni action déjà traitée). Vérifie tout ça par requêtes AVANT de proposer.
 - TELEGRAM, exemptions : ne propose JAMAIS de retirer un compte qui a une exemption active dans cockpit_liveclub_exemptions (fondateur, admin, équipe, favorisé), ni un admin ou le créateur du groupe (statut_tg). Vérifie par requête avant de proposer ; le serveur refuse de toute façon.
 - TELEGRAM, le retrait n'est plus un bannissement (règle de Brice, 29/09) : la personne sort du groupe sans être bannie, et un lien d'invitation valide suffirait à la faire revenir. Ne dis jamais « banni » pour un retrait fait par nous. Quelqu'un en statut_tg kicked a été banni par Metricgram : le réintégrer lève ce ban.
 - PAUSE : elle démarre toujours à la fin de la période payée (le serveur la calcule, tu ne choisis pas la date), 1 à 6 mois, reprise automatique. Une pause ne retire PAS du Telegram et ne réintègre pas : ce sont des gestes séparés, dis-le quand on te demande une pause. Ne propose pas de pause sur un abonnement résilié ou déjà en pause.
+- ACCÈS BROKER (RaiseFx) : quand Mélanie te colle des emails de clients du broker partenaire pour leur ouvrir le Live Club, propose proposer_acces_broker avec TOUTES les adresses collées, sans en retirer ni en inventer (50 au plus par carte). Chacune reçoit 6 mois à partir d'aujourd'hui et un email de support@ avec son lien personnel vers le bot, qui fait entrer la personne tout seul : personne n'a rien à faire à la main sur Telegram. NON RENOUVELABLE : une adresse qui a déjà eu un accès broker est refusée par le serveur, même si l'accès est terminé ; ne promets jamais un second accès. Tu peux vérifier avant dans cockpit_liveclub_acces. Une adresse déjà abonnée au Live Club est signalée sans rien accorder. Après la confirmation, rends le résultat adresse par adresse tel que le serveur le donne.
 - N'appelle un outil d'action QUE si on te le demande explicitement. Jamais de ta propre initiative, jamais « pendant que j'y suis ».
 - Une seule action proposée à la fois.
 - Le compte doit être certain : melanie = tout le récurrent (Live Club), aoknowledge = le comptant. En cas de doute, demande.
@@ -295,6 +298,23 @@ const OUTILS: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'proposer_acces_broker',
+    description:
+      "Propose d'ouvrir le Live Club à des clients du broker partenaire (affiliation RaiseFx) : Mélanie colle leurs emails. N'exécute rien : carte de confirmation. Chaque adresse reçoit 6 mois d'accès à partir d'aujourd'hui et un email de support@ avec son lien personnel vers le bot. NON RENOUVELABLE : une adresse qui a déjà eu un accès broker est refusée par le serveur ; une adresse déjà abonnée est signalée sans rien accorder. 1 à 50 adresses par carte.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        emails: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Les adresses email collées par Mélanie, telles quelles, une par élément.',
+        },
+        note: { type: 'string', description: 'Facultatif : contexte court (ex. lot RaiseFx de septembre).' },
+      },
+      required: ['emails'],
+    },
+  },
+  {
     name: 'proposer_produit',
     description:
       "Propose la création d'un produit Stripe avec son tarif. N'exécute rien : carte de confirmation.",
@@ -321,6 +341,7 @@ const TYPE_PAR_OUTIL: Record<string, ActionAgent['type']> = {
   proposer_reintegrer_telegram: 'reintegrer_telegram',
   proposer_pause_abonnement: 'pause_abonnement',
   proposer_reprise_abonnement: 'reprise_abonnement',
+  proposer_acces_broker: 'acces_broker',
 }
 
 /** Ce que la boucle renvoie, quel que soit le canal. */
@@ -328,7 +349,31 @@ export type ReponseAgent = {
   reply: string
   etapes: { sql: string; resultat_tronque: boolean }[]
   /** Presente = une action Stripe attend une confirmation HUMAINE. */
-  action?: ActionAgent & { resume: string; cle_presente: boolean }
+  action?: ActionAgent & {
+    resume: string
+    cle_presente: boolean
+    /** cle_presente false : ce qui manque, en une phrase prete a afficher (carte et Telegram). */
+    cle_manquante?: string
+  }
+}
+
+/**
+ * Ce qui manque pour executer l'action, en une phrase, ou null si rien ne
+ * manque. Chaque type dit SA piece : l'acces broker a besoin de Resend et de
+ * la lecture Stripe (pas d'une « cle du compte telegram »), les gestes du
+ * groupe du bot Telegram, le reste de la cle d'ecriture Stripe du compte.
+ */
+function ceQuiManque(action: ActionAgent): string | null {
+  if (action.type === 'acces_broker') return prerequisAccesBroker()
+  if (action.compte === 'telegram') {
+    return cleTelegramPresente()
+      ? null
+      : "Le bot du groupe Live Club n'est pas configuré (TELEGRAM_LIVECLUB_BOT_TOKEN et TELEGRAM_LIVECLUB_CHAT_ID sur le projet journal) : rien ne peut être exécuté."
+  }
+  const compte = action.compte as CompteStripe
+  return cleAgent(compte) !== null
+    ? null
+    : `La clé d'écriture du compte ${compte} n'est pas encore posée (variable ${nomVariableCle(compte)} sur le projet journal) : rien ne peut être exécuté.`
 }
 
 /**
@@ -424,6 +469,7 @@ export async function boucleAgent(
             resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify({ erreur: action }), is_error: true })
             continue
           }
+          const manque = ceQuiManque(action)
           return {
             reply: textOf(response)
               || 'Voilà ce que je te propose — à toi de confirmer :',
@@ -431,9 +477,9 @@ export async function boucleAgent(
             action: {
               ...action,
               resume: resumeAction(action),
-              cle_presente: action.compte === 'telegram'
-                ? cleTelegramPresente()
-                : cleAgent(action.compte as CompteStripe) !== null,
+              // Acces broker : il faut Resend et la lecture Stripe, pas le
+              // bot (l'email porte le lien du bot, rien n'est fait sur le groupe).
+              ...(manque ? { cle_presente: false, cle_manquante: manque } : { cle_presente: true }),
             },
           }
         }

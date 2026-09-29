@@ -1,5 +1,8 @@
 {
   "buildCommand": "npm run build",
   "framework": "nextjs",
-  "regions": ["fra1"]
+  "regions": ["fra1"],
+  "crons": [
+    { "path": "/api/cron/liveclub", "schedule": "0 7 * * *" }
+  ]
 }

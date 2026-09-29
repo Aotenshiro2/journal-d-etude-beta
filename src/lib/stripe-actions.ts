@@ -17,6 +17,14 @@
 // de confirmation le dit au lieu d'un bouton Confirmer.
 
 import { prisma } from '@/lib/db'
+import {
+  finPeriodeAbonnement, calculerReprisePause, decouperEmails, normaliserEmail, preparerPoseDePause,
+  effacementMetadonneesPause,
+} from '@/lib/liveclub/pur'
+
+// La regle de la pause vit dans liveclub/pur.ts (testable sans base) ; elle
+// est reexportee ici pour les appelants de stripe-actions (29/09).
+export { finPeriodeAbonnement, calculerReprisePause }
 
 const API = 'https://api.stripe.com'
 
@@ -46,7 +54,8 @@ function estCompte(v: unknown): v is CompteStripe {
   return v === 'aoknowledge' || v === 'melanie'
 }
 
-async function stripeGet(cle: string, chemin: string): Promise<Record<string, unknown>> {
+/** GET Stripe (version epinglee). `chemin` porte sa query. Jette si Stripe refuse. */
+export async function stripeGet(cle: string, chemin: string): Promise<Record<string, unknown>> {
   const reponse = await fetch(`${API}${chemin}`, {
     headers: { Authorization: `Bearer ${cle}`, 'Stripe-Version': STRIPE_VERSION },
   })
@@ -58,7 +67,8 @@ async function stripeGet(cle: string, chemin: string): Promise<Record<string, un
   return json
 }
 
-async function stripePost(
+/** POST Stripe en form-urlencoded (version epinglee). Jette si Stripe refuse. */
+export async function stripePost(
   cle: string,
   chemin: string,
   corps: Record<string, string>,
@@ -90,8 +100,10 @@ export type ActionAgent = {
   type: 'code_promo' | 'remboursement' | 'produit' | 'revoquer_code'
     | 'retirer_telegram' | 'reintegrer_telegram'
     | 'pause_abonnement' | 'reprise_abonnement'
-  // 'telegram' pour les deux actions du groupe Live Club — pas un compte
-  // Stripe, mais la carte de confirmation affiche d'ou vient le pouvoir.
+    | 'acces_broker'
+  // 'telegram' pour les actions du groupe Live Club (retrait, reintegration,
+  // acces broker) : pas un compte Stripe, mais la carte de confirmation
+  // affiche d'ou vient le pouvoir.
   compte: CompteStripe | 'telegram'
   params: Record<string, unknown>
 }
@@ -195,10 +207,10 @@ function relationAbsente(err: unknown): boolean {
  * migration il ne peut pas y en avoir), toute autre erreur remonte : on ne
  * retire personne sur une lecture ratee.
  */
-async function exemptionActive(telegramId: number): Promise<{ motif: string } | null> {
+export async function exemptionActive(telegramId: number): Promise<{ motif: string; jusquau: Date | null } | null> {
   try {
-    const lignes = await prisma.$queryRaw<{ motif: string }[]>`
-      select motif from public.cockpit_liveclub_exemptions
+    const lignes = await prisma.$queryRaw<{ motif: string; jusquau: Date | null }[]>`
+      select motif, jusquau from public.cockpit_liveclub_exemptions
       where telegram_id = ${telegramId}
         and retire_le is null
         and (jusquau is null or jusquau >= current_date)
@@ -357,26 +369,70 @@ export async function reintegrerAuLiveClub(telegramId: number): Promise<IssueGes
 }
 
 /**
+ * Les valeurs de cockpit_liveclub_gestes.geste. Les quatre dernieres
+ * (acces_broker, arret_annule, invitation, fin_acces) demandent la migration
+ * 20260929200300 : avant elle, l'insert bute sur le check et la ligne est
+ * perdue (loggue), jamais le geste.
+ */
+export type GesteJournal =
+  | 'retrait' | 'reintegration' | 'entree_acceptee' | 'entree_refusee'
+  | 'pause' | 'arret' | 'reprise' | 'rappel' | 'refus'
+  | 'acces_broker' | 'arret_annule' | 'invitation' | 'fin_acces'
+
+export type ResultatGeste = 'fait' | 'refuse' | 'echec' | 'simule'
+
+/** Une ligne de journal qui ne vient pas de retirerDuLiveClub / reintegrerAuLiveClub. */
+export type EntreeJournalLiveClub = {
+  geste: GesteJournal
+  resultat: ResultatGeste
+  regle?: string | null
+  /** JAMAIS de texte de message, de lien d'invitation ni d'email. */
+  details?: Record<string, unknown>
+}
+
+export type ContexteJournalLiveClub = {
+  telegramId: number | null
+  membreId?: string | null
+  acteur: string
+  abonnementId?: string | null
+  /** update_id Telegram : unique en base, un update rejoue ne trace pas deux fois. */
+  updateId?: number | null
+  /** Remplace le geste deduit d'une IssueGesteLiveClub (ex. un retrait du passage quotidien trace en 'fin_acces'). */
+  geste?: GesteJournal
+  /** Remplace la regle d'une IssueGesteLiveClub (ex. 'pause' au lieu de 'manuel'). */
+  regle?: string
+}
+
+/**
  * Une ligne par tentative dans cockpit_liveclub_gestes (SQL brut, comme les
  * autres ecritures serveur). Ne jette JAMAIS : si la table manque (migration
  * 20260929190200 pas appliquee) ou si l'insert echoue, on le loggue et le
  * geste garde sa reponse. Ni le lien ni le message ne sont ecrits.
+ * Renvoie 'doublon' quand l'update_id est deja trace (rien n'est ecrit).
  */
 export async function journaliserGesteLiveClub(
-  issue: IssueGesteLiveClub,
-  contexte: { telegramId: number | null; membreId?: string | null; acteur: string },
-): Promise<void> {
-  const geste = issue.geste === 'retirer' ? 'retrait' : 'reintegration'
-  const resultat = issue.ok ? 'fait' : issue.resultat
+  issue: IssueGesteLiveClub | EntreeJournalLiveClub,
+  contexte: ContexteJournalLiveClub,
+): Promise<'ecrit' | 'doublon' | 'echec'> {
+  const deIssue = 'ok' in issue
+  const geste: GesteJournal = contexte.geste
+    ?? (deIssue ? (issue.geste === 'retirer' ? 'retrait' : 'reintegration') : issue.geste)
+  const resultat: ResultatGeste = deIssue ? (issue.ok ? 'fait' : issue.resultat) : issue.resultat
+  const regle = contexte.regle ?? issue.regle ?? null
+  const details = issue.details ?? {}
   try {
-    await prisma.$executeRaw`
+    const n = await prisma.$executeRaw`
       insert into public.cockpit_liveclub_gestes
-        (telegram_id, membre_id, geste, resultat, acteur, regle, details)
-      values (${contexte.telegramId}, ${contexte.membreId ?? null}::uuid, ${geste}, ${resultat},
-              ${contexte.acteur}, ${issue.regle}, ${JSON.stringify(issue.details)}::jsonb)`
+        (telegram_id, membre_id, abonnement_id, geste, resultat, acteur, regle, update_id, details)
+      values (${contexte.telegramId}, ${contexte.membreId ?? null}::uuid, ${contexte.abonnementId ?? null},
+              ${geste}, ${resultat}, ${contexte.acteur}, ${regle}, ${contexte.updateId ?? null},
+              ${JSON.stringify(details)}::jsonb)
+      on conflict (update_id) do nothing`
+    return n === 0 ? 'doublon' : 'ecrit'
   } catch (err) {
     console.warn(`[liveclub/gestes] journalisation impossible (${geste} u${contexte.telegramId ?? '?'} ${resultat})`
       + `${relationAbsente(err) ? ' : table absente, migration 20260929190200 pas appliquee' : ` : ${messageErreur(err)}`}`)
+    return 'echec'
   }
 }
 
@@ -395,6 +451,26 @@ export function validerAction(brut: unknown): ActionAgent | string {
     const qui = String(p.qui ?? '').trim().slice(0, 80)
     if (!qui) return 'Précise QUI (nom ou pseudo) pour que la carte de confirmation soit lisible.'
     return { type: a.type, compte: 'telegram', params: { telegram_id: telegramId, qui } }
+  }
+
+  // Acces broker (RaiseFx, 29/09) : une liste d'emails colles par Melanie.
+  // Liste ou texte (un par ligne, virgules) ; une seule adresse illisible et
+  // c'est un refus, pour que le modele la montre au lieu de l'avaler.
+  if (a.type === 'acces_broker') {
+    const brut = p.emails
+    const morceaux = Array.isArray(brut)
+      ? brut.flatMap(e => decouperEmails(String(e ?? '')))
+      : typeof brut === 'string' ? decouperEmails(brut) : []
+    if (morceaux.length === 0) return 'emails : au moins une adresse.'
+    const invalides = morceaux.filter(e => !normaliserEmail(e))
+    if (invalides.length) {
+      return `Adresse(s) illisible(s) : ${invalides.slice(0, 5).map(e => e.slice(0, 80)).join(', ')}. `
+        + `Corrige-les ou retire-les, puis repropose.`
+    }
+    const emails = [...new Set(morceaux.map(e => normaliserEmail(e) as string))]
+    if (emails.length > 50) return '50 emails au plus par carte : découpe la liste.'
+    const note = p.note == null ? null : String(p.note).trim().slice(0, 200) || null
+    return { type: 'acces_broker', compte: 'telegram', params: { emails, note } }
   }
 
   if (!estCompte(a.compte)) return 'Compte inconnu : aoknowledge ou melanie.'
@@ -527,6 +603,15 @@ export function resumeAction(a: ActionAgent): string {
     return `Réintégrer ${p.qui} (u${p.telegram_id}) dans le groupe Live Club : levée du ban s'il y en a un `
       + `(celui de Metricgram compris) + lien d'invitation à usage unique (14 jours) à lui transmettre.`
   }
+  if (a.type === 'acces_broker') {
+    const emails = (p.emails as string[]) ?? []
+    return `Accorder 6 mois d'accès broker au Live Club, à partir d'aujourd'hui, à ${emails.length} `
+      + `adresse${emails.length > 1 ? 's' : ''} : ${emails.join(', ')}. `
+      + `Chacune reçoit un email de support@ avec son lien personnel vers le bot. `
+      + `Non renouvelable : une adresse qui a déjà eu un accès broker est refusée, `
+      + `et une adresse déjà abonnée est signalée sans rien accorder.`
+      + (p.note ? ` Note : ${p.note}` : '')
+  }
   return `Créer le produit « ${p.nom} » à ${p.montant} ${String(p.devise).toUpperCase()}${p.recurrence ? `/${p.recurrence === 'month' ? 'mois' : 'an'}` : ' (comptant)'} sur le compte ${a.compte}.`
 }
 
@@ -580,6 +665,46 @@ export async function executerAction(a: ActionAgent, acteur = 'agent'): Promise<
       : `${a.params.qui} : ${issue.message} La table cockpit_telegram_membres l'enregistrera au prochain événement.`
   }
 
+  // ── Acces broker (RaiseFx) ────────────────────────────────────────────────
+  // Meme fonction que le formulaire du cockpit. Import dynamique : acces.ts
+  // importe deja ce fichier (journaliserGesteLiveClub), on evite le cycle.
+  if (a.type === 'acces_broker') {
+    const { accorderAccesBroker, prerequisAccesBroker } = await import('@/lib/liveclub/acces')
+    const manque = prerequisAccesBroker()
+    if (manque) throw new Error(manque)
+    const emails = (a.params.emails as string[]) ?? []
+    const resultats = await accorderAccesBroker(emails, {
+      acteur, note: typeof a.params.note === 'string' ? a.params.note : null,
+    })
+    const lignes = resultats.map(r => {
+      switch (r.resultat) {
+        case 'accorde':
+          return `${r.email} : ${r.renvoi ? 'accès déjà accordé, invitation renvoyée,' : 'accordé'} jusqu'au ${r.jusquau}`
+            + (r.emailEnvoye ? ', email parti' : `, ATTENTION email PAS parti (${r.erreur ?? '?'})`)
+        case 'deja_accorde':
+          return `${r.email} : déjà eu un accès broker${r.jusquau ? ` (jusqu'au ${r.jusquau})` : ''}, non renouvelable, rien fait`
+        case 'deja_abonne':
+          return `${r.email} : déjà abonné au Live Club, rien accordé`
+        case 'invalide':
+          return `${r.email} : adresse illisible, rien fait`
+        default:
+          return `${r.email} : échec, rien accordé (${r.erreur ?? '?'})`
+      }
+    })
+    const accordes = resultats.filter(r => r.resultat === 'accorde' && !r.renvoi).length
+    // Tout en echec (base ou Stripe illisible) : c'est une panne, pas un succes.
+    if (resultats.length > 0 && resultats.every(r => r.resultat === 'echec')) {
+      throw new Error(`Aucun accès accordé.\n${lignes.join('\n')}`)
+    }
+    // Un message Telegram tient en 4 096 caracteres : au-dela de 25 adresses,
+    // on ne detaille que ce qui n'est pas un accord propre.
+    const detail = resultats.length > 25
+      ? lignes.filter((_l, i) => !(resultats[i].resultat === 'accorde' && resultats[i].emailEnvoye))
+      : lignes
+    return `Accès broker : ${accordes} accordé${accordes > 1 ? 's' : ''} sur ${resultats.length}.`
+      + (detail.length ? `\n${detail.join('\n')}` : ' Tous les emails sont partis.')
+  }
+
   const cle = cleAgent(a.compte as CompteStripe)
   if (!cle) {
     throw new Error(
@@ -594,7 +719,14 @@ export async function executerAction(a: ActionAgent, acteur = 'agent'): Promise<
 
     if (a.type === 'reprise_abonnement') {
       // Vider pause_collection = lever la pause. Le prochain cycle preleve.
-      await stripePost(cle, `/v1/subscriptions/${abo}`, { pause_collection: '' })
+      // Dans le MEME appel, effacer les metadonnees qui dataient la pause
+      // (liveclub/pur.ts) : laissees en place, une pause posee plus tard au
+      // Dashboard reprendrait cette fin payee perimee et sortirait un membre
+      // qui a paye.
+      await stripePost(cle, `/v1/subscriptions/${abo}`, {
+        pause_collection: '',
+        ...effacementMetadonneesPause(),
+      })
       return `Pause levée pour ${p.qui} : les prélèvements reprennent au prochain cycle. `
         + `La réintégration Telegram reste un geste séparé (proposer_reintegrer_telegram).`
     }
@@ -609,20 +741,17 @@ export async function executerAction(a: ActionAgent, acteur = 'agent'): Promise<
     if (!['active', 'trialing', 'past_due'].includes(statut)) {
       throw new Error(`L'abonnement est « ${statut} » : on ne met en pause qu'un abonnement vivant.`)
     }
-    const items = (sub.items as { data?: { current_period_end?: number }[] })?.data ?? []
-    const finPeriode = items[0]?.current_period_end
-      ?? (sub as { current_period_end?: number }).current_period_end
-    if (!finPeriode) throw new Error('Fin de période introuvable sur l’abonnement.')
 
-    const reprise = new Date(finPeriode * 1000)
-    reprise.setUTCMonth(reprise.getUTCMonth() + Number(p.nb_mois))
-    await stripePost(cle, `/v1/subscriptions/${abo}`, {
-      'pause_collection[behavior]': 'void',
-      'pause_collection[resumes_at]': String(Math.floor(reprise.getTime() / 1000)),
-    })
+    // MEME pose que pauser() du bot (preparerPoseDePause, liveclub/pur.ts) :
+    // pause_collection et les metadonnees qui datent le debut de la pause
+    // (META_PAUSE_PAYE_JUSQUAU, META_PAUSE_REPRISE), dans le meme appel. Sans
+    // elles, le bot du Live Club ne sait pas quand la periode payee se termine
+    // et ne sort personne. Refuse une pause deja posee.
+    const pose = preparerPoseDePause(sub, Number(p.nb_mois))
+    await stripePost(cle, `/v1/subscriptions/${abo}`, pose.corps)
     const fmt = (d: Date) => d.toISOString().slice(0, 10)
-    return `Abonnement de ${p.qui} en pause : payé jusqu'au ${fmt(new Date(finPeriode * 1000))}, `
-      + `reprise automatique des prélèvements le ${fmt(reprise)}. Visible dans le cockpit après la `
+    return `Abonnement de ${p.qui} en pause : payé jusqu'au ${fmt(new Date(pose.finPeriodeSec * 1000))}, `
+      + `reprise automatique des prélèvements le ${fmt(pose.reprise)}. Visible dans le cockpit après la `
       + `prochaine collecte. ⚠️ Le retrait du Telegram à la fin de la période payée reste un geste `
       + `séparé tant que le raccord n'est pas construit.`
   }

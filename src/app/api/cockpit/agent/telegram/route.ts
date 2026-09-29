@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { randomUUID } from 'node:crypto'
+import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db'
 import { boucleAgent } from '@/lib/agent-cockpit'
 import { validerAction, executerAction, RefusAction, expurgerLiensInvitation } from '@/lib/stripe-actions'
@@ -72,6 +73,27 @@ async function chargerConversation(chatId: number): Promise<LigneConversation | 
   return lignes[0] ?? null
 }
 
+// HISTORIQUE EN AJOUT, JAMAIS EN REECRITURE (29/09) : l'agent peut reflechir
+// deux minutes sur un message texte, et un clic Confirmer peut tomber pendant
+// ce temps. Si chaque chemin reecrivait l'historique qu'il a lu au depart, le
+// dernier a ecrire effacerait les lignes de l'autre, dont la ligne « ✓ » d'un
+// remboursement fait : au tour suivant, le modele ne saurait plus qu'il est
+// fait et pourrait le reproposer. Chaque ecriture AJOUTE donc ses messages a
+// l'historique present en base au moment de l'ecriture, et la borne aux
+// MAX_MESSAGES_CONSERVES derniers est appliquee en SQL, dans la meme
+// instruction.
+function historiqueAvecAjout(actuel: Prisma.Sql, ajout: Prisma.Sql): Prisma.Sql {
+  const tout = Prisma.sql`((case when jsonb_typeof(${actuel}) = 'array' then ${actuel} else '[]'::jsonb end) || ${ajout})`
+  return Prisma.sql`(select coalesce(jsonb_agg(e order by i), '[]'::jsonb)
+    from jsonb_array_elements(${tout}) with ordinality as a(e, i)
+    where i > jsonb_array_length(${tout}) - ${MAX_MESSAGES_CONSERVES}::int)`
+}
+
+// Dans un « on conflict do update » : l'historique de la ligne existante,
+// complete par les messages que porte l'insert. Les inserts qui l'utilisent
+// nomment la table « c » (insert into ... as c).
+const HISTORIQUE_UPSERT = historiqueAvecAjout(Prisma.raw('c.messages'), Prisma.raw('excluded.messages'))
+
 export async function POST(req: NextRequest) {
   // Verrou 1 : la requete vient bien de Telegram.
   const secret = process.env.TELEGRAM_WEBHOOK_SECRET?.trim()
@@ -100,10 +122,31 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true })
     }
 
-    const conv = await chargerConversation(chatId)
     const [verbe, nonce] = donnee.split(':')
-    if (!conv || !conv.action_en_attente || !nonce || nonce !== conv.nonce) {
-      await acquitter('Cette action n’est plus en attente.')
+    if (!nonce || (verbe !== 'ok' && verbe !== 'non')) {
+      await acquitter('Cette action n\'est plus en attente.')
+      return NextResponse.json({ ok: true })
+    }
+
+    // CONSOMMATION ATOMIQUE AVANT EXECUTION (29/09) : la carte est retiree de
+    // la conversation par UN update conditionne au nonce, et seul l'appel qui
+    // recupere la ligne va plus loin. Deux clics rapproches, ou un rejeu
+    // Telegram du meme callback, arrivent chacun ici : le premier emporte
+    // l'action, le second ne trouve plus rien (nonce deja a null) et n'execute
+    // rien. Avant, on lisait la carte, on executait, puis on la remettait a
+    // zero : pendant l'execution, une seconde requete voyait encore la carte,
+    // d'ou un remboursement possible en double. Annuler passe par la meme
+    // porte, pour qu'un Annuler et un Confirmer croises ne fassent pas les deux.
+    // Contrepartie assumee : si l'execution tombe en panne, la carte est
+    // perdue et il faut la redemander a l'agent. On ne rejoue jamais seul un
+    // geste qui a pu partir a moitie.
+    const consommee = await prisma.$queryRaw<{ action_en_attente: unknown }[]>`
+      update public.cockpit_agent_conversations
+      set action_en_attente = null, nonce = null, maj_le = now()
+      where chat_id = ${chatId} and nonce = ${nonce} and action_en_attente is not null
+      returning action_en_attente`
+    if (consommee.length === 0) {
+      await acquitter('Cette action n\'est plus en attente.')
       return NextResponse.json({ ok: true })
     }
 
@@ -111,13 +154,15 @@ export async function POST(req: NextRequest) {
     if (verbe === 'ok') {
       // Revalidation stricte : ce qui s'execute est ce qui a ete valide, pas
       // ce que porte le message Telegram.
-      const action = validerAction(conv.action_en_attente)
+      const action = validerAction(consommee[0].action_en_attente)
       if (typeof action === 'string') {
         issue = `Action refusée : ${action}`
       } else {
         try {
           issue = `✓ ${await executerAction(action, `agent:${compte[0].user_id}`)}`
-          console.log(`[cockpit/telegram/action] ${compte[0].user_id} ${action.type} ${action.compte}`, action.params)
+          // Acces broker : le nombre d'adresses, jamais les adresses.
+          console.log(`[cockpit/telegram/action] ${compte[0].user_id} ${action.type} ${action.compte}`,
+            action.type === 'acces_broker' ? { emails: (action.params.emails as string[]).length } : action.params)
         } catch (err) {
           issue = err instanceof RefusAction
             ? `Rien n’a été fait. ${err.message}`
@@ -128,19 +173,29 @@ export async function POST(req: NextRequest) {
       issue = '(action annulée, rien n’a été exécuté)'
     }
 
-    const messages = (Array.isArray(conv.messages) ? conv.messages : []) as MessageStocke[]
-    // L'humain recoit le lien d'invitation (sendMessage plus bas), la
-    // conversation conservee en base n'en garde qu'une mention.
-    messages.push({ role: 'assistant', content: expurgerLiensInvitation(issue) })
-    await prisma.$executeRaw`
-      update public.cockpit_agent_conversations
-      set action_en_attente = null, nonce = null,
-          messages = ${JSON.stringify(messages.slice(-MAX_MESSAGES_CONSERVES))}::jsonb,
-          maj_le = now()
-      where chat_id = ${chatId}`
-
+    // LE RESULTAT PART D'ABORD (29/09) : la carte est deja consommee, donc si
+    // la route tombait ici en 500, le rejeu Telegram ne trouverait plus rien
+    // et l'humain ne verrait que « plus en attente », sans le resultat ni le
+    // lien d'invitation, qui n'existe nulle part ailleurs. L'ecriture de
+    // l'historique vient apres, et son echec est journalise sans rien casser.
     await acquitter()
     await tg('sendMessage', { chat_id: chatId, text: issue })
+
+    // Ajout a l'historique present en base, pas reecriture d'un historique lu
+    // plus tot (voir historiqueAvecAjout). Cet update ne touche qu'aux
+    // messages : une nouvelle carte proposee entre-temps garde son action et
+    // son nonce. L'humain a recu le lien d'invitation ci-dessus, la
+    // conversation conservee n'en garde qu'une mention.
+    try {
+      const ligne = JSON.stringify([{ role: 'assistant', content: expurgerLiensInvitation(issue) }])
+      await prisma.$executeRaw`
+        update public.cockpit_agent_conversations
+        set messages = ${historiqueAvecAjout(Prisma.raw('messages'), Prisma.sql`${ligne}::jsonb`)},
+            maj_le = now()
+        where chat_id = ${chatId}`
+    } catch (err) {
+      console.error('[cockpit/telegram] historique apres action', err)
+    }
     return NextResponse.json({ ok: true })
   }
 
@@ -188,6 +243,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true })
   }
 
+  // Cet instantane ne sert QU'AU MODELE : il n'est jamais reecrit en base.
+  // En fin de tour, seuls les deux messages de ce tour (question et reponse)
+  // sont ajoutes a l'historique present en base a ce moment-la (voir
+  // historiqueAvecAjout), pour ne pas effacer une ligne « ✓ » ecrite par un
+  // clic Confirmer pendant que l'agent reflechissait.
   const messages = (Array.isArray(conv?.messages) ? conv!.messages : []) as MessageStocke[]
   messages.push({ role: 'user', content: texte })
 
@@ -221,19 +281,29 @@ export async function POST(req: NextRequest) {
   }
 
   clearInterval(battement)
-  messages.push({ role: 'assistant', content: reponse.reply })
+  // Les deux messages de ce tour, les seuls que ce chemin ecrit en base. Un
+  // rejeu Telegram du MEME update, traite en parallele, n'ajoute rien une
+  // seconde fois : la clause where de chaque upsert l'ecarte quand ce
+  // update_id est deja ecrit.
+  const tour = JSON.stringify([
+    { role: 'user', content: texte },
+    { role: 'assistant', content: reponse.reply },
+  ] satisfies MessageStocke[])
 
   if (reponse.action) {
-    const { resume, cle_presente, ...action } = reponse.action
+    const { resume, cle_presente, cle_manquante, ...action } = reponse.action
     if (!cle_presente) {
       await prisma.$executeRaw`
-        insert into public.cockpit_agent_conversations (chat_id, telegram_id, messages, dernier_update_id)
-        values (${chatId}, ${telegramId}, ${JSON.stringify(messages.slice(-MAX_MESSAGES_CONSERVES))}::jsonb, ${updateId})
+        insert into public.cockpit_agent_conversations as c (chat_id, telegram_id, messages, dernier_update_id)
+        values (${chatId}, ${telegramId}, ${tour}::jsonb, ${updateId})
         on conflict (chat_id) do update
-        set messages = excluded.messages, dernier_update_id = ${updateId}, maj_le = now()`
+        set messages = ${HISTORIQUE_UPSERT},
+            dernier_update_id = greatest(c.dernier_update_id, excluded.dernier_update_id), maj_le = now()
+        where c.dernier_update_id is distinct from excluded.dernier_update_id`
       await tg('sendMessage', {
         chat_id: chatId,
-        text: `${reponse.reply}\n\n⚠️ ${resume}\n\nLa clé d'écriture du compte ${action.compte} n'est pas posée : rien ne peut être exécuté.`,
+        text: `${reponse.reply}\n\n⚠️ ${resume}\n\n${cle_manquante
+          ?? `La clé d'écriture du compte ${action.compte} n'est pas posée : rien ne peut être exécuté.`}`,
       })
       return NextResponse.json({ ok: true })
     }
@@ -242,13 +312,15 @@ export async function POST(req: NextRequest) {
     // message a CETTE action ; une nouvelle proposition remplace l'ancienne.
     const nonce = randomUUID().slice(0, 8)
     await prisma.$executeRaw`
-      insert into public.cockpit_agent_conversations
+      insert into public.cockpit_agent_conversations as c
         (chat_id, telegram_id, messages, action_en_attente, nonce, dernier_update_id)
-      values (${chatId}, ${telegramId}, ${JSON.stringify(messages.slice(-MAX_MESSAGES_CONSERVES))}::jsonb,
+      values (${chatId}, ${telegramId}, ${tour}::jsonb,
               ${JSON.stringify(action)}::jsonb, ${nonce}, ${updateId})
       on conflict (chat_id) do update
-      set messages = excluded.messages, action_en_attente = excluded.action_en_attente,
-          nonce = excluded.nonce, dernier_update_id = ${updateId}, maj_le = now()`
+      set messages = ${HISTORIQUE_UPSERT}, action_en_attente = excluded.action_en_attente,
+          nonce = excluded.nonce,
+          dernier_update_id = greatest(c.dernier_update_id, excluded.dernier_update_id), maj_le = now()
+      where c.dernier_update_id is distinct from excluded.dernier_update_id`
     await tg('sendMessage', {
       chat_id: chatId,
       text: `${reponse.reply}\n\n⚠️ ${resume}`,
@@ -263,11 +335,12 @@ export async function POST(req: NextRequest) {
   }
 
   await prisma.$executeRaw`
-    insert into public.cockpit_agent_conversations (chat_id, telegram_id, messages, dernier_update_id)
-    values (${chatId}, ${telegramId}, ${JSON.stringify(messages.slice(-MAX_MESSAGES_CONSERVES))}::jsonb, ${updateId})
+    insert into public.cockpit_agent_conversations as c (chat_id, telegram_id, messages, dernier_update_id)
+    values (${chatId}, ${telegramId}, ${tour}::jsonb, ${updateId})
     on conflict (chat_id) do update
-    set messages = excluded.messages, action_en_attente = null, nonce = null,
-        dernier_update_id = ${updateId}, maj_le = now()`
+    set messages = ${HISTORIQUE_UPSERT}, action_en_attente = null, nonce = null,
+        dernier_update_id = greatest(c.dernier_update_id, excluded.dernier_update_id), maj_le = now()
+    where c.dernier_update_id is distinct from excluded.dernier_update_id`
   await tg('sendMessage', { chat_id: chatId, text: reponse.reply })
   return NextResponse.json({ ok: true })
 }

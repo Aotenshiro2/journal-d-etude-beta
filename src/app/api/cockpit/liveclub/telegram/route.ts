@@ -1,24 +1,33 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { traiterBouton, traiterDemandeAdhesion, traiterMessagePrive } from '@/lib/liveclub/bot-membre'
 
-// Webhook du bot ADMIN du groupe Telegram Live Club (chantier du 10/09).
+// Webhook du bot du groupe Telegram Live Club, @aok_liveclub_bot (chantier du
+// 10/09, etendu le 29/09).
 //
-// Il ne fait qu'UNE chose : tenir `cockpit_telegram_membres` a jour au fil
-// des entrees et sorties. Il ne recoit QUE les evenements d'adhesion
-// (allowed_updates=chat_member au setWebhook) — AUCUN message du groupe ne
-// passe par ici, par construction : la table dit QUI est la, jamais ce qui
-// s'y dit.
+// Deux metiers sur le meme webhook :
+// 1. tenir `cockpit_telegram_membres` a jour au fil des entrees et sorties
+//    (chat_member, my_chat_member) : comportement du 10/09, inchange ;
+// 2. depuis le 29/09, le bot des MEMBRES (lib/liveclub/bot-membre.ts) :
+//    demandes d'adhesion nees de nos liens, /start avec le jeton personnel,
+//    menu a boutons, confirmations, agent Haiku en prive.
+//
+// PREMIERE REGLE, avant tout le reste : un message qui n'est pas prive est
+// ignore sans log ni ecriture. Le bot est admin du groupe et "message" est
+// ecoute pour le prive : sans ce filtre, tout ce qui se dit dans le groupe
+// passerait par ici. La table dit QUI est la, jamais ce qui s'y dit.
 //
 // C'est un bot DIFFERENT de l'agent (@aok_cockpit_bot) : l'agent parle en
-// prive a Brice et Melanie, celui-ci vit dans un groupe de membres. Meler
-// les deux aurait mis le webhook de l'agent sous le bruit du groupe.
+// prive a Brice et Melanie, celui-ci aux membres du groupe.
 //
 // Verrous : le secret de webhook, et le chat_id du groupe quand il est
-// connu (TELEGRAM_LIVECLUB_CHAT_ID) — un update d'un autre chat est ignore.
+// connu (TELEGRAM_LIVECLUB_CHAT_ID) : un update d'un autre chat est ignore.
 // Tant que la variable n'est pas posee, on loggue le chat.id observe pour
 // pouvoir la poser (premier evenement = decouverte de l'identifiant).
 
-export const maxDuration = 30
+// 60 s : une reponse de l'agent (Haiku, quelques outils) doit tenir avant que
+// Telegram ne rejoue le webhook.
+export const maxDuration = 60
 
 // Les six statuts de ChatMember, ceux qu'accepte la contrainte de statut_tg.
 const STATUTS_TG: unknown[] = ['creator', 'administrator', 'member', 'restricted', 'left', 'kicked']
@@ -31,10 +40,37 @@ export async function POST(req: NextRequest) {
 
   const update = await req.json().catch(() => ({}))
 
+  // (1) Hors prive : rien, tout de suite, sans log ni ecriture.
+  if (update.message && update.message.chat?.type !== 'private') {
+    return NextResponse.json({ ok: true })
+  }
+
+  const updateId = Number(update.update_id)
+  const idLisible = Number.isSafeInteger(updateId)
+
+  // Bot des membres. Une panne ici ne doit jamais faire rejouer l'update en
+  // boucle par Telegram : on loggue (sans texte ni identifiant de membre) et
+  // on repond 200. Le dedoublonnage (2) vit dans chaque traitement.
+  if (update.message || update.callback_query || update.chat_join_request) {
+    if (!idLisible) return NextResponse.json({ ok: true })
+    try {
+      if (update.message) await traiterMessagePrive(update.message, updateId)
+      else if (update.callback_query) await traiterBouton(update.callback_query, updateId)
+      else await traiterDemandeAdhesion(update.chat_join_request, updateId)
+    } catch (err) {
+      const genre = update.message ? 'message' : update.callback_query ? 'bouton' : 'demande'
+      console.error(`[liveclub/telegram] ${genre} non traite : ${(err instanceof Error ? err.message : String(err)).split('\n')[0].slice(0, 200)}`)
+    }
+    return NextResponse.json({ ok: true })
+  }
+
   // `my_chat_member` = le statut du BOT change (ajoute au groupe, promu
   // admin…) : c'est le moment ou on decouvre le chat_id du groupe.
   if (update.my_chat_member) {
     const chat = update.my_chat_member.chat
+    // En prive, my_chat_member = un membre qui bloque ou debloque le bot :
+    // rien a decouvrir, et rien a logguer sur lui.
+    if (chat?.type === 'private') return NextResponse.json({ ok: true })
     console.log(`[liveclub/telegram] bot ${update.my_chat_member.new_chat_member?.status} `
       + `dans « ${chat?.title} » — chat_id ${chat?.id} (a poser en TELEGRAM_LIVECLUB_CHAT_ID)`)
     return NextResponse.json({ ok: true })

@@ -166,9 +166,9 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  let reponse: Awaited<ReturnType<typeof boucleAgent>>
   try {
-    const reponse = await boucleAgent(historique, userId)
-    return NextResponse.json(reponse, { headers: cors })
+    reponse = await boucleAgent(historique, userId)
   } catch (err) {
     console.error('[cockpit/agent]', err)
     return NextResponse.json(
@@ -176,4 +176,45 @@ export async function POST(req: NextRequest) {
       { status: 502, headers: cors },
     )
   }
+
+  // CARTE A USAGE UNIQUE (29/09) : une action executable est memorisee cote
+  // serveur, et le front ne recoit que son carte_id pour la confirmer.
+  // /api/cockpit/agent/action la consomme par un update atomique avant
+  // d'executer : un double clic ou un second essai ne peut pas la jouer deux
+  // fois. Sans cle posee, pas de bouton, donc pas de carte a memoriser.
+  //
+  // Hors du try de l'agent, et avec son propre catch : si l'enregistrement
+  // echoue (table absente tant que la migration n'est pas appliquee, base
+  // injoignable), la reponse de l'agent, deja payee, est rendue quand meme,
+  // et la carte arrive SANS bouton, avec la vraie raison. Sinon l'erreur
+  // tombait dans le message « service IA indisponible », qui aiguille vers
+  // la mauvaise panne et pousse a relancer un appel paye pour rien.
+  if (reponse.action?.cle_presente) {
+    const { type, compte, params } = reponse.action
+    try {
+      const carte = await prisma.$queryRaw<{ carte_id: string }[]>`
+        insert into public.cockpit_agent_cartes (user_id, action)
+        values (${userId}::uuid, ${JSON.stringify({ type, compte, params })}::jsonb)
+        returning carte_id::text as carte_id`
+      return NextResponse.json(
+        { ...reponse, action: { ...reponse.action, carte_id: carte[0].carte_id } },
+        { headers: cors },
+      )
+    } catch (err) {
+      console.error('[cockpit/agent] enregistrement de la carte', err)
+      return NextResponse.json(
+        {
+          ...reponse,
+          action: {
+            ...reponse.action,
+            cle_presente: false,
+            cle_manquante:
+              "Carte non enregistrée côté serveur (erreur de la base) : cette action ne peut pas être confirmée. Redemande-la dans un instant, et si ça se répète, vérifie que la migration cockpit_agent_cartes est appliquée.",
+          },
+        },
+        { headers: cors },
+      )
+    }
+  }
+  return NextResponse.json(reponse, { headers: cors })
 }
