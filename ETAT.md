@@ -14,8 +14,8 @@ cle anon est publique.
    OUVERTE.** Pas de RLS, anon et authenticated ont tous les droits (herites
    des privileges par defaut du schema public). Lecture verifiee de
    l exterieur (HTTP 200 avec la cle anon), ecriture deduite du catalogue.
-   0 ligne a la mesure : rien n a fuite. Fermeture ECRITE, NON APPLIQUEE,
-   attend le GO de Brice :
+   0 ligne a la mesure : rien n a fuite. FERMEE le 30/09 sur GO de Brice
+   (lecture anon passee de HTTP 200 a 401, le journal lit toujours) :
    `sites/Aoknowledgecom/supabase/migrations/20260930120000_trade_import_fermer.sql`
    (RLS + revoke anon/authenticated ; le journal lit en postgres bypassrls,
    donc sans effet pour lui). Le script de creation
