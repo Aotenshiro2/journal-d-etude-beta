@@ -141,7 +141,12 @@ export type AbonnementResume = {
    * rien encaisse ou si un avoir l'a suivie. Voir finPayeeTerminee.
    */
   payeJusquau: string | null
-  derniereFacture: { statut: string; payeeLe: string | null } | null
+  /**
+   * finaliseeLe (30/09) : finalisation de la facture (status_transitions.
+   * finalized_at, repli sur created), pour savoir si elle etait deja due au
+   * moment d'une sortie du groupe.
+   */
+  derniereFacture: { statut: string; payeeLe: string | null; finaliseeLe: string | null } | null
   /**
    * Prix d'une periode d'apres les items (unit_amount x quantity, en
    * centimes), AVANT remise. null si un item n'a pas de prix unitaire (palier,
@@ -159,6 +164,15 @@ export type AbonnementResume = {
    * droit d'aujourd'hui existait deja a une date passee (sortie Metricgram).
    */
   debutLe: string | null
+  /** Creation de l'abonnement chez Stripe (created), ISO : rattrapage des emails de bienvenue. */
+  creeLe: string | null
+  /**
+   * Impayes (Brice, 30/09), pour un abonnement past_due ou unpaid seulement :
+   * ses factures ouvertes lues (lireImpaye). Absent = pas lu (abonnement a
+   * jour, ou lecture pas faite) ; 'illisible' = la lecture a echoue. Pose par
+   * stripe.ts (completerImpaye), jamais par resumerAbonnement. Voir etatImpaye.
+   */
+  impaye?: Impaye | 'illisible'
 }
 
 function isoDepuisSec(s: unknown): string | null {
@@ -486,10 +500,14 @@ export function resumerAbonnement(
     && (pause?.resumes_at == null || pause.resumes_at * 1000 > Date.now())
 
   const facture = sub.latest_invoice && typeof sub.latest_invoice === 'object'
-    ? sub.latest_invoice as { status?: string; status_transitions?: { paid_at?: number | null } }
+    ? sub.latest_invoice as { status?: string; created?: number; status_transitions?: { paid_at?: number | null; finalized_at?: number | null } }
     : null
   const derniereFacture = facture
-    ? { statut: String(facture.status ?? ''), payeeLe: isoDepuisSec(facture.status_transitions?.paid_at) }
+    ? {
+      statut: String(facture.status ?? ''),
+      payeeLe: isoDepuisSec(facture.status_transitions?.paid_at),
+      finaliseeLe: isoDepuisSec(facture.status_transitions?.finalized_at) ?? isoDepuisSec(facture.created),
+    }
     : null
 
   const client = typeof sub.customer === 'string'
@@ -520,6 +538,7 @@ export function resumerAbonnement(
     periodicite: periodiciteAbonnement(sub),
     prelevementAuto: sub.collection_method !== 'send_invoice',
     debutLe: isoDepuisSec(sub.start_date) ?? isoDepuisSec(sub.created),
+    creeLe: isoDepuisSec(sub.created),
   }
 }
 
@@ -528,9 +547,18 @@ export function resumerAbonnement(
  * pause effective (une pause laisse 'active' chez Stripe), OU abonnement
  * termine dont la derniere facture, payee apres la resiliation, couvre encore
  * cet instant (payeJusquau).
+ *
+ * Impayes (Brice, 30/09) : un abonnement past_due ou unpaid dont les
+ * factures ouvertes sont lues (impaye) n'ouvre le groupe que pendant les 5
+ * jours qui suivent le premier echec (etatImpaye 'grace'), puis plus du tout.
+ * Factures pas lues, illisibles ou sans facture ouverte datable : l'ancienne
+ * regle (past_due garde le groupe, unpaid non).
  */
 export function abonnementOuvreLeGroupeLe(a: AbonnementResume, maintenantMs: number): boolean {
   if (a.pauseEffective) return false
+  const impaye = etatImpaye(a, maintenantMs)
+  if (impaye === 'grace') return true
+  if (impaye === 'suspendu' || impaye === 'fenetre_depassee') return false
   if (statutDonneDroit(a.statut)) return true
   if (!statutTermine(a.statut) || !a.payeJusquau) return false
   const fin = Date.parse(a.payeJusquau)
@@ -547,9 +575,12 @@ export function abonnementOuvreLeGroupe(a: AbonnementResume): boolean {
 
 /**
  * Fin du droit que donne l'abonnement (ISO) : la fin payee pour un
- * abonnement termine, la fin de la periode en cours sinon.
+ * abonnement termine, la fin de la periode en cours sinon. Paiement en retard
+ * encore dans ses 5 jours (Brice, 30/09) : la fin de ces 5 jours.
  */
 export function finDuDroit(a: AbonnementResume): string | null {
+  const grace = finGraceImpaye(a)
+  if (grace) return grace
   return statutTermine(a.statut) ? a.payeJusquau : a.finPeriode
 }
 
@@ -764,6 +795,14 @@ export type FaitsMontants = {
   a_regler_non_disponible?: string
   rien_a_regler?: true
   aucun_abonnement_en_cours?: true
+  /**
+   * Impaye de plus de 5 jours encore dans la fenetre de 30 jours (Brice,
+   * 30/09) : le groupe est ferme, il rouvre des que le paiement passe, au
+   * tarif actuel si c'est regle avant cette date.
+   */
+  acces_au_groupe_suspendu?: true
+  acces_rouvre_des_que_le_paiement_passe?: true
+  tarif_actuel_garde_si_regle_avant?: string
 }
 
 /**
@@ -771,7 +810,11 @@ export type FaitsMontants = {
  * tarif et prochain prelevement de chaque abonnement vivant, et ce qui reste
  * a regler. Montants mis en forme (formaterMontant), dates en francais.
  */
-export function faitsMontants(vivants: readonly EntreeMontants[], impayes: readonly EntreeImpaye[]): FaitsMontants {
+export function faitsMontants(
+  vivants: readonly EntreeMontants[],
+  impayes: readonly EntreeImpaye[],
+  maintenantMs: number = Date.now(),
+): FaitsMontants {
   const abonnements = vivants.map(({ abonnement: a, apercu }) => {
     const { tarif, prelevement } = montantsDeLaPeriode(a, apercu)
     const statut: FaitsMontants['abonnements'][number]['statut'] = a.pauseEffective ? 'en_pause'
@@ -817,13 +860,303 @@ export function faitsMontants(vivants: readonly EntreeMontants[], impayes: reado
     }
   }
 
+  const dette = detteOuverte(impayes.map(i => i.abonnement), maintenantMs)
   return {
     abonnements,
     a_regler: aRegler.slice(0, 3),
     ...(nonDisponible ? { a_regler_non_disponible: "un paiement est en retard, mais le montant n'est pas lisible pour le moment" } : {}),
     ...(!aRegler.length && !nonDisponible ? { rien_a_regler: true as const } : {}),
     ...(!abonnements.length ? { aucun_abonnement_en_cours: true as const } : {}),
+    ...(dette ? {
+      acces_au_groupe_suspendu: true as const,
+      acces_rouvre_des_que_le_paiement_passe: true as const,
+      tarif_actuel_garde_si_regle_avant: formaterDateFr(dette.limite),
+    } : {}),
   }
+}
+
+// ---------------------------------------------------------------------------
+// Impayes (Brice, 30/09). Le compte Stripe de Melanie marque l'abonnement
+// « non paye » (unpaid) quand toutes les relances echouent (environ 14 jours,
+// 8 tentatives), facture laissee ouverte : payer cette facture ramene
+// l'abonnement a 'active', au meme tarif. Deux delais, comptes depuis le
+// PREMIER ECHEC de la facture impayee la plus ancienne encore ouverte :
+//   - 5 jours : le droit au groupe tombe (avant, on laisse : carte expiree,
+//     decouvert passager), et le passage quotidien sort le membre, sans ban ;
+//   - 30 jours : la fenetre de retour se ferme, le passage resilie
+//     l'abonnement et annule sa facture ; revenir = nouvel abonnement, au
+//     prix du moment.
+//
+// La date du premier echec n'est pas un champ de la facture Stripe (API
+// clover). Pour un prelevement automatique (charge_automatically), la
+// premiere tentative de paiement part a la FINALISATION de la facture
+// (status_transitions.finalized_at, environ une heure apres sa creation) :
+// c'est elle qui echoue la premiere. Repli sur created. Pour une facture
+// envoyee (send_invoice), rien n'est preleve : l'echec, c'est l'echeance
+// passee sans paiement (due_date), repli sur finalized_at puis created. La
+// vraie heure de la tentative ratee vivrait dans les paiements de la facture
+// (invoice.payments, puis le PaymentIntent) : deux lectures Stripe de plus par
+// facture, pour une difference d'une heure environ.
+// ---------------------------------------------------------------------------
+
+/** Jours apres le premier echec pendant lesquels un abonnement en retard ouvre encore le groupe. */
+export const JOURS_IMPAYE_SORTIE = 5
+/** Jours apres le premier echec pendant lesquels la facture se regle au tarif actuel (fenetre de retour). */
+export const JOURS_FENETRE_RETOUR = 30
+
+const JOUR_MS = 86_400_000
+
+type FactureBrute = {
+  id?: unknown
+  status?: unknown
+  collection_method?: unknown
+  due_date?: unknown
+  created?: unknown
+  amount_remaining?: unknown
+  status_transitions?: { finalized_at?: unknown; paid_at?: unknown } | null
+}
+
+function secondesPositives(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null
+}
+
+/**
+ * Le premier echec d'une facture Stripe brute, en secondes, ou null : voir
+ * l'en-tete de la section (finalized_at pour un prelevement automatique,
+ * due_date pour une facture envoyee, repli sur created).
+ */
+export function premierEchecFacture(brut: unknown): number | null {
+  if (!brut || typeof brut !== 'object') return null
+  const f = brut as FactureBrute
+  const finalisee = secondesPositives(f.status_transitions?.finalized_at)
+  const creee = secondesPositives(f.created)
+  if (f.collection_method === 'send_invoice') return secondesPositives(f.due_date) ?? finalisee ?? creee
+  return finalisee ?? creee
+}
+
+export type Impaye = {
+  /** Premier echec de la facture impayee la plus ancienne encore ouverte (ISO), null = aucune facture ouverte datable. */
+  depuis: string | null
+  /** Id de cette facture : la cle « une fois par facture » du passage. Jamais montre au membre. */
+  factureId: string | null
+  /** Ids de toutes les factures ouvertes de l'abonnement : celles a annuler quand la fenetre se ferme. */
+  facturesOuvertes: string[]
+  /** Ce qui reste a regler, la plus recente d'abord (facturesARegler) : montants et liens de paiement. */
+  aRegler: FactureARegler[]
+}
+
+/**
+ * Les factures ouvertes brutes d'un abonnement (GET /v1/invoices,
+ * status=open) -> l'impaye. Une facture ouverte dont le reste a payer est nul
+ * (avoir, solde) ne date pas l'impaye.
+ */
+export function lireImpaye(factures: readonly unknown[]): Impaye {
+  let plusAncienne: { t: number; id: string | null } | null = null
+  const ouvertes: string[] = []
+  for (const brut of factures) {
+    if (!brut || typeof brut !== 'object') continue
+    const f = brut as FactureBrute
+    if (f.status !== 'open') continue
+    const id = typeof f.id === 'string' && /^in_[A-Za-z0-9]+$/.test(f.id) ? f.id : null
+    if (id) ouvertes.push(id)
+    if (typeof f.amount_remaining === 'number' && f.amount_remaining <= 0) continue
+    const t = premierEchecFacture(f)
+    if (t !== null && (plusAncienne === null || t < plusAncienne.t)) plusAncienne = { t, id }
+  }
+  return {
+    depuis: plusAncienne ? new Date(plusAncienne.t * 1000).toISOString() : null,
+    factureId: plusAncienne?.id ?? null,
+    facturesOuvertes: ouvertes,
+    aRegler: facturesARegler(factures),
+  }
+}
+
+/** Statuts Stripe d'un paiement en retard, ceux que la regle des impayes regarde. */
+export function enRetardDePaiement(statut: string): boolean {
+  return statut === 'past_due' || statut === 'unpaid'
+}
+
+/**
+ * Ou en est l'impaye d'un abonnement, a cet instant :
+ * - 'a_jour' : ni past_due ni unpaid ;
+ * - 'non_lu' : en retard, factures pas lues (ancienne regle) ;
+ * - 'illisible' : en retard, la lecture des factures a echoue (on ne decide rien) ;
+ * - 'sans_facture' : en retard, aucune facture ouverte datable (ancienne regle) ;
+ * - 'grace' : premier echec il y a 5 jours au plus, le groupe reste ouvert ;
+ * - 'suspendu' : plus de 5 jours, 30 au plus : plus de groupe, dette payable au tarif actuel ;
+ * - 'fenetre_depassee' : plus de 30 jours : le passage resilie.
+ */
+export type EtatImpaye = 'a_jour' | 'non_lu' | 'illisible' | 'sans_facture' | 'grace' | 'suspendu' | 'fenetre_depassee'
+
+export function etatImpaye(a: AbonnementResume, maintenantMs: number = Date.now()): EtatImpaye {
+  if (!enRetardDePaiement(a.statut)) return 'a_jour'
+  if (a.impaye === undefined) return 'non_lu'
+  if (a.impaye === 'illisible') return 'illisible'
+  if (!a.impaye.depuis) return 'sans_facture'
+  const ecoule = maintenantMs - Date.parse(a.impaye.depuis)
+  if (!Number.isFinite(ecoule)) return 'illisible'
+  if (ecoule <= JOURS_IMPAYE_SORTIE * JOUR_MS) return 'grace'
+  if (ecoule <= JOURS_FENETRE_RETOUR * JOUR_MS) return 'suspendu'
+  return 'fenetre_depassee'
+}
+
+function depuisImpaye(a: AbonnementResume): number | null {
+  if (!enRetardDePaiement(a.statut) || !a.impaye || a.impaye === 'illisible' || !a.impaye.depuis) return null
+  const t = Date.parse(a.impaye.depuis)
+  return Number.isFinite(t) ? t : null
+}
+
+/** Jours pleins depuis le premier echec (arrondi par defaut), null si l'impaye n'est pas date. */
+export function joursDepuisPremierEchec(a: AbonnementResume, maintenantMs: number = Date.now()): number | null {
+  const t = depuisImpaye(a)
+  return t === null ? null : Math.floor((maintenantMs - t) / JOUR_MS)
+}
+
+/** Fin des 5 jours ou le groupe reste ouvert (ISO), null si l'impaye n'est pas date. */
+export function finGraceImpaye(a: AbonnementResume): string | null {
+  const t = depuisImpaye(a)
+  return t === null ? null : new Date(t + JOURS_IMPAYE_SORTIE * JOUR_MS).toISOString()
+}
+
+/** Fin de la fenetre de retour au tarif actuel (ISO), null si l'impaye n'est pas date. */
+export function limiteFenetreImpaye(a: AbonnementResume): string | null {
+  const t = depuisImpaye(a)
+  return t === null ? null : new Date(t + JOURS_FENETRE_RETOUR * JOUR_MS).toISOString()
+}
+
+export type Dette = {
+  /** Premier echec (ISO). */
+  depuis: string
+  /** Fin de la fenetre de retour au tarif actuel (ISO) : premier echec + 30 jours. */
+  limite: string
+  /** Ce qui reste a regler, la plus recente d'abord (3 au plus). */
+  aRegler: FactureARegler[]
+}
+
+/**
+ * « La dette d'abord » (Brice, 30/09) : parmi les abonnements d'un payeur,
+ * ceux dont l'acces est suspendu pour un impaye ENCORE dans la fenetre de 30
+ * jours, avec ce qui reste a regler. null s'il n'y en a pas (ou plus : au-dela
+ * de 30 jours, la facture est annulee, et on propose un nouvel abonnement).
+ */
+export function detteOuverte(abonnements: readonly AbonnementResume[], maintenantMs: number = Date.now()): Dette | null {
+  let depuis: number | null = null
+  const factures: FactureARegler[] = []
+  // Le meme abonnement peut arriver deux fois (lu par le client, puis par l'email).
+  const vus = new Set<string>()
+  for (const a of abonnements) {
+    if (vus.has(a.id)) continue
+    vus.add(a.id)
+    if (etatImpaye(a, maintenantMs) !== 'suspendu') continue
+    const t = depuisImpaye(a)
+    if (t === null || !a.impaye || a.impaye === 'illisible') continue
+    if (depuis === null || t < depuis) depuis = t
+    factures.push(...a.impaye.aRegler)
+  }
+  if (depuis === null || !factures.length) return null
+  const aRegler = [...factures]
+    .sort((x, y) => (y.factureLe ?? '').localeCompare(x.factureLe ?? ''))
+    .slice(0, 3)
+  return {
+    depuis: new Date(depuis).toISOString(),
+    limite: new Date(depuis + JOURS_FENETRE_RETOUR * JOUR_MS).toISOString(),
+    aRegler,
+  }
+}
+
+/**
+ * Les lignes « ce qui reste a regler » d'un message, montants compris. Une
+ * facture : une phrase, et son lien si lienDansLeTexte (sinon l'appelant le
+ * met sur un bouton). Plusieurs : une ligne par facture, lien compris. Rien a
+ * regler : chaine vide.
+ */
+export function phraseARegler(aRegler: readonly FactureARegler[], o: { lienDansLeTexte: boolean }): string {
+  if (!aRegler.length) return ''
+  const facture = (f: FactureARegler) => (f.factureLe ? ` sur ta facture du ${formaterDateFr(f.factureLe)}` : '')
+  if (aRegler.length === 1) {
+    const f = aRegler[0]
+    const base = `Il reste ${formaterMontant(f.centimes, f.devise)} à régler${facture(f)}.`
+    if (!o.lienDansLeTexte) return base
+    return f.lien ? `${base} Tu peux la régler ici : ${f.lien}` : `${base} Le lien de paiement n'est pas disponible là, tout de suite.`
+  }
+  const lignes = aRegler.map(f => {
+    const quand = f.factureLe ? `, facture du ${formaterDateFr(f.factureLe)}` : ''
+    return `- ${formaterMontant(f.centimes, f.devise)}${quand} : ${f.lien ?? LIEN_NON_DISPONIBLE}`
+  })
+  return `Il reste à régler :\n${lignes.join('\n')}`
+}
+
+/**
+ * Ce que le bot dit a un payeur dont l'acces est suspendu pour un impaye
+ * encore ouvert (point 4 de Brice, 30/09) : le montant et le lien de sa
+ * facture, « regle-la et ton acces rouvre tout seul, a ton tarif actuel »,
+ * AU LIEU d'un nouvel abonnement. Ton neutre, jamais de relance.
+ */
+export function texteDette(d: Dette): string {
+  const plusieurs = d.aRegler.length > 1
+  return [
+    "Ton dernier paiement pour le Live Club n'est pas passé, et ça fait plus de 5 jours : ton abonnement ne t'ouvre plus le groupe pour le moment.",
+    phraseARegler(d.aRegler, { lienDansLeTexte: true }),
+    `${plusieurs ? 'Règle-les' : 'Règle-la'} et ton accès rouvre tout seul, à ton tarif actuel (si c'est réglé avant le ${formaterDateFr(d.limite)}). `
+      + `Dès que c'est fait, écris-moi /menu : je te redonne le lien du groupe tout de suite.`,
+  ].join('\n\n')
+}
+
+/**
+ * La phrase « Mon abonnement » d'un abonnement en retard de paiement, selon
+ * son etat (null = pas de regle des impayes : l'appelant garde sa phrase).
+ * portailCarte : le portail Stripe du compte (config.ts), passe en parametre
+ * parce que ce module n'importe rien.
+ */
+export function phraseImpaye(a: AbonnementResume, maintenantMs: number, portailCarte: string): string | null {
+  const etat = etatImpaye(a, maintenantMs)
+  if (etat === 'grace') {
+    const fin = finGraceImpaye(a)
+    const suite = a.statut === 'past_due'
+      ? `Il va être retenté tout seul : vérifie ta carte, tu peux la changer sur ${portailCarte}.`
+      : phraseARegler(a.impaye && a.impaye !== 'illisible' ? a.impaye.aRegler : [], { lienDansLeTexte: true })
+    return [`Ton dernier paiement n'est pas passé.`, suite, `Tu gardes le groupe jusqu'au ${fin ? formaterDateFr(fin) : '?'}.`]
+      .filter(Boolean).join(' ')
+  }
+  if (etat === 'suspendu') {
+    const d = detteOuverte([a], maintenantMs)
+    return d ? texteDette(d) : "Ton dernier paiement pour le Live Club n'est pas passé, et ça fait plus de 5 jours : ton abonnement ne t'ouvre plus le groupe pour le moment."
+  }
+  if (etat === 'fenetre_depassee') {
+    return "Ton dernier paiement pour le Live Club n'a pas été réglé dans les 30 jours : ton abonnement ne t'ouvre plus le groupe, et pour revenir, c'est un nouvel abonnement."
+  }
+  return null
+}
+
+/**
+ * Les faits bruts de l'impaye pour l'agent (outil mon_abonnement) : montants
+ * deja mis en forme, dates en francais, liens de paiement. Rien sur un
+ * abonnement a jour.
+ */
+export function faitsImpaye(a: AbonnementResume, maintenantMs: number = Date.now()): Record<string, unknown> {
+  const etat = etatImpaye(a, maintenantMs)
+  if (etat === 'grace') {
+    const fin = finGraceImpaye(a)
+    return { paiement_en_retard: true, groupe_garde_jusquau: fin ? formaterDateFr(fin) : null }
+  }
+  if (etat === 'suspendu') {
+    const d = detteOuverte([a], maintenantMs)
+    return {
+      paiement_en_retard: true,
+      acces_au_groupe_suspendu: true,
+      a_regler: (d?.aRegler ?? []).map(f => ({
+        montant: formaterMontant(f.centimes, f.devise),
+        facture_du: f.factureLe ? formaterDateFr(f.factureLe) : null,
+        lien: f.lien ?? LIEN_NON_DISPONIBLE,
+      })),
+      acces_rouvre_des_que_le_paiement_passe: true,
+      tarif_actuel_garde_si_regle_avant: d ? formaterDateFr(d.limite) : null,
+    }
+  }
+  if (etat === 'fenetre_depassee') {
+    return { paiement_en_retard: true, acces_au_groupe_suspendu: true, fenetre_de_30_jours_depassee: true, revenir: 'nouvel abonnement' }
+  }
+  return {}
 }
 
 // ---------------------------------------------------------------------------
@@ -883,24 +1216,32 @@ export function phraseGeste(g: GesteLu): string | null {
       if (!fait) return regle === 'plus_de_demande' ? "Plus de demande d'adhésion en attente." : "Entrée dans le groupe non acceptée."
       return `Entrée dans le groupe acceptée${raison ? ` (${raison})` : ''}${d.reprise ? ', demande en attente reprise' : ''}.`
     case 'entree_refusee':
+      if (fait && regle === 'impaye_ouvert') return 'Entrée dans le groupe refusée (paiement en retard, facture à régler).'
       return fait ? "Entrée dans le groupe refusée (pas de droit ouvert)." : "Refus d'entrée non appliqué."
-    case 'invitation':
+    case 'invitation': {
+      const canal = d.canal === 'email' ? ' par email' : ''
       if (!fait) {
         if (regle === 'jeton_invalide') return 'Lien personnel expiré ou déjà utilisé.'
         if (regle === 'deja_dans_le_groupe') return 'Lien personnel ouvert : déjà dans le groupe.'
         if (regle === 'sans_droit') return "Lien personnel ouvert : pas d'abonnement actif."
+        if (regle === 'impaye_ouvert') return 'Lien vers le groupe non envoyé : paiement en retard, facture à régler.'
+        if (regle === 'reouverture_impaye') return 'Paiement passé : déjà revenu dans le groupe.'
         return 'Lien vers le groupe non envoyé.'
       }
       if (regle === 'retour_groupe') return 'Lien de retour vers le groupe envoyé.'
       if (regle === 'sortie_abusive_metricgram') return 'Bannissement levé, lien de retour envoyé.'
       if (regle === 'broker_renvoi') return "Lien d'accès broker renvoyé par email."
+      if (regle === 'reouverture_impaye') return `Paiement passé : accès réouvert, lien de retour envoyé${canal}.`
+      if (regle === 'bienvenue_rattrapage') return 'Email de bienvenue envoyé (rattrapage du passage quotidien).'
       return `Lien d'entrée dans le groupe envoyé${raison ? ` (${raison})` : ''}.`
+    }
     case 'reintegration':
       if (!fait) return `Réintégration non faite${motif ? ` (${motif})` : ''}.`
       return regle === 'payeur_banni' ? 'Ancien blocage du groupe levé (droit ouvert).' : "Réintégré dans le groupe par l'équipe."
     case 'retrait':
       if (!fait) return `Sortie du groupe non faite${motif ? ` (${motif})` : ''}.`
       if (regle === 'desabonne') return 'Sortie du groupe (abonnement terminé).'
+      if (regle === 'impaye_5j') return 'Sortie du groupe (paiement en retard depuis plus de 5 jours).'
       return "Sorti du groupe par l'équipe."
     case 'fin_acces':
       return fait ? "Sortie du groupe (fin d'accès broker)." : `Sortie de fin d'accès broker non faite${motif ? ` (${motif})` : ''}.`
@@ -914,6 +1255,11 @@ export function phraseGeste(g: GesteLu): string | null {
       return `Pause programmée${jusqua ? `, groupe gardé jusqu'au ${jusqua}` : ''}${reprise ? `, reprise le ${reprise}` : ''}.`
     }
     case 'arret': {
+      if (regle === 'fenetre_30j') {
+        if (!fait) return 'Abonnement non arrêté : sa situation a changé entre-temps (paiement passé, ou déjà terminé).'
+        const nonAnnulees = Number(d.factures_non_annulees ?? 0)
+        return `Abonnement arrêté : paiement en retard depuis plus de 30 jours, ${nonAnnulees > 0 ? 'facture pas encore annulée' : 'facture annulée'}.`
+      }
       if (!fait) return 'Arrêt non programmé.'
       const fin = date('fin')
       return `Arrêt programmé${fin ? ` au ${fin}` : ' à la fin de la période payée'}${regle === 'manuel' ? " par l'équipe" : ''}.`
@@ -934,6 +1280,8 @@ export function phraseGeste(g: GesteLu): string | null {
       if (regle === 'pause_j7') return `Rappel de fin de pause envoyé${canal} (J-7).`
       if (regle === 'pause_debut') return `Message de début de pause envoyé${canal}.`
       if (regle === 'sortie_desabonne') return `Message de fin d'abonnement envoyé${canal}.`
+      if (regle === 'sortie_impaye') return `Message de sortie pour paiement en retard envoyé${canal} (montant et lien de la facture).`
+      if (regle === 'fin_fenetre_30j') return `Message de fin d'abonnement (paiement en retard de plus de 30 jours) envoyé${canal}.`
       if (regle === 'broker_j7') return `Rappel de fin d'accès broker envoyé${canal} (J-7).`
       if (regle === 'broker_fin_message') return `Message de fin d'accès broker envoyé${canal}.`
       return `Rappel envoyé${canal}.`

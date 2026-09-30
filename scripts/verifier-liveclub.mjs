@@ -17,16 +17,21 @@ import {
   lireMontant, montantsDeLaPeriode, remiseAppliquee, parPeriode, periodiciteAbonnement,
   facturesARegler, peutAvoirUnImpaye, faitsMontants, MONTANT_NON_DISPONIBLE, LIEN_NON_DISPONIBLE,
   libelleBouton, phraseGeste, expurgerLiensInvitation,
+  premierEchecFacture, lireImpaye, etatImpaye, enRetardDePaiement, joursDepuisPremierEchec, finGraceImpaye,
+  limiteFenetreImpaye, detteOuverte, texteDette, phraseImpaye, faitsImpaye, phraseARegler,
+  JOURS_IMPAYE_SORTIE, JOURS_FENETRE_RETOUR,
 } from '../src/lib/liveclub/pur.ts'
 import {
   desabonneHorsGrace, finAbonnement,
   prelevementAPrevenir, montantAAnnoncer, clePrelevement, jourParis, RAPPEL_PRELEVEMENT_JOURS,
   sortieAbusiveASignaler, sortiParMetricgram, cleSortieAbusive,
   droitCouvraitLaSortie, retourARetenter, MAX_ESSAIS_RETOUR,
+  decisionSortieImpaye, decisionFenetre, factureRegleeApresSortie, decisionReouverture,
+  bienvenueARattraper, JOURS_RATTRAPAGE_BIENVENUE,
 } from '../src/lib/liveclub/passage-regles.ts'
 import {
   GRACE_JOURS, URLS_ABONNEMENT, URL_ABONNEMENT, URL_PORTAIL_CARTE, texteAbonnement,
-  ARGUMENT_TARIF_PAUSE, TEXTE_PAUSE_AVANT_ARRET,
+  ARGUMENT_TARIF_PAUSE, TEXTE_PAUSE_AVANT_ARRET, sortiesActives, sortiesImpayesActives, PLAFOND_RESILIATIONS_PASSAGE,
 } from '../src/lib/liveclub/config.ts'
 
 const PRODUITS = ['prod_UcOraPncQlbrW4', 'prod_UynMpOvBtGTsIw']
@@ -783,6 +788,304 @@ test('sorties abusives de Metricgram (transition)', () => {
   for (const r of ['envoye', 'bot_jamais_demarre', 'bot_bloque', 'droit_vu_par_email_seul', 'rebanni_metricgram', 'en_cours', null]) {
     assert.ok(!retourARetenter(r, 0), String(r))
   }
+})
+
+// ---------------------------------------------------------------------------
+// Impayes (Brice, 30/09) : sortie a 5 jours, reouverture, fenetre de 30 jours,
+// la dette d'abord, rattrapage des emails de bienvenue.
+// ---------------------------------------------------------------------------
+
+const secI = iso => Math.floor(Date.parse(iso) / 1000)
+const msI = iso => Date.parse(iso)
+// Premier echec : finalisation de la facture, le 1er septembre 2026 a 10 h UTC.
+const ECHEC = '2026-09-01T10:00:00.000Z'
+const J = n => Date.parse(ECHEC) + n * 86_400_000
+const LIEN_FACTURE = 'https://invoice.stripe.com/i/TEST_impaye'
+const factureOuverte = (extra = {}) => ({
+  id: 'in_TESTIMPAYE01', status: 'open', collection_method: 'charge_automatically', due_date: null,
+  created: secI('2026-09-01T09:00:00Z'), status_transitions: { finalized_at: secI(ECHEC), paid_at: null },
+  amount_remaining: 8900, currency: 'eur', hosted_invoice_url: LIEN_FACTURE, ...extra,
+})
+const enRetard = (statut, factures = [factureOuverte()], extra = {}) => ({
+  ...resumerAbonnement(abo({ status: statut, latest_invoice: { status: 'open', status_transitions: {} }, ...extra }), PRODUITS),
+  impaye: lireImpaye(factures),
+})
+
+test('impayes : date du premier echec (clover) et lecture des factures ouvertes', () => {
+  // Prelevement automatique : la premiere tentative part a la finalisation.
+  assert.equal(premierEchecFacture(factureOuverte()), secI(ECHEC))
+  assert.equal(premierEchecFacture(factureOuverte({ status_transitions: {} })), secI('2026-09-01T09:00:00Z'))
+  // Facture envoyee : l'echec, c'est l'echeance passee.
+  assert.equal(premierEchecFacture(factureOuverte({ collection_method: 'send_invoice', due_date: secI('2026-09-15T00:00:00Z') })), secI('2026-09-15T00:00:00Z'))
+  assert.equal(premierEchecFacture(factureOuverte({ collection_method: 'send_invoice', due_date: null })), secI(ECHEC))
+  assert.equal(premierEchecFacture({}), null)
+  assert.equal(premierEchecFacture(null), null)
+
+  const i = lireImpaye([factureOuverte()])
+  assert.equal(i.depuis, ECHEC)
+  assert.equal(i.factureId, 'in_TESTIMPAYE01')
+  assert.deepEqual(i.facturesOuvertes, ['in_TESTIMPAYE01'])
+  assert.deepEqual(i.aRegler, [{ centimes: 8900, devise: 'eur', lien: LIEN_FACTURE, factureLe: '2026-09-01T09:00:00.000Z' }])
+  // La plus ancienne facture ouverte date l'impaye ; un reste nul ne date rien
+  // (mais reste a annuler) ; une facture payee n'est pas ouverte.
+  const plusieurs = lireImpaye([
+    factureOuverte({ id: 'in_TESTRECENTE1', created: secI('2026-10-01T09:00:00Z'), status_transitions: { finalized_at: secI('2026-10-01T10:00:00Z') } }),
+    factureOuverte({ id: 'in_TESTZERO0001', created: secI('2026-08-01T09:00:00Z'), status_transitions: { finalized_at: secI('2026-08-01T10:00:00Z') }, amount_remaining: 0 }),
+    factureOuverte(),
+    factureOuverte({ id: 'in_TESTPAYEE001', status: 'paid', status_transitions: { finalized_at: secI('2026-07-01T10:00:00Z') } }),
+  ])
+  assert.equal(plusieurs.depuis, ECHEC)
+  assert.equal(plusieurs.factureId, 'in_TESTIMPAYE01')
+  assert.deepEqual(plusieurs.facturesOuvertes, ['in_TESTRECENTE1', 'in_TESTZERO0001', 'in_TESTIMPAYE01'])
+  assert.equal(lireImpaye([]).depuis, null)
+  assert.ok(enRetardDePaiement('past_due') && enRetardDePaiement('unpaid') && !enRetardDePaiement('active') && !enRetardDePaiement('canceled'))
+})
+
+test('impayes : droit a J+4 et J+6 d un past_due, droit d un unpaid', () => {
+  assert.equal(JOURS_IMPAYE_SORTIE, 5)
+  assert.equal(JOURS_FENETRE_RETOUR, 30)
+  const pd = enRetard('past_due')
+  // J+4 : carte expiree, decouvert passager, on laisse.
+  assert.equal(etatImpaye(pd, J(4)), 'grace')
+  assert.ok(abonnementOuvreLeGroupeLe(pd, J(4)))
+  assert.equal(meilleurAbonnement([pd], J(4)).id, pd.id)
+  assert.equal(finDuDroit(pd), '2026-09-06T10:00:00.000Z')
+  assert.equal(finGraceImpaye(pd), '2026-09-06T10:00:00.000Z')
+  // Pile 5 jours : encore 'oui' ; une minute de plus : 'non'.
+  assert.ok(abonnementOuvreLeGroupeLe(pd, J(5)))
+  assert.ok(!abonnementOuvreLeGroupeLe(pd, J(5) + 60_000))
+  // J+6 : plus de droit, meme si Stripe relance encore.
+  assert.equal(etatImpaye(pd, J(6)), 'suspendu')
+  assert.ok(!abonnementOuvreLeGroupeLe(pd, J(6)))
+  assert.equal(meilleurAbonnement([pd], J(6)), null)
+  assert.equal(joursDepuisPremierEchec(pd, J(6) + 3_600_000), 6)
+  // Un autre abonnement actif du meme payeur garde le droit.
+  const actif = resumerAbonnement(abo({ id: 'sub_TESTACTIF001' }), PRODUITS)
+  assert.equal(meilleurAbonnement([pd, actif], J(6)).id, 'sub_TESTACTIF001')
+
+  // unpaid (relances epuisees, facture laissee ouverte) : pas de droit au-dela de 5 jours.
+  const up = enRetard('unpaid')
+  assert.equal(etatImpaye(up, J(20)), 'suspendu')
+  assert.ok(!abonnementOuvreLeGroupeLe(up, J(20)))
+  assert.equal(meilleurAbonnement([up], J(20)), null)
+  // Dans les 5 jours (regle lue telle quelle : past_due OU unpaid) : 'oui'.
+  assert.ok(abonnementOuvreLeGroupeLe(up, J(3)))
+
+  // Factures pas lues ou sans facture ouverte datable : l'ancienne regle
+  // (past_due garde, unpaid non). Illisibles : aucune decision de sortie.
+  const nonLu = resumerAbonnement(abo({ status: 'past_due' }), PRODUITS)
+  assert.equal(etatImpaye(nonLu, J(20)), 'non_lu')
+  assert.ok(abonnementOuvreLeGroupeLe(nonLu, J(20)))
+  assert.ok(!abonnementOuvreLeGroupeLe(resumerAbonnement(abo({ status: 'unpaid' }), PRODUITS), J(20)))
+  assert.equal(etatImpaye(enRetard('past_due', []), J(20)), 'sans_facture')
+  assert.ok(abonnementOuvreLeGroupeLe(enRetard('past_due', []), J(20)))
+  const illisible = { ...nonLu, impaye: 'illisible' }
+  assert.equal(etatImpaye(illisible, J(20)), 'illisible')
+  assert.equal(decisionSortieImpaye(etatImpaye(illisible, J(20)), true), 'inconnu')
+  assert.equal(decisionSortieImpaye('non_lu', true), 'inconnu')
+  // Un abonnement a jour n'est jamais touche par la regle.
+  assert.equal(etatImpaye(actif, J(20)), 'a_jour')
+  assert.equal(decisionSortieImpaye('a_jour', true), 'rien')
+  assert.equal(decisionSortieImpaye('grace', true), 'grace')
+})
+
+test('impayes : sortie simulee sans l interrupteur, reelle avec LIVECLUB_SORTIES_IMPAYES ou LIVECLUB_SORTIES_ACTIVES', () => {
+  const avant = { actives: process.env.LIVECLUB_SORTIES_ACTIVES, impayes: process.env.LIVECLUB_SORTIES_IMPAYES }
+  const poser = (actives, impayes) => {
+    if (actives === undefined) delete process.env.LIVECLUB_SORTIES_ACTIVES
+    else process.env.LIVECLUB_SORTIES_ACTIVES = actives
+    if (impayes === undefined) delete process.env.LIVECLUB_SORTIES_IMPAYES
+    else process.env.LIVECLUB_SORTIES_IMPAYES = impayes
+  }
+  const etat = etatImpaye(enRetard('past_due'), J(6))
+  try {
+    poser(undefined, undefined)
+    assert.ok(!sortiesImpayesActives() && !sortiesActives())
+    assert.equal(decisionSortieImpaye(etat, sortiesImpayesActives()), 'simuler')
+    // Une valeur autre que '1' ne vaut rien.
+    poser('oui', 'true')
+    assert.ok(!sortiesImpayesActives())
+    // L'interrupteur separe : la sortie des impayes seulement, pas la bascule.
+    poser(undefined, '1')
+    assert.ok(sortiesImpayesActives() && !sortiesActives())
+    assert.equal(decisionSortieImpaye(etat, sortiesImpayesActives()), 'sortir')
+    assert.equal(decisionFenetre(etatImpaye(enRetard('unpaid'), J(31)), sortiesActives(), false), 'simuler')
+    // La bascule complete l'emporte aussi.
+    poser('1', undefined)
+    assert.ok(sortiesImpayesActives() && sortiesActives())
+    assert.equal(decisionSortieImpaye(etat, sortiesImpayesActives()), 'sortir')
+  } finally {
+    poser(avant.actives, avant.impayes)
+  }
+  // Un abonnement dont la fenetre est depassee et pas encore resilie sort aussi.
+  assert.equal(decisionSortieImpaye('fenetre_depassee', false), 'simuler')
+})
+
+test('fenetre de 30 jours : J+29 rien, J+31 resiliation simulee sans l interrupteur, reelle avec', () => {
+  const up = enRetard('unpaid')
+  assert.equal(limiteFenetreImpaye(up), '2026-10-01T10:00:00.000Z')
+  assert.equal(etatImpaye(up, J(29)), 'suspendu')
+  assert.equal(decisionFenetre(etatImpaye(up, J(29)), true, false), 'rien')
+  assert.equal(decisionFenetre(etatImpaye(up, J(29)), false, false), 'rien')
+  assert.equal(etatImpaye(up, J(31)), 'fenetre_depassee')
+  assert.equal(decisionFenetre(etatImpaye(up, J(31)), false, false), 'simuler')
+  assert.equal(decisionFenetre(etatImpaye(up, J(31)), true, false), 'resilier')
+  // Une seule fois par abonnement.
+  assert.equal(decisionFenetre('fenetre_depassee', true, true), 'deja_fait')
+  // past_due depuis plus de 30 jours : pareil ; factures illisibles : rien.
+  assert.equal(decisionFenetre(etatImpaye(enRetard('past_due'), J(31)), true, false), 'resilier')
+  assert.equal(decisionFenetre('illisible', true, false), 'inconnu')
+  assert.equal(decisionFenetre('a_jour', true, false), 'rien')
+  assert.ok(PLAFOND_RESILIATIONS_PASSAGE >= 1 && PLAFOND_RESILIATIONS_PASSAGE <= 20)
+  // Au-dela de 30 jours, plus de droit non plus.
+  assert.ok(!abonnementOuvreLeGroupeLe(up, J(31)))
+})
+
+test('reouverture : facture reglee apres la sortie, detectee une seule fois', () => {
+  const sortie = new Date('2026-09-07T07:00:00Z')
+  const reglee = { payeeLe: '2026-09-10T12:00:00.000Z', dueLe: ECHEC }
+  assert.ok(factureRegleeApresSortie([reglee], sortie))
+  assert.ok(factureRegleeApresSortie([reglee], sortie.toISOString()))
+  // Payee avant la sortie, ou nee apres (nouvel abonnement, cycle suivant) : pas celle de la sortie.
+  assert.ok(!factureRegleeApresSortie([{ payeeLe: '2026-09-06T12:00:00.000Z', dueLe: ECHEC }], sortie))
+  assert.ok(!factureRegleeApresSortie([{ payeeLe: '2026-09-10T12:00:00.000Z', dueLe: '2026-09-08T10:00:00.000Z' }], sortie))
+  assert.ok(!factureRegleeApresSortie([{ payeeLe: null, dueLe: ECHEC }], sortie))
+  assert.ok(!factureRegleeApresSortie([], sortie))
+
+  assert.equal(decisionReouverture(true, 'non', 'oui', false), 'envoyer')
+  assert.equal(decisionReouverture(false, 'non', 'oui', false), 'rien')
+  assert.equal(decisionReouverture(true, 'oui', 'inconnu', false), 'deja_revenu')
+  assert.equal(decisionReouverture(true, 'inconnu', 'oui', false), 'inconnu')
+  assert.equal(decisionReouverture(true, 'non', 'inconnu', false), 'inconnu')
+  assert.equal(decisionReouverture(true, 'non', 'non', false), 'sans_droit')
+
+  // Une seule fois : le passage ferme la boucle par une ligne posterieure a
+  // la sortie (derniere reouverture >= sortie), le suivant ne renvoie rien.
+  const derniereReouverture = new Map()
+  const tid = 123456789
+  const passage = maintenant => {
+    const deja = (derniereReouverture.get(tid) ?? 0) >= sortie.getTime()
+    const d = decisionReouverture(factureRegleeApresSortie([reglee], sortie), 'non', 'oui', deja)
+    if (d === 'envoyer') derniereReouverture.set(tid, maintenant)
+    return d
+  }
+  assert.equal(passage(msI('2026-09-11T07:00:00Z')), 'envoyer')
+  assert.equal(passage(msI('2026-09-12T07:00:00Z')), 'deja_faite')
+  // Une nouvelle sortie plus tard (nouvel impaye) rouvre une boucle.
+  assert.ok(!((derniereReouverture.get(tid) ?? 0) >= msI('2026-10-20T07:00:00Z')))
+  // La cle de sortie (partagee avec la tache Metricgram) est stable.
+  assert.equal(cleSortieAbusive(tid, sortie), cleSortieAbusive(tid, sortie.toISOString()))
+
+  // La derniere facture d'un resume porte sa finalisation.
+  const r = resumerAbonnement(abo({ latest_invoice: { status: 'paid', created: secI('2026-09-01T09:00:00Z'), status_transitions: { paid_at: secI('2026-09-10T12:00:00Z'), finalized_at: secI(ECHEC) } } }), PRODUITS)
+  assert.equal(r.derniereFacture.finaliseeLe, ECHEC)
+  assert.equal(resumerAbonnement(abo({ latest_invoice: { status: 'open', created: secI('2026-09-01T09:00:00Z'), status_transitions: {} } }), PRODUITS).derniereFacture.finaliseeLe, '2026-09-01T09:00:00.000Z')
+})
+
+test('la dette d abord : montant et lien de la facture, pas de nouvel abonnement dans les 30 jours', () => {
+  const pd = enRetard('past_due')
+  const d = detteOuverte([pd], J(10))
+  assert.equal(d.depuis, ECHEC)
+  assert.equal(d.limite, '2026-10-01T10:00:00.000Z')
+  assert.equal(d.aRegler.length, 1)
+  const t = texteDette(d)
+  for (const attendu of ['89 €', LIEN_FACTURE, '1er octobre 2026', 'tarif actuel', 'rouvre tout seul', '/menu', 'facture du 1er septembre 2026']) {
+    assert.ok(t.includes(attendu), attendu)
+  }
+  // Pas de liens d'abonnement tant que la facture se regle, ton neutre.
+  for (const u of URLS_ABONNEMENT) assert.ok(!t.includes(u), u)
+  const horsClavier = new RegExp(`[${[0x2013, 0x2014, 0x2026, 0x201c, 0x201d].map(c => String.fromCharCode(c)).join("")}]`)
+  assert.ok(!horsClavier.test(t), "caracteres clavier")
+  assert.ok(!/(?<!\p{L})paye(?!\p{L})|tu nous dois|urgent|rapidement/iu.test(t), t)
+  // Dans les 5 jours : le droit tient, pas de dette ; au-dela de 30 jours : un nouvel abonnement.
+  assert.equal(detteOuverte([pd], J(4)), null)
+  assert.equal(detteOuverte([pd], J(31)), null)
+  assert.ok(phraseImpaye(pd, J(31), URL_PORTAIL_CARTE).includes('nouvel abonnement'))
+  // Le meme abonnement lu deux fois (client, puis email) : une seule ligne.
+  assert.equal(detteOuverte([pd, pd], J(10)).aRegler.length, 1)
+  // Un abonnement a jour ou sans facture lue : pas de dette.
+  assert.equal(detteOuverte([resumerAbonnement(abo(), PRODUITS)], J(10)), null)
+  // Deux factures ouvertes : une ligne par facture, liens compris.
+  const deux = detteOuverte([enRetard('unpaid', [
+    factureOuverte(),
+    factureOuverte({ id: 'in_TESTIMPAYE02', created: secI('2026-10-01T09:00:00Z'), status_transitions: { finalized_at: secI('2026-10-01T10:00:00Z') }, hosted_invoice_url: 'https://invoice.stripe.com/i/TEST_deux' }),
+  ])], J(10))
+  const t2 = texteDette(deux)
+  assert.ok(t2.includes('Règle-les') && t2.includes(LIEN_FACTURE) && t2.includes('https://invoice.stripe.com/i/TEST_deux'))
+  assert.equal(phraseARegler([], { lienDansLeTexte: true }), '')
+
+  // « Mon abonnement » et l'outil de l'agent : les memes chiffres.
+  assert.equal(phraseImpaye(pd, J(10), URL_PORTAIL_CARTE), t)
+  const grace = phraseImpaye(pd, J(2), URL_PORTAIL_CARTE)
+  assert.ok(grace.includes(URL_PORTAIL_CARTE) && grace.includes("jusqu'au 6 septembre 2026"), grace)
+  assert.equal(phraseImpaye(resumerAbonnement(abo(), PRODUITS), J(10), URL_PORTAIL_CARTE), null)
+  assert.deepEqual(faitsImpaye(pd, J(10)), {
+    paiement_en_retard: true, acces_au_groupe_suspendu: true,
+    a_regler: [{ montant: '89 €', facture_du: '1er septembre 2026', lien: LIEN_FACTURE }],
+    acces_rouvre_des_que_le_paiement_passe: true, tarif_actuel_garde_si_regle_avant: '1er octobre 2026',
+  })
+  const fm = faitsMontants([], [{ abonnement: pd, factures: [factureOuverte()] }], J(10))
+  assert.ok(fm.acces_au_groupe_suspendu && fm.tarif_actuel_garde_si_regle_avant === '1er octobre 2026')
+  assert.deepEqual(fm.a_regler, [{ montant: '89 €', facture_du: '1er septembre 2026', lien: LIEN_FACTURE }])
+  // Aucun identifiant Stripe ne sort (factures, abonnement, client).
+  for (const x of [t, t2, JSON.stringify(faitsImpaye(pd, J(10))), JSON.stringify(fm)]) {
+    assert.ok(!/(?<![A-Za-z])(cus|sub|in|di)_[A-Za-z0-9]{4,}/.test(x), x)
+  }
+})
+
+test('rattrapage des emails de bienvenue : une fois, jamais si rattache', () => {
+  assert.equal(JOURS_RATTRAPAGE_BIENVENUE, 3)
+  const maintenant = new Date('2026-10-07T07:00:00Z')
+  const cree = iso => resumerAbonnement(abo({ created: secI(iso) }), PRODUITS)
+  const libre = { rattache: false, emailDejaEnvoye: false, dejaTraite: false }
+  const recent = cree('2026-10-05T12:00:00Z')
+  assert.equal(recent.creeLe, '2026-10-05T12:00:00.000Z')
+  assert.ok(bienvenueARattraper(recent, maintenant, libre))
+  // Deja rattache a un compte Telegram, email deja parti (page ou passage), deja traite : rien.
+  assert.ok(!bienvenueARattraper(recent, maintenant, { ...libre, rattache: true }))
+  assert.ok(!bienvenueARattraper(recent, maintenant, { ...libre, emailDejaEnvoye: true }))
+  assert.ok(!bienvenueARattraper(recent, maintenant, { ...libre, dejaTraite: true }))
+  // Plus de 3 jours, pas actif, sans client : rien. En essai : oui.
+  assert.ok(!bienvenueARattraper(cree('2026-10-03T12:00:00Z'), maintenant, libre))
+  assert.ok(!bienvenueARattraper(resumerAbonnement(abo({ status: 'past_due', created: secI('2026-10-05T12:00:00Z') }), PRODUITS), maintenant, libre))
+  assert.ok(!bienvenueARattraper(resumerAbonnement(abo({ status: 'canceled', created: secI('2026-10-05T12:00:00Z') }), PRODUITS), maintenant, libre))
+  assert.ok(bienvenueARattraper(resumerAbonnement(abo({ status: 'trialing', created: secI('2026-10-05T12:00:00Z') }), PRODUITS), maintenant, libre))
+  assert.ok(!bienvenueARattraper({ ...recent, clientStripe: null }, maintenant, libre))
+  assert.ok(!bienvenueARattraper({ ...recent, creeLe: null }, maintenant, libre))
+  // Une fois : apres le premier passage, l'abonnement est « deja traite ».
+  const traites = new Set()
+  const passer = () => {
+    const ok = bienvenueARattraper(recent, maintenant, { ...libre, dejaTraite: traites.has(recent.id) })
+    if (ok) traites.add(recent.id)
+    return ok
+  }
+  assert.ok(passer())
+  assert.ok(!passer())
+})
+
+test('fil Support : phrases des gestes des impayes (Brice 30/09)', () => {
+  assert.equal(phraseGeste({ geste: 'retrait', resultat: 'fait', regle: 'impaye_5j' }), 'Sortie du groupe (paiement en retard depuis plus de 5 jours).')
+  assert.equal(phraseGeste({ geste: 'retrait', resultat: 'simule', regle: 'impaye_5j' }), null)
+  assert.equal(phraseGeste({ geste: 'rappel', resultat: 'fait', regle: 'sortie_impaye', details: { canal: 'email' } }),
+    'Message de sortie pour paiement en retard envoyé par email (montant et lien de la facture).')
+  assert.equal(phraseGeste({ geste: 'invitation', resultat: 'fait', regle: 'reouverture_impaye', details: { canal: 'prive' } }),
+    'Paiement passé : accès réouvert, lien de retour envoyé.')
+  assert.equal(phraseGeste({ geste: 'invitation', resultat: 'fait', regle: 'reouverture_impaye', details: { canal: 'email' } }),
+    'Paiement passé : accès réouvert, lien de retour envoyé par email.')
+  assert.equal(phraseGeste({ geste: 'invitation', resultat: 'refuse', regle: 'reouverture_impaye' }), 'Paiement passé : déjà revenu dans le groupe.')
+  assert.equal(phraseGeste({ geste: 'invitation', resultat: 'refuse', regle: 'impaye_ouvert' }), 'Lien vers le groupe non envoyé : paiement en retard, facture à régler.')
+  assert.equal(phraseGeste({ geste: 'entree_refusee', resultat: 'fait', regle: 'impaye_ouvert' }), 'Entrée dans le groupe refusée (paiement en retard, facture à régler).')
+  assert.equal(phraseGeste({ geste: 'arret', resultat: 'fait', regle: 'fenetre_30j', details: { factures_non_annulees: 0 } }),
+    'Abonnement arrêté : paiement en retard depuis plus de 30 jours, facture annulée.')
+  assert.equal(phraseGeste({ geste: 'arret', resultat: 'fait', regle: 'fenetre_30j', details: { factures_non_annulees: 1 } }),
+    'Abonnement arrêté : paiement en retard depuis plus de 30 jours, facture pas encore annulée.')
+  assert.equal(phraseGeste({ geste: 'arret', resultat: 'simule', regle: 'fenetre_30j' }), null)
+  assert.equal(phraseGeste({ geste: 'arret', resultat: 'echec', regle: 'fenetre_30j' }), null)
+  assert.equal(phraseGeste({ geste: 'rappel', resultat: 'fait', regle: 'fin_fenetre_30j', details: { canal: 'prive' } }),
+    "Message de fin d'abonnement (paiement en retard de plus de 30 jours) envoyé.")
+  assert.equal(phraseGeste({ geste: 'invitation', resultat: 'fait', regle: 'bienvenue_rattrapage' }), 'Email de bienvenue envoyé (rattrapage du passage quotidien).')
+  // L'arret programme par un membre ne change pas.
+  assert.equal(phraseGeste({ geste: 'arret', resultat: 'fait', regle: 'demande_membre', details: { fin: '2026-10-07' } }), 'Arrêt programmé au 7 octobre 2026.')
 })
 
 console.log(`\n${n} blocs verifies, tout est bon.`)

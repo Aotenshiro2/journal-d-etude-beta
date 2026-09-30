@@ -10,8 +10,8 @@
 import { prisma } from '@/lib/db'
 import { exemptionActive } from '@/lib/stripe-actions'
 import { rattachementActif, membreParEmail } from './rattacher'
-import { abonnementsLiveClubDuClient, abonnementsLiveClubParEmail } from './stripe'
-import { dateIso, finDuDroit, meilleurAbonnement, messageErreur, relationAbsente } from './pur'
+import { abonnementsLiveClubDuClient, abonnementsLiveClubParEmail, type AbonnementResume } from './stripe'
+import { dateIso, detteOuverte, finDuDroit, meilleurAbonnement, messageErreur, relationAbsente, type Dette } from './pur'
 
 export { meilleurAbonnement }
 
@@ -24,6 +24,13 @@ export type Droit = {
   clientStripe?: string
   membreId?: string
   accesId?: string
+  /**
+   * 'non' seulement (Brice, 30/09, « la dette d'abord ») : le droit tombe a
+   * cause d'un impaye de plus de 5 jours encore dans la fenetre de 30 jours.
+   * Le bot donne alors le montant et le lien de la facture au lieu des liens
+   * d'abonnement (detteOuverte, pur.ts).
+   */
+  dette?: Dette
   /** Sources illisibles (codes courts, sans donnee personnelle), pour les logs. */
   erreurs?: string[]
 }
@@ -58,15 +65,27 @@ export async function droitLiveClub(telegramId: number): Promise<Droit> {
   // un client melanie sans abonnement Live Club (achat ponctuel) quand
   // l'abonnement vit sur un autre cus_ du meme email. Dans ces deux cas on
   // relit par l'email avant de conclure.
+  // Les abonnements lus (pour la dette d'un 'non', Brice 30/09).
+  const lus: AbonnementResume[] = []
   if (rattachement && (rattachement.client_stripe || rattachement.email)) {
     try {
       const clientMelanie = rattachement.client_stripe
         && (rattachement.compte == null || rattachement.compte === 'melanie')
         ? rattachement.client_stripe
         : null
-      let abo = clientMelanie ? meilleurAbonnement(await abonnementsLiveClubDuClient(clientMelanie)) : null
+      // Un abonnement en retard de paiement vient avec ses factures ouvertes
+      // (stripe.ts) : passe 5 jours apres le premier echec, il n'ouvre plus
+      // le groupe (abonnementOuvreLeGroupeLe, pur.ts).
+      let abo: AbonnementResume | null = null
+      if (clientMelanie) {
+        const duClient = await abonnementsLiveClubDuClient(clientMelanie)
+        lus.push(...duClient)
+        abo = meilleurAbonnement(duClient)
+      }
       if (!abo && rattachement.email) {
-        abo = meilleurAbonnement(await abonnementsLiveClubParEmail(rattachement.email))
+        const parEmail = await abonnementsLiveClubParEmail(rattachement.email)
+        lus.push(...parEmail)
+        abo = meilleurAbonnement(parEmail)
       } else if (!abo && !clientMelanie) {
         // Client d'un autre compte Stripe, sans email pour le retrouver : on
         // ne sait pas, et un 'non' ferait refuser ou sortir un payeur.
@@ -135,5 +154,6 @@ export async function droitLiveClub(telegramId: number): Promise<Droit> {
     console.warn(`[liveclub/droits] u${telegramId} : droit inconnu (${erreurs.length} source(s) illisible(s))`)
     return { statut: 'inconnu', raison: null, ...base, erreurs }
   }
-  return { statut: 'non', raison: null, ...base }
+  const dette = detteOuverte(lus)
+  return { statut: 'non', raison: null, ...base, ...(dette ? { dette } : {}) }
 }

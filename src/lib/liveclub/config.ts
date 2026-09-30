@@ -88,6 +88,26 @@ export function sortiesActives(): boolean {
   return process.env.LIVECLUB_SORTIES_ACTIVES?.trim() === '1'
 }
 
+/**
+ * Interrupteur SEPARE de la sortie des impayes a 5 jours (Brice, 30/09) :
+ * Metricgram ne sort pas un abonnement past_due (il n'agit qu'une fois
+ * l'abonnement non actif, apres environ 14 jours de relances et 7 jours de
+ * grace), donc ce geste peut s'activer avant la bascule sans conflit.
+ * LIVECLUB_SORTIES_IMPAYES === '1', ou la bascule complete. Il ne commande
+ * QUE la sortie reelle des impayes et son message : la fenetre de 30 jours,
+ * le rattrapage des emails de bienvenue et les desabonnes restent sous
+ * sortiesActives(). Sans lui, la sortie est SIMULEE (regle 'impaye_5j').
+ */
+export function sortiesImpayesActives(): boolean {
+  return process.env.LIVECLUB_SORTIES_IMPAYES?.trim() === '1' || sortiesActives()
+}
+
+/**
+ * Plafond de resiliations REELLES par passage (fenetre de 30 jours) : un
+ * garde-fou si une lecture fausse faisait croire a une serie d'impayes.
+ */
+export const PLAFOND_RESILIATIONS_PASSAGE = 10
+
 /** Cle Stripe de LECTURE du compte melanie (repli sur la cle d'ecriture). */
 export function cleStripeLecture(): string | null {
   return process.env.STRIPE_READ_KEY_MELANIE?.trim()

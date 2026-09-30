@@ -94,6 +94,30 @@ export async function stripePost(
   return json
 }
 
+/**
+ * DELETE Stripe (version epinglee), parametres en query string. Sert a la
+ * resiliation d'un abonnement impaye depuis plus de 30 jours (passage
+ * quotidien du Live Club, 30/09). Jette si Stripe refuse (cle sans le droit
+ * compris : Stripe renvoie alors une erreur de permission).
+ */
+export async function stripeDelete(
+  cle: string,
+  chemin: string,
+  params: Record<string, string> = {},
+): Promise<Record<string, unknown>> {
+  const q = new URLSearchParams(params).toString()
+  const reponse = await fetch(`${API}${chemin}${q ? `?${q}` : ''}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${cle}`, 'Stripe-Version': STRIPE_VERSION },
+  })
+  const json = (await reponse.json()) as Record<string, unknown>
+  if (!reponse.ok) {
+    const err = json?.error as { message?: string } | undefined
+    throw new Error(err?.message?.slice(0, 300) || `Stripe a répondu ${reponse.status}`)
+  }
+  return json
+}
+
 // ---------------------------------------------------------------------------
 // Les trois actions. Chacune valide STRICTEMENT ses parametres : un parametre
 // inattendu ou mal forme est un refus, pas une tolerance — c'est du texte qui

@@ -51,7 +51,7 @@ import {
   envoyerCodeSiConnu, rattacherParEmail, reserverCode, verifierCode, type CodeReserve, type IssueCode,
 } from './verification'
 import { CODE_ENVOIS_HEURE, CODE_VALIDITE_MINUTES, intentionNonRattache, masquerCodes } from './verification-pur'
-import { jetonBienForme, libelleBouton, messageErreur, normaliserEmail, pauseDejaProposee, relationAbsente } from './pur'
+import { jetonBienForme, libelleBouton, messageErreur, normaliserEmail, pauseDejaProposee, relationAbsente, texteDette } from './pur'
 
 // Formes minimales des updates Telegram utilises ici.
 type Utilisateur = { id: number; is_bot?: boolean; first_name?: string }
@@ -244,11 +244,14 @@ export async function traiterDemandeAdhesion(demande: DemandeAdhesionTg, updateI
     return
   }
 
-  await envoyer(ecrireA, messageRefus())
+  // La dette d'abord (Brice, 30/09) : un payeur rattache dont l'acces est
+  // suspendu pour un impaye encore dans la fenetre de 30 jours recoit le
+  // montant et le lien de sa facture, pas les liens d'un nouvel abonnement.
+  await envoyer(ecrireA, droit.dette ? texteDette(droit.dette) : messageRefus())
   const r = await refuserDemande(u.id)
   await journaliserGesteLiveClub(
     r.ok
-      ? { geste: 'entree_refusee', resultat: 'fait', regle: 'sans_droit', details: {} }
+      ? { geste: 'entree_refusee', resultat: 'fait', regle: droit.dette ? 'impaye_ouvert' : 'sans_droit', details: {} }
       : { geste: 'entree_refusee', resultat: 'echec', regle: 'telegram', details: { etape: 'declineChatJoinRequest', erreur: r.erreur } },
     contexte,
   )
@@ -387,11 +390,23 @@ async function proposerRetourAuGroupe(chat: number, u: Utilisateur, updateId: nu
   const presence = await estDansLeGroupe(u.id)
   if (presence === 'oui') return false
   const droit = await droitLiveClub(u.id)
-  if (droit.statut === 'non') return false
 
   const contexte = { telegramId: u.id, membreId: droit.membreId ?? null, acteur: ACTEUR_BOT_MEMBRE, abonnementId: droit.abonnementId ?? null }
   const avant = o.entete ? `${o.entete}\n\n` : ''
   const details = { declencheur: o.declencheur }
+
+  if (droit.statut === 'non') {
+    // La dette d'abord (Brice, 30/09) : hors du groupe a cause d'un impaye
+    // encore dans la fenetre de 30 jours, le montant et le lien de la
+    // facture. Pas sur un clic de bouton : « Mon abonnement » le dit deja.
+    if (!droit.dette || o.declencheur === 'bouton') return false
+    await envoyer(chat, `${avant}${texteDette(droit.dette)}`, o.boutons)
+    await journaliserGesteLiveClub(
+      { geste: 'invitation', resultat: 'refuse', regle: 'impaye_ouvert', details },
+      { ...contexte, updateId: null },
+    )
+    return true
+  }
 
   if (droit.statut === 'inconnu' || presence === 'inconnu') {
     await envoyer(chat, `${avant}Je n'arrive pas à vérifier ton accès au groupe en ce moment, donc je ne t'envoie pas de lien. `
@@ -508,6 +523,13 @@ async function traiterStartJeton(chat: number, u: Utilisateur, jeton: string, up
     return
   }
   if (droit.statut === 'non') {
+    // La dette d'abord (Brice, 30/09) : impaye encore dans la fenetre de 30
+    // jours = le montant et le lien de la facture, pas un nouvel abonnement.
+    if (droit.dette) {
+      await envoyer(chat, texteDette(droit.dette), clavierMenu())
+      await journal({ geste: 'invitation', resultat: 'refuse', regle: 'impaye_ouvert', details: { usage: ligne.usage } }, extra)
+      return
+    }
     await envoyer(chat, `Ton lien est bon, mais je ne vois pas d'abonnement actif en ce moment, donc je ne peux pas t'ouvrir le groupe.\n\n`
       + `Si tu viens de payer, attends une minute et rouvre ton lien.\n\n${texteAbonnement()}`, clavierMenu())
     await journal({ geste: 'invitation', resultat: 'refuse', regle: 'sans_droit', details: { usage: ligne.usage } }, extra)
@@ -599,11 +621,14 @@ async function apresCodeValide(chat: number, u: Utilisateur, email: string, upda
   // Droit ouvert et hors du groupe : le lien de retour (ban leve s'il le
   // faut). Le message part par envoyer, donc au fil Support aussi.
   if (await proposerRetourAuGroupe(chat, u, updateId, { declencheur: 'verification', entete, boutons: clavierMenu(), reprendre: true })) return
-  // Pas de lien : dans le groupe, ou pas de droit ouvert.
+  // Pas de lien : dans le groupe, ou pas de droit ouvert. Un impaye encore
+  // dans la fenetre de 30 jours : la dette d'abord (Brice, 30/09).
   const droit = await droitLiveClub(u.id)
-  const suite = droit.statut === 'non'
-    ? `Mais je ne vois pas d'abonnement Live Club actif en ce moment, donc je ne peux pas t'ouvrir le groupe.\n\n${texteAbonnement()}`
-    : `Tu es déjà dans le groupe, tout est bon. Que veux-tu faire ?`
+  const suite = droit.statut !== 'non'
+    ? `Tu es déjà dans le groupe, tout est bon. Que veux-tu faire ?`
+    : droit.dette
+      ? texteDette(droit.dette)
+      : `Mais je ne vois pas d'abonnement Live Club actif en ce moment, donc je ne peux pas t'ouvrir le groupe.\n\n${texteAbonnement()}`
   await repondeur(chat, u.id, r)(`${entete}\n\n${suite}`, clavierMenu())
 }
 

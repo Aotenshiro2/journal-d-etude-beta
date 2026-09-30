@@ -28,8 +28,8 @@ import {
   type AbonnementResume,
 } from './stripe'
 import {
-  abonnementOuvreLeGroupe, calculerReprisePause, faitsMontants, formaterDateFr, messageErreur, nbMoisPauseValide,
-  peutAvoirUnImpaye, statutDonneDroit, statutTermine,
+  abonnementOuvreLeGroupe, calculerReprisePause, enRetardDePaiement, etatImpaye, faitsImpaye, faitsMontants, formaterDateFr,
+  messageErreur, nbMoisPauseValide, peutAvoirUnImpaye, phraseImpaye, statutDonneDroit, statutTermine,
   type EntreeImpaye, type EntreeMontants, type FaitsMontants,
 } from './pur'
 import type { ActionMembre } from './conversations'
@@ -87,6 +87,13 @@ function phraseAbonnement(a: AbonnementResume): string {
   if (a.pauseActive) {
     return `Une pause est prévue : ta période payée va jusqu'au ${fin ?? '?'}, tu gardes le groupe jusque-là. Ensuite rien n'est prélevé, et l'abonnement reprend tout seul${reprise ? ` le ${reprise}` : ''}.`
   }
+  // Paiement en retard, factures lues (Brice, 30/09) : 5 jours de groupe
+  // garde, puis le montant et le lien de la facture, puis au-dela de 30 jours
+  // un nouvel abonnement. Avant l'arret programme : un abonnement en retard
+  // ne garde plus le groupe « jusqu'a la fin de la periode ». Factures pas
+  // lues : les anciennes phrases ci-dessous.
+  const impaye = phraseImpaye(a, Date.now(), URL_PORTAIL_CARTE)
+  if (impaye) return impaye
   if (a.arretPrevu && statutDonneDroit(a.statut)) {
     return `Ton abonnement s'arrête${fin ? ` le ${fin}` : ' à la fin de la période en cours'} : rien ne sera plus prélevé. Tu gardes le groupe jusque-là, et tu peux encore changer d'avis.`
   }
@@ -107,9 +114,25 @@ function phraseAbonnement(a: AbonnementResume): string {
   return `Ton abonnement est terminé${termine ? ` depuis le ${termine}` : ''}.`
 }
 
-/** L'abonnement a-t-il une phrase « en cours » ? Vivant chez Stripe, ou resilie mais encore paye. */
+/**
+ * L'abonnement a-t-il une phrase « en cours » ? Vivant chez Stripe, resilie
+ * mais encore paye, ou en retard de paiement avec ses factures lues (un
+ * unpaid reste en place chez Stripe : sa facture se regle, Brice 30/09).
+ */
 function abonnementEnCours(a: AbonnementResume): boolean {
-  return statutDonneDroit(a.statut) || abonnementOuvreLeGroupe(a)
+  if (statutDonneDroit(a.statut) || abonnementOuvreLeGroupe(a)) return true
+  const e = etatImpaye(a)
+  return enRetardDePaiement(a.statut) && (e === 'grace' || e === 'suspendu' || e === 'fenetre_depassee')
+}
+
+/** Le statut d'un abonnement « en cours » dans les faits de l'agent. */
+function statutDesFaits(a: AbonnementResume): string {
+  if (a.pauseEffective) return 'en_pause'
+  const e = etatImpaye(a)
+  if (e === 'suspendu') return 'acces_suspendu_paiement_en_retard'
+  if (e === 'fenetre_depassee') return 'paiement_non_regle_depuis_plus_de_30_jours'
+  if (statutDonneDroit(a.statut)) return a.statut
+  return a.statut === 'unpaid' ? 'paiement_en_retard' : 'resilie_mais_paye'
 }
 
 export type Situation =
@@ -141,14 +164,14 @@ export async function situationDuMembre(telegramId: number): Promise<Situation> 
       texte: vivants.map(phraseAbonnement).join('\n\n'),
       faits: {
         abonnements: vivants.map(a => ({
-          statut: a.pauseEffective ? 'en_pause'
-            : statutDonneDroit(a.statut) ? a.statut
-            : 'resilie_mais_paye',
+          statut: statutDesFaits(a),
           fin_periode: a.finPeriode ? formaterDateFr(a.finPeriode) : null,
           actif_jusquau: statutDonneDroit(a.statut) ? null : a.payeJusquau ? formaterDateFr(a.payeJusquau) : null,
           arret_programme: a.arretPrevu,
           pause_prevue_ou_en_cours: a.pauseActive,
           reprise_apres_pause: a.pauseJusquau ? formaterDateFr(a.pauseJusquau) : null,
+          // Impaye (Brice, 30/09) : groupe garde jusqu'a, ou montant et lien a regler.
+          ...faitsImpaye(a),
         })),
       },
     }

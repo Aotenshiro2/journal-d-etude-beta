@@ -159,3 +159,75 @@ change que le nom du Carnet) :
   comme reste a regler (seulement 'open'). Les textes de panne du menu
   (jeton illisible, lien impossible, ban non leve, confirmation sur un
   abonnement qui n est plus lie) gardent support@.
+
+## Impayes du Live Club (30/09/2026, NON commite, NON deploye)
+
+Decisions de Brice du 30/09 (compte Stripe de Melanie regle sur « marquer
+l abonnement comme non paye », facture laissee ouverte). Tout est compte
+depuis le PREMIER ECHEC de la facture impayee la plus ancienne encore
+ouverte : status_transitions.finalized_at (la premiere tentative de
+prelevement part a la finalisation), repli sur created ; due_date pour une
+facture envoyee (premierEchecFacture, pur.ts).
+- Droit (pur.ts, abonnementOuvreLeGroupeLe, etatImpaye) : un abonnement
+  past_due ou unpaid ouvre le groupe 5 jours apres le premier echec, puis
+  plus. stripe.ts lit les factures ouvertes des abonnements en retard
+  (completerImpaye) ; illisibles = droit 'inconnu' (droitLiveClub) ou
+  'illisible' dans la liste du passage (aucune decision). Effet immediat sur
+  les demandes d adhesion.
+- Passage quotidien (passage.ts), 4 taches nouvelles :
+  (g) sortie SANS ban a 5 jours (retrait, regle 'impaye_5j'), une fois par
+  facture (details.facture_id), message prive sinon email (montant, lien de
+  la facture, acces qui rouvre tout seul, tarif garde avant premier echec +
+  30 jours). Interrupteur SEPARE : sortiesImpayesActives() =
+  LIVECLUB_SORTIES_IMPAYES === '1' ou la bascule ; sans lui, lignes 'simule'
+  a relire dans le Journal du bot.
+  (h) reouverture : sortie pour impaye (notre bot, ou Metricgram) dont la
+  facture est payee apres la sortie et due avant, membre absent, droit
+  'oui' : unban only_if_banned, lien de demande d adhesion en prive si le bot
+  a deja ete demarre, sinon lien personnel vers le bot par email (jeton
+  'retour'). REELLE meme avant la bascule. Une fois par reouverture ; un lien
+  « sorti par erreur » deja envoye ferme aussi la boucle ; la tache
+  Metricgram ne signale plus ces sorties comme abusives (pour_impaye).
+  (i) fenetre de 30 jours : DELETE /v1/subscriptions/{id} (invoice_now et
+  prorate a false) PUIS void des factures ouvertes (dans cet ordre : annuler
+  d abord la derniere facture ferait repasser l abonnement a 'active'), cle
+  d ecriture, relecture en direct avant, plafond 10 par passage. Echec
+  (cle sans le droit, panne) = ligne 'arret' 'fenetre_30j' en 'echec' avec le
+  message Stripe, rien ne bouge. Message de fin (sauf autre droit). SIMULEE
+  sans la bascule.
+  (j) rattrapage des emails de bienvenue (abonnement cree depuis moins de 3
+  jours, actif, sans compte Telegram rattache ni email deja parti) : meme
+  fonction que la page (preparerBienvenue, sortie dans liveclub/bienvenue.ts),
+  donc meme verrou. SIMULE sans la bascule.
+  La tache des desabonnes laisse les 'unpaid' a facture ouverte datee a la
+  tache (g).
+- La dette d abord (bot-membre.ts) : demande d adhesion refusee, lien
+  personnel, code verifie, /start et /menu d un compte rattache dont le
+  droit tombe pour un impaye encore dans les 30 jours : montant, lien de la
+  facture, « regle-la et ton acces rouvre tout seul, a ton tarif actuel »
+  (texteDette), au lieu des liens d abonnement. « Mon abonnement » et
+  l outil mon_abonnement donnent la meme chose (phraseImpaye, faitsImpaye) ;
+  prompt de l agent complete.
+- Journal : gestes existants seulement (retrait, rappel, invitation, arret,
+  entree_refusee), regles nouvelles impaye_5j, sortie_impaye,
+  reouverture_impaye, impaye_ouvert, fenetre_30j, fin_fenetre_30j,
+  bienvenue_rattrapage. Check en base verifie le 30/09 en lecture seule :
+  aucune migration necessaire. Phrases du fil Support dans phraseGeste.
+- Tests : verifier-liveclub.mjs 28 blocs (8 nouveaux). Eval
+  /tmp/eval-fuites-v4.json : 158 passages, 1 fuite (H01#3 Live Club :
+  formule de la politique commune recopiee, cas deja connu comme instable ;
+  4 rejeux propres ensuite), 1 incorrect (O06 bot support : nom du Carnet
+  omis), 0 refus a tort ; D01 a D03 (acces suspendu) 6/6 corrects.
+- Apercu en lecture seule (scripts/apercu-impayes.mjs, cle Stripe de
+  lecture, SELECT, getChatMember) au 30/09 : 5 abonnements en retard, 2 dans
+  leurs 5 jours, 3 sorties SIMULEES (presents, non exemptes), 0 au-dela de
+  30 jours, 0 bienvenue a rattraper, 1 reouverture qui partirait POUR DE
+  VRAI au premier passage apres le deploiement.
+- URGENT (30/09 en fin de journee) : les cles Anthropic du coffre
+  (anthropic-liveclub-bot, anthropic-support-chatbot) repondent « credit
+  balance is too low ». Si ce sont celles de la production, l agent des deux
+  bots est a l arret (repli sur les boutons et « je previens l equipe »).
+- A suivre : permissions de STRIPE_AGENT_KEY_MELANIE pour DELETE
+  subscription et void invoice non verifiables sans ecrire (roadmap : groupe
+  Billing en ecriture depuis le 04/09) ; le passage le dira au premier cas
+  reel. La reouverture par email passe par un jeton 'retour' de 30 jours.

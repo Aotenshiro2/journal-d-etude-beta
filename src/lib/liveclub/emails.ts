@@ -11,7 +11,7 @@
 
 import { Resend } from 'resend'
 import { SUPPORT, URL_PORTAIL_CARTE, MOIS_ACCES_BROKER, lienBotAccueil, texteAbonnement } from './config'
-import { echapperHtml, formaterDateFr, formaterMontant, messageErreur, normaliserEmail } from './pur'
+import { echapperHtml, formaterDateFr, formaterMontant, messageErreur, normaliserEmail, phraseARegler, type FactureARegler } from './pur'
 
 export type ResultatEmail = { ok: true; id: string | null } | { ok: false; erreur: string }
 
@@ -203,6 +203,68 @@ export function modeleRetourSortieAbusive(lienGroupe: string): ModeleMessage {
 }
 
 // ---------------------------------------------------------------------------
+// Impayes (Brice, 30/09)
+// ---------------------------------------------------------------------------
+
+/**
+ * Sortie du groupe 5 jours apres le premier echec de paiement. Ton neutre :
+ * le montant du, le lien de la facture (le bouton quand il n'y en a qu'une,
+ * dans le texte sinon), l'acces qui rouvre tout seul, et le tarif garde dans
+ * les 30 jours (limite = premier echec + 30 jours).
+ */
+export function modeleSortieImpaye(aRegler: readonly FactureARegler[], limite: string): ModeleMessage {
+  const une = aRegler.length === 1 && aRegler[0].lien ? aRegler[0] : null
+  return {
+    sujet: 'Ton accès au Live Club est suspendu',
+    paragraphes: [
+      'Salut !',
+      "Ton dernier paiement pour le Live Club n'est pas passé, et ça fait maintenant plus de 5 jours. Ton accès au groupe Telegram est donc suspendu pour le moment.",
+      ...(aRegler.length ? [phraseARegler(aRegler, { lienDansLeTexte: !une })] : []),
+      `Dès que le paiement passe, ton accès rouvre tout seul, et on t'envoie de quoi revenir dans le groupe. Ton tarif actuel est gardé si tu règles dans les 30 jours, donc avant le ${formaterDateFr(limite)}.`,
+      `Une question ? Écris à ${SUPPORT}.`,
+    ],
+    ...(une?.lien ? { bouton: { texte: 'Régler ma facture', url: une.lien } } : {}),
+  }
+}
+
+/**
+ * Reouverture apres une sortie pour impaye (notre bot ou Metricgram) : la
+ * phrase de Brice, puis le lien. 'prive' : un lien de DEMANDE d'adhesion
+ * (jamais par email). 'email' : le lien personnel vers le bot, qui donne le
+ * lien du groupe.
+ */
+export function modeleReouverture(lien: string, canal: 'prive' | 'email'): ModeleMessage {
+  return {
+    sujet: 'Ton accès au Live Club est réouvert',
+    paragraphes: [
+      'Ton paiement est passé, ton accès au Live Club est réouvert. Clique ici pour revenir.',
+      canal === 'prive'
+        ? "Appuie sur le bouton ci-dessous et demande à rejoindre le groupe : c'est accepté tout seul. Le lien marche pendant 14 jours."
+        : 'Le bouton ci-dessous ouvre notre bot Telegram : appuie sur Démarrer, il te redonne le lien du groupe.',
+      `Un souci ? Écris à ${SUPPORT}.`,
+    ],
+    bouton: { texte: 'Revenir dans le groupe', url: lien },
+  }
+}
+
+/**
+ * La fenetre de 30 jours est depassee : l'abonnement est arrete. factureAnnulee
+ * = toutes ses factures ouvertes ont ete annulees (il n'a plus rien a regler).
+ */
+export function modeleFinFenetre(factureAnnulee: boolean): ModeleMessage {
+  return {
+    sujet: 'Ton abonnement au Live Club est terminé',
+    paragraphes: [
+      'Salut !',
+      `Ton dernier paiement pour le Live Club n'a pas été réglé dans les 30 jours, donc ton abonnement est arrêté et ton accès au groupe a pris fin.${factureAnnulee ? " Ta facture en attente est annulée : tu n'as plus rien à régler." : ''}`,
+      "Tu veux revenir ? Abonne-toi avec la même adresse email, et on t'envoie de quoi rentrer dans le groupe.",
+      texteAbonnement(),
+      `Une question ? Écris à ${SUPPORT}.`,
+    ],
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Rendu
 // ---------------------------------------------------------------------------
 
@@ -289,6 +351,19 @@ export function emailFinBroker(email: string): Promise<ResultatEmail> {
 
 export function emailSortieDesabonne(email: string): Promise<ResultatEmail> {
   return envoyerModele(email, modeleSortieDesabonne())
+}
+
+export function emailSortieImpaye(email: string, aRegler: readonly FactureARegler[], limite: string): Promise<ResultatEmail> {
+  return envoyerModele(email, modeleSortieImpaye(aRegler, limite))
+}
+
+/** lienBot : le lien PERSONNEL vers le bot (jamais un lien d'invitation du groupe). */
+export function emailReouverture(email: string, lienBot: string): Promise<ResultatEmail> {
+  return envoyerModele(email, modeleReouverture(lienBot, 'email'))
+}
+
+export function emailFinFenetre(email: string, factureAnnulee: boolean): Promise<ResultatEmail> {
+  return envoyerModele(email, modeleFinFenetre(factureAnnulee))
 }
 
 export function emailRappelPrelevement(

@@ -15,6 +15,19 @@
 //       bot, le bot lui envoie un lien de retour, un seul par 30 jours (un
 //       membre rebanni est signale 'rebanni_metricgram', sans second lien) ;
 //       un lien rate sur une panne est retente 2 fois ;
+//   (g) IMPAYES (Brice, 30/09) : sortie SANS ban 5 jours apres le premier
+//       echec de paiement (abonnement past_due ou unpaid), une fois par
+//       facture, avec le montant et le lien de la facture. SIMULEE sans
+//       sortiesImpayesActives() (LIVECLUB_SORTIES_IMPAYES, ou la bascule) ;
+//   (h) REOUVERTURE : la facture de la sortie (notre bot ou Metricgram) est
+//       reglee, le membre est absent : ban leve, lien de demande d'adhesion
+//       en prive, sinon lien personnel vers le bot par email. Une fois par
+//       reouverture, REELLE meme avant la bascule (un droit ouvert) ;
+//   (i) FENETRE DE 30 JOURS : resiliation de l'abonnement, puis annulation de
+//       ses factures ouvertes, puis message. SIMULEE sans la bascule ;
+//   (j) RATTRAPAGE des emails de bienvenue : abonnement cree depuis moins de
+//       3 jours, sans compte Telegram ni email deja envoye. SIMULE sans la
+//       bascule (Metricgram envoie encore le sien) ;
 //   (d) purge des conversations privees de plus de 7 jours.
 //
 // A CHAQUE SORTIE REELLE (pause, fin d'acces broker, desabonne quand les
@@ -47,29 +60,40 @@ import {
   retirerDuLiveClub, journaliserGesteLiveClub, stripeGet,
   type EntreeJournalLiveClub, type GesteJournal,
 } from '@/lib/stripe-actions'
-import { GRACE_JOURS, PLAFOND_SORTIES_PASSAGE, chatId, cleStripeLecture, lienBot, sortiesActives } from './config'
+import {
+  GRACE_JOURS, PLAFOND_RESILIATIONS_PASSAGE, PLAFOND_SORTIES_PASSAGE, chatId, cleStripeLecture, lienBot,
+  sortiesActives, sortiesImpayesActives,
+} from './config'
 import {
   listerAbonnementsLiveClub, clientsStripeParEmail, abonnementsLiveClubParEmail, adopterPause, effacerMetadonneesPause,
-  lireAbonnement, apercuProchaineFacture as apercuStripe,
+  lireAbonnement, apercuProchaineFacture as apercuStripe, facturesPayeesAbonnement, fermerFenetreImpaye,
+  annulerFacturesOuvertes,
   type AbonnementResume,
 } from './stripe'
 import { droitLiveClub, type Droit } from './droits'
-import { creerJeton, jetonExistant } from './jetons'
+import { annulerReservationEmail, creerJeton, jetonExistant } from './jetons'
+import { preparerBienvenue } from './bienvenue'
 import { appelTelegram, envoyer, lienDemandeAdhesion } from './telegram'
 import { tracerGeste, tracerMessageBot } from './support-pont'
 import {
   emailRappelPause, emailDebutPauseSansReprise, emailRetour, emailRappelFinBroker, emailFinBroker,
-  emailSortieDesabonne, emailRappelPrelevement,
+  emailSortieDesabonne, emailRappelPrelevement, emailSortieImpaye, emailReouverture, emailFinFenetre, emailBienvenue,
   modeleRappelPause, modeleDebutPauseSansReprise, modeleRetour, modeleRappelFinBroker, modeleFinBroker,
-  modeleSortieDesabonne, modeleRappelPrelevement, modeleRetourSortieAbusive,
+  modeleSortieDesabonne, modeleRappelPrelevement, modeleRetourSortieAbusive, modeleSortieImpaye, modeleReouverture,
+  modeleFinFenetre,
   type ModeleMessage, type ResultatEmail,
 } from './emails'
-import { abonnementOuvreLeGroupe, dateIso, messageErreur, normaliserEmail, relationAbsente, statutDonneDroit, statutTermine } from './pur'
+import {
+  abonnementOuvreLeGroupe, dateIso, enRetardDePaiement, etatImpaye, joursDepuisPremierEchec, limiteFenetreImpaye,
+  messageErreur, normaliserEmail, relationAbsente, statutDonneDroit, statutTermine,
+  type Impaye,
+} from './pur'
 import {
   PlafondSorties, pauseASortir, repriseAPrevenir, repriseFaite, desabonneHorsGrace, finAbonnement,
   debutSerieImpayee, brokerAPrevenir, brokerFini, lirePresence, estIntouchable,
   prelevementAPrevenir, montantAAnnoncer, clePrelevement, jourParis, sortieAbusiveASignaler, cleSortieAbusive,
-  droitCouvraitLaSortie, retourARetenter,
+  droitCouvraitLaSortie, retourARetenter, decisionSortieImpaye, decisionFenetre, decisionReouverture,
+  factureRegleeApresSortie, bienvenueARattraper,
   FENETRE_FIN_BROKER_JOURS, FENETRE_RAPPEL_JOURS,
   type FactureBreve, type Presence,
 } from './passage-regles'
@@ -83,6 +107,8 @@ const MAX_RESOLUTIONS_EMAIL = 300
 export type SynthesePassage = {
   ok: boolean
   sorties_actives: boolean
+  /** Interrupteur separe de la sortie des impayes (LIVECLUB_SORTIES_IMPAYES, ou la bascule). */
+  sorties_impayes_actives: boolean
   duree_ms: number
   /** Le budget de temps a ete atteint : le reste passera demain. */
   interrompu: boolean
@@ -110,7 +136,20 @@ export type SynthesePassage = {
    * pris apres la sortie (reabonne), pas une sortie abusive, rien d'ecrit.
    * retours_retentes : liens retentes apres une panne passagere.
    */
-  metricgram: { signalees: number; liens_envoyes: number; sans_lien: number; rebannis: number; retours_retentes: number; deja_signalees: number; revenus: number; sans_droit: number; droit_posterieur: number; inconnus: number; echecs: number }
+  metricgram: { signalees: number; liens_envoyes: number; sans_lien: number; rebannis: number; retours_retentes: number; deja_signalees: number; revenus: number; sans_droit: number; droit_posterieur: number; pour_impaye: number; inconnus: number; echecs: number }
+  /**
+   * (g) Sortie a 5 jours. en_grace : abonnements en retard depuis 5 jours au
+   * plus (groupe garde) ; sans_compte : abonnements a sortir sans compte
+   * Telegram rattache ; gardes : exempte, admin, ou autre droit ; deja_traites :
+   * deja sortis (ou simules) pour cette facture.
+   */
+  impayes: { simules: number; sorties: number; messages: number; en_grace: number; deja_traites: number; gardes: number; absents: number; sans_compte: number; inconnus: number; echecs: number }
+  /** (h) Reouverture apres une sortie pour impaye (facture reglee). */
+  reouvertures: { liens_prives: number; emails: number; deja_revenus: number; deja_faits: number; sans_droit: number; inconnus: number; echecs: number }
+  /** (i) Fenetre de 30 jours. plus_a_resilier : paye ou termine entre la liste et la relecture. */
+  fenetre_30j: { simulees: number; resiliations: number; factures_annulees: number; factures_en_echec: number; messages: number; plus_a_resilier: number; reportees: number; deja_faits: number; inconnus: number; echecs: number }
+  /** (j) Rattrapage des emails de bienvenue. */
+  bienvenue: { simules: number; envoyes: number; deja_envoyes: number; deja_traites: number; rattaches: number; sans_email: number; inconnus: number; echecs: number }
   purge: { conversations: number }
   /** Lignes de journal perdues (table ou contrainte pas encore migree). */
   journal_echecs: number
@@ -130,6 +169,12 @@ type Contexte = {
   /** Comptes Telegram sortis pendant ce passage (une seule sortie par compte). */
   sortis: Set<number>
   emailsClients: Map<string, string | null>
+  /**
+   * Sorties (cleSortieAbusive) dont la facture impayee a ete reglee depuis :
+   * la reouverture s'en charge, la tache Metricgram ne les signale pas comme
+   * sorties abusives (ce n'en sont pas : le membre ne payait plus).
+   */
+  sortiesImpayeReglees: Set<string>
 }
 
 function tempsEcoule(ctx: Contexte): boolean {
@@ -327,10 +372,14 @@ async function gesteExiste(p: {
    * reprise, et changee quand la pause est prolongee au Dashboard).
    */
   payeJusquau?: string | null
+  /** Un champ de details a egaler (ex. facture_id : « une fois par facture », 30/09). */
+  detail?: { cle: string; valeur: string } | null
 }): Promise<boolean> {
   const abo = p.abonnementId ?? null
   const tid = p.telegramId ?? null
   const paye = p.payeJusquau ?? null
+  const cle = p.detail?.cle ?? null
+  const valeur = p.detail?.valeur ?? null
   const lignes = await prisma.$queryRaw<{ ok: number }[]>`
     select 1 as ok from public.cockpit_liveclub_gestes
     where geste = ${p.geste} and regle = ${p.regle}
@@ -338,8 +387,36 @@ async function gesteExiste(p: {
       and (${abo}::text is null or abonnement_id = ${abo})
       and (${tid}::bigint is null or telegram_id = ${tid}::bigint)
       and (${paye}::text is null or details->>'paye_jusquau' = ${paye})
+      and (${cle}::text is null or details->>${cle}::text = ${valeur}::text)
     limit 1`
   return lignes.length > 0
+}
+
+/**
+ * Ferme une ligne reservee (reserverGeste) qui n'est pas un envoi : son
+ * resultat final et des details en plus. Une ligne 'fait' ou 'refuse' d'un
+ * compte Telegram va aussi au fil Support (sauf fil: false, pour une simple
+ * mise a jour). Une panne est comptee dans journal_echecs.
+ */
+async function noterGeste(
+  ctx: Contexte,
+  gesteId: bigint,
+  n: { resultat: 'fait' | 'refuse' | 'echec'; details: Record<string, unknown>; fil?: boolean },
+) {
+  try {
+    const lignes = await prisma.$queryRaw<{ telegram_id: bigint | null; membre_id: string | null; geste: string; resultat: string; regle: string | null; details: Record<string, unknown> | null }[]>`
+      update public.cockpit_liveclub_gestes
+      set resultat = ${n.resultat}, details = details || ${JSON.stringify(n.details)}::jsonb
+      where geste_id = ${gesteId}
+      returning telegram_id, membre_id::text as membre_id, geste, resultat, regle, details`
+    const g = lignes[0]
+    if (n.fil !== false && g?.telegram_id != null && (g.resultat === 'fait' || g.resultat === 'refuse')) {
+      await tracerGeste(Number(g.telegram_id), { geste: g.geste, resultat: g.resultat, regle: g.regle, details: g.details }, { membreId: g.membre_id })
+    }
+  } catch (err) {
+    ctx.s.journal_echecs++
+    erreur(ctx, 'journal_ecriture', err)
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -973,6 +1050,15 @@ async function tacheDesabonnes(ctx: Contexte, abonnements: AbonnementResume[], p
   for (const a of abonnements) {
     const rattaches = a.clientStripe ? parClient.get(a.clientStripe) ?? [] : []
     if (rattaches.length === 0) continue
+    // 'unpaid' avec une facture ouverte datee (Brice, 30/09) : c'est la
+    // tache des impayes (sortie a 5 jours, fenetre de 30 jours) qui s'en
+    // charge, avec le montant et le lien de la facture, pas un message
+    // « abonnement termine ». Factures illisibles : on ne decide rien.
+    if (a.statut === 'unpaid') {
+      const e = etatImpaye(a, ctx.maintenant.getTime())
+      if (e === 'illisible') { s.inconnus++; continue }
+      if (e === 'grace' || e === 'suspendu' || e === 'fenetre_depassee') continue
+    }
     // 'unpaid' se date sur ses factures impayees (sa periode avance toute
     // seule) : une lecture Stripe de plus, seulement pour ceux-la.
     let debutImpaye: string | null = null
@@ -1386,6 +1472,18 @@ async function tacheSortiesMetricgram(ctx: Contexte, rattaches: Rattache[], abon
   const dejaRelances = new Set(signalees
     .filter(l => l.telegram_id != null && l.retour === 'envoye' && l.fait_le.getTime() > limiteRebanni)
     .map(l => Number(l.telegram_id)))
+  // Un lien de reouverture apres impaye (30/09) envoye depuis moins de 30
+  // jours compte aussi : Metricgram qui le ressort ne lui vaut pas un second lien.
+  try {
+    const rouverts = await prisma.$queryRaw<{ telegram_id: bigint }[]>`
+      select distinct telegram_id from public.cockpit_liveclub_gestes
+      where geste = 'invitation' and regle = 'reouverture_impaye' and resultat = 'fait' and telegram_id is not null
+        and fait_le > now() - make_interval(days => ${FENETRE_REBANNI_JOURS}::int)`
+    for (const r of rouverts) dejaRelances.add(Number(r.telegram_id))
+  } catch (err) {
+    erreur(ctx, 'journal_illisible', err)
+    return
+  }
 
   const parId = new Map((abonnements ?? []).map(a => [a.id, a]))
   const parCompte = new Map<number, Rattache[]>()
@@ -1402,6 +1500,9 @@ async function tacheSortiesMetricgram(ctx: Contexte, rattaches: Rattache[], abon
     if (dejaSignales.has(cle)) { s.deja_signalees++; continue }
     vus.add(telegramId)
 
+    // Sortie d'un membre qui ne payait plus, et qui a regle depuis (30/09) :
+    // pas une sortie abusive, la reouverture (h) s'en occupe.
+    if (ctx.sortiesImpayeReglees.has(cle)) { s.pour_impaye++; continue }
     const p = await presence(telegramId)
     if (p.etat === 'inconnu') { s.inconnus++; continue }
     if (p.etat === 'oui') { s.revenus++; continue }
@@ -1547,6 +1648,643 @@ async function retenterLiensRetour(
 }
 
 // ---------------------------------------------------------------------------
+// (g) Impayes : sortie 5 jours apres le premier echec (Brice, 30/09)
+// ---------------------------------------------------------------------------
+
+/** L'impaye lu d'un abonnement (null s'il n'est pas lu, illisible ou pas date). */
+function impayeLu(a: AbonnementResume): (Impaye & { depuis: string }) | null {
+  return a.impaye && a.impaye !== 'illisible' && a.impaye.depuis ? a.impaye as Impaye & { depuis: string } : null
+}
+
+/**
+ * Sortie SANS ban d'un membre present, non exempte, non admin, sans autre
+ * droit (broker, acces manuel, autre abonnement : droitAvantSortie), dont
+ * l'abonnement est en retard de paiement depuis plus de 5 jours. Une fois par
+ * facture (details.facture_id : la facture impayee la plus ancienne). SIMULEE
+ * sans sortiesImpayesActives() : une ligne 'simule' par facture, a relire dans
+ * le Journal du bot avant d'activer. Jamais sur une facture illisible ni un
+ * droit 'inconnu'. Plafond de sorties du passage respecte (sortir).
+ */
+async function tacheImpayes(ctx: Contexte, abonnements: AbonnementResume[], parClient: Map<string, Rattache[]>) {
+  const s = ctx.s.impayes
+  const reel = sortiesImpayesActives()
+  const maintenantMs = ctx.maintenant.getTime()
+  for (const a of abonnements) {
+    if (tempsEcoule(ctx)) return
+    if (!enRetardDePaiement(a.statut)) continue
+    const decision = decisionSortieImpaye(etatImpaye(a, maintenantMs), reel)
+    if (decision === 'rien') continue
+    if (decision === 'grace') { s.en_grace++; continue }
+    if (decision === 'inconnu') { s.inconnus++; continue }
+    const impaye = impayeLu(a)
+    if (!impaye) { s.inconnus++; continue }
+    const rattaches = a.clientStripe ? parClient.get(a.clientStripe) ?? [] : []
+    if (rattaches.length === 0) { s.sans_compte++; continue }
+    const detailFacture = impaye.factureId ? { cle: 'facture_id', valeur: impaye.factureId } : null
+
+    for (const r of rattaches) {
+      if (tempsEcoule(ctx)) return
+      if (ctx.sortis.has(r.telegramId)) continue
+      let deja: boolean
+      try {
+        deja = await gesteExiste({
+          geste: 'retrait', regle: 'impaye_5j', resultats: reel ? ['fait'] : ['fait', 'simule'],
+          abonnementId: a.id, telegramId: r.telegramId, detail: detailFacture,
+        })
+      } catch (err) {
+        erreur(ctx, 'journal_illisible', err)
+        s.inconnus++
+        continue
+      }
+      if (deja) {
+        s.deja_traites++
+        if (reel) await rattraperMessageSortieImpaye(ctx, a, r, impaye)
+        continue
+      }
+      const p = await presence(r.telegramId)
+      if (p.etat === 'inconnu') { s.inconnus++; continue }
+      if (p.etat === 'non') { s.absents++; continue }
+      if (estIntouchable(p)) { s.gardes++; continue }
+      const emailPayeur = await emailClient(ctx, a.clientStripe)
+      // Exemption, acces broker, acces manuel, autre abonnement (meme par un
+      // autre client Stripe du meme email) : on garde. Avec la regle des 5
+      // jours, droitLiveClub ne compte plus cet abonnement-ci.
+      const droit = await droitAvantSortie(r.telegramId, [r.email, emailPayeur])
+      if (droit === 'inconnu') { s.inconnus++; continue }
+      if (droit === 'oui') { s.gardes++; continue }
+
+      const details = {
+        statut: a.statut, impaye_depuis: impaye.depuis.slice(0, 10), jours: joursDepuisPremierEchec(a, maintenantMs),
+        facture_id: impaye.factureId, statut_tg: p.statut,
+      }
+      const contexte = { telegramId: r.telegramId, membreId: r.membreId, abonnementId: a.id }
+      if (decision === 'simuler') {
+        await tracer(ctx, { geste: 'retrait', resultat: 'simule', regle: 'impaye_5j', details }, contexte)
+        s.simules++
+        continue
+      }
+      const issue = await sortir(ctx, r.telegramId, { geste: 'retrait', regle: 'impaye_5j', abonnementId: a.id, membreId: r.membreId, details })
+      if (issue === 'plafond') continue
+      if (issue !== 'fait') { s.echecs++; continue }
+      s.sorties++
+      if (await messageSortieImpaye(ctx, a, r, impaye)) s.messages++
+    }
+  }
+}
+
+/**
+ * Le message de sortie pour impaye (montant, lien de la facture, acces qui
+ * rouvre tout seul, tarif garde dans les 30 jours), une fois par abonnement,
+ * compte et facture, reserve avant l'envoi. En prive s'il a demarre le bot,
+ * sinon par email. true = parti.
+ */
+async function messageSortieImpaye(ctx: Contexte, a: AbonnementResume, r: Rattache, impaye: Impaye & { depuis: string }): Promise<boolean> {
+  const facture = impaye.factureId
+  let reserve: bigint | null
+  try {
+    reserve = await reserverGeste({
+      cle: `liveclub:sortie_impaye:${a.id}:${r.telegramId}:${facture ?? ''}`,
+      deja: Prisma.sql`
+        select 1 from public.cockpit_liveclub_gestes d
+        where d.geste = 'rappel' and d.regle = 'sortie_impaye' and d.resultat = 'fait'
+          and d.abonnement_id = ${a.id} and d.telegram_id = ${r.telegramId}::bigint
+          and (${facture}::text is null or d.details->>'facture_id' = ${facture}::text)`,
+      geste: 'rappel', regle: 'sortie_impaye', telegramId: r.telegramId, membreId: r.membreId,
+      abonnementId: a.id, details: { facture_id: facture, impaye_depuis: impaye.depuis.slice(0, 10) },
+    })
+  } catch (err) {
+    erreur(ctx, 'journal_reservation', err)
+    return false
+  }
+  if (reserve === null) return false
+  const limite = limiteFenetreImpaye(a) ?? impaye.depuis
+  const email = r.email ?? await emailClient(ctx, a.clientStripe)
+  const envoi = await prevenir(ctx, [r.telegramId], email, modeleSortieImpaye(impaye.aRegler, limite),
+    e => emailSortieImpaye(e, impaye.aRegler, limite))
+  await cloreReservation(ctx, reserve, envoi)
+  return envoi !== null
+}
+
+/**
+ * Sortie deja faite pour cette facture, message jamais parti (prive et email
+ * en echec) : on le retente, si le membre est toujours hors du groupe. La
+ * reservation garde l'unicite.
+ */
+async function rattraperMessageSortieImpaye(ctx: Contexte, a: AbonnementResume, r: Rattache, impaye: Impaye & { depuis: string }) {
+  let envoye: boolean
+  try {
+    envoye = await gesteExiste({
+      geste: 'rappel', regle: 'sortie_impaye', resultats: ['fait'], abonnementId: a.id, telegramId: r.telegramId,
+      detail: impaye.factureId ? { cle: 'facture_id', valeur: impaye.factureId } : null,
+    })
+  } catch (err) {
+    erreur(ctx, 'journal_illisible', err)
+    return
+  }
+  if (envoye) return
+  if ((await presence(r.telegramId)).etat !== 'non') return
+  if (await messageSortieImpaye(ctx, a, r, impaye)) ctx.s.impayes.messages++
+  else ctx.s.impayes.echecs++
+}
+
+// ---------------------------------------------------------------------------
+// (h) Reouverture apres une sortie pour impaye (Brice, 30/09)
+// ---------------------------------------------------------------------------
+
+/** Sorties regardees : 45 derniers jours (le membre a 30 jours pour payer apres le premier echec). */
+const FENETRE_REOUVERTURE_JOURS = 45
+
+type SortieARouvrir = { telegram_id: bigint; sorti_le: Date; par: string }
+
+/**
+ * Le membre sorti pour impaye (par notre bot : retrait 'impaye_5j' ; ou par
+ * Metricgram) dont la facture de la sortie est reglee depuis
+ * (factureRegleeApresSortie : payee apres la sortie, due avant), et qui est
+ * absent du groupe : ban leve (only_if_banned, sans effet sur un non banni),
+ * puis « Ton paiement est passe, ton acces au Live Club est reouvert » avec
+ * un lien de demande d'adhesion en prive s'il a demarre le bot, sinon le lien
+ * personnel vers le bot par email. droitLiveClub doit dire 'oui' (c'est lui
+ * qui approuvera la demande). Une fois par reouverture : une ligne
+ * 'invitation' 'reouverture_impaye' ('fait', ou 'refuse' s'il est deja
+ * revenu) posterieure a la sortie ferme la boucle. REELLE meme avant la
+ * bascule. Seule la sortie la plus recente d'un compte est regardee.
+ */
+async function tacheReouvertures(ctx: Contexte, abonnements: AbonnementResume[], parClient: Map<string, Rattache[]>) {
+  const s = ctx.s.reouvertures
+  let sorties: SortieARouvrir[]
+  let faites: { telegram_id: bigint; fait_le: Date }[]
+  try {
+    sorties = await prisma.$queryRaw<SortieARouvrir[]>`
+      select telegram_id, sorti_le, par from (
+        select telegram_id, fait_le as sorti_le, 'bot' as par
+        from public.cockpit_liveclub_gestes
+        where geste = 'retrait' and regle = 'impaye_5j' and resultat = 'fait' and telegram_id is not null
+          and fait_le > now() - make_interval(days => ${FENETRE_REOUVERTURE_JOURS}::int)
+        union all
+        select telegram_id, sorti_le, 'metricgram' as par
+        from public.cockpit_telegram_membres
+        where present = false and sorti_le is not null and par_qui ilike '%metric%'
+          and sorti_le > now() - make_interval(days => ${FENETRE_REOUVERTURE_JOURS}::int)
+      ) as sorties
+      order by sorti_le desc
+      limit 300`
+    // Une boucle se ferme aussi par un lien de retour « sorti par erreur »
+    // deja envoye apres cette sortie (tache Metricgram) : pas deux liens.
+    faites = await prisma.$queryRaw<{ telegram_id: bigint; fait_le: Date }[]>`
+      select telegram_id, max(fait_le) as fait_le
+      from public.cockpit_liveclub_gestes
+      where geste = 'invitation' and telegram_id is not null
+        and ((regle = 'reouverture_impaye' and resultat in ('fait', 'refuse'))
+          or (regle = 'sortie_abusive_metricgram' and resultat = 'fait'))
+        and fait_le > now() - make_interval(days => ${FENETRE_REOUVERTURE_JOURS + 30}::int)
+      group by telegram_id`
+  } catch (err) {
+    erreur(ctx, 'reouvertures_illisibles', err)
+    return
+  }
+  const derniereReouverture = new Map(faites.map(f => [Number(f.telegram_id), f.fait_le.getTime()]))
+
+  // Compte Telegram -> ses abonnements actifs (index inverse de parClient), et son email connu.
+  const actifsParCompte = new Map<number, AbonnementResume[]>()
+  const emailParCompte = new Map<number, string>()
+  for (const a of abonnements) {
+    if ((a.statut !== 'active' && a.statut !== 'trialing') || a.pauseActive || !a.clientStripe) continue
+    for (const r of parClient.get(a.clientStripe) ?? []) {
+      actifsParCompte.set(r.telegramId, [...actifsParCompte.get(r.telegramId) ?? [], a])
+      if (r.email && !emailParCompte.has(r.telegramId)) emailParCompte.set(r.telegramId, r.email)
+    }
+  }
+
+  const vus = new Set<number>()
+  for (const l of sorties) {
+    if (tempsEcoule(ctx)) return
+    const telegramId = Number(l.telegram_id)
+    if (!Number.isSafeInteger(telegramId) || vus.has(telegramId)) continue
+    vus.add(telegramId)
+    const actifs = actifsParCompte.get(telegramId)
+    if (!actifs?.length) continue
+    if ((derniereReouverture.get(telegramId) ?? 0) >= l.sorti_le.getTime()) { s.deja_faits++; continue }
+
+    // La facture impayee au moment de la sortie est-elle reglee depuis ?
+    let abo: AbonnementResume | null = null
+    let illisible = false
+    for (const a of actifs) {
+      try {
+        if (factureRegleeApresSortie(await facturesPayeesAbonnement(a.id), l.sorti_le)) { abo = a; break }
+      } catch (err) {
+        erreur(ctx, 'factures_payees_illisibles', err)
+        illisible = true
+      }
+    }
+    if (!abo) { if (illisible) s.inconnus++; continue }
+    const sortiLe = l.sorti_le.toISOString()
+    ctx.sortiesImpayeReglees.add(cleSortieAbusive(telegramId, l.sorti_le))
+
+    const p = await presence(telegramId)
+    const droit: Droit | null = p.etat === 'non' ? await droitLiveClub(telegramId) : null
+    const decision = decisionReouverture(true, p.etat, droit?.statut ?? 'inconnu', false)
+    const contexte = { telegramId, membreId: droit?.membreId ?? null, abonnementId: abo.id }
+    const details = { sorti_le: sortiLe, sortie_par: l.par }
+    if (decision === 'inconnu') { s.inconnus++; continue }
+    if (decision === 'sans_droit') { s.sans_droit++; continue }
+    if (decision === 'deja_revenu') {
+      // Revenu par un autre chemin : la boucle se ferme, sans message.
+      await tracer(ctx, { geste: 'invitation', resultat: 'refuse', regle: 'reouverture_impaye', details: { ...details, motif: 'deja_dans_le_groupe' } }, contexte)
+      s.deja_revenus++
+      continue
+    }
+    if (decision !== 'envoyer') continue
+
+    let reserve: bigint | null
+    try {
+      reserve = await reserverGeste({
+        cle: `liveclub:reouverture:${telegramId}:${sortiLe}`,
+        deja: Prisma.sql`
+          select 1 from public.cockpit_liveclub_gestes r
+          where r.geste = 'invitation' and r.telegram_id = ${telegramId}::bigint and r.fait_le >= ${l.sorti_le}
+            and ((r.regle = 'reouverture_impaye' and r.resultat in ('fait', 'refuse'))
+              or (r.regle = 'sortie_abusive_metricgram' and r.resultat = 'fait'))`,
+        geste: 'invitation', regle: 'reouverture_impaye', telegramId, membreId: contexte.membreId,
+        abonnementId: abo.id, details,
+      })
+    } catch (err) {
+      erreur(ctx, 'journal_reservation', err)
+      s.inconnus++
+      continue
+    }
+    if (reserve === null) { s.deja_faits++; continue }
+    const email = emailParCompte.get(telegramId) ?? await emailClient(ctx, abo.clientStripe)
+    const envoi = await envoyerReouverture(ctx, telegramId, abo, email)
+    await cloreReservation(ctx, reserve, envoi)
+    if (!envoi) { s.echecs++; continue }
+    if (envoi.canal === 'prive') s.liens_prives++
+    else s.emails++
+  }
+}
+
+/**
+ * Ban leve d'abord (regle 3 de la roadmap), puis le message : en PRIVE avec
+ * un lien de demande d'adhesion si le membre a deja parle au bot (le bot
+ * approuvera la demande sur droitLiveClub), sinon (ou si le prive echoue) par
+ * EMAIL avec le lien personnel vers le bot (jeton 'retour' de l'abonnement :
+ * le bot redonne le lien du groupe). Jamais un lien d'invitation dans un
+ * email. null = rien n'est parti.
+ */
+async function envoyerReouverture(
+  ctx: Contexte,
+  telegramId: number,
+  a: AbonnementResume,
+  email: string | null,
+): Promise<{ canal: 'prive' | 'email'; telegramId: number | null } | null> {
+  const c = chatId()
+  if (!c) { erreur(ctx, 'chat_id_absent'); return null }
+  const leve = await appelTelegram('unbanChatMember', { chat_id: c, user_id: telegramId, only_if_banned: true })
+  if (!leve.ok) { erreur(ctx, 'reouverture_levee_ban', leve.erreur); return null }
+
+  let demarre = false
+  try {
+    const lignes = await prisma.$queryRaw<{ ok: number }[]>`
+      select 1 as ok from public.cockpit_liveclub_conversations where telegram_id = ${telegramId}::bigint limit 1`
+    demarre = lignes.length > 0
+  } catch (err) {
+    erreur(ctx, relationAbsente(err) ? 'conversations_table_absente' : 'conversations_illisibles', err)
+  }
+  if (demarre) {
+    try {
+      const m = modeleReouverture(await lienDemandeAdhesion(`reouverture u${telegramId}`), 'prive')
+      const texte = m.paragraphes.join('\n\n')
+      const boutons = m.bouton ? [[{ texte: m.bouton.texte, url: m.bouton.url }]] : undefined
+      const r = await envoyer(telegramId, texte, boutons)
+      if (r.ok) {
+        // Au fil Support : le texte et le libelle du bouton, jamais le lien.
+        await tracerMessageBot(telegramId, texte, { boutons })
+        return { canal: 'prive', telegramId }
+      }
+    } catch (err) {
+      erreur(ctx, 'reouverture_lien', err)
+    }
+  }
+  if (email) {
+    try {
+      const jeton = await jetonExistant({ abonnementId: a.id, usage: 'retour' })
+        ?? await creerJeton({ usage: 'retour', clientStripe: a.clientStripe, abonnementId: a.id })
+      const r = await emailReouverture(email, lienBot(jeton))
+      if (r.ok) return { canal: 'email', telegramId: null }
+    } catch (err) {
+      erreur(ctx, 'jetons_indisponibles', err)
+    }
+  }
+  ctx.s.messages_perdus++
+  return null
+}
+
+// ---------------------------------------------------------------------------
+// (i) Fenetre de retour de 30 jours (Brice, 30/09)
+// ---------------------------------------------------------------------------
+
+/**
+ * Un abonnement past_due ou unpaid dont le premier echec date de plus de 30
+ * jours : resilie (sans prorata ni remboursement), puis ses factures ouvertes
+ * annulees (fermerFenetreImpaye, stripe.ts), avec la cle d'ecriture. Une fois
+ * par abonnement (ligne 'arret' 'fenetre_30j' reservee avant l'appel). Une
+ * cle sans le droit, une panne : la ligne passe en 'echec' (etape, message de
+ * Stripe), rien d'autre ne bouge, le passage suivant reessaie. SIMULEE sans
+ * la bascule (sortiesActives). Au plus PLAFOND_RESILIATIONS_PASSAGE par
+ * passage. Puis, en reel : les factures restees ouvertes sont retentees, et
+ * le message de fin part (une fois, sauf autre droit ouvert).
+ */
+async function tacheFenetre(ctx: Contexte, abonnements: AbonnementResume[], parClient: Map<string, Rattache[]>) {
+  const s = ctx.s.fenetre_30j
+  const reel = sortiesActives()
+  const maintenantMs = ctx.maintenant.getTime()
+  let tentatives = 0
+  for (const a of abonnements) {
+    if (tempsEcoule(ctx)) return
+    if (!enRetardDePaiement(a.statut)) continue
+    const etat = etatImpaye(a, maintenantMs)
+    let deja = false
+    if (etat === 'fenetre_depassee') {
+      try {
+        deja = await gesteExiste({ geste: 'arret', regle: 'fenetre_30j', resultats: reel ? ['fait'] : ['fait', 'simule'], abonnementId: a.id })
+      } catch (err) {
+        erreur(ctx, 'journal_illisible', err)
+        s.inconnus++
+        continue
+      }
+    }
+    const decision = decisionFenetre(etat, reel, deja)
+    // 'inconnu' (factures illisibles) est deja compte par la tache des impayes.
+    if (decision === 'rien' || decision === 'inconnu') continue
+    if (decision === 'deja_fait') { s.deja_faits++; continue }
+    const impaye = impayeLu(a)
+    if (!impaye) continue
+    const rattaches = a.clientStripe ? parClient.get(a.clientStripe) ?? [] : []
+    const details = {
+      statut: a.statut, impaye_depuis: impaye.depuis.slice(0, 10), jours: joursDepuisPremierEchec(a, maintenantMs),
+      factures_ouvertes: impaye.facturesOuvertes.length,
+    }
+    const contexte = { telegramId: rattaches[0]?.telegramId ?? null, membreId: rattaches[0]?.membreId ?? null, abonnementId: a.id }
+    if (decision === 'simuler') {
+      await tracer(ctx, { geste: 'arret', resultat: 'simule', regle: 'fenetre_30j', details }, contexte)
+      s.simulees++
+      continue
+    }
+    if (tentatives >= PLAFOND_RESILIATIONS_PASSAGE) {
+      if (s.reportees === 0) console.warn(`[liveclub/passage] plafond de ${PLAFOND_RESILIATIONS_PASSAGE} resiliations atteint : le reste passera demain.`)
+      s.reportees++
+      continue
+    }
+
+    let reserve: bigint | null
+    try {
+      reserve = await reserverGeste({
+        cle: `liveclub:fenetre_30j:${a.id}`,
+        deja: Prisma.sql`
+          select 1 from public.cockpit_liveclub_gestes d
+          where d.geste = 'arret' and d.regle = 'fenetre_30j' and d.resultat = 'fait' and d.abonnement_id = ${a.id}`,
+        geste: 'arret', regle: 'fenetre_30j', telegramId: contexte.telegramId, membreId: contexte.membreId,
+        abonnementId: a.id, details,
+      })
+    } catch (err) {
+      erreur(ctx, 'journal_reservation', err)
+      s.inconnus++
+      continue
+    }
+    if (reserve === null) { s.deja_faits++; continue }
+    tentatives++
+
+    let issue: Awaited<ReturnType<typeof fermerFenetreImpaye>>
+    try {
+      issue = await fermerFenetreImpaye(a.id, maintenantMs)
+    } catch (err) {
+      // Cle d'ecriture absente ou sans le droit, Stripe en panne : rien n'a change.
+      erreur(ctx, 'fenetre_30j_stripe', err)
+      await noterGeste(ctx, reserve, { resultat: 'echec', details: { etape: 'resiliation', erreur: messageErreur(err) } })
+      s.echecs++
+      continue
+    }
+    if (!issue.resilie) {
+      await noterGeste(ctx, reserve, { resultat: 'refuse', details: { motif: issue.motif } })
+      s.plus_a_resilier++
+      continue
+    }
+    s.resiliations++
+    s.factures_annulees += issue.facturesAnnulees
+    if (issue.facturesEnEchec) {
+      s.factures_en_echec += issue.facturesEnEchec
+      erreur(ctx, 'fenetre_30j_facture')
+    }
+    await noterGeste(ctx, reserve, {
+      resultat: 'fait',
+      details: {
+        factures_annulees: issue.facturesAnnulees, factures_non_annulees: issue.facturesEnEchec,
+        ...(issue.erreurFacture ? { erreur_facture: issue.erreurFacture } : {}),
+      },
+    })
+  }
+  if (reel) {
+    await rattraperFacturesFenetre(ctx)
+    await messagesFinFenetre(ctx, abonnements, parClient)
+  }
+}
+
+/**
+ * Resiliation faite, mais une facture est restee ouverte (annulation refusee
+ * ou en panne) : on la retente, 30 jours au plus. La ligne 'fait' est mise a
+ * jour (sans nouvelle ligne au fil Support).
+ */
+async function rattraperFacturesFenetre(ctx: Contexte) {
+  const s = ctx.s.fenetre_30j
+  let lignes: { geste_id: bigint; abonnement_id: string; annulees: string | null }[]
+  try {
+    lignes = await prisma.$queryRaw`
+      select geste_id, abonnement_id, details->>'factures_annulees' as annulees
+      from public.cockpit_liveclub_gestes
+      where geste = 'arret' and regle = 'fenetre_30j' and resultat = 'fait' and abonnement_id is not null
+        and coalesce(details->>'factures_non_annulees', '0') <> '0'
+        and fait_le > now() - interval '30 days'
+      limit 50`
+  } catch (err) {
+    erreur(ctx, 'journal_illisible', err)
+    return
+  }
+  for (const l of lignes) {
+    if (tempsEcoule(ctx)) return
+    const r = await annulerFacturesOuvertes(l.abonnement_id)
+    s.factures_annulees += r.annulees
+    if (r.enEchec) {
+      s.factures_en_echec += r.enEchec
+      erreur(ctx, 'fenetre_30j_facture')
+    }
+    await noterGeste(ctx, l.geste_id, {
+      resultat: 'fait', fil: false,
+      details: { factures_annulees: (Number(l.annulees ?? 0) || 0) + r.annulees, factures_non_annulees: r.enEchec },
+    })
+  }
+}
+
+/**
+ * Le message de fin apres une resiliation de la fenetre de 30 jours : son
+ * acces a pris fin, il peut revenir en se reabonnant (les deux portes). Une
+ * fois par abonnement, 7 jours de rattrapage apres un envoi rate. Pas de
+ * message si un autre droit lui ouvre encore le groupe (autre abonnement,
+ * exemption, acces) : une ligne 'refuse' ferme la boucle. Droit inconnu : on
+ * reessaie au passage suivant.
+ */
+async function messagesFinFenetre(ctx: Contexte, abonnements: AbonnementResume[], parClient: Map<string, Rattache[]>) {
+  const s = ctx.s.fenetre_30j
+  let lignes: { abonnement_id: string; non_annulees: string | null }[]
+  try {
+    lignes = await prisma.$queryRaw`
+      select distinct on (g.abonnement_id) g.abonnement_id, g.details->>'factures_non_annulees' as non_annulees
+      from public.cockpit_liveclub_gestes g
+      where g.geste = 'arret' and g.regle = 'fenetre_30j' and g.resultat = 'fait' and g.abonnement_id is not null
+        and g.fait_le > now() - interval '7 days'
+        and not exists (
+          select 1 from public.cockpit_liveclub_gestes m
+          where m.geste = 'rappel' and m.regle = 'fin_fenetre_30j' and m.resultat in ('fait', 'refuse')
+            and m.abonnement_id = g.abonnement_id)
+      order by g.abonnement_id, g.fait_le desc
+      limit 100`
+  } catch (err) {
+    erreur(ctx, 'journal_illisible', err)
+    return
+  }
+  const parId = new Map(abonnements.map(a => [a.id, a]))
+  for (const l of lignes) {
+    if (tempsEcoule(ctx)) return
+    const cus = parId.get(l.abonnement_id)?.clientStripe ?? null
+    const rattaches = cus ? parClient.get(cus) ?? [] : []
+    const emailPayeur = await emailClient(ctx, cus)
+    let droit: 'oui' | 'non' | 'inconnu' = 'non'
+    if (rattaches.length) {
+      for (const r of rattaches) {
+        const d = await droitAvantSortie(r.telegramId, [r.email, emailPayeur])
+        if (d === 'oui') { droit = 'oui'; break }
+        if (d === 'inconnu') droit = 'inconnu'
+      }
+    } else if (emailPayeur) {
+      try {
+        if ((await abonnementsLiveClubParEmail(emailPayeur)).some(abonnementOuvreLeGroupe)) droit = 'oui'
+      } catch {
+        droit = 'inconnu'
+      }
+    }
+    if (droit === 'inconnu') { s.inconnus++; continue }
+    const contexte = { telegramId: rattaches[0]?.telegramId ?? null, membreId: rattaches[0]?.membreId ?? null, abonnementId: l.abonnement_id }
+    if (droit === 'oui') {
+      await tracer(ctx, { geste: 'rappel', resultat: 'refuse', regle: 'fin_fenetre_30j', details: { motif: 'autre_droit' } }, contexte)
+      continue
+    }
+    let reserve: bigint | null
+    try {
+      reserve = await reserverGeste({
+        cle: `liveclub:fin_fenetre_30j:${l.abonnement_id}`,
+        deja: Prisma.sql`
+          select 1 from public.cockpit_liveclub_gestes d
+          where d.geste = 'rappel' and d.regle = 'fin_fenetre_30j' and d.resultat in ('fait', 'refuse')
+            and d.abonnement_id = ${l.abonnement_id}`,
+        geste: 'rappel', regle: 'fin_fenetre_30j', telegramId: contexte.telegramId, membreId: contexte.membreId,
+        abonnementId: l.abonnement_id, details: {},
+      })
+    } catch (err) {
+      erreur(ctx, 'journal_reservation', err)
+      continue
+    }
+    if (reserve === null) continue
+    const annulee = (Number(l.non_annulees ?? 0) || 0) === 0
+    const email = rattaches.find(r => r.email)?.email ?? emailPayeur
+    const envoi = await prevenir(ctx, rattaches.map(r => r.telegramId), email, modeleFinFenetre(annulee), e => emailFinFenetre(e, annulee))
+    await cloreReservation(ctx, reserve, envoi)
+    if (envoi) s.messages++
+    else s.echecs++
+  }
+}
+
+// ---------------------------------------------------------------------------
+// (j) Rattrapage des emails de bienvenue (Brice, 30/09)
+// ---------------------------------------------------------------------------
+
+/**
+ * Un abonnement Live Club cree depuis moins de 3 jours (hors Payment Link :
+ * Dashboard, portail, page jamais chargee), actif, dont le client n'a ni
+ * compte Telegram rattache ni email de bienvenue deja envoye (ni jeton deja
+ * utilise) : l'email de bienvenue de la page apres paiement, avec son jeton
+ * d'entree (preparerBienvenue, bienvenue.ts : meme verrou, meme reservation).
+ * Une fois par abonnement. SIMULE sans la bascule : avant elle, Metricgram
+ * envoie encore son propre email.
+ */
+async function tacheBienvenue(ctx: Contexte, abonnements: AbonnementResume[], parClient: Map<string, Rattache[]>) {
+  const s = ctx.s.bienvenue
+  const reel = sortiesActives()
+  const candidats = abonnements.filter(a => bienvenueARattraper(a, ctx.maintenant, { rattache: false, emailDejaEnvoye: false, dejaTraite: false }))
+  if (!candidats.length) return
+  const ids = candidats.map(a => a.id)
+  let servis: Set<string>
+  let traites: Set<string>
+  try {
+    const jetons = await prisma.$queryRaw<{ abonnement_id: string }[]>`
+      select distinct abonnement_id from public.cockpit_liveclub_jetons
+      where abonnement_id = any(${ids}::text[]) and (email_envoye_le is not null or utilise_le is not null)`
+    const lignes = await prisma.$queryRaw<{ abonnement_id: string }[]>`
+      select distinct abonnement_id from public.cockpit_liveclub_gestes
+      where geste = 'invitation' and regle = 'bienvenue_rattrapage'
+        and resultat = any(${reel ? ['fait'] : ['fait', 'simule']}::text[])
+        and abonnement_id = any(${ids}::text[])`
+    servis = new Set(jetons.map(j => j.abonnement_id))
+    traites = new Set(lignes.map(l => l.abonnement_id))
+  } catch (err) {
+    erreur(ctx, relationAbsente(err) ? 'jetons_table_absente' : 'bienvenue_illisible', err)
+    s.inconnus += candidats.length
+    return
+  }
+
+  for (const a of candidats) {
+    if (tempsEcoule(ctx)) return
+    const rattache = (a.clientStripe ? parClient.get(a.clientStripe) ?? [] : []).length > 0
+    const emailDejaEnvoye = servis.has(a.id)
+    const dejaTraite = traites.has(a.id)
+    if (!bienvenueARattraper(a, ctx.maintenant, { rattache, emailDejaEnvoye, dejaTraite })) {
+      if (rattache) s.rattaches++
+      else if (emailDejaEnvoye) s.deja_envoyes++
+      else s.deja_traites++
+      continue
+    }
+    const contexte = { telegramId: null, abonnementId: a.id }
+    if (!reel) {
+      await tracer(ctx, { geste: 'invitation', resultat: 'simule', regle: 'bienvenue_rattrapage', details: { cree_le: a.creeLe?.slice(0, 10) ?? null } }, contexte)
+      s.simules++
+      continue
+    }
+    const email = await emailClient(ctx, a.clientStripe)
+    if (!email) { s.sans_email++; continue }
+    let prep: Awaited<ReturnType<typeof preparerBienvenue>>
+    try {
+      prep = await preparerBienvenue(a.id, { clientStripe: a.clientStripe, email, sessionTropAncienne: false })
+    } catch (err) {
+      erreur(ctx, relationAbsente(err) ? 'jetons_table_absente' : 'bienvenue_jeton', err)
+      s.echecs++
+      continue
+    }
+    if (prep.issue !== 'lien' || !prep.jeton || !prep.envoyerEmail) { s.deja_envoyes++; continue }
+    const envoi = await emailBienvenue(email, lienBot(prep.jeton))
+    if (!envoi.ok) {
+      try {
+        await annulerReservationEmail(prep.jeton)
+      } catch (err) {
+        erreur(ctx, 'bienvenue_reservation', err)
+      }
+      await tracer(ctx, { geste: 'invitation', resultat: 'echec', regle: 'bienvenue_rattrapage', details: { etape: 'email' } }, contexte)
+      ctx.s.messages_perdus++
+      s.echecs++
+      continue
+    }
+    await tracer(ctx, { geste: 'invitation', resultat: 'fait', regle: 'bienvenue_rattrapage', details: { jeton_nouveau: prep.nouveau, email_envoye: true } }, contexte)
+    s.envoyes++
+  }
+}
+
+// ---------------------------------------------------------------------------
 // (d) Purge des conversations privees
 // ---------------------------------------------------------------------------
 
@@ -1578,9 +2316,11 @@ export async function passageQuotidien(maintenant: Date = new Date()): Promise<S
     plafond: new PlafondSorties(PLAFOND_SORTIES_PASSAGE),
     sortis: new Set(),
     emailsClients: new Map(),
+    sortiesImpayeReglees: new Set(),
     s: {
       ok: true,
       sorties_actives: sortiesActives(),
+      sorties_impayes_actives: sortiesImpayesActives(),
       duree_ms: 0,
       interrompu: false,
       sorties_reelles: 0,
@@ -1589,7 +2329,11 @@ export async function passageQuotidien(maintenant: Date = new Date()): Promise<S
       broker: { rappels_j7: 0, sorties: 0, messages_fin: 0, termines_sans_sortie: 0, ignores: 0, inconnus: 0, echecs: 0 },
       desabonnes: { simules: 0, sorties: 0, messages: 0, deja_traites: 0, gardes: 0, absents: 0, inconnus: 0, echecs: 0 },
       prelevements: { rappels_j3: 0, montants_inconnus: 0, apercus_illisibles: 0, deja_faits: 0, ignores: 0, inconnus: 0, echecs: 0 },
-      metricgram: { signalees: 0, liens_envoyes: 0, sans_lien: 0, rebannis: 0, retours_retentes: 0, deja_signalees: 0, revenus: 0, sans_droit: 0, droit_posterieur: 0, inconnus: 0, echecs: 0 },
+      metricgram: { signalees: 0, liens_envoyes: 0, sans_lien: 0, rebannis: 0, retours_retentes: 0, deja_signalees: 0, revenus: 0, sans_droit: 0, droit_posterieur: 0, pour_impaye: 0, inconnus: 0, echecs: 0 },
+      impayes: { simules: 0, sorties: 0, messages: 0, en_grace: 0, deja_traites: 0, gardes: 0, absents: 0, sans_compte: 0, inconnus: 0, echecs: 0 },
+      reouvertures: { liens_prives: 0, emails: 0, deja_revenus: 0, deja_faits: 0, sans_droit: 0, inconnus: 0, echecs: 0 },
+      fenetre_30j: { simulees: 0, resiliations: 0, factures_annulees: 0, factures_en_echec: 0, messages: 0, plus_a_resilier: 0, reportees: 0, deja_faits: 0, inconnus: 0, echecs: 0 },
+      bienvenue: { simules: 0, envoyes: 0, deja_envoyes: 0, deja_traites: 0, rattaches: 0, sans_email: 0, inconnus: 0, echecs: 0 },
       purge: { conversations: 0 },
       journal_echecs: 0,
       messages_perdus: 0,
@@ -1628,8 +2372,14 @@ export async function passageQuotidien(maintenant: Date = new Date()): Promise<S
     await etape('pauses', () => tachePauses(ctx, liste, parClient))
     await etape('retours', () => tacheRetours(ctx, new Map(liste.map(a => [a.id, a]))))
     await etape('broker', () => tacheBroker(ctx))
+    // Impayes avant les desabonnes (une seule sortie par compte), et la
+    // reouverture avant la tache Metricgram (sortiesImpayeReglees).
+    await etape('impayes', () => tacheImpayes(ctx, liste, parClient))
+    await etape('reouvertures', () => tacheReouvertures(ctx, liste, parClient))
+    await etape('fenetre_30j', () => tacheFenetre(ctx, liste, parClient))
     await etape('desabonnes', () => tacheDesabonnes(ctx, liste, parClient))
     await etape('prelevements', () => tachePrelevements(ctx, liste, parClient))
+    await etape('bienvenue', () => tacheBienvenue(ctx, liste, parClient))
   } else {
     await etape('broker', () => tacheBroker(ctx))
   }

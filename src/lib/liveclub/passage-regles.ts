@@ -66,6 +66,11 @@ export function repriseFaite(a: AbonnementResume, sortiLe: Date): boolean {
 // ---------------------------------------------------------------------------
 
 /**
+ * (30/09) La tache des desabonnes ne regarde plus un 'unpaid' dont la facture
+ * ouverte est datee : c'est la tache des impayes (sortie a 5 jours, fenetre de
+ * 30 jours) qui s'en charge. Elle garde les 'unpaid' sans facture ouverte
+ * datable (facture irrecouvrable, par exemple), avec la regle ci-dessous.
+ *
  * Date de fin retenue pour la grace : ended_at, sinon la fin de la derniere
  * periode (incomplete_expired sans ended_at). null = on ne sait pas, on ne
  * sort personne.
@@ -266,6 +271,107 @@ export function retourARetenter(retour: string | null | undefined, essais: numbe
   if (!/^echec_/.test(r) && r !== 'conversations_illisibles' && r !== 'config') return false
   const n = Number(essais ?? 0)
   return Number.isFinite(n) && n < MAX_ESSAIS_RETOUR
+}
+
+// ---------------------------------------------------------------------------
+// Impayes (Brice, 30/09). L'etat d'un impaye (etatImpaye, pur.ts : 'grace',
+// 'suspendu', 'fenetre_depassee'...) arrive ici en texte : ce fichier
+// n'importe aucune valeur.
+// ---------------------------------------------------------------------------
+
+export type DecisionSortieImpaye = 'rien' | 'grace' | 'inconnu' | 'simuler' | 'sortir'
+
+/**
+ * Sortie du groupe pour impaye : plus de 5 jours apres le premier echec
+ * (suspendu, ou fenetre depassee si la resiliation n'a pas encore eu lieu).
+ * reel = sortiesImpayesActives() (config.ts) : sans lui, la sortie est
+ * SIMULEE. Factures illisibles ou pas lues = inconnu : on ne touche a rien.
+ */
+export function decisionSortieImpaye(etat: string, reel: boolean): DecisionSortieImpaye {
+  if (etat === 'suspendu' || etat === 'fenetre_depassee') return reel ? 'sortir' : 'simuler'
+  if (etat === 'grace') return 'grace'
+  if (etat === 'illisible' || etat === 'non_lu') return 'inconnu'
+  return 'rien'
+}
+
+export type DecisionFenetre = 'rien' | 'inconnu' | 'deja_fait' | 'simuler' | 'resilier'
+
+/**
+ * Fenetre de retour de 30 jours depassee : resiliation et annulation de la
+ * facture, une seule fois par abonnement (dejaFait : une ligne 'fait', ou
+ * 'simule' tant que reel est faux). reel = sortiesActives() (la bascule
+ * complete) : sans lui, SIMULEE.
+ */
+export function decisionFenetre(etat: string, reel: boolean, dejaFait: boolean): DecisionFenetre {
+  if (etat === 'illisible' || etat === 'non_lu') return 'inconnu'
+  if (etat !== 'fenetre_depassee') return 'rien'
+  if (dejaFait) return 'deja_fait'
+  return reel ? 'resilier' : 'simuler'
+}
+
+/** Une facture payee de l'abonnement : quand elle est devenue due, quand elle a ete payee (ISO). */
+export type FactureReglee = { payeeLe: string | null; dueLe: string | null }
+
+/**
+ * La facture qui etait impayee au moment de la sortie du groupe a-t-elle ete
+ * reglee depuis ? Une facture payee APRES la sortie et due AVANT elle (son
+ * premier echec precede la sortie). Une facture nee apres la sortie (nouvel
+ * abonnement, cycle suivant) ne compte pas : ce n'est pas celle de la sortie.
+ */
+export function factureRegleeApresSortie(factures: readonly FactureReglee[], sortiLe: Date | string): boolean {
+  const s = typeof sortiLe === 'string' ? Date.parse(sortiLe) : sortiLe.getTime()
+  if (!Number.isFinite(s)) return false
+  return factures.some(f => {
+    const paye = f.payeeLe ? Date.parse(f.payeeLe) : NaN
+    const due = f.dueLe ? Date.parse(f.dueLe) : NaN
+    return Number.isFinite(paye) && Number.isFinite(due) && paye > s && due < s
+  })
+}
+
+export type DecisionReouverture = 'rien' | 'deja_faite' | 'inconnu' | 'deja_revenu' | 'sans_droit' | 'envoyer'
+
+/**
+ * Reouverture automatique apres une sortie pour impaye (Brice, 30/09) : la
+ * facture de la sortie est reglee, le membre est absent du groupe, et
+ * droitLiveClub dit 'oui' (c'est lui qui approuvera la demande d'adhesion).
+ * Une fois par reouverture (dejaFaite : un message deja parti, ou un « deja
+ * revenu » note, apres cette sortie). Presence ou droit inconnus : rien,
+ * le passage suivant reessaie.
+ */
+export function decisionReouverture(
+  reglee: boolean,
+  presence: 'oui' | 'non' | 'inconnu',
+  droit: 'oui' | 'non' | 'inconnu',
+  dejaFaite: boolean,
+): DecisionReouverture {
+  if (dejaFaite) return 'deja_faite'
+  if (!reglee) return 'rien'
+  if (presence === 'inconnu') return 'inconnu'
+  if (presence === 'oui') return 'deja_revenu'
+  if (droit === 'inconnu') return 'inconnu'
+  if (droit === 'non') return 'sans_droit'
+  return 'envoyer'
+}
+
+/** Les emails de bienvenue sont rattrapes pour les abonnements crees depuis moins de 3 jours. */
+export const JOURS_RATTRAPAGE_BIENVENUE = 3
+
+/**
+ * Rattrapage de l'email de bienvenue (Brice, 30/09) : un abonnement Live
+ * Club actif (ou en essai), cree depuis moins de 3 jours, dont le client n'a
+ * ni compte Telegram rattache, ni email de bienvenue deja envoye (ou jeton
+ * deja utilise), et pas deja traite par un passage. Une fois par abonnement.
+ */
+export function bienvenueARattraper(
+  a: AbonnementResume,
+  maintenant: Date,
+  o: { rattache: boolean; emailDejaEnvoye: boolean; dejaTraite: boolean },
+): boolean {
+  if (a.statut !== 'active' && a.statut !== 'trialing') return false
+  if (!a.clientStripe || !a.creeLe) return false
+  const age = maintenant.getTime() - Date.parse(a.creeLe)
+  if (!Number.isFinite(age) || age < 0 || age > JOURS_RATTRAPAGE_BIENVENUE * JOUR_MS) return false
+  return !o.rattache && !o.emailDejaEnvoye && !o.dejaTraite
 }
 
 // ---------------------------------------------------------------------------

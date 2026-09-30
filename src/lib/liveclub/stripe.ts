@@ -7,14 +7,31 @@
 // latest_invoice est toujours expand (derniereFacture). La pause, elle, se date par
 // les metadonnees posees avec elle (voir metadonneesPause dans pur.ts).
 
-import { stripeGet, stripePost } from '@/lib/stripe-actions'
+import { stripeDelete, stripeGet, stripePost } from '@/lib/stripe-actions'
 import { PRODUITS_LIVECLUB, cleStripeLecture, cleStripeEcriture, estProduitLiveClub } from './config'
 import {
   type AbonnementResume, resumerAbonnement, preparerPoseDePause, metadonneesAdoption,
   effacementMetadonneesPause, nbMoisPauseValide, statutDonneDroit, normaliserEmail, requeteRechercheEmail,
+  enRetardDePaiement, etatImpaye, lireImpaye, premierEchecFacture,
 } from './pur'
 
 export type { AbonnementResume }
+
+const ID_FACTURE = /^in_[A-Za-z0-9]+$/
+
+/**
+ * Impayes (Brice, 30/09) : un abonnement past_due ou unpaid recoit ses
+ * factures ouvertes (impaye, lireImpaye dans pur.ts), qui datent le premier
+ * echec et donnent ce qui reste a regler. Les autres passent tels quels.
+ * Jette si les factures ne se lisent pas : sans elles, on ne sait pas si le
+ * droit tient encore (l'appelant en fait un 'inconnu').
+ */
+async function completerImpaye(cle: string, a: AbonnementResume): Promise<AbonnementResume> {
+  if (!enRetardDePaiement(a.statut) || !a.id) return a
+  const q = new URLSearchParams({ subscription: a.id, status: 'open', limit: '20' })
+  const liste = await stripeGet(cle, `/v1/invoices?${q}`)
+  return { ...a, impaye: lireImpaye((liste.data as unknown[] | undefined) ?? []) }
+}
 
 function cleLecture(): string {
   const cle = cleStripeLecture()
@@ -35,16 +52,24 @@ function introuvable(err: unknown): boolean {
 const ID_ABONNEMENT = /^sub_[A-Za-z0-9]{8,}$/
 const ID_CLIENT = /^cus_[A-Za-z0-9]{8,}$/
 
-/** Les abonnements Live Club d'un client Stripe (tous statuts). */
+/**
+ * Les abonnements Live Club d'un client Stripe (tous statuts), ceux en
+ * retard de paiement avec leurs factures ouvertes (completerImpaye). Jette si
+ * une de ces lectures echoue.
+ */
 export async function abonnementsLiveClubDuClient(clientStripe: string): Promise<AbonnementResume[]> {
   if (!ID_CLIENT.test(clientStripe)) throw new Error('client Stripe invalide (cus_...).')
+  const cle = cleLecture()
   const q = new URLSearchParams({ customer: clientStripe, status: 'all', limit: '100' })
   q.append('expand[]', 'data.latest_invoice')
-  const liste = await stripeGet(cleLecture(), `/v1/subscriptions?${q}`)
+  const liste = await stripeGet(cle, `/v1/subscriptions?${q}`)
   const data = (liste.data as Record<string, unknown>[] | undefined) ?? []
-  return data
+  const resumes = data
     .map(s => resumerAbonnement(s, PRODUITS_LIVECLUB))
     .filter((a): a is AbonnementResume => a !== null)
+  const complets: AbonnementResume[] = []
+  for (const a of resumes) complets.push(await completerImpaye(cle, a))
+  return complets
 }
 
 type ClientBrut = { id?: string; email?: string | null }
@@ -142,7 +167,10 @@ export type FiltreAbonnements = {
 /**
  * Tous les abonnements Live Club du compte, pagine (starting_after). Pour le
  * passage quotidien. Jette si une page echoue : une liste a moitie lue ne doit
- * pas faire croire qu'un abonnement n'existe plus.
+ * pas faire croire qu'un abonnement n'existe plus. Les abonnements en retard
+ * de paiement recoivent leurs factures ouvertes (completerImpaye) ; une
+ * lecture ratee les marque 'illisible' au lieu de jeter : les autres taches
+ * du passage continuent, et la regle des impayes ne decide rien sur eux.
  */
 export async function listerAbonnementsLiveClub(filtre: FiltreAbonnements = {}): Promise<AbonnementResume[]> {
   const cle = cleLecture()
@@ -159,10 +187,134 @@ export async function listerAbonnementsLiveClub(filtre: FiltreAbonnements = {}):
       const r = resumerAbonnement(s, PRODUITS_LIVECLUB)
       if (r) resultat.push(r)
     }
-    if (liste.has_more !== true || data.length === 0) return resultat
+    if (liste.has_more !== true || data.length === 0) {
+      const complets: AbonnementResume[] = []
+      for (const a of resultat) {
+        try {
+          complets.push(await completerImpaye(cle, a))
+        } catch {
+          complets.push({ ...a, impaye: 'illisible' })
+        }
+      }
+      return complets
+    }
     apres = String(data[data.length - 1].id)
   }
   throw new Error(`Plus de ${maxPages} pages d'abonnements : liste incomplete, rien n'est decide dessus.`)
+}
+
+// ---------------------------------------------------------------------------
+// Impayes (Brice, 30/09) : factures payees, fenetre de 30 jours
+// ---------------------------------------------------------------------------
+
+export type FacturePayee = {
+  /** Paiement (status_transitions.paid_at), ISO. */
+  payeeLe: string | null
+  /** Premier echec de la facture (premierEchecFacture), ISO : elle etait due a partir de la. */
+  dueLe: string | null
+}
+
+/**
+ * Les dernieres factures PAYEES d'un abonnement (10 au plus), pour dire si
+ * la facture qui etait impayee au moment d'une sortie du groupe a ete reglee
+ * depuis (reouverture automatique). Lecture seule. Jette sur une panne.
+ */
+export async function facturesPayeesAbonnement(abonnementId: string): Promise<FacturePayee[]> {
+  if (!ID_ABONNEMENT.test(abonnementId)) throw new Error('abonnement invalide (sub_...).')
+  const q = new URLSearchParams({ subscription: abonnementId, status: 'paid', limit: '10' })
+  const liste = await stripeGet(cleLecture(), `/v1/invoices?${q}`)
+  return ((liste.data as { status_transitions?: { paid_at?: unknown } | null }[] | undefined) ?? []).map(f => {
+    const paye = f.status_transitions?.paid_at
+    const due = premierEchecFacture(f)
+    return {
+      payeeLe: typeof paye === 'number' && paye > 0 ? new Date(paye * 1000).toISOString() : null,
+      dueLe: due === null ? null : new Date(due * 1000).toISOString(),
+    }
+  })
+}
+
+export type IssueAnnulationFactures = { annulees: number; enEchec: number; erreur?: string }
+
+/**
+ * Annule (void) toutes les factures OUVERTES d'un abonnement, une par une
+ * (POST /v1/invoices/{id}/void, cle d'ecriture : permission « Invoices :
+ * ecriture », groupe Billing). Une facture annulee ne se paie plus. Les
+ * brouillons (drafts) ne sont pas touches : un abonnement resilie n'en
+ * finalise plus. Ne jette pas : les echecs sont comptes, le premier message
+ * d'erreur garde (sans donnee personnelle).
+ */
+export async function annulerFacturesOuvertes(abonnementId: string): Promise<IssueAnnulationFactures> {
+  if (!ID_ABONNEMENT.test(abonnementId)) return { annulees: 0, enEchec: 1, erreur: 'abonnement invalide (sub_...).' }
+  let ids: string[]
+  try {
+    const q = new URLSearchParams({ subscription: abonnementId, status: 'open', limit: '20' })
+    const liste = await stripeGet(cleLecture(), `/v1/invoices?${q}`)
+    ids = ((liste.data as { id?: unknown }[] | undefined) ?? [])
+      .map(f => String(f.id ?? ''))
+      .filter(id => ID_FACTURE.test(id))
+  } catch (err) {
+    return { annulees: 0, enEchec: 1, erreur: `factures illisibles : ${err instanceof Error ? err.message : String(err)}`.slice(0, 200) }
+  }
+  let annulees = 0
+  let enEchec = 0
+  let erreur: string | undefined
+  for (const id of ids) {
+    try {
+      await stripePost(cleEcriture(), `/v1/invoices/${id}/void`, {})
+      annulees++
+    } catch (err) {
+      enEchec++
+      erreur ??= (err instanceof Error ? err.message : String(err)).slice(0, 200)
+    }
+  }
+  return { annulees, enEchec, ...(erreur ? { erreur } : {}) }
+}
+
+export type IssueFenetre =
+  | { resilie: true; facturesAnnulees: number; facturesEnEchec: number; erreurFacture?: string }
+  /** Plus rien a resilier a la relecture : paye entre-temps, deja termine, ou fenetre pas depassee. */
+  | { resilie: false; motif: string }
+
+/**
+ * La fenetre de retour de 30 jours est depassee (Brice, 30/09) : l'abonnement
+ * est RESILIE, puis ses factures ouvertes ANNULEES. Dans cet ordre : annuler
+ * d'abord la derniere facture d'un abonnement en retard le ferait repasser a
+ * 'active' chez Stripe (doc « Subscription statuses »), et un echec de la
+ * resiliation laisserait alors un abonnement actif qui repreleve.
+ *
+ * - Relecture EN DIRECT avant tout (cle d'ecriture) : toujours Live Club,
+ *   toujours past_due ou unpaid, factures ouvertes relues, et plus de 30 jours
+ *   depuis le premier echec. Sinon rien, et le motif.
+ * - Resiliation : DELETE /v1/subscriptions/{id} (permission « Subscriptions :
+ *   ecriture », groupe Billing), invoice_now=false et prorate=false : ni
+ *   facture finale, ni prorata, ni remboursement.
+ * - Puis annulerFacturesOuvertes.
+ * Jette si la relecture ou la resiliation echoue (cle absente, cle sans le
+ * droit, panne) : l'appelant journalise l'echec, rien n'a change.
+ */
+export async function fermerFenetreImpaye(abonnementId: string, maintenantMs: number = Date.now()): Promise<IssueFenetre> {
+  if (!ID_ABONNEMENT.test(abonnementId)) throw new Error('abonnement invalide (sub_...).')
+  const cle = cleEcriture()
+  const sub = await stripeGet(cle, `/v1/subscriptions/${abonnementId}?expand[]=latest_invoice`)
+  const r = resumerAbonnement(sub, PRODUITS_LIVECLUB)
+  if (!r) throw new Error("Cet abonnement n'est pas un abonnement Live Club.")
+  if (!enRetardDePaiement(r.statut)) return { resilie: false, motif: `statut_${r.statut || 'inconnu'}` }
+  const lu = await completerImpaye(cle, r)
+  const etat = etatImpaye(lu, maintenantMs)
+  if (etat !== 'fenetre_depassee') return { resilie: false, motif: `impaye_${etat}` }
+
+  await stripeDelete(cle, `/v1/subscriptions/${abonnementId}`, {
+    invoice_now: 'false',
+    prorate: 'false',
+    'cancellation_details[comment]': 'Live Club : paiement en retard depuis plus de 30 jours (passage quotidien).',
+  })
+  const factures = await annulerFacturesOuvertes(abonnementId)
+  return {
+    resilie: true,
+    facturesAnnulees: factures.annulees,
+    facturesEnEchec: factures.enEchec,
+    ...(factures.erreur ? { erreurFacture: factures.erreur } : {}),
+  }
 }
 
 async function abonnementVivant(abonnementId: string): Promise<Record<string, unknown>> {
