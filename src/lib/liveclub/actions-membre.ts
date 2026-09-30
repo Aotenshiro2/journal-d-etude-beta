@@ -8,19 +8,29 @@
 // un identifiant de membre venu d'un texte.
 //
 // Aucun geste de promo, de remboursement ou de prix : ce sont des demandes
-// pour l'equipe (support@).
+// pour l'equipe, que le bot lui transmet (fil Support, reponse ici).
+//
+// Les MONTANTS du membre (Brice, 30/09) : montantsDuMembre, pour l'outil
+// mes_montants de l'agent. Lecture seule (apercu de facture, factures
+// ouvertes), pour le payeur rattache a CE compte Telegram et lui seul.
+//
+// support@ ne reste que pour une panne (PANNE : base ou Stripe illisible,
+// ou le pont vers l'equipe lui-meme en panne) : ce que le bot ou l'equipe par
+// le fil Support savent faire ne renvoie plus vers un email (Brice, 30/09).
 
 import { journaliserGesteLiveClub, type GesteJournal } from '@/lib/stripe-actions'
-import { SUPPORT, URLS_ABONNEMENT, texteAbonnement } from './config'
+import { SUPPORT, URLS_ABONNEMENT, URL_PORTAIL_CARTE, texteAbonnement } from './config'
 import { droitLiveClub } from './droits'
 import { rattachementActif, type Rattachement } from './rattacher'
 import {
   abonnementsLiveClubDuClient, clientsStripeParEmail, lireAbonnement,
-  pauser, programmerArret, annulerArret, type AbonnementResume,
+  pauser, programmerArret, annulerArret, apercuProchaineFacture, facturesOuvertesAbonnement,
+  type AbonnementResume,
 } from './stripe'
 import {
-  abonnementOuvreLeGroupe, calculerReprisePause, formaterDateFr, messageErreur, nbMoisPauseValide,
-  statutDonneDroit, statutTermine,
+  abonnementOuvreLeGroupe, calculerReprisePause, faitsMontants, formaterDateFr, messageErreur, nbMoisPauseValide,
+  peutAvoirUnImpaye, statutDonneDroit, statutTermine,
+  type EntreeImpaye, type EntreeMontants, type FaitsMontants,
 } from './pur'
 import type { ActionMembre } from './conversations'
 import type { Bouton } from './telegram'
@@ -84,7 +94,7 @@ function phraseAbonnement(a: AbonnementResume): string {
     return `Ton abonnement Live Club est actif.${fin ? ` Prochain renouvellement le ${fin}.` : ''}`
   }
   if (a.statut === 'past_due') {
-    return `Ton dernier paiement n'est pas passé. Stripe va réessayer : vérifie ta carte. Tu gardes le groupe pendant ce temps. Besoin d'aide ? ${SUPPORT}`
+    return `Ton dernier paiement n'est pas passé. Il va être retenté tout seul : vérifie ta carte, tu peux la changer sur ${URL_PORTAIL_CARTE}. Tu gardes le groupe pendant ce temps.`
   }
   // Resilie mais paye jusqu'a une date encore a venir (regle « ce qui est
   // paye est du ») : il est ACTIF jusque-la, pas « termine ».
@@ -157,7 +167,7 @@ export async function situationDuMembre(telegramId: number): Promise<Situation> 
   if (droit.statut === 'oui') {
     return {
       etat: 'ok',
-      texte: `Ton accès au Live Club est ouvert${fin ? ` jusqu'au ${fin}` : ''}, sans abonnement à gérer ici. Une question ? ${SUPPORT}`,
+      texte: `Ton accès au Live Club est ouvert${fin ? ` jusqu'au ${fin}` : ''}, sans abonnement à gérer ici. Une question ? L'équipe peut te répondre ici.`,
       faits: { acces: 'ouvert_sans_abonnement', jusquau: fin },
     }
   }
@@ -168,6 +178,62 @@ export async function situationDuMembre(telegramId: number): Promise<Situation> 
     texte: `${dernier ? phraseAbonnement(dernier) : "Je ne trouve pas d'abonnement Live Club à ton nom."}\n\n${texteAbonnement()}`,
     faits: { acces: 'aucun', abonnement_termine: Boolean(dernier) },
   }
+}
+
+// ---------------------------------------------------------------------------
+// Les montants du membre (outil mes_montants, Brice 30/09)
+// ---------------------------------------------------------------------------
+
+export type Montants =
+  | { etat: 'non_rattache' }
+  | { etat: 'illisible' }
+  | { etat: 'ok'; faits: FaitsMontants }
+
+/**
+ * Ce que paie le membre QUI ECRIT : pour chaque abonnement vivant, le tarif
+ * apres remise et le prochain prelevement (apercu de la prochaine facture,
+ * comme le rappel J-3) ; pour chaque abonnement en retard ou a la derniere
+ * facture ouverte, ce qui reste a regler et le lien de paiement. L'identite
+ * vient du rattachement du compte Telegram, jamais d'un texte. Un apercu
+ * illisible donne « montant non disponible » (ou le prix des items s'il n'y
+ * a aucune remise, voir montantsDeLaPeriode) ; une liste de factures
+ * illisible, « montant non disponible » aussi. Lecture seule. Ne jette pas.
+ */
+export async function montantsDuMembre(telegramId: number): Promise<Montants> {
+  const r = await rattachementOuNull(telegramId)
+  if (r === 'illisible') return { etat: 'illisible' }
+  if (!r) return { etat: 'non_rattache' }
+
+  let abonnements: AbonnementResume[]
+  try {
+    abonnements = await abonnementsDuPayeur(r)
+  } catch (err) {
+    console.warn(`[liveclub/bot] Stripe illisible pour u${telegramId} : ${messageErreur(err)}`)
+    return { etat: 'illisible' }
+  }
+
+  const vivants: EntreeMontants[] = []
+  for (const a of abonnements.filter(x => statutDonneDroit(x.statut))) {
+    let apercu: Record<string, unknown> | null = null
+    try {
+      apercu = await apercuProchaineFacture(a.id)
+    } catch (err) {
+      // Arret programme (pas de prochaine facture), cle sans ce droit, panne.
+      console.warn(`[liveclub/bot] apercu de facture illisible pour u${telegramId} : ${messageErreur(err)}`)
+    }
+    vivants.push({ abonnement: a, apercu })
+  }
+
+  const impayes: EntreeImpaye[] = []
+  for (const a of abonnements.filter(peutAvoirUnImpaye)) {
+    try {
+      impayes.push({ abonnement: a, factures: await facturesOuvertesAbonnement(a.id) })
+    } catch (err) {
+      console.warn(`[liveclub/bot] factures illisibles pour u${telegramId} : ${messageErreur(err)}`)
+      impayes.push({ abonnement: a, factures: 'illisible' })
+    }
+  }
+  return { etat: 'ok', faits: faitsMontants(vivants, impayes) }
 }
 
 // ---------------------------------------------------------------------------
@@ -186,7 +252,16 @@ export type Preparation =
      */
     pausePossible?: boolean
   }
-  | { ok: false; raison: string }
+  | {
+    ok: false
+    raison: string
+    /**
+     * Le bot ne peut pas le faire, l'equipe si (Brice, 30/09 : transmettre
+     * au lieu de renvoyer vers un email). L'agent previent l'equipe
+     * (veutHumain) ; le menu a boutons joint « Contacter l'equipe ».
+     */
+    equipe?: true
+  }
 
 const PANNE = `Je n'arrive pas à lire ton abonnement en ce moment. Réessaie dans un moment, ou écris à ${SUPPORT}.`
 const NON_RATTACHE = `Je ne sais pas encore à quel abonnement ton compte Telegram est lié. Envoie-moi ici l'email de ton paiement : je t'envoie un code pour vérifier, et je te relie à ton abonnement.`
@@ -220,10 +295,10 @@ export async function preparerAction(
     if (paye?.payeJusquau) {
       return { ok: false, raison: `Ton abonnement est déjà arrêté : il reste actif jusqu'au ${formaterDateFr(paye.payeJusquau)}, puis il s'arrête, et rien ne sera plus prélevé. Rien à changer de ce côté.` }
     }
-    return { ok: false, raison: `Je ne trouve pas d'abonnement Live Club en cours à ton nom, donc rien à changer. Une question ? ${SUPPORT}` }
+    return { ok: false, raison: `Je ne trouve pas d'abonnement Live Club en cours à ton nom, donc rien à changer.` }
   }
   if (vivants.length > 1) {
-    return { ok: false, raison: `Tu as plusieurs abonnements Live Club en cours. Pour ne pas se tromper, l'équipe s'en occupe : écris à ${SUPPORT}.` }
+    return { ok: false, equipe: true, raison: `Tu as plusieurs abonnements Live Club en cours. Pour ne pas se tromper, c'est l'équipe qui s'en occupe.` }
   }
   const a = vivants[0]
   const fin = a.finPeriode ? formaterDateFr(a.finPeriode) : null
@@ -232,13 +307,13 @@ export async function preparerAction(
   if (type === 'pause') {
     const n = nbMois as number
     if (a.pauseActive) {
-      return { ok: false, raison: `Une pause est déjà prévue${a.pauseJusquau ? ` jusqu'au ${formaterDateFr(a.pauseJusquau)}` : ''}. Pour la changer, écris à ${SUPPORT}.` }
+      return { ok: false, equipe: true, raison: `Une pause est déjà prévue${a.pauseJusquau ? ` jusqu'au ${formaterDateFr(a.pauseJusquau)}` : ''}. Pour la changer, c'est l'équipe qui s'en occupe.` }
     }
     if (a.arretPrevu) {
       return { ok: false, raison: `Ton abonnement s'arrête déjà${fin ? ` le ${fin}` : ''}. Si tu préfères une pause, annule d'abord l'arrêt, puis demande la pause.` }
     }
     if (a.statut === 'past_due') {
-      return { ok: false, raison: `Ton dernier paiement n'est pas passé, donc je ne peux pas poser de pause. Écris à ${SUPPORT}, l'équipe va regarder.` }
+      return { ok: false, equipe: true, raison: `Ton dernier paiement n'est pas passé, donc je ne peux pas poser de pause : c'est l'équipe qui va regarder.` }
     }
     if (!a.finPeriode) return { ok: false, raison: PANNE }
     const reprise = formaterDateFr(calculerReprisePause(Math.floor(Date.parse(a.finPeriode) / 1000), n).toISOString())
@@ -384,6 +459,11 @@ export function clavierMenu(): Bouton[][] {
     [{ texte: 'Annuler un arrêt prévu', data: 'm:annuler' }],
     [{ texte: "Contacter l'équipe", data: 'm:equipe' }],
   ]
+}
+
+/** Sous un refus que seule l'equipe peut regler (Preparation.equipe) : le fil passe en « veut un humain ». */
+export function clavierEquipe(): Bouton[][] {
+  return [[{ texte: "Contacter l'équipe", data: 'm:equipe' }]]
 }
 
 /** « aoknowledge.com », « melaniechart.com » : le domaine d'une porte d'abonnement, pour un bouton. */

@@ -17,7 +17,12 @@
 // - (29/09) chaque message ecrit et chaque reponse vont au fil Support du
 //   cockpit (support-pont.ts), qui peut passer en « veut un humain » ;
 // - (30/09) avant un arret, la pause est proposee UNE fois, avec l'argument
-//   du tarif (TEXTE_PAUSE_AVANT_ARRET), par le bouton comme par l'agent.
+//   du tarif (TEXTE_PAUSE_AVANT_ARRET), par le bouton comme par l'agent ;
+// - (30/09) TOUTE la conversation va au fil Support, pas seulement le texte
+//   libre : commandes (jeton masque), appuis de boutons (libelle), chaque
+//   message du bot (envoyer, ci-dessous, trace ce qu'il envoie) et une ligne
+//   « [système] » pour les etapes du groupe. Un compte non rattache a son
+//   fil aussi. Le pont ne jette jamais.
 
 import { journaliserGesteLiveClub } from '@/lib/stripe-actions'
 import { prisma } from '@/lib/db'
@@ -26,13 +31,13 @@ import { droitLiveClub, type Droit } from './droits'
 import { consommerJeton, ErreurTableLiveClub } from './jetons'
 import { rattacherTelegram, type Rattachement } from './rattacher'
 import {
-  envoyer, repondreBouton, retirerBoutons, lienDemandeAdhesion, approuverDemande,
+  envoyer as envoyerTelegram, repondreBouton, retirerBoutons, lienDemandeAdhesion, approuverDemande,
   refuserDemande, estDansLeGroupe, statutDansLeGroupe, appelTelegram, type Bouton,
   type ResultatTelegram,
 } from './telegram'
 import {
   preparerAction, executerActionMembre, situationDuMembre, rattachementOuNull,
-  clavierMenu, clavierSansRattachement, clavierDureesPause, clavierConfirmation, clavierPauseAvantArret,
+  clavierMenu, clavierSansRattachement, clavierDureesPause, clavierConfirmation, clavierPauseAvantArret, clavierEquipe,
   TEXTE_EQUIPE, TEXTE_EQUIPE_INDISPONIBLE, TEXTE_SECOURS_EQUIPE, TEXTE_NON_RATTACHE, TEXTE_PANNE,
   TEXTE_ATTENTE_HUMAIN, ACTEUR_BOT_MEMBRE,
 } from './actions-membre'
@@ -41,12 +46,12 @@ import {
   poserActionEnAttente, consommerNonce,
 } from './conversations'
 import { repondreAuMembre } from './agent-membre'
-import { enregistrerEchangeSupport, estEnAttenteHumain } from './support-pont'
+import { enregistrerEchangeSupport, estEnAttenteHumain, texteAvecBoutons, tracerEtape, tracerMessageBot } from './support-pont'
 import {
   envoyerCodeSiConnu, rattacherParEmail, reserverCode, verifierCode, type CodeReserve, type IssueCode,
 } from './verification'
 import { CODE_ENVOIS_HEURE, CODE_VALIDITE_MINUTES, intentionNonRattache, masquerCodes } from './verification-pur'
-import { jetonBienForme, messageErreur, normaliserEmail, pauseDejaProposee, relationAbsente } from './pur'
+import { jetonBienForme, libelleBouton, messageErreur, normaliserEmail, pauseDejaProposee, relationAbsente } from './pur'
 
 // Formes minimales des updates Telegram utilises ici.
 type Utilisateur = { id: number; is_bot?: boolean; first_name?: string }
@@ -123,6 +128,27 @@ async function versSupport(
 }
 
 /**
+ * Envoie un message prive ET le trace dans le fil Support du compte (Brice,
+ * 30/09 : toute la conversation du bot se lit dans le cockpit). Dans un chat
+ * prive, l'id du chat EST celui du compte Telegram (un groupe a un id
+ * negatif, que le pont ignore). Les boutons n'entrent au fil que par leur
+ * libelle, jamais par leur adresse (lien d'invitation). Un envoi refuse par
+ * Telegram est trace « [non délivré] ». Ne jette pas.
+ */
+async function envoyer(
+  chat: number,
+  texte: string,
+  boutons?: Bouton[][],
+  identite?: Rattachement | null,
+): Promise<Awaited<ReturnType<typeof envoyerTelegram>>> {
+  const r = await envoyerTelegram(chat, texte, boutons)
+  await tracerMessageBot(chat, texte, {
+    boutons, membreId: identite?.membre_id ?? null, email: identite?.email ?? null, livre: r.ok,
+  })
+  return r
+}
+
+/**
  * Envoie au membre ET trace la reponse du bot dans le fil Support.
  *
  * Avec veutHumain, le fil passe d'abord en attente, puis on RELIT l'attente :
@@ -134,17 +160,16 @@ async function versSupport(
 function repondeur(chat: number, telegramId: number, r: Rattachement | null) {
   return async (texte: string, boutons?: Bouton[][], veutHumain = false, secours?: string): Promise<void> => {
     if (!veutHumain) {
-      await envoyer(chat, texte, boutons)
-      await versSupport(telegramId, r, 'ia', texte)
+      await envoyer(chat, texte, boutons, r)
       return
     }
-    await versSupport(telegramId, r, 'ia', texte, true)
+    await versSupport(telegramId, r, 'ia', texteAvecBoutons(texte, boutons), true)
     if (await estEnAttenteHumain(telegramId)) {
-      await envoyer(chat, texte, boutons)
+      await envoyerTelegram(chat, texte, boutons)
       return
     }
     console.warn(`[liveclub/bot] mise en attente d'un humain non confirmee pour u${telegramId} : adresse de l'equipe donnee`)
-    await envoyer(chat, secours ?? `${texte}\n\n${TEXTE_SECOURS_EQUIPE}`, boutons)
+    await envoyerTelegram(chat, secours ?? `${texte}\n\n${TEXTE_SECOURS_EQUIPE}`, boutons)
   }
 }
 
@@ -156,7 +181,7 @@ async function envoyerMenu(
 ): Promise<void> {
   const r = dejaLu !== undefined ? dejaLu : await rattachementOuNull(telegramId)
   if (r && r !== 'illisible') {
-    await envoyer(chat, entete ?? 'Que veux-tu faire ?', clavierMenu())
+    await envoyer(chat, entete ?? 'Que veux-tu faire ?', clavierMenu(), r)
   } else {
     await envoyer(chat, entete ? `${entete}\n\n${TEXTE_NON_RATTACHE}` : TEXTE_NON_RATTACHE, clavierSansRattachement())
   }
@@ -192,6 +217,9 @@ export async function traiterDemandeAdhesion(demande: DemandeAdhesionTg, updateI
   const droit: Droit = await droitLiveClub(u.id)
   const ecrireA = demande.user_chat_id ?? u.id
   const contexte = { telegramId: u.id, membreId: droit.membreId ?? null, acteur: ACTEUR_BOT_MEMBRE, abonnementId: droit.abonnementId ?? null, updateId }
+  // Au fil Support du compte (Brice, 30/09) : la demande recue. L'issue
+  // (acceptee, refusee) y arrive par le journal des gestes (tracerGeste).
+  await tracerEtape(u.id, "Demande d'adhésion au groupe reçue.", { membreId: droit.membreId ?? null })
 
   if (droit.statut === 'inconnu') {
     await envoyer(ecrireA, `Salut ! J'ai bien reçu ta demande pour rejoindre le Live Club, mais j'ai un souci technique pour vérifier ton accès.\n\n`
@@ -459,6 +487,7 @@ async function traiterStartJeton(chat: number, u: Utilisateur, jeton: string, up
   if (ligne.client_stripe || ligne.email) {
     try {
       await rattacherTelegram(u.id, { clientStripe: ligne.client_stripe, email: ligne.email, source: 'bot' })
+      await tracerEtape(u.id, "Compte Telegram relié à l'abonnement (lien personnel).")
     } catch (err) {
       console.warn(`[liveclub/bot] rattachement impossible pour u${u.id} : ${messageErreur(err)}`)
     }
@@ -567,11 +596,9 @@ async function apresCodeValide(chat: number, u: Utilisateur, email: string, upda
   const lu = await rattachementOuNull(u.id)
   const r = lu && lu !== 'illisible' ? lu : null
   const entete = `C'est bon, ton email est vérifié : ton compte Telegram est maintenant relié à ton abonnement.`
-  // Droit ouvert et hors du groupe : le lien de retour (ban leve s'il le faut).
-  if (await proposerRetourAuGroupe(chat, u, updateId, { declencheur: 'verification', entete, boutons: clavierMenu(), reprendre: true })) {
-    await versSupport(u.id, r, 'ia', `${entete} (suite : lien vers le groupe, ou explication si l'accès ne peut pas être vérifié)`)
-    return
-  }
+  // Droit ouvert et hors du groupe : le lien de retour (ban leve s'il le
+  // faut). Le message part par envoyer, donc au fil Support aussi.
+  if (await proposerRetourAuGroupe(chat, u, updateId, { declencheur: 'verification', entete, boutons: clavierMenu(), reprendre: true })) return
   // Pas de lien : dans le groupe, ou pas de droit ouvert.
   const droit = await droitLiveClub(u.id)
   const suite = droit.statut === 'non'
@@ -730,6 +757,7 @@ export async function traiterMessagePrive(message: MessageTg, updateId: number):
 
   const texte = (message.text ?? '').trim()
   if (!texte) {
+    await versSupport(u.id, null, 'membre', '[message sans texte]')
     await envoyer(chat, `Je ne lis que les messages écrits. Écris-moi, ou utilise les boutons :`, clavierMenu())
     return
   }
@@ -738,6 +766,8 @@ export async function traiterMessagePrive(message: MessageTg, updateId: number):
   const commande = /^\/(start|menu)(?:@\w+)?(?:\s+(\S+))?\s*$/i.exec(texte)
   if (commande) {
     const param = commande[2]
+    // Au fil Support : la commande, jamais le jeton du lien personnel.
+    await versSupport(u.id, null, 'membre', `/${commande[1].toLowerCase()}${param ? ' [jeton]' : ''}`)
     if (commande[1].toLowerCase() === 'start' && param) {
       await traiterStartJeton(chat, u, param, updateId)
       return
@@ -796,7 +826,10 @@ async function noterPropositionPause(telegramId: number): Promise<void> {
 
 async function proposer(chat: number, telegramId: number, prep: Awaited<ReturnType<typeof preparerAction>>): Promise<void> {
   if (!prep.ok) {
-    await envoyer(chat, prep.raison)
+    // Seule l'equipe peut le faire (Brice, 30/09) : le bouton qui la
+    // previent, au lieu d'une adresse email.
+    await envoyer(chat, prep.equipe ? `${prep.raison}\n\nAppuie sur « Contacter l'équipe » : elle te répond ici, dans cette conversation.` : prep.raison,
+      prep.equipe ? clavierEquipe() : undefined)
     return
   }
   let nonce: string
@@ -827,12 +860,13 @@ export async function traiterBouton(bouton: BoutonTg, updateId: number): Promise
 
   const r = await rattachementOuNull(u.id)
   const identite = r && r !== 'illisible' ? r : null
+  // Au fil Support : le libelle du bouton, jamais le nonce d'une confirmation.
+  await versSupport(u.id, identite, 'membre', `[bouton] ${libelleBouton(data)}`)
 
   // « Contacter l'equipe » : le fil passe en « veut un humain » (decision 5),
   // la reponse de l'equipe arrivera ici par le bot.
   if (data === 'm:equipe') {
     await repondreBouton(bouton.id)
-    await versSupport(u.id, identite, 'membre', `[bouton] Contacter l'équipe`)
     await repondeur(chat, u.id, identite)(TEXTE_EQUIPE, undefined, true, TEXTE_EQUIPE_INDISPONIBLE)
     return
   }

@@ -107,6 +107,31 @@ export async function lireAbonnement(abonnementId: string): Promise<AbonnementRe
   }
 }
 
+/**
+ * Apercu de la prochaine facture d'un abonnement (POST
+ * /v1/invoices/create_preview : un calcul, RIEN n'est cree chez Stripe), pour
+ * le montant reel apres remise, taxe et solde du client. Meme appel pour le
+ * rappel J-3 (passage.ts) et pour l'outil mes_montants du bot. Cle de
+ * lecture. Jette sur une panne, une cle sans ce droit, ou un abonnement sans
+ * prochaine facture (arret programme) : l'appelant en fait un null.
+ */
+export async function apercuProchaineFacture(abonnementId: string): Promise<Record<string, unknown>> {
+  if (!ID_ABONNEMENT.test(abonnementId)) throw new Error('abonnement invalide (sub_...).')
+  return stripePost(cleLecture(), '/v1/invoices/create_preview', { subscription: abonnementId })
+}
+
+/**
+ * Les factures OUVERTES d'un abonnement (GET /v1/invoices, status=open), les
+ * plus recentes d'abord, 20 au plus : ce qui reste a regler (facturesARegler,
+ * pur.ts, fait la selection). Lecture seule. Jette sur une panne.
+ */
+export async function facturesOuvertesAbonnement(abonnementId: string): Promise<Record<string, unknown>[]> {
+  if (!ID_ABONNEMENT.test(abonnementId)) throw new Error('abonnement invalide (sub_...).')
+  const q = new URLSearchParams({ subscription: abonnementId, status: 'open', limit: '20' })
+  const liste = await stripeGet(cleLecture(), `/v1/invoices?${q}`)
+  return (liste.data as Record<string, unknown>[] | undefined) ?? []
+}
+
 export type FiltreAbonnements = {
   /** Statut Stripe a lister ('all' par defaut, qui inclut les termines). */
   statut?: 'all' | 'active' | 'trialing' | 'past_due' | 'canceled' | 'unpaid' | 'incomplete_expired' | 'paused'

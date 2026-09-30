@@ -7,9 +7,12 @@
 // OUTILS FERMES : aucun ne prend d'identifiant. L'identite est le telegram_id
 // de l'update, passe par le serveur ; le modele ne peut donc lire ni toucher
 // l'abonnement de quelqu'un d'autre, quoi qu'on lui ecrive. Aucun outil de
-// promo, de remboursement, de code ni de prix, et aucun ne lit les coupons ou
-// codes promotionnels Stripe (verifie le 30/09 : mon_abonnement ne rend que
-// statut et dates). Les liens partenaires et les liens utiles PUBLIES sont
+// promo, de remboursement, de code ni de changement de prix, et aucun ne lit
+// les coupons ou codes promotionnels Stripe (verifie le 30/09 : mon_abonnement
+// rend statut et dates ; mes_montants, du 30/09, des montants deja mis en
+// forme, un booleen « remise », des dates et le lien de paiement d'une facture
+// ouverte : ni identifiant Stripe, ni code, ni nom de coupon, voir
+// faitsMontants dans pur.ts). Les liens partenaires et les liens utiles PUBLIES sont
 // dans le prompt, via src/lib/politique-information.ts (30/09) ; le modele
 // n'en cree aucun. demander_un_humain (29/09,
 // decision 5) ne touche a rien : il leve le drapeau veutHumain, et c'est le
@@ -29,11 +32,13 @@ import { textOf } from '@/lib/ai'
 import { coutMicroEuros } from '@/lib/ia-prix'
 import { expurgerLiensInvitation } from '@/lib/stripe-actions'
 import { filtrerSortie } from '@/lib/politique-information'
-import { SUPPORT, TEXTE_PAUSE_AVANT_ARRET } from './config'
-import { preparerAction, situationDuMembre } from './actions-membre'
+import { TEXTE_PAUSE_AVANT_ARRET } from './config'
+import { montantsDuMembre, preparerAction, situationDuMembre } from './actions-membre'
 import type { ActionMembre, MessageConserve } from './conversations'
 import { messageErreur, pauseDejaProposee } from './pur'
-import { MODELE_LIVECLUB, RESULTAT_DEMANDER_UN_HUMAIN, requeteAgentMembre } from './prompt-membre'
+import {
+  CONSIGNE_EQUIPE_TRANSMISE, CONSIGNE_MONTANTS, MODELE_LIVECLUB, RESULTAT_DEMANDER_UN_HUMAIN, requeteAgentMembre,
+} from './prompt-membre'
 
 export { MODELE_LIVECLUB }
 
@@ -41,6 +46,13 @@ const KEY_ENV = 'ANTHROPIC_API_KEY_LIVECLUB'
 const KEY_ENV_REPLI = 'ANTHROPIC_API_KEY_SUPPORT'
 
 const MAX_TOURS = 4
+
+/**
+ * Stripe ou la base illisibles pour un outil de lecture : reessayer, ou
+ * transmettre a l'equipe s'il lui faut une reponse (pas d'adresse email :
+ * Brice, 30/09 ; le bot ajoute support@ lui-meme si le pont est en panne).
+ */
+const ILLISIBLE = "Abonnement illisible pour le moment : propose de réessayer dans un moment, ou, s'il a besoin d'une réponse maintenant, de prévenir l'équipe (demander_un_humain), qui lui répondra ici."
 
 /** L'agent n'a pas abouti : l'equipe est prevenue (veutHumain), le menu reste la. */
 const TEXTE_SANS_REPONSE = `Je n'ai pas de réponse sûre là-dessus, donc je préviens l'équipe : quelqu'un va te répondre ici, dans cette conversation. En attendant, le menu est là :`
@@ -185,7 +197,19 @@ export async function repondreAuMembre(
           ? { situation: s.texte, faits: s.faits }
           : s.etat === 'non_rattache'
             ? { erreur: 'Compte Telegram lie a aucun abonnement.' }
-            : { erreur: `Abonnement illisible pour le moment : propose de reessayer plus tard ou d'ecrire a ${SUPPORT}.` }
+            : { erreur: ILLISIBLE }
+        resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify(contenu) })
+        continue
+      }
+
+      // Les montants du membre qui ecrit (Brice, 30/09), et de lui seul.
+      if (bloc.name === 'mes_montants') {
+        const m = await montantsDuMembre(telegramId)
+        const contenu = m.etat === 'ok'
+          ? { montants: m.faits, consigne: CONSIGNE_MONTANTS }
+          : m.etat === 'non_rattache'
+            ? { erreur: 'Compte Telegram lie a aucun abonnement.' }
+            : { erreur: ILLISIBLE }
         resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify(contenu) })
         continue
       }
@@ -200,7 +224,12 @@ export async function repondreAuMembre(
       const nbMois = type === 'pause' ? Number((bloc.input as { nb_mois?: unknown })?.nb_mois) : undefined
       const prep = await preparerAction(telegramId, type, nbMois)
       if (!prep.ok) {
-        resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify({ refus: prep.raison }) })
+        // Seule l'equipe peut le faire (plusieurs abonnements, pause a
+        // changer, paiement en retard) : l'agent transmet lui-meme (Brice,
+        // 30/09), au lieu de donner une adresse email.
+        if (prep.equipe) humain = true
+        const contenu = prep.equipe ? { refus: prep.raison, equipe_prevenue: true, consigne: CONSIGNE_EQUIPE_TRANSMISE } : { refus: prep.raison }
+        resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify(contenu) })
         continue
       }
       // Proposition valide : la boucle s'arrete. La phrase de confirmation est

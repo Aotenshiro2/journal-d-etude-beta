@@ -14,6 +14,9 @@ import {
   genererJeton, jetonBienForme, normaliserEmail, decouperEmails, requeteRechercheEmail,
   nomLienInvitation, callbackDataValide, echapperHtml, relationAbsente,
   montantPeriodeAbonnement, abonnementARemise, formaterMontant, pauseDejaProposee,
+  lireMontant, montantsDeLaPeriode, remiseAppliquee, parPeriode, periodiciteAbonnement,
+  facturesARegler, peutAvoirUnImpaye, faitsMontants, MONTANT_NON_DISPONIBLE, LIEN_NON_DISPONIBLE,
+  libelleBouton, phraseGeste, expurgerLiensInvitation,
 } from '../src/lib/liveclub/pur.ts'
 import {
   desabonneHorsGrace, finAbonnement,
@@ -561,6 +564,166 @@ test('rappel J-3 avant prelevement', () => {
   // Hiver (UTC+1) : 23 h 30 UTC le 15 decembre = 16 decembre a Paris.
   assert.equal(jourParis('2026-12-15T23:30:00Z'), '2026-12-16')
   assert.equal(jourParis('2026-12-15T22:30:00Z'), '2026-12-15')
+})
+
+test('montants du membre : mise en forme (Brice 30/09)', () => {
+  // Mise en forme : euros sans decimales inutiles, virgule sinon, autre devise en code.
+  assert.equal(formaterMontant(8900, 'eur'), '89 €')
+  assert.equal(formaterMontant(8950, 'EUR'), '89,50 €')
+  assert.equal(formaterMontant(0, 'eur'), '0 €')
+  assert.equal(formaterMontant(13905, 'usd'), '139,05 USD')
+  // Lecture d'un montant Stripe : entier >= 0 et devise, sinon null.
+  assert.deepEqual(lireMontant(8900, 'EUR'), { centimes: 8900, devise: 'eur' })
+  assert.deepEqual(lireMontant(0, 'eur'), { centimes: 0, devise: 'eur' })
+  for (const [c, d] of [[-1, 'eur'], [89.5, 'eur'], ['8900', 'eur'], [8900, ''], [8900, null], [null, 'eur']]) {
+    assert.equal(lireMontant(c, d), null, `${c} ${d}`)
+  }
+  // Periode du prix (price.recurring) et sa tournure.
+  const avecPrix = recurring => ({ items: { data: [{ price: { recurring } }] } })
+  assert.equal(periodiciteAbonnement(avecPrix({ interval: 'month', interval_count: 1 })), 'mois')
+  assert.equal(periodiciteAbonnement(avecPrix({ interval: 'month', interval_count: 3 })), '3 mois')
+  assert.equal(periodiciteAbonnement(avecPrix({ interval: 'year' })), 'an')
+  assert.equal(periodiciteAbonnement(avecPrix({ interval: 'week', interval_count: 2 })), '2 semaines')
+  assert.equal(periodiciteAbonnement(avecPrix(null)), null)
+  assert.equal(periodiciteAbonnement({}), null)
+  assert.equal(parPeriode('mois'), 'par mois')
+  assert.equal(parPeriode('an'), 'par an')
+  assert.equal(parPeriode('3 mois'), 'tous les 3 mois')
+  assert.equal(parPeriode('2 semaines'), 'toutes les 2 semaines')
+  assert.equal(parPeriode(null), '')
+
+  // Tarif apres remise et prochain prelevement : l'apercu d'abord (total pour
+  // le tarif, amount_due pour le prelevement : un solde crediteur baisse le
+  // prelevement, pas le tarif).
+  const futurSec = Math.floor(Date.parse('2099-10-15T10:00:00Z') / 1000)
+  const brut = (extra = {}) => abo({
+    items: { data: [{ current_period_end: futurSec, quantity: 1, price: { product: PRODUITS[1], unit_amount: 13900, currency: 'eur', recurring: { interval: 'month', interval_count: 1 } } }] },
+    collection_method: 'charge_automatically',
+    ...extra,
+  })
+  const sansRemise = resumerAbonnement(brut(), PRODUITS)
+  const avecRemise = resumerAbonnement(brut({ discounts: ['di_TEST0000'] }), PRODUITS)
+  assert.equal(sansRemise.periodicite, 'mois')
+  assert.deepEqual(montantsDeLaPeriode(avecRemise, { total: 8900, amount_due: 8900, currency: 'eur' }),
+    { tarif: { centimes: 8900, devise: 'eur' }, prelevement: { centimes: 8900, devise: 'eur' } })
+  assert.deepEqual(montantsDeLaPeriode(sansRemise, { total: 13900, amount_due: 3900, currency: 'eur' }),
+    { tarif: { centimes: 13900, devise: 'eur' }, prelevement: { centimes: 3900, devise: 'eur' } })
+  // Apercu illisible : le prix des items SEULEMENT sans remise, sinon rien.
+  assert.deepEqual(montantsDeLaPeriode(sansRemise, null).tarif, { centimes: 13900, devise: 'eur' })
+  assert.deepEqual(montantsDeLaPeriode(avecRemise, null), { tarif: null, prelevement: null })
+  assert.deepEqual(montantsDeLaPeriode(avecRemise, { total: 'x', currency: 'eur' }), { tarif: null, prelevement: null })
+  // Remise : posee sur l'abonnement, ou visible dans l'apercu (remise client).
+  assert.ok(remiseAppliquee(avecRemise, null))
+  assert.ok(!remiseAppliquee(sansRemise, null))
+  assert.ok(remiseAppliquee(sansRemise, { total_discount_amounts: [{ amount: 5000, discount: 'di_X' }] }))
+  assert.ok(!remiseAppliquee(sansRemise, { total_discount_amounts: [{ amount: 0 }] }))
+})
+
+test('montants du membre : selection du montant du et faits de l outil (Brice 30/09)', () => {
+  const sec = iso => Math.floor(Date.parse(iso) / 1000)
+  const facture = (extra = {}) => ({
+    id: 'in_TEST000000', status: 'open', amount_due: 8900, amount_remaining: 8900, currency: 'eur',
+    created: sec('2099-09-07T10:00:00Z'), hosted_invoice_url: 'https://invoice.stripe.com/i/TEST_facture', ...extra,
+  })
+  // Seules les factures ouvertes avec un reste positif ; amount_remaining, pas amount_due (paiement partiel).
+  assert.deepEqual(facturesARegler([facture()]), [{ centimes: 8900, devise: 'eur', lien: 'https://invoice.stripe.com/i/TEST_facture', factureLe: '2099-09-07T10:00:00.000Z' }])
+  assert.equal(facturesARegler([facture({ amount_remaining: 3900 })])[0].centimes, 3900)
+  for (const autre of [{ status: 'paid' }, { status: 'draft' }, { status: 'void' }, { status: 'uncollectible' }, { amount_remaining: 0 }, { amount_remaining: null }, { currency: null }]) {
+    assert.deepEqual(facturesARegler([facture(autre)]), [], JSON.stringify(autre))
+  }
+  assert.deepEqual(facturesARegler([null, 'in_X', 42]), [])
+  // La plus recente d'abord, 3 au plus ; lien seulement en https.
+  const plusieurs = facturesARegler([
+    facture({ created: sec('2099-07-07T10:00:00Z'), amount_remaining: 100 }),
+    facture({ created: sec('2099-09-07T10:00:00Z'), amount_remaining: 300 }),
+    facture({ created: sec('2099-08-07T10:00:00Z'), amount_remaining: 200, hosted_invoice_url: 'http://pas-https.example' }),
+    facture({ created: sec('2099-06-07T10:00:00Z'), amount_remaining: 50 }),
+  ])
+  assert.deepEqual(plusieurs.map(f => f.centimes), [300, 200, 100])
+  assert.equal(plusieurs[1].lien, null)
+  // Aucun identifiant de facture ne sort.
+  assert.ok(!JSON.stringify(plusieurs).includes('in_TEST'))
+
+  // Ou chercher un reste a regler.
+  const futurSec = sec('2099-10-15T10:00:00Z')
+  const brut = (extra = {}) => abo({
+    items: { data: [{ current_period_end: futurSec, quantity: 1, price: { product: PRODUITS[1], unit_amount: 13900, currency: 'eur', recurring: { interval: 'month' } } }] },
+    collection_method: 'charge_automatically', ...extra,
+  })
+  const r = extra => resumerAbonnement(brut(extra), PRODUITS)
+  assert.ok(!peutAvoirUnImpaye(r()))
+  assert.ok(peutAvoirUnImpaye(r({ status: 'past_due' })))
+  assert.ok(peutAvoirUnImpaye(r({ status: 'unpaid' })))
+  assert.ok(peutAvoirUnImpaye(r({ latest_invoice: { status: 'open', status_transitions: {} } })))
+
+  // Les faits de l'outil : abonnement actif avec remise, rien a regler.
+  const actif = r({ discounts: ['di_TEST0000'] })
+  const f1 = faitsMontants([{ abonnement: actif, apercu: { total: 8900, amount_due: 8900, currency: 'eur' } }], [])
+  assert.deepEqual(f1, {
+    abonnements: [{ statut: 'actif', tarif: '89 € par mois', remise: true, prochain_prelevement: { date: '15 octobre 2099', montant: '89 €' } }],
+    a_regler: [], rien_a_regler: true,
+  })
+  // Paiement en retard : le montant du et le lien de la facture.
+  const retard = r({ status: 'past_due', latest_invoice: { status: 'open', status_transitions: {} } })
+  const f2 = faitsMontants([{ abonnement: retard, apercu: null }], [{ abonnement: retard, factures: [facture()] }])
+  assert.equal(f2.abonnements[0].statut, 'paiement_en_retard')
+  assert.equal(f2.abonnements[0].tarif, '139 € par mois')
+  assert.deepEqual(f2.a_regler, [{ montant: '89 €', facture_du: '7 septembre 2099', lien: 'https://invoice.stripe.com/i/TEST_facture' }])
+  assert.equal(f2.rien_a_regler, undefined)
+  // Factures illisibles, ou en retard sans facture ouverte lisible : « non disponible », jamais « rien a regler ».
+  const f3 = faitsMontants([], [{ abonnement: retard, factures: 'illisible' }])
+  assert.ok(f3.a_regler_non_disponible && !f3.rien_a_regler && f3.aucun_abonnement_en_cours)
+  assert.ok(faitsMontants([], [{ abonnement: retard, factures: [] }]).a_regler_non_disponible)
+  // Derniere facture ouverte payee entre-temps (liste vide, abonnement actif) : rien a regler.
+  assert.ok(faitsMontants([], [{ abonnement: r({ latest_invoice: { status: 'open' } }), factures: [] }]).rien_a_regler)
+  // Lien absent : dit tel quel, le montant reste.
+  assert.equal(faitsMontants([], [{ abonnement: retard, factures: [facture({ hosted_invoice_url: null })] }]).a_regler[0].lien, LIEN_NON_DISPONIBLE)
+  // Remise et apercu illisible : « montant non disponible », jamais le prix affiche.
+  const f4 = faitsMontants([{ abonnement: actif, apercu: null }], [])
+  assert.equal(f4.abonnements[0].tarif, MONTANT_NON_DISPONIBLE)
+  assert.equal(f4.abonnements[0].prochain_prelevement.montant, MONTANT_NON_DISPONIBLE)
+  // Arret programme, pause : pas de prochain prelevement, et pourquoi.
+  const arret = faitsMontants([{ abonnement: r({ cancel_at_period_end: true }), apercu: null }], []).abonnements[0]
+  assert.ok(arret.statut === 'arret_programme' && arret.prochain_prelevement === null && /arrêt programmé/.test(arret.sans_prelevement))
+  const pause = faitsMontants([{ abonnement: r({ pause_collection: { behavior: 'void', resumes_at: futurSec + 90 * 86400 } }), apercu: null }], []).abonnements[0]
+  assert.ok(pause.statut === 'pause_prevue' && pause.prochain_prelevement === null)
+  const facturee = faitsMontants([{ abonnement: r({ collection_method: 'send_invoice' }), apercu: null }], []).abonnements[0]
+  assert.ok(facturee.prochain_prelevement === null && /pas de prélèvement automatique/.test(facturee.sans_prelevement))
+  // Rien qui identifie chez Stripe (client, abonnement, facture, remise).
+  for (const f of [f1, f2, f3, f4]) assert.ok(!/(?<![A-Za-z])(cus|sub|in|di|promo)_[A-Za-z0-9]{4,}/.test(JSON.stringify(f)), JSON.stringify(f))
+})
+
+test('fil Support : libelles des boutons et gestes (Brice 30/09)', () => {
+  assert.equal(libelleBouton('m:abo'), 'Mon abonnement')
+  assert.equal(libelleBouton('m:equipe'), "Contacter l'équipe")
+  assert.equal(libelleBouton('m:arret_ok'), "J'arrête quand même")
+  assert.equal(libelleBouton('p:3'), 'Pause de 3 mois')
+  // Jamais le nonce d'une confirmation.
+  assert.equal(libelleBouton('c:AbCdEf123456'), 'Oui, je confirme')
+  assert.equal(libelleBouton('x:AbCdEf123456'), 'Non, laisse tomber')
+  assert.equal(libelleBouton('zz:inconnu'), 'bouton inconnu')
+
+  assert.equal(expurgerLiensInvitation('va sur https://t.me/+AbCd123 ou https://t.me/joinchat/XyZ'), 'va sur [lien transmis] ou [lien transmis]')
+  assert.equal(expurgerLiensInvitation('https://t.me/aok_liveclub_bot'), 'https://t.me/aok_liveclub_bot')
+
+  // Les gestes 'fait' et 'refuse' ont une ligne ; 'simule' et 'echec' restent au journal.
+  assert.equal(phraseGeste({ geste: 'retrait', resultat: 'simule', regle: 'desabonne' }), null)
+  assert.equal(phraseGeste({ geste: 'invitation', resultat: 'echec', regle: 'telegram' }), null)
+  assert.equal(phraseGeste({ geste: 'entree_acceptee', resultat: 'fait', regle: 'abonnement' }), 'Entrée dans le groupe acceptée (abonnement).')
+  assert.equal(phraseGeste({ geste: 'refus', resultat: 'fait', regle: 'sortie_abusive_metricgram' }), 'Sortie par Metricgram repérée (droit ouvert).')
+  assert.equal(phraseGeste({ geste: 'invitation', resultat: 'fait', regle: 'sortie_abusive_metricgram', details: { sorti_le: '2026-09-27T10:15:00.000Z' } }), 'Bannissement levé, lien de retour envoyé.')
+  assert.equal(phraseGeste({ geste: 'pause', resultat: 'fait', regle: 'demande_membre', details: { paye_jusquau: '2026-10-15', reprise_le: '2026-12-15' } }),
+    "Pause programmée, groupe gardé jusqu'au 15 octobre 2026, reprise le 15 décembre 2026.")
+  assert.equal(phraseGeste({ geste: 'arret', resultat: 'fait', regle: 'demande_membre', details: { fin: '2026-10-07' } }), 'Arrêt programmé au 7 octobre 2026.')
+  assert.equal(phraseGeste({ geste: 'rappel', resultat: 'fait', regle: 'prelevement_j3', details: { jour_annonce: '2026-10-04', canal: 'prive' } }), 'Rappel J-3 envoyé (prélèvement du 4 octobre 2026).')
+  assert.equal(phraseGeste({ geste: 'rappel', resultat: 'fait', regle: 'sortie_desabonne', details: { canal: 'email' } }), "Message de fin d'abonnement envoyé par email.")
+  assert.equal(phraseGeste({ geste: 'fin_acces', resultat: 'fait', regle: 'broker_fin' }), "Sortie du groupe (fin d'accès broker).")
+  assert.equal(phraseGeste({ geste: 'retrait', resultat: 'refuse', regle: 'exempte' }), 'Sortie du groupe non faite (membre exempté).')
+  assert.equal(phraseGeste({ geste: 'pause', resultat: 'fait', regle: 'pause_effective' }), 'Sortie du groupe (début de la pause).')
+  // Un detail inattendu (lien, email) n'entre jamais dans la ligne : seules des dates sont lues.
+  const piege = phraseGeste({ geste: 'invitation', resultat: 'fait', regle: 'abonnement', details: { lien: 'https://t.me/+SECRET', email: 'x@y.fr' } })
+  assert.ok(!/t\.me|@/.test(piege), piege)
+  assert.equal(phraseGeste({ geste: 'geste_futur', resultat: 'fait', regle: 'x' }), 'Geste du bot fait.')
 })
 
 test('sorties abusives de Metricgram (transition)', () => {

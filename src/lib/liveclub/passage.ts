@@ -44,18 +44,19 @@
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db'
 import {
-  retirerDuLiveClub, journaliserGesteLiveClub, stripeGet, stripePost,
+  retirerDuLiveClub, journaliserGesteLiveClub, stripeGet,
   type EntreeJournalLiveClub, type GesteJournal,
 } from '@/lib/stripe-actions'
 import { GRACE_JOURS, PLAFOND_SORTIES_PASSAGE, chatId, cleStripeLecture, lienBot, sortiesActives } from './config'
 import {
   listerAbonnementsLiveClub, clientsStripeParEmail, abonnementsLiveClubParEmail, adopterPause, effacerMetadonneesPause,
-  lireAbonnement,
+  lireAbonnement, apercuProchaineFacture as apercuStripe,
   type AbonnementResume,
 } from './stripe'
 import { droitLiveClub, type Droit } from './droits'
 import { creerJeton, jetonExistant } from './jetons'
 import { appelTelegram, envoyer, lienDemandeAdhesion } from './telegram'
+import { tracerGeste, tracerMessageBot } from './support-pont'
 import {
   emailRappelPause, emailDebutPauseSansReprise, emailRetour, emailRappelFinBroker, emailFinBroker,
   emailSortieDesabonne, emailRappelPrelevement,
@@ -404,11 +405,18 @@ async function cloreReservation(
 ) {
   try {
     if (envoi) {
-      await prisma.$executeRaw`
+      const lignes = await prisma.$queryRaw<{ telegram_id: bigint | null; membre_id: string | null; geste: string; resultat: string; regle: string | null; details: Record<string, unknown> | null }[]>`
         update public.cockpit_liveclub_gestes
         set details = details || ${JSON.stringify({ canal: envoi.canal })}::jsonb,
             telegram_id = coalesce(${envoi.telegramId}::bigint, telegram_id)
-        where geste_id = ${gesteId}`
+        where geste_id = ${gesteId}
+        returning telegram_id, membre_id::text as membre_id, geste, resultat, regle, details`
+      // Le geste reserve (inscrit 'fait' avant l'envoi, hors de
+      // journaliserGesteLiveClub) va au fil Support une fois l'envoi parti.
+      const g = lignes[0]
+      if (g?.telegram_id != null) {
+        await tracerGeste(Number(g.telegram_id), { geste: g.geste, resultat: g.resultat, regle: g.regle, details: g.details }, { membreId: g.membre_id })
+      }
     } else {
       await prisma.$executeRaw`
         update public.cockpit_liveclub_gestes set resultat = 'echec' where geste_id = ${gesteId}`
@@ -435,7 +443,12 @@ async function prevenir(
   const boutons = m.bouton ? [[{ texte: m.bouton.texte, url: m.bouton.url }]] : undefined
   for (const tid of telegramIds) {
     const r = await envoyer(tid, texte, boutons)
-    if (r.ok) return { canal: 'prive', telegramId: tid }
+    if (r.ok) {
+      // Au fil Support du compte (Brice, 30/09) : le message delivre et les
+      // libelles de ses boutons, jamais leur adresse. Ne jette pas.
+      await tracerMessageBot(tid, texte, { boutons })
+      return { canal: 'prive', telegramId: tid }
+    }
   }
   if (email) {
     const r = await parEmail(email)
@@ -1104,13 +1117,13 @@ async function rattraperMessagesSortieDesabonne(
  * Apercu de la prochaine facture (POST /v1/invoices/create_preview : rien
  * n'est cree chez Stripe), pour le montant reel apres remise, taxe et solde.
  * null sur une panne ou une cle sans ce droit : le rappel ne donne alors que
- * la date (montantAAnnoncer).
+ * la date (montantAAnnoncer). Meme appel que l'outil mes_montants du bot
+ * (apercuProchaineFacture de stripe.ts).
  */
 async function apercuProchaineFacture(ctx: Contexte, abonnementId: string): Promise<Record<string, unknown> | null> {
-  const cle = cleStripeLecture()
-  if (!cle) return null
+  if (!cleStripeLecture()) return null
   try {
-    return await stripePost(cle, '/v1/invoices/create_preview', { subscription: abonnementId })
+    return await apercuStripe(abonnementId)
   } catch (err) {
     if (ctx.s.prelevements.apercus_illisibles === 0) {
       console.warn(`[liveclub/passage] apercu de facture illisible : ${messageErreur(err)}`)
@@ -1329,9 +1342,14 @@ async function lienRetourAutomatique(ctx: Contexte, telegramId: number, droitBot
     return 'echec_lien'
   }
   const m = modeleRetourSortieAbusive(lien)
-  const envoi = await envoyer(telegramId, m.paragraphes.join('\n\n'),
-    m.bouton ? [[{ texte: m.bouton.texte, url: m.bouton.url }]] : undefined)
-  if (envoi.ok) return 'envoye'
+  const texte = m.paragraphes.join('\n\n')
+  const boutons = m.bouton ? [[{ texte: m.bouton.texte, url: m.bouton.url }]] : undefined
+  const envoi = await envoyer(telegramId, texte, boutons)
+  if (envoi.ok) {
+    // Au fil Support : le libelle du bouton, jamais le lien d'invitation.
+    await tracerMessageBot(telegramId, texte, { boutons })
+    return 'envoye'
+  }
   return envoi.code === 403 ? 'bot_bloque' : 'echec_envoi'
 }
 
@@ -1429,6 +1447,8 @@ async function tacheSortiesMetricgram(ctx: Contexte, rattaches: Rattache[], abon
     if (reserve === null) { s.deja_signalees++; continue }
     dejaSignales.add(cle)
     s.signalees++
+    // Signal reserve hors de journaliserGesteLiveClub : sa ligne au fil Support ici.
+    await tracerGeste(telegramId, { geste: 'refus', resultat: 'fait', regle: 'sortie_abusive_metricgram' }, { membreId: d.membreId ?? null })
 
     // Deja relance apres un ban precedent : Metricgram le ressort a chaque
     // retour tant qu'il ne l'a pas dans sa base. Signale, sans second lien.

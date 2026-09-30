@@ -18,24 +18,75 @@
 //
 // Jamais de texte de message ni d'email dans un log. Aucune fonction ne jette :
 // une panne du support ne casse pas le bot.
+//
+// TOUTE la conversation (Brice, 30/09 : le Support ne montrait aucun fil
+// Telegram, parce que seul le texte libre passait par ici) : commandes,
+// appuis de boutons, chaque message du bot (menu, verification, invitations,
+// messages prives du passage quotidien) et une ligne « [système] » pour les
+// etapes du groupe (demande d'adhesion recue, acceptee, refusee). Un compte
+// non rattache a son fil aussi (telegramId seul, sans membre). Rien n'entre
+// en clair qui ouvrirait une porte : lien d'invitation, jeton de /start, code
+// de verification (nettoyerPourSupport). Des boutons, seul le libelle entre
+// (texteAvecBoutons) : l'adresse d'un bouton peut etre un lien d'invitation.
+//
+// Toutes les ecritures prennent un client en dernier parametre (prisma par
+// defaut) : scripts/verifier-pont-support.mjs les rejoue dans une
+// transaction toujours annulee, contre la vraie base.
 
 import { Resend } from 'resend'
+import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db'
+import { expurgerLiensInvitation, phraseGeste, type GesteLu } from './pur'
+import { masquerCodes } from './verification-pur'
+import type { Bouton } from './telegram'
 
 export type EchangeSupport = {
   telegramId: number
   membreId?: string | null
   email?: string | null
-  role: 'membre' | 'ia' | 'humain'
+  /** 'systeme' : une etape ou un geste du bot (groupe, pause, rappel), affichee « [système] ». */
+  role: 'membre' | 'ia' | 'humain' | 'systeme'
   texte: string
   veutHumain?: boolean
 }
 
+/** Le client SQL des ecritures : prisma, ou une transaction (test). */
+export type ClientSupport = Pick<Prisma.TransactionClient, '$queryRaw'>
+
 /** Meme plafond que /api/support/chat et /api/support/reply. */
 const MAX_CARACTERES = 4000
 
-/** Les roles du modele support (ceux que lit l'ecran du cockpit). */
-const ROLE_SUPPORT = { membre: 'user', ia: 'assistant', humain: 'human' } as const
+/**
+ * Les roles du modele support (ceux que lit l'ecran du cockpit). Une etape
+ * 'systeme' est ecrite en 'system', avec le prefixe « [système] » dans le
+ * texte : le cockpit l'affiche en ligne discrete (SupportView.tsx, 30/09), et
+ * un cockpit plus ancien, qui ne connait que user, assistant et human, la
+ * montre en bulle « IA » encore lisible. Le bot support du site ignore ce
+ * role (versMessagesSupport), et un fil Telegram ne lui parvient jamais.
+ */
+const ROLE_SUPPORT = { membre: 'user', ia: 'assistant', humain: 'human', systeme: 'system' } as const
+const PREFIXE_SYSTEME = '[système] '
+
+/**
+ * Ce qui ne doit jamais entrer en clair dans un fil : les liens d'invitation
+ * Telegram (expurgerLiensInvitation), un jeton de /start (lien t.me/...?start=
+ * colle dans un message) et un code de verification a 6 chiffres
+ * (masquerCodes, qui laisse les emails intacts).
+ */
+export function nettoyerPourSupport(texte: string): string {
+  const sansJeton = texte.replace(/([?&]start=)[A-Za-z0-9_-]{8,}/g, '$1[jeton]')
+  return masquerCodes(expurgerLiensInvitation(sansJeton))
+}
+
+/**
+ * Le texte d'un message du bot tel qu'il entre au fil : suivi des LIBELLES de
+ * ses boutons, jamais de leur adresse (un bouton « Rejoindre le groupe »
+ * porte un lien d'invitation).
+ */
+export function texteAvecBoutons(texte: string, boutons?: Bouton[][]): string {
+  const libelles = (boutons ?? []).flat().map(b => b.texte).filter(Boolean)
+  return libelles.length ? `${texte}\n[boutons : ${libelles.join(' | ')}]` : texte
+}
 
 /** Le userId d'un fil Telegram (jamais un uuid Supabase). */
 export function userIdTelegram(telegramId: number): string {
@@ -70,7 +121,7 @@ async function alerterEquipe(email: string | null, messages: MessageFil[]): Prom
       .map(s => s.trim())
       .filter(Boolean)
     const transcript = messages.slice(-6)
-      .map(m => `<p><strong>${m.role === 'user' ? 'Membre' : m.role === 'human' ? 'Équipe' : 'IA'}</strong> : ${
+      .map(m => `<p><strong>${m.role === 'user' ? 'Membre' : m.role === 'human' ? 'Équipe' : m.role === 'system' ? 'Bot' : 'IA'}</strong> : ${
         echapper(String(m.content)).slice(0, 600)
       }</p>`)
       .join('\n')
@@ -102,13 +153,16 @@ async function alerterEquipe(email: string | null, messages: MessageFil[]): Prom
  *   l'equipe est prevenue par email).
  * - role 'humain' : la demande est prise en main, le fil sort de l'attente.
  * - membreId et email ne remplacent la valeur connue que s'ils sont fournis.
+ * - le texte passe par nettoyerPourSupport (lien d'invitation, jeton, code).
+ * - un compte Telegram prive seulement (id > 0) : un groupe a un id negatif.
  *
  * Ne jette jamais.
  */
-export async function enregistrerEchangeSupport(e: EchangeSupport): Promise<void> {
+export async function enregistrerEchangeSupport(e: EchangeSupport, db: ClientSupport = prisma): Promise<void> {
   try {
-    if (!Number.isSafeInteger(e.telegramId)) return
-    const texte = typeof e.texte === 'string' ? e.texte.trim().slice(0, MAX_CARACTERES) : ''
+    if (!Number.isSafeInteger(e.telegramId) || e.telegramId <= 0) return
+    const brut = typeof e.texte === 'string' ? nettoyerPourSupport(e.texte.trim()) : ''
+    const texte = (e.role === 'systeme' && brut ? `${PREFIXE_SYSTEME}${brut}` : brut).slice(0, MAX_CARACTERES)
     if (!texte) return
     const role = ROLE_SUPPORT[e.role]
     if (!role) return
@@ -121,7 +175,7 @@ export async function enregistrerEchangeSupport(e: EchangeSupport): Promise<void
     // La CTE lit l'etat AVANT l'ecriture (meme instantane) : on sait si le fil
     // attendait deja un humain, pour ne prevenir l'equipe qu'une fois.
     // Horodatages en UTC sans fuseau, comme ceux que Prisma ecrit.
-    const lignes = await prisma.$queryRaw<{ attendait: boolean | null; messages: unknown; email: string | null }[]>`
+    const lignes = await db.$queryRaw<{ attendait: boolean | null; messages: unknown; email: string | null }[]>`
       with avant as (
         select "escalatedAt" is not null as attendait
         from public."SupportThread" where "telegramId" = ${e.telegramId}
@@ -153,6 +207,64 @@ export async function enregistrerEchangeSupport(e: EchangeSupport): Promise<void
     }
   } catch (err) {
     journaliser('enregistrement', err)
+  }
+}
+
+export type OptionsTrace = {
+  boutons?: Bouton[][]
+  membreId?: string | null
+  email?: string | null
+  /** false : Telegram a refuse l'envoi, le fil le dit (« [non délivré] »). */
+  livre?: boolean
+}
+
+/**
+ * Un message ENVOYE par le bot a ce compte (menu, verification, invitation,
+ * passage quotidien), avec les libelles de ses boutons. Ne jette jamais.
+ */
+export async function tracerMessageBot(
+  telegramId: number,
+  texte: string,
+  o: OptionsTrace = {},
+  db: ClientSupport = prisma,
+): Promise<void> {
+  const corps = texteAvecBoutons(o.livre === false ? `[non délivré] ${texte}` : texte, o.boutons)
+  await enregistrerEchangeSupport({ telegramId, membreId: o.membreId, email: o.email, role: 'ia', texte: corps }, db)
+}
+
+/**
+ * Une etape du bot pour ce compte, en une ligne courte (« Demande d'adhesion
+ * au groupe recue »). Ne jette jamais.
+ */
+export async function tracerEtape(
+  telegramId: number,
+  etape: string,
+  o: { membreId?: string | null } = {},
+  db: ClientSupport = prisma,
+): Promise<void> {
+  await enregistrerEchangeSupport({ telegramId, membreId: o.membreId, role: 'systeme', texte: etape }, db)
+}
+
+/**
+ * Un GESTE du bot (ligne du journal cockpit_liveclub_gestes) dans le fil du
+ * compte : 'fait' ou 'refuse' seulement, en une ligne lisible (phraseGeste).
+ * Appele par journaliserGesteLiveClub (stripe-actions.ts) et par le passage
+ * quotidien pour ses envois reserves. Rien pour un compte absent ou un
+ * groupe. Ne jette jamais.
+ */
+export async function tracerGeste(
+  telegramId: number | null | undefined,
+  g: GesteLu,
+  o: { membreId?: string | null } = {},
+  db: ClientSupport = prisma,
+): Promise<void> {
+  try {
+    if (typeof telegramId !== 'number' || !Number.isSafeInteger(telegramId) || telegramId <= 0) return
+    const phrase = phraseGeste(g)
+    if (!phrase) return
+    await tracerEtape(telegramId, phrase, o, db)
+  } catch (err) {
+    journaliser('geste', err)
   }
 }
 

@@ -64,7 +64,7 @@ serveur la lit), puis relancer `npm run verifier:rls`.
   verifie (aucun lien de confirmation) et n ouvre donc plus son statut Skool ;
   le quiz du site devrait lire l erreur d insertion pour qu un blocage se voie.
 
-## Bots : pause avant arret, liens utiles, codes promo (30/09/2026, NON commite)
+## Bots : pause avant arret, liens utiles, codes promo (30/09/2026, commite 7e7ece6)
 
 Trois demandes de Brice, appliquees aux deux bots (politique commune
 src/lib/politique-information.ts) :
@@ -89,6 +89,73 @@ src/lib/politique-information.ts) :
 - Eval scripts/eval-fuites.mjs : 135 passages, 0 fuite, 0 refus a tort,
   0 incorrect (30/09). Nouvelles verifications : canal de Melanie sur les
   codes, adresses exactes des liens de la liste, pause avant l arret.
-- A suivre : mon_abonnement ne donne pas le MONTANT paye (le membre ne peut
-  pas connaitre son tarif par le bot, il est renvoye a support@) ; le brief ne
-  dit pas quel espace (Telegram ou Skool) porte quel lien.
+- A suivre : le brief ne dit pas quel espace (Telegram ou Skool) porte quel
+  lien. (Le montant paye est traite dans la section suivante.)
+
+## Bots : montants, transmission a l equipe, fil Support complet (30/09/2026, NON commite)
+
+Decisions de Brice du 30/09, bot membre Live Club (le bot support du site ne
+change que le nom du Carnet) :
+- Nom : l extension s appelle « Le Carnet du Trader » (LIENS_UTILES ; l URL
+  du Chrome Web Store garde son ancien chemin, inchangee). Le prompt support
+  ne differe que de cette ligne (diff avant/apres des 6 contextes).
+- Montants : nouvel outil mes_montants (prompt-membre.ts, execute par
+  agent-membre.ts, lu par montantsDuMembre dans actions-membre.ts). Pour le
+  membre QUI ECRIT (identite serveur, aucun parametre) : tarif par periode
+  apres remise et montant du prochain prelevement d apres l apercu de facture
+  Stripe (POST /v1/invoices/create_preview, la meme fonction que le rappel
+  J-3, apercuProchaineFacture dans stripe.ts) ; apercu illisible = prix des
+  items seulement s il n y a aucune remise, sinon « montant non disponible ».
+  Reste a regler : factures ouvertes de l abonnement (GET /v1/invoices
+  status=open) si paiement en retard ou derniere facture ouverte ;
+  amount_remaining et hosted_invoice_url (3 factures au plus). Mise en forme
+  et selection dans pur.ts (faitsMontants, facturesARegler), aucun
+  identifiant Stripe ni code ni nom de coupon ne sort. Prompt : chiffres
+  donnes quand il les demande, ton neutre, jamais de relance ni « paye »,
+  jamais abordes au milieu d une autre conversation ; « tu beneficies d une
+  remise » seulement s il demande pourquoi son prix differe ; jamais les
+  montants ou le code d un autre (refus + canal de Melanie).
+- Transmission : plus de renvoi vers support@ pour ce que le bot ou l equipe
+  savent faire. Remboursement, remise demandee ou promise, reclamation, cas
+  particulier, demande d humain : demander_un_humain, et « l equipe te repond
+  ici ». Les refus que seule l equipe peut regler (plusieurs abonnements,
+  pause a changer, pause avec paiement en retard : Preparation.equipe) sont
+  transmis d office par l agent, et le menu a boutons joint « Contacter
+  l equipe ». support@ reste : pannes (base ou Stripe illisibles), pont
+  Support en panne (le bot l ajoute lui-meme), membre qui demande un email.
+  Variantes 'liveclub' dans politique-information.ts (texteLiveClub,
+  PHRASES_BOT).
+- Fil Support COMPLET (constat du 30/09 : 0 fil Telegram en base, parce que
+  seul le texte libre passait par le pont). Maintenant : commandes (/start
+  [jeton]), appuis de boutons (libelle, jamais le nonce), chaque message du
+  bot (envoyer de bot-membre.ts trace ce qu il envoie, boutons par leur
+  libelle seulement), messages prives du passage quotidien (prevenir,
+  lienRetourAutomatique), et les GESTES : journaliserGesteLiveClub
+  (stripe-actions.ts) ajoute une ligne « [système] » pour chaque geste 'fait'
+  ou 'refuse' d un compte Telegram (phraseGeste, pur.ts ; 'simule' et 'echec'
+  restent au journal, rien sans telegram_id), plus les gestes reserves du
+  passage (cloreReservation, signal Metricgram). Un compte non rattache a son
+  fil. Nettoyage au pont : liens d invitation, jetons de /start, codes a 6
+  chiffres. Role 'system' pour ces lignes, affiche en ligne discrete par
+  apps/cockpit/src/views/SupportView.tsx (depot workspace, NON commite,
+  npm run build ok).
+- Preuve : scripts/verifier-pont-support.mjs execute le pont contre la vraie
+  base dans une transaction TOUJOURS annulee (fil cree, gestes, vue
+  cockpit_support_threads lue en authenticated allowliste = 1 ligne, hors
+  allowlist = 0, rien ne reste). Resultat : le pont ECRIT (pooler et
+  connexion directe) ; la cause du fil vide etait seulement le perimetre.
+- Tests : verifier-liveclub.mjs, 20 blocs (mise en forme des montants,
+  selection du montant du, faits de l outil, libelles, gestes).
+  Eval eval-fuites.mjs complete (/tmp/eval-fuites-v3.json) : 152 passages
+  (82 Live Club, 70 support), 0 fuite, 0 refus a tort, 0 incorrect (30/09).
+  Nouveaux cas : O06 (Carnet du Trader), M01 a M08 (montants, impaye avec
+  faux lien SIMULE, remise sans code, montant et code d un autre, impaye
+  jamais aborde hors sujet), T01 et T02 (transmission, pas d email) ; P02 et
+  L07 exigent maintenant la transmission. Nouvelles regles dures :
+  identifiant Stripe cite = fuite.
+- A suivre : les dates du bot sont au jour UTC, le rappel J-3 au jour de
+  Paris (jourParis) : un abonnement pris entre minuit et 2 h a Paris verra
+  deux dates differentes. Une facture 'uncollectible' n est pas comptee
+  comme reste a regler (seulement 'open'). Les textes de panne du menu
+  (jeton illisible, lien impossible, ban non leve, confirmation sur un
+  abonnement qui n est plus lie) gardent support@.

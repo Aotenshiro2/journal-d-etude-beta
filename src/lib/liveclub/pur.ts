@@ -150,6 +150,8 @@ export type AbonnementResume = {
   montantPeriode: { centimes: number; devise: string } | null
   /** Une remise (coupon, code promo) est posee sur l'abonnement ou un de ses items. */
   aRemise: boolean
+  /** « mois », « 3 mois », « an » : la periode du prix (price.recurring), null si illisible. */
+  periodicite: string | null
   /** Stripe preleve tout seul (charge_automatically), pas une facture envoyee a payer. */
   prelevementAuto: boolean
   /**
@@ -444,6 +446,23 @@ export function formaterMontant(centimes: number, devise: string): string {
   return d === 'eur' ? `${nombre} €` : `${nombre} ${d.toUpperCase()}`
 }
 
+const INTERVALLES_FR: Record<string, [string, string]> = {
+  day: ['jour', 'jours'], week: ['semaine', 'semaines'], month: ['mois', 'mois'], year: ['an', 'ans'],
+}
+
+/**
+ * La periode du prix du premier item (price.recurring) : « mois », « 3 mois »,
+ * « an ». null si le prix n'est pas recurrent ou illisible.
+ */
+export function periodiciteAbonnement(sub: Record<string, unknown>): string | null {
+  const items = (sub.items as { data?: { price?: { recurring?: { interval?: unknown; interval_count?: unknown } | null } | null }[] } | undefined)?.data ?? []
+  const r = items[0]?.price?.recurring
+  const noms = INTERVALLES_FR[String(r?.interval ?? '')]
+  if (!noms) return null
+  const n = typeof r?.interval_count === 'number' && Number.isInteger(r.interval_count) && r.interval_count > 0 ? r.interval_count : 1
+  return n === 1 ? noms[0] : `${n} ${noms[1]}`
+}
+
 /**
  * Resume d'un abonnement Stripe brut (latest_invoice expand ou non). null si
  * aucun de ses items ne porte un des produits donnes : ce n'est pas un
@@ -498,6 +517,7 @@ export function resumerAbonnement(
     derniereFacture,
     montantPeriode: montantPeriodeAbonnement(sub),
     aRemise: abonnementARemise(sub),
+    periodicite: periodiciteAbonnement(sub),
     prelevementAuto: sub.collection_method !== 'send_invoice',
     debutLe: isoDepuisSec(sub.start_date) ?? isoDepuisSec(sub.created),
   }
@@ -622,6 +642,339 @@ export function pauseDejaProposee(
     if (Number.isFinite(quand) && maintenantMs - quand > HEURES_PROPOSITION_PAUSE * 3_600_000) return false
     return /pause/i.test(m.content) && /tarif/i.test(m.content)
   })
+}
+
+// ---------------------------------------------------------------------------
+// Montants du membre (Brice, 30/09) : ce qu'il paie par periode apres remise,
+// son prochain prelevement, et ce qui lui reste a regler, pour LUI seul (outil
+// mes_montants de l'agent, actions-membre.ts). Rien d'autre ne sort d'ici que
+// des montants deja mis en forme, des dates et un lien de paiement : aucun
+// identifiant Stripe (client, abonnement, facture, remise), aucun code ni nom
+// de coupon.
+// ---------------------------------------------------------------------------
+
+export type Montant = { centimes: number; devise: string }
+
+export const MONTANT_NON_DISPONIBLE = 'montant non disponible'
+export const LIEN_NON_DISPONIBLE = 'lien non disponible'
+
+/**
+ * Un montant Stripe lisible (centimes entiers, 0 ou plus, devise non vide),
+ * ou null. Meme lecture que montantAAnnoncer (passage-regles.ts, qui ne peut
+ * pas importer ce fichier).
+ */
+export function lireMontant(centimes: unknown, devise: unknown): Montant | null {
+  if (typeof centimes !== 'number' || !Number.isInteger(centimes) || centimes < 0) return null
+  if (typeof devise !== 'string' || !devise.trim()) return null
+  return { centimes, devise: devise.trim().toLowerCase() }
+}
+
+/**
+ * Le tarif d'une periode APRES remise et le montant du prochain prelevement,
+ * d'apres l'apercu de la prochaine facture (POST /v1/invoices/create_preview,
+ * comme le rappel J-3) : `total` (apres remise et taxe) pour le tarif,
+ * `amount_due` (apres le solde du client) pour le prelevement. Apercu
+ * illisible : le prix des items SEULEMENT si aucune remise n'est posee
+ * (Brice, 30/09), sinon null, que le bot dit « montant non disponible ».
+ */
+export function montantsDeLaPeriode(
+  a: AbonnementResume,
+  apercu: Record<string, unknown> | null,
+): { tarif: Montant | null; prelevement: Montant | null } {
+  const total = lireMontant(apercu?.total, apercu?.currency)
+  const du = lireMontant(apercu?.amount_due, apercu?.currency)
+  if (total || du) return { tarif: total ?? du, prelevement: du ?? total }
+  const repli = !a.aRemise && a.montantPeriode ? a.montantPeriode : null
+  return { tarif: repli, prelevement: repli }
+}
+
+/** Une remise s'applique : posee sur l'abonnement, ou visible dans l'apercu (total_discount_amounts). */
+export function remiseAppliquee(a: AbonnementResume, apercu: Record<string, unknown> | null): boolean {
+  if (a.aRemise) return true
+  const remises = apercu?.total_discount_amounts
+  return Array.isArray(remises)
+    && remises.some(r => typeof (r as { amount?: unknown } | null)?.amount === 'number' && (r as { amount: number }).amount > 0)
+}
+
+/** « par mois », « par an », « tous les 3 mois » : la periode d'un tarif, en francais. */
+export function parPeriode(periodicite: string | null): string {
+  if (!periodicite) return ''
+  if (!/^\d/.test(periodicite)) return `par ${periodicite}`
+  return /semaines$/.test(periodicite) ? `toutes les ${periodicite}` : `tous les ${periodicite}`
+}
+
+export type FactureARegler = Montant & { lien: string | null; factureLe: string | null }
+
+/**
+ * La SELECTION du montant du : dans des factures Stripe brutes (GET
+ * /v1/invoices?subscription=...&status=open), celles qui restent a regler :
+ * statut 'open' et un reste a payer positif (amount_remaining, pas
+ * amount_due : un paiement partiel est deduit). La plus recente d'abord, `max`
+ * au plus. Le lien est la page de paiement Stripe (hosted_invoice_url), en
+ * https seulement ; aucun identifiant de facture ne sort.
+ */
+export function facturesARegler(factures: readonly unknown[], max = 3): FactureARegler[] {
+  const lues: (FactureARegler & { t: number })[] = []
+  for (const brut of factures) {
+    const f = brut as { status?: unknown; amount_remaining?: unknown; currency?: unknown; hosted_invoice_url?: unknown; created?: unknown } | null
+    if (!f || f.status !== 'open') continue
+    const m = lireMontant(f.amount_remaining, f.currency)
+    if (!m || m.centimes <= 0) continue
+    const lien = typeof f.hosted_invoice_url === 'string' && /^https:\/\/\S+$/.test(f.hosted_invoice_url) ? f.hosted_invoice_url : null
+    lues.push({ ...m, lien, factureLe: isoDepuisSec(f.created), t: typeof f.created === 'number' ? f.created : 0 })
+  }
+  return lues
+    .sort((x, y) => y.t - x.t)
+    .slice(0, max)
+    .map(f => ({ centimes: f.centimes, devise: f.devise, lien: f.lien, factureLe: f.factureLe }))
+}
+
+/** Un abonnement ou chercher un reste a regler : paiement en retard (past_due, unpaid) ou derniere facture ouverte. */
+export function peutAvoirUnImpaye(a: AbonnementResume): boolean {
+  return a.statut === 'past_due' || a.statut === 'unpaid' || a.derniereFacture?.statut === 'open'
+}
+
+export type EntreeMontants = {
+  /** Un abonnement vivant (active, trialing, past_due) du membre. */
+  abonnement: AbonnementResume
+  /** L'apercu brut de sa prochaine facture, null s'il est illisible ou absent. */
+  apercu: Record<string, unknown> | null
+}
+
+export type EntreeImpaye = {
+  abonnement: AbonnementResume
+  /** Ses factures ouvertes brutes, 'illisible' si la liste n'a pas pu etre lue. */
+  factures: readonly unknown[] | 'illisible'
+}
+
+export type FaitsMontants = {
+  abonnements: {
+    statut: 'actif' | 'essai' | 'paiement_en_retard' | 'pause_prevue' | 'en_pause' | 'arret_programme'
+    /** « 89 € par mois », ou MONTANT_NON_DISPONIBLE. */
+    tarif: string
+    /** SA remise s'applique (jamais laquelle, ni son code). */
+    remise: boolean
+    prochain_prelevement: { date: string; montant: string } | null
+    /** Pourquoi il n'y a pas de prochain prelevement. */
+    sans_prelevement?: string
+  }[]
+  /** Ce qui reste a regler, la facture la plus recente d'abord (3 au plus). */
+  a_regler: { montant: string; facture_du: string | null; lien: string }[]
+  /** Un paiement est en retard mais son montant n'est pas lisible. */
+  a_regler_non_disponible?: string
+  rien_a_regler?: true
+  aucun_abonnement_en_cours?: true
+}
+
+/**
+ * Ce que l'outil mes_montants donne au modele, pour le membre qui ecrit :
+ * tarif et prochain prelevement de chaque abonnement vivant, et ce qui reste
+ * a regler. Montants mis en forme (formaterMontant), dates en francais.
+ */
+export function faitsMontants(vivants: readonly EntreeMontants[], impayes: readonly EntreeImpaye[]): FaitsMontants {
+  const abonnements = vivants.map(({ abonnement: a, apercu }) => {
+    const { tarif, prelevement } = montantsDeLaPeriode(a, apercu)
+    const statut: FaitsMontants['abonnements'][number]['statut'] = a.pauseEffective ? 'en_pause'
+      : a.pauseActive ? 'pause_prevue'
+      : a.arretPrevu ? 'arret_programme'
+      : a.statut === 'past_due' ? 'paiement_en_retard'
+      : a.statut === 'trialing' ? 'essai'
+      : 'actif'
+    const periode = parPeriode(a.periodicite)
+    const sans = a.arretPrevu ? 'arrêt programmé : plus rien ne sera prélevé'
+      : a.pauseEffective ? "en pause : rien n'est prélevé pendant la pause"
+      : a.pauseActive ? 'pause prévue : rien ne sera prélevé pendant la pause'
+      : !a.prelevementAuto ? 'pas de prélèvement automatique : chaque facture arrive à régler'
+      : !a.finPeriode ? 'date du prochain prélèvement inconnue'
+      : null
+    return {
+      statut,
+      tarif: tarif ? `${formaterMontant(tarif.centimes, tarif.devise)}${periode ? ` ${periode}` : ''}` : MONTANT_NON_DISPONIBLE,
+      remise: remiseAppliquee(a, apercu),
+      prochain_prelevement: sans || !a.finPeriode ? null : {
+        date: formaterDateFr(a.finPeriode),
+        montant: prelevement ? formaterMontant(prelevement.centimes, prelevement.devise) : MONTANT_NON_DISPONIBLE,
+      },
+      ...(sans ? { sans_prelevement: sans } : {}),
+    }
+  })
+
+  const aRegler: FaitsMontants['a_regler'] = []
+  let nonDisponible = false
+  for (const i of impayes) {
+    if (i.factures === 'illisible') { nonDisponible = true; continue }
+    const factures = facturesARegler(i.factures)
+    if (factures.length) {
+      for (const f of factures) {
+        aRegler.push({
+          montant: formaterMontant(f.centimes, f.devise),
+          facture_du: f.factureLe ? formaterDateFr(f.factureLe) : null,
+          lien: f.lien ?? LIEN_NON_DISPONIBLE,
+        })
+      }
+    } else if (i.abonnement.statut === 'past_due' || i.abonnement.statut === 'unpaid') {
+      nonDisponible = true
+    }
+  }
+
+  return {
+    abonnements,
+    a_regler: aRegler.slice(0, 3),
+    ...(nonDisponible ? { a_regler_non_disponible: "un paiement est en retard, mais le montant n'est pas lisible pour le moment" } : {}),
+    ...(!aRegler.length && !nonDisponible ? { rien_a_regler: true as const } : {}),
+    ...(!abonnements.length ? { aucun_abonnement_en_cours: true as const } : {}),
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Les gestes du bot dans le fil Support (Brice, 30/09) : une ligne courte et
+// lisible par geste 'fait' ou 'refuse' du journal (cockpit_liveclub_gestes).
+// Elle ne lit que le geste, la regle et des DATES des details : jamais un
+// lien, un jeton, un code ni un email (le journal n'en porte pas, et la ligne
+// passe encore par nettoyerPourSupport).
+// ---------------------------------------------------------------------------
+
+/**
+ * Remplace les liens d'invitation Telegram d'un texte avant de le conserver
+ * (historique de conversation, fil Support) : le lien part a l'humain, pas en
+ * base. Ici depuis le 30/09 (stripe-actions.ts le reexporte).
+ */
+export function expurgerLiensInvitation(texte: string): string {
+  return texte.replace(/https?:\/\/(?:t\.me|telegram\.me)\/(?:\+|joinchat\/)\S+/gi, '[lien transmis]')
+}
+
+/** Pourquoi un droit est ouvert (droits.ts, raison), en francais. */
+const RAISONS_DROIT: Record<string, string> = {
+  abonnement: 'abonnement', exemption: 'exemption', acces_broker: 'accès broker', acces_manuel: 'accès manuel',
+}
+
+/** Motifs d'un refus de sortie (retirerDuLiveClub, passage quotidien). */
+const MOTIFS_REFUS: Record<string, string> = {
+  exempte: 'membre exempté', admin_du_groupe: 'administrateur du groupe', absent_du_groupe: "déjà hors du groupe",
+  plafond_passage: 'plafond du passage atteint, reportée',
+}
+
+export type GesteLu = {
+  geste: string
+  resultat: string
+  regle: string | null
+  details?: Record<string, unknown> | null
+}
+
+/**
+ * La ligne « [système] » d'un geste du bot (sans le prefixe), ou null s'il
+ * ne va pas au fil : 'simule' et 'echec' restent dans le journal. Une regle
+ * inconnue garde une ligne generique, jamais le code brut d'un detail.
+ */
+export function phraseGeste(g: GesteLu): string | null {
+  if (g.resultat !== 'fait' && g.resultat !== 'refuse') return null
+  const d = g.details ?? {}
+  const date = (champ: string): string | null => {
+    const v = d[champ]
+    return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v) ? formaterDateFr(v) : null
+  }
+  const fait = g.resultat === 'fait'
+  const regle = g.regle ?? ''
+  const raison = RAISONS_DROIT[regle]
+  const motif = MOTIFS_REFUS[regle]
+
+  switch (g.geste) {
+    case 'entree_acceptee':
+      if (!fait) return regle === 'plus_de_demande' ? "Plus de demande d'adhésion en attente." : "Entrée dans le groupe non acceptée."
+      return `Entrée dans le groupe acceptée${raison ? ` (${raison})` : ''}${d.reprise ? ', demande en attente reprise' : ''}.`
+    case 'entree_refusee':
+      return fait ? "Entrée dans le groupe refusée (pas de droit ouvert)." : "Refus d'entrée non appliqué."
+    case 'invitation':
+      if (!fait) {
+        if (regle === 'jeton_invalide') return 'Lien personnel expiré ou déjà utilisé.'
+        if (regle === 'deja_dans_le_groupe') return 'Lien personnel ouvert : déjà dans le groupe.'
+        if (regle === 'sans_droit') return "Lien personnel ouvert : pas d'abonnement actif."
+        return 'Lien vers le groupe non envoyé.'
+      }
+      if (regle === 'retour_groupe') return 'Lien de retour vers le groupe envoyé.'
+      if (regle === 'sortie_abusive_metricgram') return 'Bannissement levé, lien de retour envoyé.'
+      if (regle === 'broker_renvoi') return "Lien d'accès broker renvoyé par email."
+      return `Lien d'entrée dans le groupe envoyé${raison ? ` (${raison})` : ''}.`
+    case 'reintegration':
+      if (!fait) return `Réintégration non faite${motif ? ` (${motif})` : ''}.`
+      return regle === 'payeur_banni' ? 'Ancien blocage du groupe levé (droit ouvert).' : "Réintégré dans le groupe par l'équipe."
+    case 'retrait':
+      if (!fait) return `Sortie du groupe non faite${motif ? ` (${motif})` : ''}.`
+      if (regle === 'desabonne') return 'Sortie du groupe (abonnement terminé).'
+      return "Sorti du groupe par l'équipe."
+    case 'fin_acces':
+      return fait ? "Sortie du groupe (fin d'accès broker)." : `Sortie de fin d'accès broker non faite${motif ? ` (${motif})` : ''}.`
+    case 'pause': {
+      if (!fait) return `Pause non posée${motif ? ` (${motif})` : ''}.`
+      if (regle === 'pause_effective' || regle === 'pause_resortie') return 'Sortie du groupe (début de la pause).'
+      if (regle === 'pause_adoptee') return 'Pause posée hors du bot, prise en compte.'
+      const reprise = date('reprise_le')
+      const jusqua = date('paye_jusquau')
+      if (regle === 'manuel') return `Pause programmée par l'équipe${reprise ? `, reprise le ${reprise}` : ''}.`
+      return `Pause programmée${jusqua ? `, groupe gardé jusqu'au ${jusqua}` : ''}${reprise ? `, reprise le ${reprise}` : ''}.`
+    }
+    case 'arret': {
+      if (!fait) return 'Arrêt non programmé.'
+      const fin = date('fin')
+      return `Arrêt programmé${fin ? ` au ${fin}` : ' à la fin de la période payée'}${regle === 'manuel' ? " par l'équipe" : ''}.`
+    }
+    case 'arret_annule':
+      return fait ? "Arrêt annulé : l'abonnement continue." : 'Annulation de l\'arrêt non faite.'
+    case 'reprise':
+      if (!fait) return regle === 'pause_sans_reprise' ? 'Pause sans date de reprise : pas de retour automatique.' : 'Retour après la pause non fait.'
+      if (regle === 'pause_deja_revenu') return 'Retour après la pause : déjà revenu dans le groupe.'
+      return 'Retour après la pause : lien de retour envoyé.'
+    case 'rappel': {
+      if (!fait) return 'Rappel non envoyé.'
+      const canal = d.canal === 'email' ? ' par email' : ''
+      if (regle === 'prelevement_j3') {
+        const jour = date('jour_annonce') ?? date('echeance')
+        return `Rappel J-3 envoyé${canal}${jour ? ` (prélèvement du ${jour})` : ''}.`
+      }
+      if (regle === 'pause_j7') return `Rappel de fin de pause envoyé${canal} (J-7).`
+      if (regle === 'pause_debut') return `Message de début de pause envoyé${canal}.`
+      if (regle === 'sortie_desabonne') return `Message de fin d'abonnement envoyé${canal}.`
+      if (regle === 'broker_j7') return `Rappel de fin d'accès broker envoyé${canal} (J-7).`
+      if (regle === 'broker_fin_message') return `Message de fin d'accès broker envoyé${canal}.`
+      return `Rappel envoyé${canal}.`
+    }
+    case 'refus':
+      if (regle === 'sortie_abusive_metricgram') return 'Sortie par Metricgram repérée (droit ouvert).'
+      return 'Refus noté par le bot.'
+    case 'acces_broker': {
+      const jusqua = date('jusquau')
+      return fait ? `Accès broker ouvert${jusqua ? ` jusqu'au ${jusqua}` : ''}.` : 'Accès broker non ouvert.'
+    }
+    default:
+      return fait ? 'Geste du bot fait.' : 'Geste du bot refusé.'
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Libelles des boutons pour le fil Support (Brice, 30/09 : toute la
+// conversation du bot se lit dans le cockpit). Memes textes que les claviers
+// d'actions-membre.ts. Jamais le nonce d'une confirmation.
+// ---------------------------------------------------------------------------
+
+const LIBELLES_BOUTONS: Record<string, string> = {
+  'm:abo': 'Mon abonnement',
+  'm:pause': 'Mettre en pause',
+  'm:arret': 'Arrêter',
+  'm:arret_ok': "J'arrête quand même",
+  'm:annuler': 'Annuler un arrêt prévu',
+  'm:equipe': "Contacter l'équipe",
+  'v:email': "J'ai payé : vérifier mon email",
+}
+
+/** Le libelle lisible d'un callback_data (« Mon abonnement », « Pause de 3 mois », « Oui, je confirme »). */
+export function libelleBouton(data: string): string {
+  const connu = LIBELLES_BOUTONS[data]
+  if (connu) return connu
+  const pause = /^p:([1-6])$/.exec(data)
+  if (pause) return `Pause de ${pause[1]} mois`
+  if (/^c:/.test(data)) return 'Oui, je confirme'
+  if (/^x:/.test(data)) return 'Non, laisse tomber'
+  return 'bouton inconnu'
 }
 
 /** callback_data : 1 a 64 octets (limite Telegram). */

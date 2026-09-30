@@ -16,16 +16,19 @@
 // Produits = ecriture (couvre les tarifs). Tant que la cle manque, la carte
 // de confirmation le dit au lieu d'un bouton Confirmer.
 
+import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db'
 import {
   finPeriodeAbonnement, calculerReprisePause, decouperEmails, normaliserEmail, preparerPoseDePause,
-  effacementMetadonneesPause, resumerAbonnement,
+  effacementMetadonneesPause, resumerAbonnement, expurgerLiensInvitation,
 } from '@/lib/liveclub/pur'
 import { PRODUITS_LIVECLUB } from '@/lib/liveclub/config'
+import { tracerGeste } from '@/lib/liveclub/support-pont'
 
 // La regle de la pause vit dans liveclub/pur.ts (testable sans base) ; elle
 // est reexportee ici pour les appelants de stripe-actions (29/09).
-export { finPeriodeAbonnement, calculerReprisePause }
+// expurgerLiensInvitation aussi (30/09).
+export { finPeriodeAbonnement, calculerReprisePause, expurgerLiensInvitation }
 
 const API = 'https://api.stripe.com'
 
@@ -410,10 +413,19 @@ export type ContexteJournalLiveClub = {
  * 20260929190200 pas appliquee) ou si l'insert echoue, on le loggue et le
  * geste garde sa reponse. Ni le lien ni le message ne sont ecrits.
  * Renvoie 'doublon' quand l'update_id est deja trace (rien n'est ecrit).
+ *
+ * Fil Support (Brice, 30/09 : voir les GESTES du bot dans le fil du membre) :
+ * une ligne 'fait' ou 'refuse' ecrite pour un compte Telegram ajoute aussi une
+ * ligne « [système] » lisible dans son fil (tracerGeste, support-pont.ts, qui
+ * ne jette jamais). Pas de fil pour un geste sans telegram_id, ni pour un
+ * geste 'simule' ou 'echec' (ils restent dans le journal du bot), ni pour un
+ * doublon.
  */
 export async function journaliserGesteLiveClub(
   issue: IssueGesteLiveClub | EntreeJournalLiveClub,
   contexte: ContexteJournalLiveClub,
+  /** prisma, ou une transaction (scripts/verifier-pont-support.mjs, toujours annulee). */
+  db: Pick<Prisma.TransactionClient, '$executeRaw' | '$queryRaw'> = prisma,
 ): Promise<'ecrit' | 'doublon' | 'echec'> {
   const deIssue = 'ok' in issue
   const geste: GesteJournal = contexte.geste
@@ -422,14 +434,18 @@ export async function journaliserGesteLiveClub(
   const regle = contexte.regle ?? issue.regle ?? null
   const details = issue.details ?? {}
   try {
-    const n = await prisma.$executeRaw`
+    const n = await db.$executeRaw`
       insert into public.cockpit_liveclub_gestes
         (telegram_id, membre_id, abonnement_id, geste, resultat, acteur, regle, update_id, details)
       values (${contexte.telegramId}, ${contexte.membreId ?? null}::uuid, ${contexte.abonnementId ?? null},
               ${geste}, ${resultat}, ${contexte.acteur}, ${regle}, ${contexte.updateId ?? null},
               ${JSON.stringify(details)}::jsonb)
       on conflict (update_id) do nothing`
-    return n === 0 ? 'doublon' : 'ecrit'
+    if (n === 0) return 'doublon'
+    if (contexte.telegramId !== null) {
+      await tracerGeste(contexte.telegramId, { geste, resultat, regle, details }, { membreId: contexte.membreId ?? null }, db)
+    }
+    return 'ecrit'
   } catch (err) {
     console.warn(`[liveclub/gestes] journalisation impossible (${geste} u${contexte.telegramId ?? '?'} ${resultat})`
       + `${relationAbsente(err) ? ' : table absente, migration 20260929190200 pas appliquee' : ` : ${messageErreur(err)}`}`)
@@ -628,13 +644,9 @@ export class RefusAction extends Error {
   }
 }
 
-/**
- * Remplace les liens d'invitation Telegram d'un texte avant de le conserver
- * (historique de conversation) : le lien part a l'humain, pas en base.
- */
-export function expurgerLiensInvitation(texte: string): string {
-  return texte.replace(/https?:\/\/(?:t\.me|telegram\.me)\/(?:\+|joinchat\/)\S+/gi, '[lien transmis]')
-}
+// expurgerLiensInvitation vit dans liveclub/pur.ts depuis le 30/09 (le pont
+// Support l'utilise, et ce fichier appelle le pont : pas d'import en boucle).
+// Il est reexporte en tete de fichier pour les appelants d'avant.
 
 /**
  * Execute une action DEJA validee. Renvoie une phrase de resultat, jette
