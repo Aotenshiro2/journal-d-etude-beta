@@ -13,7 +13,7 @@ import {
   effacementMetadonneesPause,
   genererJeton, jetonBienForme, normaliserEmail, decouperEmails, requeteRechercheEmail,
   nomLienInvitation, callbackDataValide, echapperHtml, relationAbsente,
-  montantPeriodeAbonnement, abonnementARemise, formaterMontant,
+  montantPeriodeAbonnement, abonnementARemise, formaterMontant, pauseDejaProposee,
 } from '../src/lib/liveclub/pur.ts'
 import {
   desabonneHorsGrace, finAbonnement,
@@ -23,6 +23,7 @@ import {
 } from '../src/lib/liveclub/passage-regles.ts'
 import {
   GRACE_JOURS, URLS_ABONNEMENT, URL_ABONNEMENT, URL_PORTAIL_CARTE, texteAbonnement,
+  ARGUMENT_TARIF_PAUSE, TEXTE_PAUSE_AVANT_ARRET,
 } from '../src/lib/liveclub/config.ts'
 
 const PRODUITS = ['prod_UcOraPncQlbrW4', 'prod_UynMpOvBtGTsIw']
@@ -441,6 +442,37 @@ test('deux portes d abonnement et portail carte (Brice 29/09)', () => {
   assert.ok(t.endsWith(URLS_ABONNEMENT[1]))
   assert.ok(/^[\x20-\x7eÀ-ÿ]+$/.test(t), 'caracteres clavier seulement')
   assert.ok(URL_PORTAIL_CARTE.startsWith('https://billing.stripe.com/p/login/'))
+})
+
+test('pause proposee une fois avant l arret (Brice 30/09)', () => {
+  // Le texte porte l'argument du tarif, en caracteres clavier.
+  assert.ok(TEXTE_PAUSE_AVANT_ARRET.includes(ARGUMENT_TARIF_PAUSE))
+  assert.ok(/1 à 6 mois/.test(TEXTE_PAUSE_AVANT_ARRET) && /fin de ta période déjà payée/.test(TEXTE_PAUSE_AVANT_ARRET))
+  for (const ligne of TEXTE_PAUSE_AVANT_ARRET.split('\n')) assert.ok(/^[\x20-\x7eÀ-ÿ]*$/.test(ligne), ligne)
+  assert.ok(callbackDataValide('m:arret_ok'))
+
+  const maintenant = Date.parse('2026-09-30T12:00:00Z')
+  const il = h => new Date(maintenant - h * 3_600_000).toISOString()
+  const echange = (reponse, at) => [
+    { role: 'user', content: 'Je veux arrêter.', at },
+    { role: 'assistant', content: reponse, at },
+  ]
+  // Proposee juste avant (texte du serveur, ou argument redit par l'agent) : oui.
+  assert.ok(pauseDejaProposee(echange(TEXTE_PAUSE_AVANT_ARRET, il(0.1)), maintenant))
+  assert.ok(pauseDejaProposee(echange('Tu peux aussi faire une pause : elle garde ton tarif actuel.', il(1)), maintenant))
+  // Sans horodatage (eval, vieux historiques) : compte aussi.
+  assert.ok(pauseDejaProposee([{ role: 'assistant', content: TEXTE_PAUSE_AVANT_ARRET }], maintenant))
+  // Rien, un autre sujet, un message du membre, trop vieux, ou trop loin dans le fil : non.
+  assert.ok(!pauseDejaProposee([], maintenant))
+  assert.ok(!pauseDejaProposee(echange('Ton abonnement est actif.', il(0.1)), maintenant))
+  assert.ok(!pauseDejaProposee(echange('Une pause de combien de mois ?', il(0.1)), maintenant))
+  assert.ok(!pauseDejaProposee([{ role: 'user', content: 'pause ou tarif ?', at: il(0.1) }], maintenant))
+  assert.ok(!pauseDejaProposee(echange(TEXTE_PAUSE_AVANT_ARRET, il(25)), maintenant))
+  assert.ok(!pauseDejaProposee([
+    ...echange(TEXTE_PAUSE_AVANT_ARRET, il(2)),
+    ...echange('Ton abonnement est actif.', il(1)),
+    ...echange('Avec plaisir !', il(0.5)),
+  ], maintenant))
 })
 
 test('montant d une periode et remises', () => {

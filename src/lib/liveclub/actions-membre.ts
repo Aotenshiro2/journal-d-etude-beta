@@ -175,7 +175,17 @@ export async function situationDuMembre(telegramId: number): Promise<Situation> 
 // ---------------------------------------------------------------------------
 
 export type Preparation =
-  | { ok: true; action: Omit<ActionMembre, 'expire'>; resume: string }
+  | {
+    ok: true
+    action: Omit<ActionMembre, 'expire'>
+    resume: string
+    /**
+     * Arret seulement : une pause pourrait etre posee a la place (ni pause
+     * deja prevue, ni paiement en retard, fin de periode connue). C'est la
+     * condition pour proposer la pause avant l'arret (Brice, 30/09).
+     */
+    pausePossible?: boolean
+  }
   | { ok: false; raison: string }
 
 const PANNE = `Je n'arrive pas à lire ton abonnement en ce moment. Réessaie dans un moment, ou écris à ${SUPPORT}.`
@@ -249,6 +259,9 @@ export async function preparerAction(
     return {
       ok: true,
       action: { ...base, type: 'arret' },
+      // Memes conditions que la branche pause ci-dessus (arretPrevu est
+      // deja exclu) : on ne propose pas une pause que le bot refuserait.
+      pausePossible: !a.pauseActive && a.statut !== 'past_due' && Boolean(a.finPeriode),
       resume: `Tu confirmes l'arrêt de ton abonnement ?\n\n`
         + `Plus rien ne sera prélevé. Tu gardes le groupe jusqu'au ${fin ?? 'bout de la période payée'}, puis tu en sors. `
         + `Tu peux changer d'avis jusqu'à cette date.`,
@@ -398,6 +411,18 @@ export function clavierDureesPause(): Bouton[][] {
   return [
     [1, 2, 3].map(n => ({ texte: `${n} mois`, data: `p:${n}` })),
     [4, 5, 6].map(n => ({ texte: `${n} mois`, data: `p:${n}` })),
+  ]
+}
+
+/**
+ * Sous TEXTE_PAUSE_AVANT_ARRET (config.ts) : la pause (le choix des durees,
+ * comme le bouton du menu) ou l'arret quand meme, qui passe directement a la
+ * confirmation, sans reproposer la pause.
+ */
+export function clavierPauseAvantArret(): Bouton[][] {
+  return [
+    [{ texte: 'Plutôt une pause', data: 'm:pause' }],
+    [{ texte: "J'arrête quand même", data: 'm:arret_ok' }],
   ]
 }
 

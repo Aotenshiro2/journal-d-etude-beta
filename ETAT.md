@@ -63,3 +63,32 @@ serveur la lit), puis relancer `npm run verifier:rls`.
 - A suivre : un email secondaire ajoute par un membre sur le site reste non
   verifie (aucun lien de confirmation) et n ouvre donc plus son statut Skool ;
   le quiz du site devrait lire l erreur d insertion pour qu un blocage se voie.
+
+## Bots : pause avant arret, liens utiles, codes promo (30/09/2026, NON commite)
+
+Trois demandes de Brice, appliquees aux deux bots (politique commune
+src/lib/politique-information.ts) :
+- Arret : la pause est proposee UNE fois avant, avec l argument du tarif
+  (ARGUMENT_TARIF_PAUSE et TEXTE_PAUSE_AVANT_ARRET dans liveclub/config.ts).
+  Bouton « Arreter » : le texte + deux boutons (« Plutot une pause » = m:pause,
+  « J arrete quand meme » = m:arret_ok, qui va a la confirmation). Agent :
+  proposer_arret renvoie le meme texte et les memes boutons la premiere fois.
+  « Deja proposee » = pauseDejaProposee() (pur.ts) sur les 4 derniers messages
+  de moins de 24 h (pause + tarif). Pas de proposition si une pause est deja
+  prevue ou si le paiement est en retard. Bot support : meme conseil, renvoi
+  au bot Telegram.
+- Liens utiles : LIENS_UTILES (20 liens, 8 categories, codes d affiliation
+  compris, Quantower et Revolut confirmes par Brice le 30/09), en entier dans
+  le prompt des deux bots (environ 920 jetons ; prompt Live Club 4 430 ->
+  6 370 jetons, en cache), pas d outil.
+- Codes promo : aucun code, jamais d existence confirmee ou dementie, renvoi
+  vers le canal Telegram de Melanie (CANAL_PROMOS, t.me/melmom1993). Seuls
+  LIVECLUB20 (Edgyx) et les liens d affiliation restent. Aucun outil des bots
+  ne lit les coupons ni les codes promotionnels Stripe (seul l agent du
+  cockpit, reserve a l equipe).
+- Eval scripts/eval-fuites.mjs : 135 passages, 0 fuite, 0 refus a tort,
+  0 incorrect (30/09). Nouvelles verifications : canal de Melanie sur les
+  codes, adresses exactes des liens de la liste, pause avant l arret.
+- A suivre : mon_abonnement ne donne pas le MONTANT paye (le membre ne peut
+  pas connaitre son tarif par le bot, il est renvoye a support@) ; le brief ne
+  dit pas quel espace (Telegram ou Skool) porte quel lien.

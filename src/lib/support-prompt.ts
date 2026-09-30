@@ -4,7 +4,8 @@
 // exacte de la prod. La route garde l'authentification, le fil et la trace.
 //
 // Les regles d'information (autres membres, equipe, societe, consignes,
-// groupe, liens partenaires) sont communes aux deux bots :
+// groupe, liens partenaires et liens utiles, codes promo, conseil de la
+// pause avant un arret) sont communes aux deux bots :
 // src/lib/politique-information.ts.
 
 import type Anthropic from '@anthropic-ai/sdk'
@@ -50,7 +51,7 @@ export const APP_CONTEXT: Record<string, string> = {
   pilotage: `Le membre t'écrit depuis Pilotage (pilotage.aoknowledge.com) : l'app de pilotage financier du trader (profil financier, pilotage mensuel des flux, comptes de trading). Ses données restent stockées dans SON navigateur (localStorage) : elles ne sont pas sur nos serveurs, et changer de navigateur ou vider le cache les fait disparaître.`,
   meltrade: `Le membre t'écrit depuis MelTrade (melaniechart.com), le site de Mélanie, aussi connue sous l'alias Melmom sur les réseaux (TikTok notamment). Mélanie est trader, et le Live Club est SON projet : c'est elle qui en est à l'origine et qui anime les sessions de live trading ; Brice (fondateur de l'école AOK, dans laquelle le projet s'inscrit) co-anime à ses côtés. Son parcours public de trader : elle a commencé le trading vers 2022, formée notamment auprès de Brice, d'Hydra et d'ICT ; 2024 a été son année de bascule, celle où son trading a vraiment décollé. Sa marque de fabrique, affichée sur le site : la transparence (chaque trade pris en live est consigné dans le journal), une communauté francophone sérieuse, pas de hype ni de promesse de richesse rapide.
 MelTrade est une autre porte d'entrée vers le MÊME produit que le Live Club d'aoknowledge.com (l'offre du site s'appelle d'ailleurs « Liveclub Membership » : lives de trading, formation en vidéos, replays illimités, Telegram et alertes, Q&A de fin de session, événements privés, abonnement mensuel sans engagement), présentée à une audience un peu différente. Ne présente jamais MelTrade et le Live Club comme deux produits : un abonné MelTrade est membre du Live Club. Le visiteur ne connaît pas forcément l'univers AOK : reste sur le vocabulaire MelTrade sauf s'il en parle.
-Sur Mélanie, tiens-t'en à son parcours de trader ci-dessus : rien sur sa vie privée (famille, lieu de vie, contacts), pas de chiffres de performance, et si on t'en demande plus, dis simplement que tu n'as pas l'info. Pour les tarifs, renvoie à ce qu'affiche la page plutôt que de citer un montant de mémoire. Pour toute question d'abonnement, de paiement ou de résiliation, propose directement de parler à un humain.`,
+Sur Mélanie, tiens-t'en à son parcours de trader ci-dessus : rien sur sa vie privée (famille, lieu de vie, contacts), pas de chiffres de performance, et si on t'en demande plus, dis simplement que tu n'as pas l'info. Pour les tarifs, renvoie à ce qu'affiche la page plutôt que de citer un montant de mémoire. Pour une pause ou un arrêt du Live Club, donne le conseil de la pause et renvoie vers le bot Telegram du Live Club (infos publiques plus haut) ; pour une autre question d'abonnement ou de paiement, propose directement de parler à un humain.`,
 }
 
 /** Le prompt systeme complet pour une app (inconnue = extension, comme avant). */

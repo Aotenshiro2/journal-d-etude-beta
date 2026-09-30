@@ -596,6 +596,34 @@ export function nomLienInvitation(nom: string): string {
   return (nom.trim() || 'Live Club').slice(0, 32)
 }
 
+// ---------------------------------------------------------------------------
+// Pause proposee avant un arret (Brice, 30/09)
+// ---------------------------------------------------------------------------
+
+/** Messages regardes pour savoir si la pause vient d'etre proposee (2 echanges). */
+const MESSAGES_PROPOSITION_PAUSE = 4
+/** Au-dela, une nouvelle demande d'arret est une nouvelle demande. */
+const HEURES_PROPOSITION_PAUSE = 24
+
+/**
+ * La pause a-t-elle deja ete proposee pour CETTE demande d'arret ? Vrai si un
+ * des derniers messages du bot (4 messages, moins de 24 heures) parle de pause
+ * ET de tarif : le texte du serveur (TEXTE_PAUSE_AVANT_ARRET, config.ts) ou
+ * l'argument donne par l'agent. Une seule proposition par demande, pas
+ * d'insistance : l'arret suivant passe directement a la confirmation.
+ */
+export function pauseDejaProposee(
+  historique: readonly { role: string; content: string; at?: string }[],
+  maintenantMs: number = Date.now(),
+): boolean {
+  return historique.slice(-MESSAGES_PROPOSITION_PAUSE).some(m => {
+    if (m.role !== 'assistant' || typeof m.content !== 'string') return false
+    const quand = m.at ? Date.parse(m.at) : NaN
+    if (Number.isFinite(quand) && maintenantMs - quand > HEURES_PROPOSITION_PAUSE * 3_600_000) return false
+    return /pause/i.test(m.content) && /tarif/i.test(m.content)
+  })
+}
+
 /** callback_data : 1 a 64 octets (limite Telegram). */
 export function callbackDataValide(s: string): boolean {
   const n = new TextEncoder().encode(s).length

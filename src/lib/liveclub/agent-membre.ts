@@ -7,9 +7,11 @@
 // OUTILS FERMES : aucun ne prend d'identifiant. L'identite est le telegram_id
 // de l'update, passe par le serveur ; le modele ne peut donc lire ni toucher
 // l'abonnement de quelqu'un d'autre, quoi qu'on lui ecrive. Aucun outil de
-// promo, de remboursement, de code ni de prix (les liens partenaires PUBLIES
-// sont dans le prompt, via src/lib/politique-information.ts, 30/09 ; le
-// modele n'en cree aucun). demander_un_humain (29/09,
+// promo, de remboursement, de code ni de prix, et aucun ne lit les coupons ou
+// codes promotionnels Stripe (verifie le 30/09 : mon_abonnement ne rend que
+// statut et dates). Les liens partenaires et les liens utiles PUBLIES sont
+// dans le prompt, via src/lib/politique-information.ts (30/09) ; le modele
+// n'en cree aucun. demander_un_humain (29/09,
 // decision 5) ne touche a rien : il leve le drapeau veutHumain, et c'est le
 // bot qui fait passer le fil en « veut un humain » dans l'ecran Support.
 //
@@ -27,10 +29,10 @@ import { textOf } from '@/lib/ai'
 import { coutMicroEuros } from '@/lib/ia-prix'
 import { expurgerLiensInvitation } from '@/lib/stripe-actions'
 import { filtrerSortie } from '@/lib/politique-information'
-import { SUPPORT } from './config'
+import { SUPPORT, TEXTE_PAUSE_AVANT_ARRET } from './config'
 import { preparerAction, situationDuMembre } from './actions-membre'
 import type { ActionMembre, MessageConserve } from './conversations'
-import { messageErreur } from './pur'
+import { messageErreur, pauseDejaProposee } from './pur'
 import { MODELE_LIVECLUB, RESULTAT_DEMANDER_UN_HUMAIN, requeteAgentMembre } from './prompt-membre'
 
 export { MODELE_LIVECLUB }
@@ -68,6 +70,12 @@ export type ReponseAgentMembre = {
   action?: Omit<ActionMembre, 'expire'>
   /** Vrai = l'agent n'a pas abouti (tours epuises, reponse vide) : la route joint le menu a boutons. */
   repli?: true
+  /**
+   * Vrai = le membre demande l'arret et `texte` lui propose d'abord la pause
+   * (TEXTE_PAUSE_AVANT_ARRET) : aucune action posee, la route joint
+   * clavierPauseAvantArret().
+   */
+  pauseAvantArret?: true
   /**
    * Vrai = le fil passe en « veut un humain » dans l'ecran Support du
    * cockpit : l'agent a appele demander_un_humain, ou il n'a pas abouti.
@@ -198,6 +206,14 @@ export async function repondreAuMembre(
       // Proposition valide : la boucle s'arrete. La phrase de confirmation est
       // celle du SERVEUR (ce qui sera vraiment fait), pas celle du modele.
       const avant = nettoyer(textOf(response))
+      // Arret (Brice, 30/09) : la premiere fois, la pause d'abord, avec
+      // l'argument du tarif et les boutons du menu, sans action posee. Deja
+      // proposee (historique, ou le texte du modele juste avant) : la
+      // confirmation, sans insister.
+      const vu = avant ? [...historique, { role: 'assistant' as const, content: avant }] : historique
+      if (type === 'arret' && prep.pausePossible && !pauseDejaProposee(vu)) {
+        return { texte: avant ? `${avant}\n\n${TEXTE_PAUSE_AVANT_ARRET}` : TEXTE_PAUSE_AVANT_ARRET, pauseAvantArret: true, ...drapeau() }
+      }
       return { texte: avant ? `${avant}\n\n${prep.resume}` : prep.resume, action: prep.action, ...drapeau() }
     }
     messages.push({ role: 'user', content: resultats })

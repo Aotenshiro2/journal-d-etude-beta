@@ -1,5 +1,6 @@
 // Configuration du Live Club (29/09) : ce que le bot, la page de bienvenue,
 // le passage quotidien et l'agent du cockpit lisent tous au meme endroit.
+// Module PUR, sans import : scripts/verifier-liveclub.mjs le charge tel quel.
 //
 // Les deux produits Stripe sont LA MEME offre (compte melanie). Ils vivent
 // dans le code SERVEUR du journal, jamais dans le navigateur.
@@ -25,6 +26,24 @@ export const SUPPORT = 'support@aoknowledge.com'
 export function texteAbonnement(): string {
   return `Pour t'abonner, c'est au choix sur ${URLS_ABONNEMENT[0]} ou sur ${URLS_ABONNEMENT[1]}`
 }
+
+/**
+ * L'argument de la pause face a un arret (Brice, 30/09) : un nouvel
+ * abonnement se prend au prix du moment, la pause garde le tarif actuel.
+ * Une phrase, au tutoiement : reprise telle quelle par le bot (boutons), par
+ * l'agent (prompt-membre.ts) et par le texte ci-dessous.
+ */
+export const ARGUMENT_TARIF_PAUSE = `Si le prix augmente entre-temps, un nouvel abonnement pris plus tard se fera au prix du moment, sans garantie de retrouver ton tarif actuel. La pause, elle, garde ton abonnement, donc ton tarif.`
+
+/**
+ * La proposition de pause faite UNE fois avant l'arret (Brice, 30/09), par le
+ * bouton « Arreter » comme par l'agent : envoyee avec clavierPauseAvantArret()
+ * (actions-membre.ts). Elle contient « pause » et « tarif » : c'est ce que
+ * pauseDejaProposee() (pur.ts) reconnait dans l'historique.
+ */
+export const TEXTE_PAUSE_AVANT_ARRET = `Avant d'arrêter : si c'est pour un temps, quelle qu'en soit la raison, tu peux plutôt te mettre en pause, de 1 à 6 mois. Elle démarre à la fin de ta période déjà payée.\n\n`
+  + `${ARGUMENT_TARIF_PAUSE}\n\n`
+  + `Tu préfères une pause, ou tu arrêtes quand même ?`
 
 /** Jours de grace apres la fin d'un abonnement, comme Metricgram. */
 export const GRACE_JOURS = 7

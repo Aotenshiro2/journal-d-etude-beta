@@ -15,11 +15,13 @@
 //   de son paiement (verification.ts), sans jamais savoir si une adresse est
 //   celle d'un abonne ;
 // - (29/09) chaque message ecrit et chaque reponse vont au fil Support du
-//   cockpit (support-pont.ts), qui peut passer en « veut un humain ».
+//   cockpit (support-pont.ts), qui peut passer en « veut un humain » ;
+// - (30/09) avant un arret, la pause est proposee UNE fois, avec l'argument
+//   du tarif (TEXTE_PAUSE_AVANT_ARRET), par le bouton comme par l'agent.
 
 import { journaliserGesteLiveClub } from '@/lib/stripe-actions'
 import { prisma } from '@/lib/db'
-import { SUPPORT, chatId, texteAbonnement } from './config'
+import { SUPPORT, TEXTE_PAUSE_AVANT_ARRET, chatId, texteAbonnement } from './config'
 import { droitLiveClub, type Droit } from './droits'
 import { consommerJeton, ErreurTableLiveClub } from './jetons'
 import { rattacherTelegram, type Rattachement } from './rattacher'
@@ -30,7 +32,7 @@ import {
 } from './telegram'
 import {
   preparerAction, executerActionMembre, situationDuMembre, rattachementOuNull,
-  clavierMenu, clavierSansRattachement, clavierDureesPause, clavierConfirmation,
+  clavierMenu, clavierSansRattachement, clavierDureesPause, clavierConfirmation, clavierPauseAvantArret,
   TEXTE_EQUIPE, TEXTE_EQUIPE_INDISPONIBLE, TEXTE_SECOURS_EQUIPE, TEXTE_NON_RATTACHE, TEXTE_PANNE,
   TEXTE_ATTENTE_HUMAIN, ACTEUR_BOT_MEMBRE,
 } from './actions-membre'
@@ -44,7 +46,7 @@ import {
   envoyerCodeSiConnu, rattacherParEmail, reserverCode, verifierCode, type CodeReserve, type IssueCode,
 } from './verification'
 import { CODE_ENVOIS_HEURE, CODE_VALIDITE_MINUTES, intentionNonRattache, masquerCodes } from './verification-pur'
-import { jetonBienForme, messageErreur, normaliserEmail, relationAbsente } from './pur'
+import { jetonBienForme, messageErreur, normaliserEmail, pauseDejaProposee, relationAbsente } from './pur'
 
 // Formes minimales des updates Telegram utilises ici.
 type Utilisateur = { id: number; is_bot?: boolean; first_name?: string }
@@ -706,8 +708,11 @@ async function traiterTexteLibre(chat: number, u: Utilisateur, texte: string, up
     }
     await repondre(reponse.texte, clavierConfirmation(nonce), reponse.veutHumain === true)
   } else {
-    // L'agent n'a pas abouti : le filet est le menu a boutons, joint au message.
-    await repondre(reponse.texte, reponse.repli ? clavierMenu() : undefined, reponse.veutHumain === true)
+    // L'agent n'a pas abouti : le filet est le menu a boutons, joint au
+    // message. Arret demande pour la premiere fois : la pause d'abord, avec
+    // les memes boutons que le parcours « Arreter » du menu.
+    const boutons = reponse.repli ? clavierMenu() : reponse.pauseAvantArret ? clavierPauseAvantArret() : undefined
+    await repondre(reponse.texte, boutons, reponse.veutHumain === true)
   }
   try {
     await ajouterEchange(u.id, texte, reponse.texte)
@@ -761,6 +766,33 @@ export async function traiterMessagePrive(message: MessageTg, updateId: number):
 // ---------------------------------------------------------------------------
 // (8) Boutons
 // ---------------------------------------------------------------------------
+
+/**
+ * La pause a-t-elle deja ete proposee a ce compte pour cette demande d'arret
+ * (pauseDejaProposee sur l'historique de l'agent) ? Historique illisible =
+ * non : on la propose.
+ */
+async function pauseDejaProposeeA(telegramId: number): Promise<boolean> {
+  try {
+    return pauseDejaProposee(await lireHistorique(telegramId))
+  } catch (err) {
+    if (!(err instanceof ErreurTableLiveClub)) console.warn(`[liveclub/bot] historique illisible : ${messageErreur(err)}`)
+    return false
+  }
+}
+
+/**
+ * Trace la proposition faite par le bouton dans l'historique de l'agent : si
+ * le membre repond ensuite par ecrit (« non, j'arrete »), l'agent ne la
+ * refait pas. Ne jette pas.
+ */
+async function noterPropositionPause(telegramId: number): Promise<void> {
+  try {
+    await ajouterEchange(telegramId, '[bouton] Arrêter', TEXTE_PAUSE_AVANT_ARRET)
+  } catch (err) {
+    if (!(err instanceof ErreurTableLiveClub)) console.warn(`[liveclub/bot] historique non ecrit : ${messageErreur(err)}`)
+  }
+}
 
 async function proposer(chat: number, telegramId: number, prep: Awaited<ReturnType<typeof preparerAction>>): Promise<void> {
   if (!prep.ok) {
@@ -847,10 +879,27 @@ export async function traiterBouton(bouton: BoutonTg, updateId: number): Promise
     await proposer(chat, u.id, await preparerAction(u.id, 'pause', Number(pause[1])))
     return
   }
-  if (data === 'm:arret' || data === 'm:annuler') {
+  if (data === 'm:annuler') {
     await repondreBouton(bouton.id)
     await retour()
-    await proposer(chat, u.id, await preparerAction(u.id, data === 'm:arret' ? 'arret' : 'annuler_arret'))
+    await proposer(chat, u.id, await preparerAction(u.id, 'annuler_arret'))
+    return
+  }
+  // « Arreter » (Brice, 30/09) : la premiere fois, la pause d'abord, avec
+  // l'argument du tarif (TEXTE_PAUSE_AVANT_ARRET), et deux boutons ; si le
+  // membre veut toujours arreter (« J'arrete quand meme », m:arret_ok), la
+  // confirmation comme avant. Une seule proposition par demande : deja faite
+  // (bouton ou agent, vue dans l'historique), on passe a la confirmation.
+  if (data === 'm:arret' || data === 'm:arret_ok') {
+    await repondreBouton(bouton.id)
+    await retour()
+    const prep = await preparerAction(u.id, 'arret')
+    if (data === 'm:arret' && prep.ok && prep.pausePossible && !(await pauseDejaProposeeA(u.id))) {
+      await envoyer(chat, TEXTE_PAUSE_AVANT_ARRET, clavierPauseAvantArret())
+      await noterPropositionPause(u.id)
+      return
+    }
+    await proposer(chat, u.id, prep)
     return
   }
 
