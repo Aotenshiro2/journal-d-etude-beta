@@ -397,3 +397,26 @@ model Pattern {
 
   @@index([userId])
 }
+
+// Activité des membres, jour par jour (02/10/2026) : les compteurs du panneau
+// « Ton activité » du Carnet, remontés par l extension quand le membre est
+// connecté et n a pas coupé la sync. Que des nombres, aucun contenu. Une ligne
+// par membre, app, appareil (installation de l extension) et jour : la ligne
+// est un miroir des compteurs de l appareil, le cockpit additionnera.
+// Table créée par sites/Aoknowledgecom/supabase/migrations/20261002170000_activite_jour.sql
+// (RLS active, aucun droit anon/authenticated : seul le serveur l écrit).
+model ActiviteJour {
+  userId     String
+  app        String   @default("carnet")
+  appareil   String
+  jour       DateTime @db.Date
+  ecrits     Int      @default(0)
+  mentor     Int      @default(0)
+  trades     Int      @default(0)
+  jugements  Int      @default(0)
+  consultees Int      @default(0)
+  majLe      DateTime @default(now()) @db.Timestamp(3)
+
+  @@id([userId, app, appareil, jour])
+  @@index([jour])
+}
