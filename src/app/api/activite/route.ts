@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db'
 import { getUserId } from '@/lib/api-auth'
+import { ecrireActivite } from '@/lib/activite-jour'
 
 /**
  * POST /api/activite — compteurs d'activité d'un membre, jour par jour
@@ -67,24 +67,10 @@ export async function POST(req: NextRequest) {
       lignes.push({ jour, valeurs: valeurs as number[] })
     }
 
-    // Une seule requête pour tout le lot (le premier envoi d'un membre porte
-    // jusqu'à un an de jours) : tableaux dépliés par unnest, upsert sur la clé.
-    const col = (i: number) => lignes.map(l => l.valeurs[i])
-    await prisma.$executeRaw(Prisma.sql`
-      INSERT INTO "ActiviteJour" ("userId", "app", "appareil", "jour", "ecrits", "mentor", "trades", "jugements", "consultees", "majLe")
-      SELECT ${userId}, ${app}, ${appareil}, x.jour::date, x.ecrits, x.mentor, x.trades, x.jugements, x.consultees, CURRENT_TIMESTAMP
-      FROM unnest(
-        ${lignes.map(l => l.jour)}::text[],
-        ${col(0)}::int[], ${col(1)}::int[], ${col(2)}::int[], ${col(3)}::int[], ${col(4)}::int[]
-      ) AS x(jour, ecrits, mentor, trades, jugements, consultees)
-      ON CONFLICT ("userId", "app", "appareil", "jour") DO UPDATE SET
-        "ecrits" = EXCLUDED."ecrits",
-        "mentor" = EXCLUDED."mentor",
-        "trades" = EXCLUDED."trades",
-        "jugements" = EXCLUDED."jugements",
-        "consultees" = EXCLUDED."consultees",
-        "majLe" = CURRENT_TIMESTAMP
-    `)
+    await ecrireActivite(prisma, userId, app, appareil, lignes.map(l => ({
+      jour: l.jour,
+      ecrits: l.valeurs[0], mentor: l.valeurs[1], trades: l.valeurs[2], jugements: l.valeurs[3], consultees: l.valeurs[4],
+    })))
 
     return NextResponse.json({ ok: true, enregistres: lignes.length })
   } catch (error) {
