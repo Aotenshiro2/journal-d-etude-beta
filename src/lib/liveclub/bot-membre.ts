@@ -26,6 +26,13 @@
 // - (06/10) un compte NON rattache sorti du groupe dans les 60 derniers jours
 //   recoit d'abord la raison de sa sortie, une fois par sortie, puis la
 //   verification par code (donnerRaisonDeLaSortie, ci-dessous).
+// - (06/10, Nelly) un compte sans rattachement lisible passe d'abord par son
+//   droit (profilSansRattachement, actions-membre.ts) : un acces offert sans
+//   abonnement (exemption, acces broker, acces manuel) a sa situation partout
+//   (/start, /menu, texte libre avec l'agent, boutons, lien perime), le lien
+//   de retour s'il est hors du groupe, jamais la demande d'email ni la raison
+//   d'une sortie ; un droit illisible = TEXTE_PANNE (sauf un email ou un code
+//   tape, qui gardent la verification) ; un droit 'non' = le parcours d'avant.
 
 import { journaliserGesteLiveClub } from '@/lib/stripe-actions'
 import { prisma } from '@/lib/db'
@@ -39,16 +46,18 @@ import {
   type ResultatTelegram,
 } from './telegram'
 import {
-  preparerAction, executerActionMembre, situationDuMembre, rattachementOuNull,
+  preparerAction, executerActionMembre, situationDuMembre, rattachementOuNull, profilSansRattachement,
   clavierMenu, clavierSansRattachement, clavierDureesPause, clavierConfirmation, clavierPauseAvantArret, clavierEquipe,
+  clavierAccesOffert,
   TEXTE_EQUIPE, TEXTE_EQUIPE_INDISPONIBLE, TEXTE_SECOURS_EQUIPE, TEXTE_NON_RATTACHE, TEXTE_PANNE,
-  TEXTE_ATTENTE_HUMAIN, ACTEUR_BOT_MEMBRE,
+  TEXTE_ATTENTE_HUMAIN, ACTEUR_BOT_MEMBRE, type ProfilSansRattachement,
 } from './actions-membre'
 import {
   premierPassage, reserverMessageIA, lireHistorique, ajouterEchange,
   poserActionEnAttente, consommerNonce,
 } from './conversations'
 import { repondreAuMembre } from './agent-membre'
+import { contexteAccesOffert } from './prompt-membre'
 import { enregistrerEchangeSupport, estEnAttenteHumain, texteAvecBoutons, tracerEtape, tracerMessageBot } from './support-pont'
 import {
   envoyerCodeSiConnu, rattacherParEmail, reserverCode, verifierCode, type CodeReserve, type IssueCode,
@@ -239,21 +248,37 @@ async function donnerRaisonDeLaSortie(chat: number, telegramId: number, o: Optio
   return true
 }
 
+/** Le profil d'un compte a acces offert sans rattachement (profilSansRattachement). */
+type ProfilAccesOffert = Extract<ProfilSansRattachement, { parcours: 'acces_offert' }>
+
 async function envoyerMenu(
   chat: number,
   telegramId: number,
   entete?: string,
   dejaLu?: Awaited<ReturnType<typeof rattachementOuNull>>,
+  profilLu?: ProfilSansRattachement,
 ): Promise<void> {
   const r = dejaLu !== undefined ? dejaLu : await rattachementOuNull(telegramId)
   if (r && r !== 'illisible') {
     await envoyer(chat, entete ?? 'Que veux-tu faire ?', clavierMenu(), r)
     return
   }
+  // (06/10) Sans rattachement lisible, le droit d'abord : un acces offert a
+  // sa situation (jamais la demande d'email), un droit illisible la panne.
+  const p = profilLu ?? await profilSansRattachement(telegramId, r)
+  const avecEntete = (texte: string) => (entete ? `${entete}\n\n${texte}` : texte)
+  if (p.parcours === 'acces_offert') {
+    await envoyer(chat, avecEntete(p.acces.texte), clavierAccesOffert())
+    return
+  }
+  if (p.parcours === 'panne') {
+    await envoyer(chat, avecEntete(TEXTE_PANNE))
+    return
+  }
   // Non rattache et sorti du groupe il y a peu : la raison d'abord, a la
   // place du texte habituel (elle demande deja l'email du paiement).
-  if (r === null && await donnerRaisonDeLaSortie(chat, telegramId, { entete, boutons: clavierSansRattachement() })) return
-  await envoyer(chat, entete ? `${entete}\n\n${TEXTE_NON_RATTACHE}` : TEXTE_NON_RATTACHE, clavierSansRattachement())
+  if (await donnerRaisonDeLaSortie(chat, telegramId, { entete, boutons: clavierSansRattachement() })) return
+  await envoyer(chat, avecEntete(TEXTE_NON_RATTACHE), clavierSansRattachement())
 }
 
 // ---------------------------------------------------------------------------
@@ -440,10 +465,13 @@ type OptionsRetour = {
   boutons?: Bouton[][]
   /** Tenter la reprise d'une demande laissee en attente (deja faite sur /start et /menu). */
   reprendre: boolean
+  /** Le droit deja lu par l'appelant (profilSansRattachement), pour ne pas le relire. */
+  droit?: Droit
 }
 
 /**
- * Un compte RATTACHE (l'appelant l'a verifie) qui n'est pas dans le groupe
+ * Un compte RATTACHE, ou (06/10) a acces offert sans rattachement
+ * (l'appelant l'a verifie), qui n'est pas dans le groupe
  * alors que son droit est 'oui' : ban de Metricgram, sortie d'une ancienne
  * pause, lien d'entree jamais ouvert... On lui envoie un lien de demande
  * d'adhesion avec l'explication, au lieu du seul menu. Presence ou droit
@@ -458,7 +486,7 @@ async function proposerRetourAuGroupe(chat: number, u: Utilisateur, updateId: nu
   if (o.declencheur === 'bouton' && await lienEnvoyeRecemment(u.id)) return false
   const presence = await estDansLeGroupe(u.id)
   if (presence === 'oui') return false
-  const droit = await droitLiveClub(u.id)
+  const droit = o.droit ?? await droitLiveClub(u.id)
 
   const contexte = { telegramId: u.id, membreId: droit.membreId ?? null, acteur: ACTEUR_BOT_MEMBRE, abonnementId: droit.abonnementId ?? null }
   const avant = o.entete ? `${o.entete}\n\n` : ''
@@ -559,6 +587,18 @@ async function traiterStartJeton(chat: number, u: Utilisateur, jeton: string, up
       if (await proposerRetourAuGroupe(chat, u, updateId, { declencheur: 'jeton_invalide', entete, boutons: clavierMenu(), reprendre: true })) return
       await envoyer(chat, `${entete}\n\nQue veux-tu faire ?`, clavierMenu())
       await journal({ geste: 'invitation', resultat: 'refuse', regle: 'jeton_invalide', details: { rattache: true } })
+      return
+    }
+    // (06/10) Acces offert sans abonnement : pas besoin de lien ni d'email.
+    // Hors du groupe, le lien de retour ; sinon sa situation.
+    const profil = await profilSansRattachement(u.id, r)
+    if (profil.parcours === 'acces_offert') {
+      const entete = `Ce lien ne sert plus (il a expiré, ou il a déjà servi), mais tu n'en as pas besoin.`
+      if (await proposerRetourAuGroupe(chat, u, updateId, {
+        declencheur: 'jeton_invalide', entete, boutons: clavierAccesOffert(), reprendre: true, droit: profil.droit,
+      })) return
+      await envoyer(chat, `${entete}\n\n${profil.acces.texte}`, clavierAccesOffert())
+      await journal({ geste: 'invitation', resultat: 'refuse', regle: 'jeton_invalide', details: { acces_offert: true } })
       return
     }
     await envoyer(chat, `Ce lien ne marche pas : il a expiré, ou il a déjà servi à un autre compte Telegram.\n\n`
@@ -706,8 +746,14 @@ async function apresCodeValide(chat: number, u: Utilisateur, email: string, upda
  * code, 6 chiffres = le code, le reste = l'explication (ou, si l'equipe a la
  * main, « message transmis »). Le code tape n'est jamais recopie dans le fil
  * Support.
+ *
+ * (06/10) L'appelant a deja ecarte l'acces offert. droitIllisible = son droit
+ * n'a pas pu etre lu (panne) : un email ou un code gardent la verification
+ * (elle ne depend pas du droit), le reste recoit TEXTE_PANNE, ni l'explication
+ * ni la raison d'une sortie, qu'on ne peut pas dire a quelqu'un qui a peut-etre
+ * un acces offert.
  */
-async function traiterNonRattache(chat: number, u: Utilisateur, texte: string, updateId: number): Promise<void> {
+async function traiterNonRattache(chat: number, u: Utilisateur, texte: string, updateId: number, droitIllisible = false): Promise<void> {
   const intention = intentionNonRattache(texte)
   // Un code tape n'est jamais lisible dans le fil Support, meme glisse dans
   // une phrase que lireCode n'a pas reconnue.
@@ -762,6 +808,10 @@ async function traiterNonRattache(chat: number, u: Utilisateur, texte: string, u
     await repondre(TEXTE_ATTENTE_HUMAIN, clavierSansRattachement())
     return
   }
+  if (droitIllisible) {
+    await repondre(TEXTE_PANNE)
+    return
+  }
   // Sorti du groupe il y a peu (06/10) : la raison d'abord, a la place du
   // texte habituel. Pas sur un email ni un code (plus haut) : il est deja
   // dans la verification, la raison attend son prochain message.
@@ -775,24 +825,51 @@ async function traiterNonRattache(chat: number, u: Utilisateur, texte: string, u
  * Chaque message du membre et chaque reponse du bot vont au fil Support du
  * cockpit. Si l'equipe a la main (fil « veut un humain »), le bot ne repond
  * pas a sa place : les boutons (gestes deterministes) restent la.
+ *
+ * (06/10) Ordre de lecture : le rattachement, puis le droit. Un compte sans
+ * rattachement lisible mais a acces offert (exemption, acces broker, acces
+ * manuel) parle a l'agent comme un rattache (ses outils rendent sa situation,
+ * rien a payer ni a mettre en pause), avec le menu de l'acces offert.
  */
 async function traiterTexteLibre(chat: number, u: Utilisateur, texte: string, updateId: number): Promise<void> {
   const r = await rattachementOuNull(u.id)
+  if (r && r !== 'illisible') {
+    await converserAvecAgent(chat, u, texte, r, clavierMenu())
+    return
+  }
+  const profil = await profilSansRattachement(u.id, r)
+  if (profil.parcours === 'acces_offert') {
+    await converserAvecAgent(chat, u, texte, null, clavierAccesOffert(), contexteAccesOffert(profil.acces.texte))
+    return
+  }
   if (r === 'illisible') {
     await versSupport(u.id, null, 'membre', masquerCodes(texte))
     await repondeur(chat, u.id, null)(TEXTE_PANNE)
     return
   }
-  if (!r) {
-    await traiterNonRattache(chat, u, texte, updateId)
-    return
-  }
+  await traiterNonRattache(chat, u, texte, updateId, profil.parcours === 'panne')
+}
 
-  await versSupport(u.id, r, 'membre', texte)
+/**
+ * L'agent, pour un compte rattache (r) ou a acces offert sans rattachement
+ * (r null : son message va au fil Support codes masques, comme tout compte
+ * non rattache). `clavier` : le menu joint aux replis (menu complet, ou celui
+ * de l'acces offert). `contexte` : la situation d'un acces offert, donnee a
+ * l'agent d'emblee (contexteAccesOffert, prompt-membre.ts).
+ */
+async function converserAvecAgent(
+  chat: number,
+  u: Utilisateur,
+  texte: string,
+  r: Rattachement | null,
+  clavier: Bouton[][],
+  contexte?: string,
+): Promise<void> {
+  await versSupport(u.id, r, 'membre', r ? texte : masquerCodes(texte))
   const repondre = repondeur(chat, u.id, r)
 
   if (await estEnAttenteHumain(u.id)) {
-    await repondre(TEXTE_ATTENTE_HUMAIN, clavierMenu())
+    await repondre(TEXTE_ATTENTE_HUMAIN, clavier)
     return
   }
 
@@ -803,22 +880,22 @@ async function traiterTexteLibre(chat: number, u: Utilisateur, texte: string, up
     historique = sousLePlafond ? await lireHistorique(u.id) : []
   } catch (err) {
     if (!(err instanceof ErreurTableLiveClub)) console.warn(`[liveclub/bot] conversation illisible : ${messageErreur(err)}`)
-    await repondre(`Je ne peux pas répondre aux messages écrits pour le moment. Les boutons marchent :`, clavierMenu())
+    await repondre(`Je ne peux pas répondre aux messages écrits pour le moment. Les boutons marchent :`, clavier)
     return
   }
   if (!sousLePlafond) {
-    await repondre(`Tu m'as beaucoup écrit aujourd'hui, je m'arrête là pour les messages écrits. Les boutons marchent toujours :`, clavierMenu())
+    await repondre(`Tu m'as beaucoup écrit aujourd'hui, je m'arrête là pour les messages écrits. Les boutons marchent toujours :`, clavier)
     return
   }
 
   await appelTelegram('sendChatAction', { chat_id: chat, action: 'typing' })
   let reponse: Awaited<ReturnType<typeof repondreAuMembre>>
   try {
-    reponse = await repondreAuMembre(u.id, historique, texte)
+    reponse = await repondreAuMembre(u.id, historique, texte, { contexte })
   } catch (err) {
     console.warn(`[liveclub/bot] agent indisponible : ${messageErreur(err)}`)
     // L'agent ne sait pas repondre : le fil passe en « veut un humain ».
-    await repondre(`Je n'arrive pas à répondre là, tout de suite, donc je préviens l'équipe : quelqu'un va te répondre ici. En attendant, les boutons marchent :`, clavierMenu(), true)
+    await repondre(`Je n'arrive pas à répondre là, tout de suite, donc je préviens l'équipe : quelqu'un va te répondre ici. En attendant, les boutons marchent :`, clavier, true)
     return
   }
 
@@ -836,7 +913,7 @@ async function traiterTexteLibre(chat: number, u: Utilisateur, texte: string, up
     // L'agent n'a pas abouti : le filet est le menu a boutons, joint au
     // message. Arret demande pour la premiere fois : la pause d'abord, avec
     // les memes boutons que le parcours « Arreter » du menu.
-    const boutons = reponse.repli ? clavierMenu() : reponse.pauseAvantArret ? clavierPauseAvantArret() : undefined
+    const boutons = reponse.repli ? clavier : reponse.pauseAvantArret ? clavierPauseAvantArret() : undefined
     await repondre(reponse.texte, boutons, reponse.veutHumain === true)
   }
   try {
@@ -878,13 +955,23 @@ export async function traiterMessagePrive(message: MessageTg, updateId: number):
     }
     const start = commande[1].toLowerCase() === 'start'
     const entete = start ? texteAccueil(u.first_name) : undefined
+    const declencheur = start ? 'start' : 'menu'
     const r = await rattachementOuNull(u.id)
     // Payeur rattache avec le droit, mais hors du groupe : le lien de retour
     // avec le menu, au lieu du seul menu.
-    if (r && r !== 'illisible' && await proposerRetourAuGroupe(chat, u, updateId, {
-      declencheur: start ? 'start' : 'menu', entete, boutons: clavierMenu(), reprendre: false,
+    if (r && r !== 'illisible') {
+      if (await proposerRetourAuGroupe(chat, u, updateId, { declencheur, entete, boutons: clavierMenu(), reprendre: false })) return
+      await envoyerMenu(chat, u.id, entete, r)
+      return
+    }
+    // (06/10) Sans rattachement lisible, le droit d'abord : un acces offert
+    // hors du groupe recoit le lien de retour, comme un payeur ; sinon
+    // envoyerMenu donne sa situation, la panne, ou le parcours non rattache.
+    const profil = await profilSansRattachement(u.id, r)
+    if (profil.parcours === 'acces_offert' && await proposerRetourAuGroupe(chat, u, updateId, {
+      declencheur, entete, boutons: clavierAccesOffert(), reprendre: false, droit: profil.droit,
     })) return
-    await envoyerMenu(chat, u.id, entete, r)
+    await envoyerMenu(chat, u.id, entete, r, profil)
     return
   }
 
@@ -941,6 +1028,22 @@ async function proposer(chat: number, telegramId: number, prep: Awaited<ReturnTy
   await envoyer(chat, prep.resume, clavierConfirmation(nonce))
 }
 
+/**
+ * Un bouton d'un compte a acces offert SANS rattachement (06/10), deja
+ * repondu (repondreBouton) : pause, arret ou annulation (vieux messages) =
+ * rien a gerer ; tout le reste (« Mon abonnement », bouton inconnu) = le lien
+ * de retour s'il est hors du groupe (un par 10 minutes), puis sa situation.
+ * Jamais la demande d'email ni la raison d'une sortie.
+ */
+async function boutonAccesOffert(chat: number, u: Utilisateur, updateId: number, data: string, p: ProfilAccesOffert): Promise<void> {
+  if (/^(?:m:pause|m:arret|m:arret_ok|m:annuler|p:[1-6])$/.test(data)) {
+    await envoyer(chat, p.acces.rienAGerer, clavierAccesOffert())
+    return
+  }
+  await proposerRetourAuGroupe(chat, u, updateId, { declencheur: 'bouton', reprendre: true, droit: p.droit })
+  await envoyer(chat, p.acces.texte, clavierAccesOffert())
+}
+
 /** Un clic sur un bouton. Toujours answerCallbackQuery, quoi qu'il arrive. */
 export async function traiterBouton(bouton: BoutonTg, updateId: number): Promise<void> {
   const u = bouton.from
@@ -961,13 +1064,21 @@ export async function traiterBouton(bouton: BoutonTg, updateId: number): Promise
   // Au fil Support : le libelle du bouton, jamais le nonce d'une confirmation.
   await versSupport(u.id, identite, 'membre', `[bouton] ${libelleBouton(data)}`)
 
+  // (06/10) Sans rattachement lisible, le droit d'abord (acces offert, panne,
+  // ou non rattache), lu une seule fois et seulement si un bouton le demande,
+  // apres repondreBouton.
+  let profilLu: Promise<ProfilSansRattachement> | null = null
+  const profil = (): Promise<ProfilSansRattachement> =>
+    (profilLu ??= profilSansRattachement(u.id, r === 'illisible' ? 'illisible' : null))
+
   // « Contacter l'equipe » : le fil passe en « veut un humain » (decision 5),
   // la reponse de l'equipe arrivera ici par le bot.
   if (data === 'm:equipe') {
     await repondreBouton(bouton.id)
-    // Non rattache, sorti du groupe il y a peu (06/10) : la raison d'abord
-    // (sans boutons), puis l'equipe est prevenue comme d'habitude.
-    if (r === null) await donnerRaisonDeLaSortie(chat, u.id)
+    // Non rattache sans droit, sorti du groupe il y a peu (06/10) : la raison
+    // d'abord (sans boutons), puis l'equipe est prevenue comme d'habitude.
+    // Jamais a un acces offert, ni sur un droit illisible.
+    if (!identite && (await profil()).parcours === 'non_rattache') await donnerRaisonDeLaSortie(chat, u.id)
     await repondeur(chat, u.id, identite)(TEXTE_EQUIPE, undefined, true, TEXTE_EQUIPE_INDISPONIBLE)
     return
   }
@@ -979,18 +1090,33 @@ export async function traiterBouton(bouton: BoutonTg, updateId: number): Promise
       await envoyer(chat, `Ton compte Telegram est déjà relié à ton abonnement, pas besoin de code. Que veux-tu faire ?`, clavierMenu())
       return
     }
+    const p = await profil()
+    // (06/10) Acces offert : rien a verifier, sa situation (vieux bouton).
+    if (p.parcours === 'acces_offert') {
+      await envoyer(chat, p.acces.texte, clavierAccesOffert())
+      return
+    }
     // Sorti du groupe il y a peu (06/10) : la raison, qui demande deja l'email.
-    if (r === null && await donnerRaisonDeLaSortie(chat, u.id)) return
+    if (p.parcours === 'non_rattache' && await donnerRaisonDeLaSortie(chat, u.id)) return
     await envoyer(chat, TEXTE_DEMANDE_EMAIL)
     return
   }
 
-  // Tout le reste demande un compte rattache.
+  // Tout le reste demande un compte rattache, ou (06/10) un acces offert.
   if (r === 'illisible' || !r) {
     await repondreBouton(bouton.id)
+    const p = await profil()
+    if (p.parcours === 'acces_offert') {
+      await boutonAccesOffert(chat, u, updateId, data, p)
+      return
+    }
+    if (p.parcours === 'panne') {
+      await envoyer(chat, TEXTE_PANNE)
+      return
+    }
     // Non rattache, sorti du groupe il y a peu (06/10) : la raison d'abord.
-    if (!r && await donnerRaisonDeLaSortie(chat, u.id, { boutons: clavierSansRattachement() })) return
-    await envoyer(chat, r ? TEXTE_PANNE : TEXTE_NON_RATTACHE, r ? undefined : clavierSansRattachement())
+    if (await donnerRaisonDeLaSortie(chat, u.id, { boutons: clavierSansRattachement() })) return
+    await envoyer(chat, TEXTE_NON_RATTACHE, clavierSansRattachement())
     return
   }
 

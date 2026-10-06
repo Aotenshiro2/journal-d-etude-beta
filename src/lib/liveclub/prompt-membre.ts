@@ -108,17 +108,45 @@ export const RESULTAT_DEMANDER_UN_HUMAIN = { ok: true, consigne: "L'équipe est 
 export const CONSIGNE_MONTANTS = "Ce sont les montants du membre qui t'écrit, et de lui seul. Réponds seulement à ce qu'il a demandé, de façon neutre et factuelle, sans relance ni insistance. Un lien de facture se recopie en entier. Le champ remise ne se dit que s'il demande pourquoi son prix diffère du prix affiché, et jamais d'où elle vient ni son code."
 
 /**
+ * Jointe aux resultats de mon_abonnement et de mes_montants quand l'acces du
+ * membre est offert sans abonnement (exemption, acces broker, acces manuel :
+ * Brice, 06/10), la meme en prod et dans l'eval. SYSTEM_PROMPT_MEMBRE ne
+ * change pas ; pour un compte non rattache, elle part aussi d'emblee dans le
+ * contexte (contexteAccesOffert). Le motif de l'acces n'est jamais donne a
+ * l'agent, il ne doit pas l'inventer.
+ */
+export const CONSIGNE_ACCES_OFFERT = "Son accès au Live Club ne passe pas par un abonnement à lui : il n'a rien à payer, et rien à mettre en pause ni à arrêter. Ne lui demande jamais l'email de son paiement ni un code, et ne lui propose pas de s'abonner, sauf si sa situation le dit elle-même. Tu ne sais pas pourquoi cet accès lui est offert : ne l'invente pas. Pour une question que tu ne sais pas régler, propose de prévenir l'équipe (demander_un_humain)."
+
+/**
  * Jointe au resultat d'une proposition que seule l'equipe peut regler
  * (Preparation.equipe) : l'agent l'a deja transmise (veutHumain).
  */
 export const CONSIGNE_EQUIPE_TRANSMISE = "L'équipe est prévenue et répondra ici, dans cette conversation Telegram. Explique en une phrase pourquoi tu ne peux pas le faire toi-même, puis dis-le, sans donner d'adresse email."
 
-/** La requete d'un tour de l'agent : la meme en prod et dans l'eval. */
-export function requeteAgentMembre(messages: Anthropic.MessageParam[]): Anthropic.MessageCreateParamsNonStreaming {
+/**
+ * Le contexte d'un compte a acces offert SANS rattachement (Brice, 06/10) :
+ * sa situation (texte du serveur, accesSansAbonnement dans pur.ts, sans motif
+ * ni note) et CONSIGNE_ACCES_OFFERT. Sans lui, a « je dois payer quelque
+ * chose ? », l'agent repondait le prix public sans appeler d'outil (eval X02).
+ */
+export function contexteAccesOffert(situation: string): string {
+  return `Information du serveur sur le membre qui t'écrit (ce n'est pas un message du membre) : ${situation}\n\n${CONSIGNE_ACCES_OFFERT}`
+}
+
+/**
+ * La requete d'un tour de l'agent : la meme en prod et dans l'eval.
+ * contexte (06/10) : un second bloc system, APRES le prompt mis en cache (le
+ * cache du prompt et des outils reste valable), pour un acces offert sans
+ * rattachement seulement (contexteAccesOffert). Absent pour tous les autres.
+ */
+export function requeteAgentMembre(messages: Anthropic.MessageParam[], contexte?: string): Anthropic.MessageCreateParamsNonStreaming {
   return {
     model: MODELE_LIVECLUB,
     max_tokens: 1024,
-    system: [{ type: 'text', text: SYSTEM_PROMPT_MEMBRE, cache_control: { type: 'ephemeral' } }],
+    system: [
+      { type: 'text', text: SYSTEM_PROMPT_MEMBRE, cache_control: { type: 'ephemeral' } },
+      ...(contexte ? [{ type: 'text' as const, text: contexte }] : []),
+    ],
     tools: OUTILS_MEMBRE,
     messages,
   }

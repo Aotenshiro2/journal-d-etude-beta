@@ -1,5 +1,8 @@
 // L'AGENT du bot Live Club (29/09) : Claude Haiku 4.5 repond en prive aux
-// membres RATTACHES a un abonnement. Il lit leur abonnement et PROPOSE une
+// membres RATTACHES a un abonnement, et (06/10) aux comptes non rattaches dont
+// l'acces est offert sans abonnement (exemption, acces broker, acces manuel :
+// leurs outils rendent cette situation, avec CONSIGNE_ACCES_OFFERT, et leurs
+// propositions sont refusees, rien a gerer). Il lit leur abonnement et PROPOSE une
 // pause, un arret ou l'annulation d'un arret ; il n'execute rien. La boucle
 // s'arrete a la premiere proposition valide, et c'est le bouton de
 // confirmation du membre (nonce consomme en base) qui execute, sans modele.
@@ -37,7 +40,7 @@ import { montantsDuMembre, preparerAction, situationDuMembre } from './actions-m
 import type { ActionMembre, MessageConserve } from './conversations'
 import { messageErreur, pauseDejaProposee } from './pur'
 import {
-  CONSIGNE_EQUIPE_TRANSMISE, CONSIGNE_MONTANTS, MODELE_LIVECLUB, RESULTAT_DEMANDER_UN_HUMAIN, requeteAgentMembre,
+  CONSIGNE_ACCES_OFFERT, CONSIGNE_EQUIPE_TRANSMISE, CONSIGNE_MONTANTS, MODELE_LIVECLUB, RESULTAT_DEMANDER_UN_HUMAIN, requeteAgentMembre,
 } from './prompt-membre'
 
 export { MODELE_LIVECLUB }
@@ -144,13 +147,15 @@ async function tracerUsage(telegramId: number, usage: Anthropic.Usage): Promise<
 
 /**
  * La boucle question -> outils -> reponse, pour le membre `telegramId` (deja
- * verifie RATTACHE par la route). Jette sur une erreur d'API ou une cle
+ * verifie RATTACHE, ou a acces offert sans rattachement, par la route). Jette sur une erreur d'API ou une cle
  * absente : la route bascule alors sur le menu a boutons.
  */
 export async function repondreAuMembre(
   telegramId: number,
   historique: MessageConserve[],
   question: string,
+  /** (06/10) Acces offert sans rattachement : contexteAccesOffert (prompt-membre.ts). */
+  o: { contexte?: string } = {},
 ): Promise<ReponseAgentMembre> {
   const client = clientAgent()
   const messages = versMessages(historique, question)
@@ -167,7 +172,7 @@ export async function repondreAuMembre(
   }
 
   for (let tour = 0; tour < MAX_TOURS; tour++) {
-    const response = await client.messages.create(requeteAgentMembre(messages))
+    const response = await client.messages.create(requeteAgentMembre(messages, o.contexte))
     await tracerUsage(telegramId, response.usage)
 
     if (response.stop_reason !== 'tool_use') {
@@ -194,7 +199,7 @@ export async function repondreAuMembre(
       if (bloc.name === 'mon_abonnement') {
         const s = await situationDuMembre(telegramId)
         const contenu = s.etat === 'ok'
-          ? { situation: s.texte, faits: s.faits }
+          ? { situation: s.texte, faits: s.faits, ...(s.accesOffert ? { consigne: CONSIGNE_ACCES_OFFERT } : {}) }
           : s.etat === 'non_rattache'
             ? { erreur: 'Compte Telegram lie a aucun abonnement.' }
             : { erreur: ILLISIBLE }
@@ -207,9 +212,11 @@ export async function repondreAuMembre(
         const m = await montantsDuMembre(telegramId)
         const contenu = m.etat === 'ok'
           ? { montants: m.faits, consigne: CONSIGNE_MONTANTS }
-          : m.etat === 'non_rattache'
-            ? { erreur: 'Compte Telegram lie a aucun abonnement.' }
-            : { erreur: ILLISIBLE }
+          : m.etat === 'acces_offert'
+            ? { rien_a_payer: true, situation: m.texte, consigne: CONSIGNE_ACCES_OFFERT }
+            : m.etat === 'non_rattache'
+              ? { erreur: 'Compte Telegram lie a aucun abonnement.' }
+              : { erreur: ILLISIBLE }
         resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify(contenu) })
         continue
       }

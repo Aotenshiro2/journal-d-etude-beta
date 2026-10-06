@@ -275,3 +275,32 @@ compte relie a aucun abonnement n'etait jamais sorti.
 - A suivre : la consigne de l'agent du cockpit (agent-cockpit.ts, lignes sur
   cockpit_liveclub_exemptions et « qui sort qui ») dit encore « on ne sort
   JAMAIS » un exempte : non touchee (chantier sans prompt), a completer.
+
+## Bot Live Club : acces offert d'un compte non rattache (06/10/2026, deploye)
+
+Bug signale par Brice (Nelly : exemption permanente, aucun rattachement) : le
+bot la traitait en « non rattache » (demande de l'email du paiement). Cause :
+situationDuMembre et bot-membre.ts tranchaient sur le seul rattachement, avant
+droitLiveClub. droitLiveClub lisait deja l'exemption et l'acces broker par le
+telegram_id (rien a corriger) ; l'acces manuel ne se lit que par le membre du
+rattachement (non change).
+- Ordre : rattachement, puis droit (profilSansRattachement, actions-membre.ts ;
+  regle pure parcoursSansRattachement et textes accesSansAbonnement, pur.ts).
+  Acces offert (exemption, broker, acces manuel) : sa situation partout
+  (/start, /menu, « Mon abonnement », boutons, lien perime, texte libre avec
+  l'agent), lien de retour s'il est hors du groupe, menu reduit
+  (clavierAccesOffert), pause ou arret = « rien a mettre en pause ni a
+  arreter ». Jamais l'email ni la raison de sortie, ni le motif ni la note.
+  Droit 'inconnu' ou rattachement illisible sans exemption lue : TEXTE_PANNE
+  (un email ou un code tape gardent la verification). Droit 'non' : parcours
+  d'avant.
+- Agent : tourne pour ces comptes ; situation donnee d'emblee en second bloc
+  system (contexteAccesOffert, apres le prompt en cache), consigne
+  CONSIGNE_ACCES_OFFERT jointe a mon_abonnement et mes_montants. Eval ciblee
+  X01, X02 (variante 'offert') : 2/2 corrects (1er essai X02 incorrect sans le
+  contexte : prix public donne sans outil).
+- Chemins PANNE d'un compte non rattache avant le correctif : texte libre et
+  boutons (sauf « Contacter l'equipe » et « verifier mon email ») quand la
+  lecture de cockpit_liveclub_rattachements jetait (log « rattachement
+  illisible pour u<id> »). /start et /menu donnaient alors TEXTE_NON_RATTACHE.
+- Tests : verifier-liveclub.mjs 31 blocs. tsc et eslint propres.

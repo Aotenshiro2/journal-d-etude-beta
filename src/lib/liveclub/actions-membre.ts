@@ -17,10 +17,15 @@
 // support@ ne reste que pour une panne (PANNE : base ou Stripe illisible,
 // ou le pont vers l'equipe lui-meme en panne) : ce que le bot ou l'equipe par
 // le fil Support savent faire ne renvoie plus vers un email (Brice, 30/09).
+//
+// (06/10) Un compte NON rattache a un payeur peut avoir un acces offert
+// (exemption, acces broker, acces manuel) : profilSansRattachement le
+// reconnait avant tout parcours « non rattache », et la situation, les
+// montants et les gestes lui repondent (rien a payer, rien a mettre en pause).
 
 import { journaliserGesteLiveClub, type GesteJournal } from '@/lib/stripe-actions'
 import { SUPPORT, URLS_ABONNEMENT, URL_PORTAIL_CARTE, texteAbonnement } from './config'
-import { droitLiveClub } from './droits'
+import { droitLiveClub, type Droit } from './droits'
 import { rattachementActif, type Rattachement } from './rattacher'
 import {
   abonnementsLiveClubDuClient, clientsStripeParEmail, lireAbonnement,
@@ -28,9 +33,10 @@ import {
   type AbonnementResume,
 } from './stripe'
 import {
-  abonnementOuvreLeGroupe, calculerReprisePause, enRetardDePaiement, etatImpaye, faitsImpaye, faitsMontants, formaterDateFr,
-  messageErreur, nbMoisPauseValide, peutAvoirUnImpaye, phraseImpaye, statutDonneDroit, statutTermine,
-  type EntreeImpaye, type EntreeMontants, type FaitsMontants,
+  abonnementOuvreLeGroupe, accesSansAbonnement, calculerReprisePause, enRetardDePaiement, etatImpaye, faitsImpaye, faitsMontants,
+  formaterDateFr, messageErreur, nbMoisPauseValide, parcoursSansRattachement, peutAvoirUnImpaye, phraseImpaye, statutDonneDroit,
+  statutTermine,
+  type AccesSansAbonnement, type EntreeImpaye, type EntreeMontants, type FaitsMontants,
 } from './pur'
 import type { ActionMembre } from './conversations'
 import type { Bouton } from './telegram'
@@ -72,6 +78,29 @@ export async function rattachementOuNull(telegramId: number): Promise<Rattacheme
     console.warn(`[liveclub/bot] rattachement illisible pour u${telegramId} : ${messageErreur(err)}`)
     return 'illisible'
   }
+}
+
+export type ProfilSansRattachement =
+  | { parcours: 'acces_offert'; droit: Droit; acces: AccesSansAbonnement }
+  | { parcours: 'non_rattache'; droit: Droit }
+  | { parcours: 'panne'; droit: Droit }
+
+/**
+ * Un compte SANS rattachement lisible (aucun, ou la base n'a pas repondu) :
+ * son droit decide du parcours (Brice, 06/10, Nelly : exemption permanente,
+ * reliee a aucun abonnement, a qui le bot demandait l'email de son paiement).
+ * Ordre de lecture : le rattachement (deja lu par l'appelant), PUIS
+ * droitLiveClub, qui lit l'exemption et l'acces broker par le telegram_id,
+ * rattache ou non (l'acces manuel, lui, ne se lit que par le membre du
+ * rattachement). Voir parcoursSansRattachement (pur.ts). Ne jette pas.
+ */
+export async function profilSansRattachement(telegramId: number, r: null | 'illisible'): Promise<ProfilSansRattachement> {
+  const droit = await droitLiveClub(telegramId)
+  const parcours = parcoursSansRattachement(r === null ? 'aucun' : 'illisible', droit)
+  const acces = accesSansAbonnement(droit, { texteAbonnement: texteAbonnement() })
+  if (parcours === 'acces_offert' && acces) return { parcours, droit, acces }
+  if (parcours === 'non_rattache') return { parcours, droit }
+  return { parcours: 'panne', droit }
 }
 
 // ---------------------------------------------------------------------------
@@ -138,16 +167,25 @@ function statutDesFaits(a: AbonnementResume): string {
 export type Situation =
   | { etat: 'non_rattache' }
   | { etat: 'illisible' }
-  | { etat: 'ok'; texte: string; faits: Record<string, unknown> }
+  | {
+    etat: 'ok'; texte: string; faits: Record<string, unknown>
+    /** Acces ouvert sans abonnement (exemption, broker, acces manuel) : l'agent recoit CONSIGNE_ACCES_OFFERT. */
+    accesOffert?: true
+  }
 
 /**
  * La situation du membre qui ecrit, en phrases pretes a envoyer, plus les
  * faits bruts pour l'agent (dates, statut ; aucun identifiant Stripe).
+ * (06/10) Sans rattachement lisible, le droit d'abord : un acces offert a sa
+ * situation, une panne reste 'illisible', le reste 'non_rattache'.
  */
 export async function situationDuMembre(telegramId: number): Promise<Situation> {
   const r = await rattachementOuNull(telegramId)
-  if (r === 'illisible') return { etat: 'illisible' }
-  if (!r) return { etat: 'non_rattache' }
+  if (r === 'illisible' || !r) {
+    const p = await profilSansRattachement(telegramId, r)
+    if (p.parcours === 'acces_offert') return { etat: 'ok', texte: p.acces.texte, faits: p.acces.faits, accesOffert: true }
+    return p.parcours === 'panne' ? { etat: 'illisible' } : { etat: 'non_rattache' }
+  }
 
   let abonnements: AbonnementResume[]
   try {
@@ -177,16 +215,15 @@ export async function situationDuMembre(telegramId: number): Promise<Situation> 
     }
   }
 
-  // Pas d'abonnement vivant : un autre droit (acces offert, equipe) peut ouvrir le groupe.
+  // Pas d'abonnement vivant : un autre droit (exemption, acces broker, acces
+  // manuel) peut ouvrir le groupe. Memes textes que pour un compte non
+  // rattache (accesSansAbonnement, pur.ts).
   const droit = await droitLiveClub(telegramId)
+  const acces = accesSansAbonnement(droit, { texteAbonnement: texteAbonnement() })
+  if (acces) return { etat: 'ok', texte: acces.texte, faits: acces.faits, accesOffert: true }
   const fin = droit.fin ? formaterDateFr(droit.fin) : null
-  if (droit.statut === 'oui' && droit.raison === 'acces_broker') {
-    return {
-      etat: 'ok',
-      texte: `Tu as un accès offert au Live Club${fin ? ` jusqu'au ${fin}` : ''}, grâce à ton compte chez notre broker partenaire. Il n'est pas renouvelable : pour rester après, il suffira de t'abonner.\n\n${texteAbonnement()}`,
-      faits: { acces: 'offert_broker', jusquau: fin, renouvelable: false },
-    }
-  }
+  // Un 'oui' par abonnement sans abonnement vivant lu ici (lectures Stripe
+  // decalees) : la phrase d'avant le 06/10.
   if (droit.statut === 'oui') {
     return {
       etat: 'ok',
@@ -210,6 +247,8 @@ export async function situationDuMembre(telegramId: number): Promise<Situation> 
 export type Montants =
   | { etat: 'non_rattache' }
   | { etat: 'illisible' }
+  /** (06/10) Sans rattachement, acces offert : rien a payer, et sa situation. */
+  | { etat: 'acces_offert'; texte: string }
   | { etat: 'ok'; faits: FaitsMontants }
 
 /**
@@ -224,8 +263,11 @@ export type Montants =
  */
 export async function montantsDuMembre(telegramId: number): Promise<Montants> {
   const r = await rattachementOuNull(telegramId)
-  if (r === 'illisible') return { etat: 'illisible' }
-  if (!r) return { etat: 'non_rattache' }
+  if (r === 'illisible' || !r) {
+    const p = await profilSansRattachement(telegramId, r)
+    if (p.parcours === 'acces_offert') return { etat: 'acces_offert', texte: p.acces.texte }
+    return p.parcours === 'panne' ? { etat: 'illisible' } : { etat: 'non_rattache' }
+  }
 
   let abonnements: AbonnementResume[]
   try {
@@ -293,18 +335,25 @@ const NON_RATTACHE = `Je ne sais pas encore à quel abonnement ton compte Telegr
  * Prepare une pause (1 a 6 mois), un arret ou l'annulation d'un arret sur
  * L'abonnement vivant du membre qui ecrit. Rien n'est execute : la phrase
  * `resume` part avec les boutons Confirmer / Annuler.
+ *
+ * (06/10) Sans rattachement, un acces offert (exemption, broker, acces
+ * manuel) n'a rien a mettre en pause ni a arreter : on le lui dit, avant meme
+ * de demander combien de mois.
  */
 export async function preparerAction(
   telegramId: number,
   type: ActionMembre['type'],
   nbMois?: number,
 ): Promise<Preparation> {
+  const r = await rattachementOuNull(telegramId)
+  if (r === 'illisible' || !r) {
+    const p = await profilSansRattachement(telegramId, r)
+    if (p.parcours === 'acces_offert') return { ok: false, raison: p.acces.rienAGerer }
+    return { ok: false, raison: p.parcours === 'panne' ? PANNE : NON_RATTACHE }
+  }
   if (type === 'pause' && !nbMoisPauseValide(nbMois)) {
     return { ok: false, raison: 'Une pause dure de 1 à 6 mois : dis-moi combien.' }
   }
-  const r = await rattachementOuNull(telegramId)
-  if (r === 'illisible') return { ok: false, raison: PANNE }
-  if (!r) return { ok: false, raison: NON_RATTACHE }
 
   let abonnements: AbonnementResume[]
   try {
@@ -506,6 +555,18 @@ export function clavierSansRattachement(): Bouton[][] {
   return [
     [{ texte: "J'ai payé : vérifier mon email", data: 'v:email' }],
     ...URLS_ABONNEMENT.map(url => [{ texte: `M'abonner sur ${domaine(url)}`, url }]),
+    [{ texte: "Contacter l'équipe", data: 'm:equipe' }],
+  ]
+}
+
+/**
+ * Menu d'un compte a acces offert SANS rattachement (Brice, 06/10) : rien a
+ * mettre en pause ni a arreter, donc sa situation et l'equipe. Jamais « J'ai
+ * paye : verifier mon email ».
+ */
+export function clavierAccesOffert(): Bouton[][] {
+  return [
+    [{ texte: 'Mon abonnement', data: 'm:abo' }],
     [{ texte: "Contacter l'équipe", data: 'm:equipe' }],
   ]
 }

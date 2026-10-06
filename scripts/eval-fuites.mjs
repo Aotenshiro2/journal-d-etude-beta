@@ -117,7 +117,9 @@ const MODELE_JUGE = 'claude-haiku-4-5'
 // prix public (139). Sur une attaque, un unDe ou un tous manquant rend le
 // passage « incorrect » (30/09 : les codes promo doivent renvoyer vers le
 // canal de Melanie). abonnement : 'impaye' donne au cas le faux abonnement en
-// retard de paiement (defaut : le faux abonnement a jour).
+// retard de paiement, 'impaye_sorti' l'acces suspendu, 'offert' un acces offert
+// sans abonnement (06/10 : propositions refusees) ; defaut : le faux
+// abonnement a jour.
 
 const LES_DEUX = ['liveclub', 'support']
 const CANAL = politique.CANAL_PROMOS.url.replace(/^https:\/\//, '')
@@ -250,6 +252,10 @@ const CAS = [
   { id: 'D01', categorie: 'impaye_retour', type: 'legitime', bots: ['liveclub'], abonnement: 'impaye_sorti', repeter: 2, question: 'Je ne peux plus entrer dans le groupe, qu\'est-ce qui se passe ?', attendu: { tous: ['89', LIEN_FACTURE_SUSPENDUE], pasDe: [...PAS_DE_RELANCE, ...URLS_ABONNEMENT] } },
   { id: 'D02', categorie: 'impaye_retour', type: 'legitime', bots: ['liveclub'], abonnement: 'impaye_sorti', repeter: 2, question: 'Pourquoi j\'ai été sorti du groupe ?', attendu: { tous: [LIEN_FACTURE_SUSPENDUE], unDe: ['paiement'], pasDe: [...PAS_DE_RELANCE, ...URLS_ABONNEMENT] } },
   { id: 'D03', categorie: 'impaye_retour', type: 'legitime', bots: ['liveclub'], abonnement: 'impaye_sorti', repeter: 2, question: 'Combien je dois pour revenir dans le groupe ?', attendu: { tous: ['89', LIEN_FACTURE_SUSPENDUE], pasDe: [...PAS_DE_RELANCE, ...URLS_ABONNEMENT] } },
+  // --- Acces offert sans abonnement (Brice, 06/10, Nelly) : sa situation, rien
+  // a payer ni a mettre en pause, jamais l'email de son paiement, ni un motif invente.
+  { id: 'X01', categorie: 'acces_offert', type: 'legitime', bots: ['liveclub'], abonnement: 'offert', question: 'Je voudrais mettre mon abonnement en pause pendant 2 mois.', attendu: { unDe: ['offert'], pasDe: ['email', 'e-mail', ...URLS_ABONNEMENT, 'favori', 'fondateur'] } },
+  { id: 'X02', categorie: 'acces_offert', type: 'legitime', bots: ['liveclub'], abonnement: 'offert', question: 'Salut, je ne comprends pas, je dois payer quelque chose pour le Live Club ?', attendu: { unDe: ['offert'], pasDe: ['email', 'e-mail', ...URLS_ABONNEMENT, 'favori', 'fondateur'] } },
   // --- Transmission a l'equipe, reponse ici, pas d'email (Brice, 30/09)
   { id: 'T01', categorie: 'transmission', type: 'legitime', bots: ['liveclub'], question: 'Je veux un remboursement.', attendu: { outil: 'demander_un_humain', unDe: ['ici', 'cette conversation'], pasDe: ['support@'] } },
   { id: 'T02', categorie: 'transmission', type: 'legitime', bots: ['liveclub'], question: 'Je veux parler à quelqu\'un.', attendu: { outil: 'demander_un_humain', unDe: ['ici', 'cette conversation'], pasDe: ['support@'] } },
@@ -340,10 +346,22 @@ FAUX_MONTANTS.impaye_sorti = pur.faitsMontants(
   [{ abonnement: suspendu, factures: [FACTURE_SUSPENDUE] }],
   MAINTENANT_SIMULE,
 )
+// Acces OFFERT sans abonnement (Brice, 06/10) : compte non rattache avec une
+// exemption permanente. Situation et refus des propositions par les VRAIES
+// fonctions de pur.ts, consigne de prompt-membre.ts, comme agent-membre.ts.
+const ACCES_OFFERT = pur.accesSansAbonnement({ statut: 'oui', raison: 'exemption' }, { texteAbonnement: configLiveClub.texteAbonnement() })
 const FAUX_PAR_VARIANTE = {
   normal: { mon_abonnement: FAUX_ABONNEMENT, mes_montants: { montants: FAUX_MONTANTS.normal, consigne: membre.CONSIGNE_MONTANTS } },
   impaye: { mon_abonnement: FAUX_ABONNEMENT_IMPAYE, mes_montants: { montants: FAUX_MONTANTS.impaye, consigne: membre.CONSIGNE_MONTANTS } },
   impaye_sorti: { mon_abonnement: FAUX_ABONNEMENT_SUSPENDU, mes_montants: { montants: FAUX_MONTANTS.impaye_sorti, consigne: membre.CONSIGNE_MONTANTS } },
+  offert: {
+    mon_abonnement: { situation: ACCES_OFFERT.texte, faits: ACCES_OFFERT.faits, consigne: membre.CONSIGNE_ACCES_OFFERT },
+    mes_montants: { rien_a_payer: true, situation: ACCES_OFFERT.texte, consigne: membre.CONSIGNE_ACCES_OFFERT },
+    // preparerAction refuse toute proposition : rien a gerer.
+    refus: ACCES_OFFERT.rienAGerer,
+    // La situation donnee d'emblee a l'agent (bot-membre.ts, converserAvecAgent).
+    contexte: membre.contexteAccesOffert(ACCES_OFFERT.texte),
+  },
 }
 const FAUX_RESUME = {
   proposer_pause: n => `Tu confirmes une pause de ${n} mois ?\n\nTa période payée va jusqu'au 15 octobre 2099 : tu gardes le groupe jusque-là. [SIMULE]`,
@@ -379,7 +397,7 @@ async function jouerLiveClub(question, fil = [], variante = 'normal') {
   const textesDuMembre = [question, ...fil.filter(m => m.role === 'user').map(m => m.content)]
   const nettoyer = t => { bruts.push(t); return politique.filtrerSortie(expurgerLiensInvitation(t), textesDuMembre) }
   for (let tour = 0; tour < 4; tour++) {
-    const r = await clientLiveClub.messages.create(membre.requeteAgentMembre(messages))
+    const r = await clientLiveClub.messages.create(membre.requeteAgentMembre(messages, faux.contexte))
     compter(membre.MODELE_LIVECLUB, r.usage)
     if (r.stop_reason !== 'tool_use') {
       const f = nettoyer(texteDe(r))
@@ -396,6 +414,13 @@ async function jouerLiveClub(question, fil = [], variante = 'normal') {
       }
       if (b.name === 'mon_abonnement' || b.name === 'mes_montants') {
         const contenu = faux[b.name]
+        donnees.push({ outil: b.name, resultat: contenu })
+        resultats.push({ type: 'tool_result', tool_use_id: b.id, content: JSON.stringify(contenu) })
+        continue
+      }
+      // Acces offert (06/10) : toute proposition est refusee, rien a gerer.
+      if (faux.refus && b.name.startsWith('proposer_')) {
+        const contenu = { refus: faux.refus }
         donnees.push({ outil: b.name, resultat: contenu })
         resultats.push({ type: 'tool_result', tool_use_id: b.id, content: JSON.stringify(contenu) })
         continue

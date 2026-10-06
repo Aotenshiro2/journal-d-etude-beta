@@ -22,6 +22,7 @@ import {
   limiteFenetreImpaye, detteOuverte, texteDette, phraseImpaye, faitsImpaye, phraseARegler,
   JOURS_IMPAYE_SORTIE, JOURS_FENETRE_RETOUR,
   sortieAExpliquer, JOURS_RAISON_SORTIE, REGLE_RAISON_SORTIE,
+  accesSansAbonnement, parcoursSansRattachement,
 } from '../src/lib/liveclub/pur.ts'
 import {
   desabonneHorsGrace, finAbonnement,
@@ -1291,6 +1292,78 @@ test('exemption datee = sortie programmee : rappel J-7 une fois, sortie le lende
     assert.ok(corps.includes('texteAbonnement()'), nom)
     assert.ok(!/[\u2013\u2014\u2018\u2019\u201C\u201D\u2026\u00A0\u202F]/.test(corps), nom)
   }
+})
+
+test('acces offert sans abonnement, compte non rattache (Nelly, 06/10)', () => {
+  const portes = texteAbonnement()
+  const lire = droit => accesSansAbonnement(droit, { texteAbonnement: portes })
+  // Ce qui ne doit jamais sortir : la demande d'email ou de code, la raison
+  // d'une sortie, le motif interne d'une exemption, sa note.
+  const interdits = ['email', 'code', 'sorti', 'favoris', 'fondateur', 'admin', 'NOTE_INTERNE']
+  // Tirets longs, apostrophes et guillemets courbes, points de suspension,
+  // espaces insecables (par leurs codes : ce fichier reste en caracteres clavier).
+  const horsClavier = new RegExp(`[${[0x2013, 0x2014, 0x2018, 0x2019, 0x201c, 0x201d, 0x2026, 0xa0, 0x202f].map(c => String.fromCharCode(c)).join('')}]`)
+  const propre = (texte, nom) => {
+    for (const mot of interdits) assert.ok(!texte.toLowerCase().includes(mot.toLowerCase()), `${nom} : ${mot}`)
+    assert.ok(!horsClavier.test(texte), `${nom} : caracteres clavier`)
+  }
+
+  // Non rattache + exemption permanente : le texte offert, sans date.
+  const permanente = { statut: 'oui', raison: 'exemption', motif: 'favorise', note: 'NOTE_INTERNE' }
+  assert.equal(parcoursSansRattachement('aucun', permanente), 'acces_offert')
+  const p = lire(permanente)
+  assert.equal(p.texte, "Ton accès au Live Club t'est offert par l'équipe : rien à payer ni à gérer ici. "
+    + "Une question ? Écris-moi, et s'il faut un humain je transmets à l'équipe.")
+  propre(p.texte, 'exemption permanente')
+  assert.ok(!JSON.stringify(p.faits).includes('favoris') && !JSON.stringify(p.faits).includes('NOTE_INTERNE'))
+  assert.equal(p.faits.jusquau, null)
+  assert.equal(p.faits.sans_date_de_fin, true)
+  // Pause, arret : rien a gerer, l'acces est offert.
+  assert.ok(p.rienAGerer.includes('rien à mettre en pause ni à arrêter'))
+  assert.ok(p.rienAGerer.includes('offert'))
+  propre(p.rienAGerer, 'rien a gerer')
+
+  // Exemption datee : la date de fin, incluse, en francais.
+  const datee = lire({ statut: 'oui', raison: 'exemption', fin: '2027-01-01' })
+  assert.equal(datee.texte, "Ton accès au Live Club t'est offert par l'équipe jusqu'au 1er janvier 2027 : rien à payer ni à gérer ici. "
+    + "Une question ? Écris-moi, et s'il faut un humain je transmets à l'équipe.")
+  assert.equal(datee.faits.jusquau, '1er janvier 2027')
+  assert.equal(datee.faits.sans_date_de_fin, false)
+  propre(datee.texte, 'exemption datee')
+
+  // Acces broker (lie au telegram_id) : le texte d'avant, avec les deux portes.
+  const broker = { statut: 'oui', raison: 'acces_broker', fin: '2027-03-15' }
+  assert.equal(parcoursSansRattachement('aucun', broker), 'acces_offert')
+  const b = lire(broker)
+  assert.equal(b.texte, "Tu as un accès offert au Live Club jusqu'au 15 mars 2027, grâce à ton compte chez notre broker partenaire. "
+    + `Il n'est pas renouvelable : pour rester après, il suffira de t'abonner.\n\n${portes}`)
+  for (const url of URLS_ABONNEMENT) assert.ok(b.texte.includes(url))
+  assert.deepEqual(b.faits, { acces: 'offert_broker', jusquau: '15 mars 2027', renouvelable: false, rien_a_payer: true })
+
+  // Acces manuel : ouvert jusqu'a sa date, sans abonnement a gerer.
+  const manuel = lire({ statut: 'oui', raison: 'acces_manuel', fin: '2026-12-31' })
+  assert.ok(manuel.texte.startsWith("Ton accès au Live Club est ouvert jusqu'au 31 décembre 2026, sans abonnement à gérer ici."))
+  propre(manuel.texte, 'acces manuel')
+
+  // Non rattache SANS droit : le parcours d'avant (raison de sortie, code).
+  const sans = { statut: 'non', raison: null }
+  assert.equal(parcoursSansRattachement('aucun', sans), 'non_rattache')
+  assert.equal(lire(sans), null)
+  // Un impaye (dette) reste un 'non' : pas un acces offert.
+  assert.equal(parcoursSansRattachement('aucun', { ...sans, dette: { depuis: 'x', limite: 'y', aRegler: [] } }), 'non_rattache')
+
+  // Droit inconnu (une source illisible) : PANNE, ni email ni raison de sortie.
+  const inconnu = { statut: 'inconnu', raison: null }
+  assert.equal(parcoursSansRattachement('aucun', inconnu), 'panne')
+  assert.equal(lire(inconnu), null)
+  // Rattachement illisible : panne, SAUF si l'exemption a pu etre lue (elle se lit seule).
+  assert.equal(parcoursSansRattachement('illisible', inconnu), 'panne')
+  assert.equal(parcoursSansRattachement('illisible', sans), 'panne')
+  assert.equal(parcoursSansRattachement('illisible', permanente), 'acces_offert')
+
+  // Un droit ouvert par un abonnement n'est pas un acces offert (il passe par le rattachement).
+  assert.equal(lire({ statut: 'oui', raison: 'abonnement', fin: '2026-11-01' }), null)
+  assert.equal(parcoursSansRattachement('aucun', { statut: 'oui', raison: 'abonnement' }), 'non_rattache')
 })
 
 console.log(`\n${n} blocs verifies, tout est bon.`)

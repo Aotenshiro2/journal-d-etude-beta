@@ -1361,6 +1361,97 @@ export function sortieAExpliquer(
 }
 
 // ---------------------------------------------------------------------------
+// Un acces sans abonnement (Brice, 06/10). Un compte Telegram peut avoir le
+// droit d'etre dans le groupe sans abonnement a lui : exemption posee par
+// l'equipe (avec ou sans date de fin), acces broker, acces manuel du cockpit.
+// Rattache a un payeur ou non, le bot lui dit SA situation : jamais « envoie
+// l'email de ton paiement », jamais la raison d'une sortie. Le motif interne
+// d'une exemption (fondateur, admin, equipe, favorise) et sa note ne sortent
+// jamais : le droit lu ici n'en porte pas, et rien de ce qu'il porte en plus
+// n'est recopie.
+// ---------------------------------------------------------------------------
+
+/** Le droit tel que droitLiveClub le rend (droits.ts), sans ses identifiants. */
+export type DroitLu = {
+  statut: 'oui' | 'non' | 'inconnu'
+  raison: 'exemption' | 'abonnement' | 'acces_broker' | 'acces_manuel' | null
+  /** Fin du droit ('YYYY-MM-DD' ou ISO), incluse ; absente = sans date. */
+  fin?: string
+}
+
+export type AccesSansAbonnement = {
+  /** La situation, prete a envoyer (« Mon abonnement », /start, /menu, outil mon_abonnement). */
+  texte: string
+  /** Les faits pour l'agent : ni motif, ni note, ni identifiant. */
+  faits: Record<string, unknown>
+  /** La reponse a une pause, un arret ou l'annulation d'un arret : rien a gerer. */
+  rienAGerer: string
+}
+
+/** Les raisons d'un droit ouvert qui ne passent pas par un abonnement. */
+const RAISONS_SANS_ABONNEMENT: ReadonlySet<DroitLu['raison']> = new Set(['exemption', 'acces_broker', 'acces_manuel'])
+
+const TEXTE_QUESTION_A_L_EQUIPE = "Une question ? Écris-moi, et s'il faut un humain je transmets à l'équipe."
+
+const TEXTE_RIEN_A_GERER = "Il n'y a rien à mettre en pause ni à arrêter : tu n'as pas d'abonnement, ton accès au Live Club t'est offert."
+
+/**
+ * La situation d'un droit ouvert SANS abonnement (exemption, acces broker,
+ * acces manuel), ou null (droit 'non', 'inconnu', ou ouvert par un
+ * abonnement). texteAbonnement : la phrase des deux portes (config.ts),
+ * passee en parametre parce que ce module n'importe rien. La date de fin est
+ * incluse (« jusqu'au 1er janvier 2027 » = encore dans le groupe ce jour-la).
+ */
+export function accesSansAbonnement(droit: DroitLu, o: { texteAbonnement: string }): AccesSansAbonnement | null {
+  if (droit.statut !== 'oui' || !RAISONS_SANS_ABONNEMENT.has(droit.raison)) return null
+  const fin = droit.fin ? formaterDateFr(droit.fin) : null
+  const jusquau = fin ? ` jusqu'au ${fin}` : ''
+  if (droit.raison === 'exemption') {
+    return {
+      texte: `Ton accès au Live Club t'est offert par l'équipe${jusquau} : rien à payer ni à gérer ici. ${TEXTE_QUESTION_A_L_EQUIPE}`,
+      faits: { acces: 'offert_par_l_equipe', jusquau: fin, sans_date_de_fin: !fin, rien_a_payer: true },
+      rienAGerer: TEXTE_RIEN_A_GERER,
+    }
+  }
+  if (droit.raison === 'acces_broker') {
+    return {
+      texte: `Tu as un accès offert au Live Club${jusquau}, grâce à ton compte chez notre broker partenaire. `
+        + `Il n'est pas renouvelable : pour rester après, il suffira de t'abonner.\n\n${o.texteAbonnement}`,
+      faits: { acces: 'offert_broker', jusquau: fin, renouvelable: false, rien_a_payer: true },
+      rienAGerer: TEXTE_RIEN_A_GERER,
+    }
+  }
+  return {
+    texte: `Ton accès au Live Club est ouvert${jusquau}, sans abonnement à gérer ici. ${TEXTE_QUESTION_A_L_EQUIPE}`,
+    faits: { acces: 'ouvert_sans_abonnement', jusquau: fin, rien_a_payer: true },
+    rienAGerer: TEXTE_RIEN_A_GERER,
+  }
+}
+
+export type ParcoursSansRattachement = 'acces_offert' | 'non_rattache' | 'panne'
+
+/**
+ * Le parcours d'un compte Telegram SANS rattachement lu (Brice, 06/10) :
+ * rattachement 'aucun' (lu, absent) ou 'illisible' (base en panne), puis son
+ * droit (droitLiveClub lit l'exemption et l'acces broker par le telegram_id,
+ * rattache ou non).
+ * - 'acces_offert' : droit ouvert sans abonnement, meme si le rattachement est
+ *   illisible (l'exemption se lit seule) : sa situation, partout.
+ * - 'panne' : rattachement illisible, ou droit 'inconnu' (une source
+ *   illisible) : on ne sait pas, donc ni « envoie ton email » ni la raison
+ *   d'une sortie a quelqu'un qui a peut-etre un acces offert.
+ * - 'non_rattache' : aucun rattachement et droit 'non' : le parcours d'avant
+ *   (raison d'une sortie recente, puis verification par code). Un 'oui' par
+ *   abonnement sans rattachement ne peut pas arriver (l'abonnement se lit par
+ *   le rattachement) : meme parcours.
+ */
+export function parcoursSansRattachement(rattachement: 'aucun' | 'illisible', droit: DroitLu): ParcoursSansRattachement {
+  if (droit.statut === 'oui' && RAISONS_SANS_ABONNEMENT.has(droit.raison)) return 'acces_offert'
+  if (rattachement === 'illisible' || droit.statut === 'inconnu') return 'panne'
+  return 'non_rattache'
+}
+
+// ---------------------------------------------------------------------------
 // Libelles des boutons pour le fil Support (Brice, 30/09 : toute la
 // conversation du bot se lit dans le cockpit). Memes textes que les claviers
 // d'actions-membre.ts. Jamais le nonce d'une confirmation.
