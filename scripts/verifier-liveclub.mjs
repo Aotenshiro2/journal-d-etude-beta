@@ -20,6 +20,7 @@ import {
   premierEchecFacture, lireImpaye, etatImpaye, enRetardDePaiement, joursDepuisPremierEchec, finGraceImpaye,
   limiteFenetreImpaye, detteOuverte, texteDette, phraseImpaye, faitsImpaye, phraseARegler,
   JOURS_IMPAYE_SORTIE, JOURS_FENETRE_RETOUR,
+  sortieAExpliquer, JOURS_RAISON_SORTIE, REGLE_RAISON_SORTIE,
 } from '../src/lib/liveclub/pur.ts'
 import {
   desabonneHorsGrace, finAbonnement,
@@ -32,6 +33,7 @@ import {
 import {
   GRACE_JOURS, URLS_ABONNEMENT, URL_ABONNEMENT, URL_PORTAIL_CARTE, texteAbonnement,
   ARGUMENT_TARIF_PAUSE, TEXTE_PAUSE_AVANT_ARRET, sortiesActives, sortiesImpayesActives, PLAFOND_RESILIATIONS_PASSAGE,
+  texteRaisonSortie,
 } from '../src/lib/liveclub/config.ts'
 
 const PRODUITS = ['prod_UcOraPncQlbrW4', 'prod_UynMpOvBtGTsIw']
@@ -1086,6 +1088,79 @@ test('fil Support : phrases des gestes des impayes (Brice 30/09)', () => {
   assert.equal(phraseGeste({ geste: 'invitation', resultat: 'fait', regle: 'bienvenue_rattrapage' }), 'Email de bienvenue envoyé (rattrapage du passage quotidien).')
   // L'arret programme par un membre ne change pas.
   assert.equal(phraseGeste({ geste: 'arret', resultat: 'fait', regle: 'demande_membre', details: { fin: '2026-10-07' } }), 'Arrêt programmé au 7 octobre 2026.')
+})
+
+test('raison de la sortie : non rattache sorti il y a moins de 60 jours, une fois par sortie (Brice 06/10)', () => {
+  assert.equal(JOURS_RAISON_SORTIE, 60)
+  assert.equal(REGLE_RAISON_SORTIE, 'raison_sortie')
+  const maintenant = Date.parse('2026-10-16T09:00:00Z')
+  const ilYa = jours => new Date(maintenant - jours * 86_400_000)
+  const retrait = (jours, extra = {}) => ({ geste: 'retrait', resultat: 'fait', regle: 'manuel', fait_le: ilYa(jours), ...extra })
+  const libre = { rattache: false }
+
+  // Ce que fait le bot a chaque message : raison due = envoyee, puis le geste
+  // 'rappel' de REGLE_RAISON_SORTIE entre au journal (fait_le = l'instant).
+  const ecrire = (journal, quand, o = libre) => {
+    const due = sortieAExpliquer(journal, quand, o)
+    if (due) journal.push({ geste: 'rappel', resultat: 'fait', regle: REGLE_RAISON_SORTIE, fait_le: new Date(quand).toISOString() })
+    return due
+  }
+
+  // Sorti depuis 10 jours (equipe, regle 'manuel'), non rattache : la raison
+  // au premier message, plus aux suivants.
+  const journal = [retrait(10)]
+  assert.deepEqual(ecrire(journal, maintenant), { retraitLe: ilYa(10).toISOString() })
+  assert.equal(ecrire(journal, maintenant + 60_000), null)
+  assert.equal(ecrire(journal, maintenant + 86_400_000), null)
+  assert.equal(journal.filter(g => g.geste === 'rappel').length, 1)
+  // Une NOUVELLE sortie apres la raison : la raison revient, une fois.
+  journal.push({ geste: 'retrait', resultat: 'fait', regle: 'manuel', fait_le: new Date(maintenant + 2 * 86_400_000) })
+  assert.ok(ecrire(journal, maintenant + 3 * 86_400_000))
+  assert.equal(ecrire(journal, maintenant + 3 * 86_400_000 + 60_000), null)
+
+  // Sorti depuis 90 jours : pas de raison. Limite de 60 jours.
+  assert.equal(sortieAExpliquer([retrait(90)], maintenant, libre), null)
+  assert.ok(sortieAExpliquer([retrait(59)], maintenant, libre))
+  assert.equal(sortieAExpliquer([retrait(61)], maintenant, libre), null)
+  // Le DERNIER retrait compte : un ancien retrait a 90 jours, un recent a 10.
+  assert.deepEqual(sortieAExpliquer([retrait(10), retrait(90)], maintenant, libre), { retraitLe: ilYa(10).toISOString() })
+  assert.equal(sortieAExpliquer([], maintenant, libre), null)
+
+  // Rattache : comportement inchange (aucune raison, rien au journal).
+  const rattache = [retrait(10)]
+  assert.equal(ecrire(rattache, maintenant, { rattache: true }), null)
+  assert.equal(rattache.length, 1)
+
+  // Quelle que soit la regle ou l'acteur, mais une sortie FAITE seulement.
+  for (const regle of ['manuel', 'impaye_5j', 'desabonne', null]) assert.ok(sortieAExpliquer([retrait(10, { regle })], maintenant, libre), String(regle))
+  for (const resultat of ['simule', 'echec', 'refuse']) assert.equal(sortieAExpliquer([retrait(10, { resultat })], maintenant, libre), null, resultat)
+  // Revenu dans le groupe depuis : rien. Une entree en echec ne compte pas.
+  assert.equal(sortieAExpliquer([retrait(10), { geste: 'entree_acceptee', resultat: 'fait', regle: 'abonnement', fait_le: ilYa(5) }], maintenant, libre), null)
+  assert.equal(sortieAExpliquer([retrait(10), { geste: 'reintegration', resultat: 'fait', regle: 'manuel', fait_le: ilYa(5) }], maintenant, libre), null)
+  assert.ok(sortieAExpliquer([retrait(10), { geste: 'entree_acceptee', resultat: 'echec', regle: 'telegram', fait_le: ilYa(5) }], maintenant, libre))
+  // Un autre rappel apres la sortie, ou une raison donnee pour une sortie
+  // PLUS ANCIENNE : la raison reste due.
+  assert.ok(sortieAExpliquer([retrait(10), { geste: 'rappel', resultat: 'fait', regle: 'sortie_impaye', fait_le: ilYa(5) }], maintenant, libre))
+  assert.ok(sortieAExpliquer([retrait(10), { geste: 'rappel', resultat: 'fait', regle: REGLE_RAISON_SORTIE, fait_le: ilYa(20) }, retrait(25)], maintenant, libre))
+  // Dates en texte (ISO) comme en Date (Prisma), lignes dans le desordre, date illisible ignoree.
+  assert.equal(sortieAExpliquer([
+    { geste: 'rappel', resultat: 'fait', regle: REGLE_RAISON_SORTIE, fait_le: ilYa(3).toISOString() },
+    { geste: 'retrait', resultat: 'fait', regle: 'manuel', fait_le: ilYa(10).toISOString() },
+  ], maintenant, libre), null)
+  assert.equal(sortieAExpliquer([retrait(10, { fait_le: 'pas une date' })], maintenant, libre), null)
+
+  // Le fil Support : une ligne lisible pour la raison donnee.
+  assert.equal(phraseGeste({ geste: 'rappel', resultat: 'fait', regle: REGLE_RAISON_SORTIE, details: { retrait_le: ilYa(10).toISOString() } }),
+    'Raison de la sortie du groupe donnée (compte non relié à un abonnement actif).')
+
+  // Le texte : la raison, la verification par code, les deux portes ;
+  // caracteres clavier seulement (ni tiret long, ni apostrophe courbe, ni
+  // points de suspension en un caractere, ni espace insecable).
+  const t = texteRaisonSortie()
+  assert.ok(t.startsWith('Tu as été sorti du groupe Live Club'), t)
+  assert.ok(t.includes("l'email utilisé pour le paiement") && t.includes('code'), t)
+  assert.ok(t.endsWith(URLS_ABONNEMENT[1]) && t.includes(URLS_ABONNEMENT[0]) && t.includes(texteAbonnement()), t)
+  assert.ok(!/[\u2013\u2014\u2018\u2019\u201C\u201D\u2026\u00A0\u202F]/.test(t), t)
 })
 
 console.log(`\n${n} blocs verifies, tout est bon.`)

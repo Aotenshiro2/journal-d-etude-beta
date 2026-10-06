@@ -23,10 +23,13 @@
 //   message du bot (envoyer, ci-dessous, trace ce qu'il envoie) et une ligne
 //   « [système] » pour les etapes du groupe. Un compte non rattache a son
 //   fil aussi. Le pont ne jette jamais.
+// - (06/10) un compte NON rattache sorti du groupe dans les 60 derniers jours
+//   recoit d'abord la raison de sa sortie, une fois par sortie, puis la
+//   verification par code (donnerRaisonDeLaSortie, ci-dessous).
 
 import { journaliserGesteLiveClub } from '@/lib/stripe-actions'
 import { prisma } from '@/lib/db'
-import { SUPPORT, TEXTE_PAUSE_AVANT_ARRET, chatId, texteAbonnement } from './config'
+import { SUPPORT, TEXTE_PAUSE_AVANT_ARRET, chatId, texteAbonnement, texteRaisonSortie } from './config'
 import { droitLiveClub, type Droit } from './droits'
 import { consommerJeton, ErreurTableLiveClub } from './jetons'
 import { rattacherTelegram, type Rattachement } from './rattacher'
@@ -51,7 +54,10 @@ import {
   envoyerCodeSiConnu, rattacherParEmail, reserverCode, verifierCode, type CodeReserve, type IssueCode,
 } from './verification'
 import { CODE_ENVOIS_HEURE, CODE_VALIDITE_MINUTES, intentionNonRattache, masquerCodes } from './verification-pur'
-import { jetonBienForme, libelleBouton, messageErreur, normaliserEmail, pauseDejaProposee, relationAbsente, texteDette } from './pur'
+import {
+  REGLE_RAISON_SORTIE, jetonBienForme, libelleBouton, messageErreur, normaliserEmail, pauseDejaProposee, relationAbsente,
+  sortieAExpliquer, texteDette, type GesteDate,
+} from './pur'
 
 // Formes minimales des updates Telegram utilises ici.
 type Utilisateur = { id: number; is_bot?: boolean; first_name?: string }
@@ -173,6 +179,66 @@ function repondeur(chat: number, telegramId: number, r: Rattachement | null) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// La raison d'une sortie du groupe, donnee a un compte non rattache (06/10)
+// ---------------------------------------------------------------------------
+
+/**
+ * Les gestes de ce compte qui decident de la raison d'une sortie
+ * (sortieAExpliquer, pur.ts) : retraits, retours dans le groupe, raisons deja
+ * donnees, 'fait' seulement. Panne ou table absente = aucune ligne : le bot
+ * garde sa reponse habituelle, il ne dit rien qu'il n'a pas lu.
+ */
+async function gestesDeSortie(telegramId: number): Promise<GesteDate[]> {
+  try {
+    return await prisma.$queryRaw<GesteDate[]>`
+      select geste, resultat, regle, fait_le from public.cockpit_liveclub_gestes
+      where telegram_id = ${telegramId} and resultat = 'fait'
+        and (geste in ('retrait', 'entree_acceptee', 'reintegration')
+          or (geste = 'rappel' and regle = ${REGLE_RAISON_SORTIE}))
+      order by fait_le desc, geste_id desc
+      limit 50`
+  } catch (err) {
+    if (!relationAbsente(err)) console.warn(`[liveclub/bot] lecture du journal impossible : ${messageErreur(err)}`)
+    return []
+  }
+}
+
+type OptionsRaison = {
+  /** Texte place avant la raison (accueil de /start). */
+  entete?: string
+  /** Boutons sous la raison (les boutons d'un compte non rattache, en general). */
+  boutons?: Bouton[][]
+}
+
+/**
+ * Un compte NON rattache (l'appelant l'a verifie) sorti du groupe dans les 60
+ * derniers jours (Brice, 06/10) : le bot lui donne D'ABORD la raison de sa
+ * sortie, une fois par sortie, avec la demande de l'email du paiement
+ * (texteRaisonSortie). Le message part par envoyer, donc au fil Support ; la
+ * trace « raison donnee » est un geste 'rappel' 'fait' de regle
+ * REGLE_RAISON_SORTIE, pose seulement si Telegram a livre (sinon la raison
+ * sera redonnee au message suivant).
+ *
+ * Si l'equipe a la main (fil « veut un humain »), le bot ne parle pas a sa
+ * place : rien n'est envoye. Renvoie true si un message est parti (ou a ete
+ * tente) : l'appelant n'envoie alors pas sa reponse habituelle.
+ */
+async function donnerRaisonDeLaSortie(chat: number, telegramId: number, o: OptionsRaison = {}): Promise<boolean> {
+  const sortie = sortieAExpliquer(await gestesDeSortie(telegramId), Date.now(), { rattache: false })
+  if (!sortie) return false
+  if (await estEnAttenteHumain(telegramId)) return false
+  const raison = texteRaisonSortie()
+  const envoi = await envoyer(chat, o.entete ? `${o.entete}\n\n${raison}` : raison, o.boutons)
+  if (envoi.ok) {
+    await journaliserGesteLiveClub(
+      { geste: 'rappel', resultat: 'fait', regle: REGLE_RAISON_SORTIE, details: { retrait_le: sortie.retraitLe } },
+      { telegramId, membreId: null, acteur: ACTEUR_BOT_MEMBRE, abonnementId: null, updateId: null },
+    )
+  }
+  return true
+}
+
 async function envoyerMenu(
   chat: number,
   telegramId: number,
@@ -182,9 +248,12 @@ async function envoyerMenu(
   const r = dejaLu !== undefined ? dejaLu : await rattachementOuNull(telegramId)
   if (r && r !== 'illisible') {
     await envoyer(chat, entete ?? 'Que veux-tu faire ?', clavierMenu(), r)
-  } else {
-    await envoyer(chat, entete ? `${entete}\n\n${TEXTE_NON_RATTACHE}` : TEXTE_NON_RATTACHE, clavierSansRattachement())
+    return
   }
+  // Non rattache et sorti du groupe il y a peu : la raison d'abord, a la
+  // place du texte habituel (elle demande deja l'email du paiement).
+  if (r === null && await donnerRaisonDeLaSortie(chat, telegramId, { entete, boutons: clavierSansRattachement() })) return
+  await envoyer(chat, entete ? `${entete}\n\n${TEXTE_NON_RATTACHE}` : TEXTE_NON_RATTACHE, clavierSansRattachement())
 }
 
 // ---------------------------------------------------------------------------
@@ -693,6 +762,10 @@ async function traiterNonRattache(chat: number, u: Utilisateur, texte: string, u
     await repondre(TEXTE_ATTENTE_HUMAIN, clavierSansRattachement())
     return
   }
+  // Sorti du groupe il y a peu (06/10) : la raison d'abord, a la place du
+  // texte habituel. Pas sur un email ni un code (plus haut) : il est deja
+  // dans la verification, la raison attend son prochain message.
+  if (await donnerRaisonDeLaSortie(chat, u.id, { boutons: clavierSansRattachement() })) return
   await repondre(TEXTE_NON_RATTACHE, clavierSansRattachement())
 }
 
@@ -892,6 +965,9 @@ export async function traiterBouton(bouton: BoutonTg, updateId: number): Promise
   // la reponse de l'equipe arrivera ici par le bot.
   if (data === 'm:equipe') {
     await repondreBouton(bouton.id)
+    // Non rattache, sorti du groupe il y a peu (06/10) : la raison d'abord
+    // (sans boutons), puis l'equipe est prevenue comme d'habitude.
+    if (r === null) await donnerRaisonDeLaSortie(chat, u.id)
     await repondeur(chat, u.id, identite)(TEXTE_EQUIPE, undefined, true, TEXTE_EQUIPE_INDISPONIBLE)
     return
   }
@@ -903,6 +979,8 @@ export async function traiterBouton(bouton: BoutonTg, updateId: number): Promise
       await envoyer(chat, `Ton compte Telegram est déjà relié à ton abonnement, pas besoin de code. Que veux-tu faire ?`, clavierMenu())
       return
     }
+    // Sorti du groupe il y a peu (06/10) : la raison, qui demande deja l'email.
+    if (r === null && await donnerRaisonDeLaSortie(chat, u.id)) return
     await envoyer(chat, TEXTE_DEMANDE_EMAIL)
     return
   }
@@ -910,6 +988,8 @@ export async function traiterBouton(bouton: BoutonTg, updateId: number): Promise
   // Tout le reste demande un compte rattache.
   if (r === 'illisible' || !r) {
     await repondreBouton(bouton.id)
+    // Non rattache, sorti du groupe il y a peu (06/10) : la raison d'abord.
+    if (!r && await donnerRaisonDeLaSortie(chat, u.id, { boutons: clavierSansRattachement() })) return
     await envoyer(chat, r ? TEXTE_PANNE : TEXTE_NON_RATTACHE, r ? undefined : clavierSansRattachement())
     return
   }

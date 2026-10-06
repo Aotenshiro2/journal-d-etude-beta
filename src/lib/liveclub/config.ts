@@ -45,6 +45,22 @@ export const TEXTE_PAUSE_AVANT_ARRET = `Avant d'arrêter : si c'est pour un temp
   + `${ARGUMENT_TARIF_PAUSE}\n\n`
   + `Tu préfères une pause, ou tu arrêtes quand même ?`
 
+/**
+ * La raison d'une sortie du groupe (Brice, 06/10), donnee UNE fois par sortie
+ * a un compte Telegram non rattache qui ecrit au bot dans les 60 jours
+ * (sortieAExpliquer, pur.ts). L'equipe a sorti, sans ban, des comptes relies
+ * a aucun abonnement, sans pouvoir les prevenir : ni email, et un bot ne peut
+ * pas ecrire le premier. Le texte enchaine sur la verification par code
+ * (« envoie-moi l'email ») : il remplace TEXTE_NON_RATTACHE la ou il est dit.
+ */
+export function texteRaisonSortie(): string {
+  return `Tu as été sorti du groupe Live Club parce qu'on n'a pas pu relier ton compte Telegram à un abonnement actif : `
+    + `soit l'email de ton paiement n'est pas renseigné chez nous, soit ton abonnement est impayé ou terminé.\n\n`
+    + `Tu as un abonnement ? Envoie-moi ici l'email utilisé pour le paiement : je t'envoie un code à 6 chiffres, `
+    + `et dès que c'est vérifié, je te redonne l'accès au groupe.\n\n`
+    + `Pas d'abonnement en cours ? ${texteAbonnement()}`
+}
+
 /** Jours de grace apres la fin d'un abonnement, comme Metricgram. */
 export const GRACE_JOURS = 7
 /** Plafond de sorties REELLES par passage quotidien. */

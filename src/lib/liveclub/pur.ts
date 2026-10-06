@@ -1284,6 +1284,7 @@ export function phraseGeste(g: GesteLu): string | null {
       if (regle === 'fin_fenetre_30j') return `Message de fin d'abonnement (paiement en retard de plus de 30 jours) envoyé${canal}.`
       if (regle === 'broker_j7') return `Rappel de fin d'accès broker envoyé${canal} (J-7).`
       if (regle === 'broker_fin_message') return `Message de fin d'accès broker envoyé${canal}.`
+      if (regle === REGLE_RAISON_SORTIE) return 'Raison de la sortie du groupe donnée (compte non relié à un abonnement actif).'
       return `Rappel envoyé${canal}.`
     }
     case 'refus':
@@ -1296,6 +1297,53 @@ export function phraseGeste(g: GesteLu): string | null {
     default:
       return fait ? 'Geste du bot fait.' : 'Geste du bot refusé.'
   }
+}
+
+// ---------------------------------------------------------------------------
+// La raison d'une sortie du groupe (Brice, 06/10). L'equipe a sorti, sans
+// ban, des comptes Telegram relies a aucun abonnement (geste 'retrait' 'fait',
+// regle 'manuel', acteur 'cockpit:<uuid>'), sans pouvoir les prevenir. Quand
+// un de ces comptes, toujours non rattache, ecrit au bot dans les 60 jours,
+// le bot lui donne d'abord la raison (texteRaisonSortie, config.ts), UNE fois
+// par sortie : la trace est un geste 'rappel' 'fait' de regle
+// REGLE_RAISON_SORTIE, pose apres l'envoi.
+// ---------------------------------------------------------------------------
+
+/** Jours apres une sortie du groupe pendant lesquels la raison est donnee. */
+export const JOURS_RAISON_SORTIE = 60
+/** Regle du geste 'rappel' qui note que la raison d'une sortie a ete donnee. */
+export const REGLE_RAISON_SORTIE = 'raison_sortie'
+
+/** Une ligne du journal des gestes (cockpit_liveclub_gestes) d'un compte, avec sa date. */
+export type GesteDate = { geste: string; resultat: string; regle: string | null; fait_le: string | Date }
+
+/**
+ * La sortie du groupe dont ce compte doit recevoir la raison, ou null.
+ * Raison due si : le compte n'est PAS rattache, son dernier geste 'retrait'
+ * 'fait' (quelle que soit la regle ou l'acteur) date de 60 jours au plus, et
+ * depuis ce retrait, ni la raison deja donnee (rappel REGLE_RAISON_SORTIE),
+ * ni un retour dans le groupe (entree_acceptee ou reintegration 'fait').
+ * Une nouvelle sortie apres une raison donnee rouvre la raison : une fois par
+ * sortie, pas une fois pour toutes. Les lignes peuvent arriver dans le
+ * desordre ; une date illisible est ignoree.
+ */
+export function sortieAExpliquer(
+  gestes: readonly GesteDate[],
+  maintenantMs: number,
+  o: { rattache: boolean },
+): { retraitLe: string } | null {
+  if (o.rattache) return null
+  const lus = gestes
+    .map(g => ({ ...g, t: new Date(g.fait_le).getTime() }))
+    .filter(g => Number.isFinite(g.t) && g.resultat === 'fait')
+  const retraits = lus.filter(g => g.geste === 'retrait')
+  if (retraits.length === 0) return null
+  const dernier = retraits.reduce((a, b) => (b.t > a.t ? b : a))
+  if (maintenantMs - dernier.t > JOURS_RAISON_SORTIE * 86_400_000) return null
+  const depuis = lus.filter(g => g.t >= dernier.t && g !== dernier)
+  if (depuis.some(g => g.geste === 'rappel' && g.regle === REGLE_RAISON_SORTIE)) return null
+  if (depuis.some(g => g.geste === 'entree_acceptee' || g.geste === 'reintegration')) return null
+  return { retraitLe: new Date(dernier.t).toISOString() }
 }
 
 // ---------------------------------------------------------------------------
