@@ -4,6 +4,7 @@
 // Lancement : node scripts/verifier-liveclub.mjs
 
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import {
   dateIso, ajouterJours, joursEntre, formaterDateFr,
   finPeriodeAbonnement, calculerReprisePause, nbMoisPauseValide,
@@ -29,6 +30,7 @@ import {
   droitCouvraitLaSortie, retourARetenter, MAX_ESSAIS_RETOUR,
   decisionSortieImpaye, decisionFenetre, factureRegleeApresSortie, decisionReouverture,
   bienvenueARattraper, JOURS_RATTRAPAGE_BIENVENUE,
+  phaseExemption, decisionRappelExemption, decisionFinExemption, jourLePlusAncien, RAPPEL_FIN_EXEMPTION_JOURS,
 } from '../src/lib/liveclub/passage-regles.ts'
 import {
   GRACE_JOURS, URLS_ABONNEMENT, URL_ABONNEMENT, URL_PORTAIL_CARTE, texteAbonnement,
@@ -1161,6 +1163,134 @@ test('raison de la sortie : non rattache sorti il y a moins de 60 jours, une foi
   assert.ok(t.includes("l'email utilisé pour le paiement") && t.includes('code'), t)
   assert.ok(t.endsWith(URLS_ABONNEMENT[1]) && t.includes(URLS_ABONNEMENT[0]) && t.includes(texteAbonnement()), t)
   assert.ok(!/[\u2013\u2014\u2018\u2019\u201C\u201D\u2026\u00A0\u202F]/.test(t), t)
+})
+
+test('exemption datee = sortie programmee : rappel J-7 une fois, sortie le lendemain de la date sans autre droit (Brice 06/10)', () => {
+  assert.equal(RAPPEL_FIN_EXEMPTION_JOURS, 7)
+  // Cas reel : favorise jusqu'au 1er janvier 2027, relie a aucun abonnement.
+  const ex = { jusquau: '2027-01-01', retireLe: null }
+  const present = { presence: 'oui', intouchable: false, droit: 'non' }
+
+  // Phases. jusquau est INCLUS (comme exemptionActive) : le 1er janvier est
+  // encore couvert, la sortie part le 2.
+  assert.equal(phaseExemption(ex, '2026-12-24'), 'en_cours')
+  assert.equal(phaseExemption(ex, '2026-12-25'), 'rappel_j7')
+  assert.equal(phaseExemption(ex, '2027-01-01'), 'rappel_j7')
+  assert.equal(phaseExemption(ex, '2027-01-02'), 'echue')
+  assert.equal(phaseExemption(ex, '2027-06-30'), 'echue')
+  assert.equal(phaseExemption({ ...ex, retireLe: '2026-12-01T10:00:00Z' }, '2027-01-02'), 'retiree')
+  // Permanente : jamais concernee, ni rappel ni sortie, interrupteur ou pas.
+  const permanente = phaseExemption({ jusquau: null, retireLe: null }, '2027-01-02')
+  assert.equal(permanente, 'permanente')
+  for (const reel of [true, false]) {
+    assert.equal(decisionFinExemption(permanente, false, present, reel), 'rien')
+    assert.equal(decisionRappelExemption(permanente, false, present, reel), 'rien')
+  }
+
+  // Echue + present + droit 'non' : sortie.
+  const echue = phaseExemption(ex, '2027-01-02')
+  assert.equal(decisionFinExemption(echue, false, present, true), 'sortir')
+  // Autre droit (abonnement, broker, acces manuel) : gardee, et close.
+  assert.equal(decisionFinExemption(echue, false, { ...present, droit: 'oui' }, true), 'clore_autre_droit')
+  // Admin ou createur : jamais sorti (le droit n'est meme pas lu), close.
+  assert.equal(decisionFinExemption(echue, false, { presence: 'oui', intouchable: true, droit: 'inconnu' }, true), 'clore_admin')
+  // Plus dans le groupe a la date : close, sans sortie ni message.
+  assert.equal(decisionFinExemption(echue, false, { presence: 'non', intouchable: false, droit: 'inconnu' }, true), 'clore_absent')
+  // Droit ou presence inconnus : rien.
+  assert.equal(decisionFinExemption(echue, false, { ...present, droit: 'inconnu' }, true), 'inconnu')
+  assert.equal(decisionFinExemption(echue, false, { ...present, presence: 'inconnu' }, true), 'inconnu')
+  // Pas encore echue : aucune sortie.
+  assert.equal(decisionFinExemption('rappel_j7', false, present, true), 'rien')
+  assert.equal(decisionFinExemption('en_cours', false, present, true), 'rien')
+
+  // Rappel J-7 : seulement a quelqu'un qui sortira vraiment.
+  const j7 = phaseExemption(ex, '2026-12-25')
+  assert.equal(decisionRappelExemption(j7, false, present, true), 'envoyer')
+  assert.equal(decisionRappelExemption(j7, false, { ...present, droit: 'oui' }, true), 'inutile')
+  assert.equal(decisionRappelExemption(j7, false, { presence: 'oui', intouchable: true, droit: 'inconnu' }, true), 'inutile')
+  assert.equal(decisionRappelExemption(j7, false, { presence: 'non', intouchable: false, droit: 'inconnu' }, true), 'inutile')
+  assert.equal(decisionRappelExemption(j7, false, { ...present, droit: 'inconnu' }, true), 'inconnu')
+  assert.equal(decisionRappelExemption(j7, false, { ...present, presence: 'inconnu' }, true), 'inconnu')
+  assert.equal(decisionRappelExemption('en_cours', false, present, true), 'rien')
+  assert.equal(decisionRappelExemption(echue, false, present, true), 'rien')
+
+  // Une fois par exemption : le journal (details.exemption_id) dit deja fait.
+  const journal = new Set()
+  const passer = (jour, lecture = present, reel = true) => {
+    const phase = phaseExemption(ex, jour)
+    if (phase === 'rappel_j7') {
+      const d = decisionRappelExemption(phase, journal.has('rappel'), lecture, reel)
+      if (d === 'envoyer' || d === 'simuler') journal.add('rappel')
+      return d
+    }
+    const d = decisionFinExemption(phase, journal.has('sortie'), lecture, reel)
+    if (d === 'sortir' || d === 'simuler') journal.add('sortie')
+    return d
+  }
+  assert.equal(passer('2026-12-25'), 'envoyer')
+  assert.equal(passer('2026-12-26'), 'deja_fait')
+  assert.equal(passer('2027-01-01'), 'deja_fait')
+  assert.equal(passer('2027-01-02'), 'sortir')
+  assert.equal(passer('2027-01-03'), 'deja_sortie')
+
+  // Sans l'interrupteur : rappel et sortie SIMULES, une fois aussi.
+  const avant = process.env.LIVECLUB_SORTIES_ACTIVES
+  try {
+    delete process.env.LIVECLUB_SORTIES_ACTIVES
+    assert.equal(decisionFinExemption(echue, false, present, sortiesActives()), 'simuler')
+    assert.equal(decisionRappelExemption(j7, false, present, sortiesActives()), 'simuler')
+    journal.clear()
+    assert.equal(passer('2027-01-02', present, sortiesActives()), 'simuler')
+    assert.equal(passer('2027-01-03', present, sortiesActives()), 'deja_sortie')
+    process.env.LIVECLUB_SORTIES_ACTIVES = '1'
+    assert.equal(decisionFinExemption(echue, false, present, sortiesActives()), 'sortir')
+  } finally {
+    if (avant === undefined) delete process.env.LIVECLUB_SORTIES_ACTIVES
+    else process.env.LIVECLUB_SORTIES_ACTIVES = avant
+  }
+
+  // Jour de Paris ET current_date de la base : echue seulement quand les deux
+  // le disent (sinon retirerDuLiveClub refuserait pour \u00AB exempte \u00BB).
+  assert.equal(jourLePlusAncien('2027-01-02', '2027-01-01'), '2027-01-01')
+  assert.equal(jourLePlusAncien('2027-01-02', '2027-01-03'), '2027-01-02')
+  assert.equal(jourLePlusAncien('2027-01-02', null), '2027-01-02')
+  assert.equal(jourLePlusAncien('2027-01-02', 'illisible'), '2027-01-02')
+  // 23 h 30 UTC le 1er janvier : deja le 2 a Paris, encore le 1er pour la base.
+  assert.equal(phaseExemption(ex, jourLePlusAncien(jourParis('2027-01-01T23:30:00Z'), '2027-01-01')), 'rappel_j7')
+  // Le cron de 7 h UTC le 2 janvier : echue.
+  assert.equal(phaseExemption(ex, jourLePlusAncien(jourParis('2027-01-02T07:00:00Z'), '2027-01-02')), 'echue')
+
+  // Fil Support.
+  assert.equal(phraseGeste({ geste: 'fin_acces', resultat: 'fait', regle: 'fin_exemption' }), "Sortie du groupe (fin de l'acc\u00E8s offert).")
+  assert.equal(phraseGeste({ geste: 'fin_acces', resultat: 'simule', regle: 'fin_exemption' }), null)
+  assert.equal(phraseGeste({ geste: 'fin_acces', resultat: 'refuse', regle: 'fin_exemption', details: { cloture: 'absent' } }),
+    "Fin de l'acc\u00E8s offert : d\u00E9j\u00E0 hors du groupe, exemption close.")
+  assert.equal(phraseGeste({ geste: 'fin_acces', resultat: 'refuse', regle: 'fin_exemption', details: { cloture: 'autre_droit', raison_droit: 'abonnement' } }),
+    "Fin de l'acc\u00E8s offert : gard\u00E9 dans le groupe (abonnement), exemption close.")
+  assert.equal(phraseGeste({ geste: 'fin_acces', resultat: 'refuse', regle: 'fin_exemption', details: { cloture: 'autre_droit', raison_droit: 'acces_broker' } }),
+    "Fin de l'acc\u00E8s offert : gard\u00E9 dans le groupe (acc\u00E8s broker), exemption close.")
+  assert.equal(phraseGeste({ geste: 'fin_acces', resultat: 'refuse', regle: 'fin_exemption', details: { cloture: 'admin' } }),
+    "Fin de l'acc\u00E8s offert : administrateur du groupe, gard\u00E9, exemption close.")
+  // Un refus de retirerDuLiveClub garde sa regle, le motif dit d'ou il vient.
+  assert.equal(phraseGeste({ geste: 'fin_acces', resultat: 'refuse', regle: 'plafond_passage', details: { motif: 'fin_exemption' } }),
+    "Sortie de fin d'acc\u00E8s offert non faite (plafond du passage atteint, report\u00E9e).")
+  assert.equal(phraseGeste({ geste: 'rappel', resultat: 'fait', regle: 'fin_exemption_j7', details: { canal: 'email' } }),
+    "Rappel de fin d'acc\u00E8s offert envoy\u00E9 par email (J-7).")
+  assert.equal(phraseGeste({ geste: 'rappel', resultat: 'fait', regle: 'fin_exemption_message', details: { canal: 'prive' } }),
+    "Message de fin d'acc\u00E8s offert envoy\u00E9.")
+  // L'acces broker ne change pas.
+  assert.equal(phraseGeste({ geste: 'fin_acces', resultat: 'fait', regle: 'broker_fin' }), "Sortie du groupe (fin d'acc\u00E8s broker).")
+
+  // Les deux textes (emails.ts, non importable sans compilateur) : presents,
+  // avec les deux portes d'abonnement, en caracteres clavier.
+  const source = readFileSync(new URL('../src/lib/liveclub/emails.ts', import.meta.url), 'utf8')
+  for (const nom of ['modeleRappelFinExemption', 'modeleFinExemption']) {
+    const debut = source.indexOf(`export function ${nom}(`)
+    assert.ok(debut >= 0, nom)
+    const corps = source.slice(debut, source.indexOf('\n}\n', debut))
+    assert.ok(corps.includes('texteAbonnement()'), nom)
+    assert.ok(!/[\u2013\u2014\u2018\u2019\u201C\u201D\u2026\u00A0\u202F]/.test(corps), nom)
+  }
 })
 
 console.log(`\n${n} blocs verifies, tout est bon.`)

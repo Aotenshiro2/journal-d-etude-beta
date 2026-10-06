@@ -233,15 +233,20 @@ function relationAbsente(err: unknown): boolean {
  * favorise), posee depuis le cockpit. Active = pas retiree, et sans date ou
  * date pas encore passee. Table absente = aucune exemption lue (avant la
  * migration il ne peut pas y en avoir), toute autre erreur remonte : on ne
- * retire personne sur une lecture ratee.
+ * retire personne sur une lecture ratee. sauf (06/10) : une exemption a ne
+ * pas compter (le passage quotidien juge la fin de celle-la).
  */
-export async function exemptionActive(telegramId: number): Promise<{ motif: string; jusquau: Date | null } | null> {
+export async function exemptionActive(
+  telegramId: number,
+  sauf: string | null = null,
+): Promise<{ motif: string; jusquau: Date | null } | null> {
   try {
     const lignes = await prisma.$queryRaw<{ motif: string; jusquau: Date | null }[]>`
       select motif, jusquau from public.cockpit_liveclub_exemptions
       where telegram_id = ${telegramId}
         and retire_le is null
         and (jusquau is null or jusquau >= current_date)
+        and (${sauf}::uuid is null or exemption_id <> ${sauf}::uuid)
       limit 1`
     return lignes[0] ?? null
   } catch (err) {

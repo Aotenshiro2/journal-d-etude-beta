@@ -1244,6 +1244,18 @@ export function phraseGeste(g: GesteLu): string | null {
       if (regle === 'impaye_5j') return 'Sortie du groupe (paiement en retard depuis plus de 5 jours).'
       return "Sorti du groupe par l'équipe."
     case 'fin_acces':
+      // Fin d'une exemption datee (06/10). Un refus de retirerDuLiveClub
+      // garde sa propre regle et porte 'fin_exemption' dans details.motif.
+      if (regle === 'fin_exemption' || d.motif === 'fin_exemption') {
+        if (fait) return "Sortie du groupe (fin de l'accès offert)."
+        if (regle === 'fin_exemption' && d.cloture === 'absent') return "Fin de l'accès offert : déjà hors du groupe, exemption close."
+        if (regle === 'fin_exemption' && d.cloture === 'admin') return "Fin de l'accès offert : administrateur du groupe, gardé, exemption close."
+        if (regle === 'fin_exemption' && d.cloture === 'autre_droit') {
+          const r = typeof d.raison_droit === 'string' ? RAISONS_DROIT[d.raison_droit] : undefined
+          return `Fin de l'accès offert : gardé dans le groupe (${r ?? 'autre droit ouvert'}), exemption close.`
+        }
+        return `Sortie de fin d'accès offert non faite${motif ? ` (${motif})` : ''}.`
+      }
       return fait ? "Sortie du groupe (fin d'accès broker)." : `Sortie de fin d'accès broker non faite${motif ? ` (${motif})` : ''}.`
     case 'pause': {
       if (!fait) return `Pause non posée${motif ? ` (${motif})` : ''}.`
@@ -1284,6 +1296,8 @@ export function phraseGeste(g: GesteLu): string | null {
       if (regle === 'fin_fenetre_30j') return `Message de fin d'abonnement (paiement en retard de plus de 30 jours) envoyé${canal}.`
       if (regle === 'broker_j7') return `Rappel de fin d'accès broker envoyé${canal} (J-7).`
       if (regle === 'broker_fin_message') return `Message de fin d'accès broker envoyé${canal}.`
+      if (regle === 'fin_exemption_j7') return `Rappel de fin d'accès offert envoyé${canal} (J-7).`
+      if (regle === 'fin_exemption_message') return `Message de fin d'accès offert envoyé${canal}.`
       if (regle === REGLE_RAISON_SORTIE) return 'Raison de la sortie du groupe donnée (compte non relié à un abonnement actif).'
       return `Rappel envoyé${canal}.`
     }

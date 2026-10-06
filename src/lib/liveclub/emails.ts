@@ -140,6 +140,36 @@ export function modeleFinBroker(): ModeleMessage {
 }
 
 /**
+ * Exemption datee (Brice, 06/10) : rappel une semaine avant la date (le
+ * dernier jour d'acces, jusquau inclus), puis message le jour de la sortie.
+ */
+export function modeleRappelFinExemption(jusquau: string): ModeleMessage {
+  return {
+    sujet: 'Ton accès au Live Club se termine bientôt',
+    paragraphes: [
+      'Salut !',
+      `Ton accès au Live Club se termine le ${formaterDateFr(jusquau)}.`,
+      'Pour rester dans le groupe, abonne-toi avant cette date.',
+      texteAbonnement(),
+      `Une question ? Écris à ${SUPPORT}.`,
+    ],
+  }
+}
+
+export function modeleFinExemption(): ModeleMessage {
+  return {
+    sujet: 'Ton accès au Live Club est terminé',
+    paragraphes: [
+      'Salut !',
+      "Ton accès offert au Live Club est arrivé à son terme, donc tu sors du groupe Telegram. Merci d'avoir été là.",
+      "Pour revenir, abonne-toi, et on t'envoie de quoi rentrer dans le groupe.",
+      texteAbonnement(),
+      `Une question ? Écris à ${SUPPORT}.`,
+    ],
+  }
+}
+
+/**
  * Sortie d'un desabonne (seulement quand LIVECLUB_SORTIES_ACTIVES vaut '1') :
  * pourquoi, et comment revenir.
  */
@@ -347,6 +377,14 @@ export function emailRappelFinBroker(email: string, jusquau: string): Promise<Re
 
 export function emailFinBroker(email: string): Promise<ResultatEmail> {
   return envoyerModele(email, modeleFinBroker())
+}
+
+export function emailRappelFinExemption(email: string, jusquau: string): Promise<ResultatEmail> {
+  return envoyerModele(email, modeleRappelFinExemption(jusquau))
+}
+
+export function emailFinExemption(email: string): Promise<ResultatEmail> {
+  return envoyerModele(email, modeleFinExemption())
 }
 
 export function emailSortieDesabonne(email: string): Promise<ResultatEmail> {

@@ -231,3 +231,47 @@ facture envoyee (premierEchecFacture, pur.ts).
   subscription et void invoice non verifiables sans ecrire (roadmap : groupe
   Billing en ecriture depuis le 04/09) ; le passage le dira au premier cas
   reel. La reouverture par email passe par un jeton 'retour' de 30 jours.
+
+## Bot Live Club : une exemption datee vaut sortie programmee (06/10/2026, NON commite, NON deploye)
+
+Demande de Brice (06/10) : « dis clairement au bot de sortir cette personne au
+premier janvier ». Avant : une exemption echue ne protegeait plus, mais un
+compte relie a aucun abonnement n'etait jamais sorti.
+- Passage quotidien, tache (k) (tacheExemptions, passage.ts ; regles pures
+  phaseExemption, decisionRappelExemption, decisionFinExemption dans
+  passage-regles.ts). jusquau est INCLUS (comme exemptionActive) : la sortie
+  part le LENDEMAIN de la date. Jour de Paris ET current_date de la base
+  (jourLePlusAncien), sinon un passage lance entre minuit Paris et minuit UTC
+  verrait retirerDuLiveClub refuser pour « exempte ».
+- J-7 a J0 : rappel une fois (rappel 'fin_exemption_j7', details.exemption_id),
+  seulement a un compte present, ni admin, sans autre droit. Echue : compte
+  present, ni admin ni createur, droit 'non' SANS cette exemption
+  (droitLiveClub(tid, { exemptionIgnoree }), plus les abonnements des emails
+  connus) : sortie SANS ban par sortir() (plafond du passage), geste
+  'fin_acces' regle 'fin_exemption', puis exemption close (retire_le = now(),
+  retire_par laisse vide : uuid de compte, pas d'identite serveur ; l'acteur
+  cron:liveclub du journal dit qui a clos), puis message de fin (rappel
+  'fin_exemption_message', rattrape 7 jours en cas d'echec). Absent du groupe :
+  close, ni sortie ni message ('refuse', cloture 'absent'). Admin ou autre
+  droit : gardee et close ('refuse', cloture 'admin' ou 'autre_droit',
+  raison_droit). Droit ou presence inconnus : rien. Permanente : jamais.
+  SIMULE sans LIVECLUB_SORTIES_ACTIVES : lignes 'simule', rien de clos.
+- Messages : prive si le compte a ecrit au bot, sinon email SEULEMENT si connu
+  (cockpit_membre_emails du membre de l'exemption, puis le rattachement) ;
+  sinon rien (compte 'sans_moyen', aucune ligne). Fil Support : phraseGeste
+  (pur.ts) pour fin_exemption, fin_exemption_j7, fin_exemption_message.
+- Synthese : exemptions { rappels_j7, sorties, simulees, messages_fin,
+  closes_absent, gardees_autre_droit, sans_moyen, inconnus, echecs }.
+- Cockpit (depot workspace, NON commite, NON deploye) : sous la date de fin du
+  formulaire, la regle (« Apres cette date, le bot sort la personne... Vide =
+  exemption permanente. ») et la date de sortie calculee ; « sortie programmee
+  le ... » (lendemain de jusquau) dans la liste des exemptions et la fiche
+  membre, « sortie au prochain passage du bot » pour une echue pas encore close.
+- Etat en base au 06/10 (lecture seule) : 17 exemptions ouvertes, 16
+  permanentes, 1 datee (favorise, 2027-01-01, ni membre ni rattachement, bot
+  jamais demarre) : ni rappel ni message possibles, sortie le 2027-01-02 s'il
+  n'a toujours aucun droit. Aucun effet au deploiement.
+- Tests : verifier-liveclub.mjs 30 blocs (1 nouveau). tsc et eslint propres.
+- A suivre : la consigne de l'agent du cockpit (agent-cockpit.ts, lignes sur
+  cockpit_liveclub_exemptions et « qui sort qui ») dit encore « on ne sort
+  JAMAIS » un exempte : non touchee (chantier sans prompt), a completer.

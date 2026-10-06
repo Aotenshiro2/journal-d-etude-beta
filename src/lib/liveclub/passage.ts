@@ -28,11 +28,20 @@
 //   (j) RATTRAPAGE des emails de bienvenue : abonnement cree depuis moins de
 //       3 jours, sans compte Telegram ni email deja envoye. SIMULE sans la
 //       bascule (Metricgram envoie encore le sien) ;
+//   (k) EXEMPTIONS DATEES (Brice, 06/10) : une exemption datee vaut sortie
+//       programmee. Rappel J-7 avant la date, puis, le lendemain de la date
+//       (jusquau inclus), sortie SANS ban si le compte est present, ni admin
+//       ni createur, et sans autre droit ; l'exemption est alors close
+//       (retire_le, retire_par laisse vide : pas d'identite serveur en uuid).
+//       Absent du groupe, ou autre droit : on clot simplement. Une fois par
+//       exemption. SIMULEE sans la bascule. Une exemption permanente (sans
+//       date) n'est jamais concernee ;
 //   (d) purge des conversations privees de plus de 7 jours.
 //
 // A CHAQUE SORTIE REELLE (pause, fin d'acces broker, desabonne quand les
-// sorties sont actives), le membre recoit un message : pourquoi, et comment
-// revenir. En prive s'il a deja demarre le bot, sinon par email.
+// sorties sont actives, fin d'exemption), le membre recoit un message :
+// pourquoi, et comment revenir. En prive s'il a deja demarre le bot, sinon
+// par email (pour une exemption : seulement si un email est connu).
 //
 // Metricgram ne voit ni les pauses (Stripe laisse 'active') ni les acces
 // broker (aucun abonnement) : sur ces deux-la, on AGIT pour de vrai.
@@ -78,9 +87,10 @@ import { tracerGeste, tracerMessageBot } from './support-pont'
 import {
   emailRappelPause, emailDebutPauseSansReprise, emailRetour, emailRappelFinBroker, emailFinBroker,
   emailSortieDesabonne, emailRappelPrelevement, emailSortieImpaye, emailReouverture, emailFinFenetre, emailBienvenue,
+  emailRappelFinExemption, emailFinExemption,
   modeleRappelPause, modeleDebutPauseSansReprise, modeleRetour, modeleRappelFinBroker, modeleFinBroker,
   modeleSortieDesabonne, modeleRappelPrelevement, modeleRetourSortieAbusive, modeleSortieImpaye, modeleReouverture,
-  modeleFinFenetre,
+  modeleFinFenetre, modeleRappelFinExemption, modeleFinExemption,
   type ModeleMessage, type ResultatEmail,
 } from './emails'
 import {
@@ -94,8 +104,9 @@ import {
   prelevementAPrevenir, montantAAnnoncer, clePrelevement, jourParis, sortieAbusiveASignaler, cleSortieAbusive,
   droitCouvraitLaSortie, retourARetenter, decisionSortieImpaye, decisionFenetre, decisionReouverture,
   factureRegleeApresSortie, bienvenueARattraper,
-  FENETRE_FIN_BROKER_JOURS, FENETRE_RAPPEL_JOURS,
-  type FactureBreve, type Presence,
+  jourLePlusAncien, phaseExemption, decisionRappelExemption, decisionFinExemption,
+  FENETRE_FIN_BROKER_JOURS, FENETRE_RAPPEL_JOURS, RAPPEL_FIN_EXEMPTION_JOURS,
+  type FactureBreve, type Presence, type LectureExemption,
 } from './passage-regles'
 
 const ACTEUR = 'cron:liveclub'
@@ -150,6 +161,16 @@ export type SynthesePassage = {
   fenetre_30j: { simulees: number; resiliations: number; factures_annulees: number; factures_en_echec: number; messages: number; plus_a_resilier: number; reportees: number; deja_faits: number; inconnus: number; echecs: number }
   /** (j) Rattrapage des emails de bienvenue. */
   bienvenue: { simules: number; envoyes: number; deja_envoyes: number; deja_traites: number; rattaches: number; sans_email: number; inconnus: number; echecs: number }
+  /**
+   * (k) Exemptions datees (Brice, 06/10). rappels_j7 : rappels partis ;
+   * sorties : sorties reelles ; simulees : rappels et sorties simules sans
+   * l'interrupteur ; messages_fin : messages de fin partis (rattrapages
+   * compris) ; closes_absent : plus dans le groupe, exemption close sans
+   * sortie ni message ; gardees_autre_droit : abonnement, broker, acces
+   * manuel ou admin du groupe, exemption close sans sortie ; sans_moyen :
+   * rappel ou message impossible (bot jamais demarre, aucun email connu).
+   */
+  exemptions: { rappels_j7: number; sorties: number; simulees: number; messages_fin: number; closes_absent: number; gardees_autre_droit: number; sans_moyen: number; inconnus: number; echecs: number }
   purge: { conversations: number }
   /** Lignes de journal perdues (table ou contrainte pas encore migree). */
   journal_echecs: number
@@ -342,18 +363,31 @@ async function droitAvantSortie(
   telegramId: number,
   emails: (string | null)[],
 ): Promise<'oui' | 'non' | 'inconnu'> {
-  const d = await droitLiveClub(telegramId)
-  if (d.statut !== 'non') return d.statut
+  return (await droitAvantSortieDetaille(telegramId, emails)).statut
+}
+
+/**
+ * droitAvantSortie, avec la raison du 'oui' (exemption, abonnement, broker,
+ * acces manuel ; 'abonnement' aussi pour un abonnement trouve par l'email).
+ * exemptionIgnoree : la fin d'exemption juge le droit SANS cette exemption.
+ */
+async function droitAvantSortieDetaille(
+  telegramId: number,
+  emails: (string | null)[],
+  opts: { exemptionIgnoree?: string | null } = {},
+): Promise<{ statut: 'oui' | 'non' | 'inconnu'; raison: Droit['raison'] }> {
+  const d = await droitLiveClub(telegramId, opts)
+  if (d.statut !== 'non') return { statut: d.statut, raison: d.raison }
   const propres = [...new Set(emails.map(e => normaliserEmail(e)).filter((e): e is string => Boolean(e)))]
   for (const email of propres) {
     try {
       const abonnements = await abonnementsLiveClubParEmail(email)
-      if (abonnements.some(abonnementOuvreLeGroupe)) return 'oui'
+      if (abonnements.some(abonnementOuvreLeGroupe)) return { statut: 'oui', raison: 'abonnement' }
     } catch {
-      return 'inconnu'
+      return { statut: 'inconnu', raison: null }
     }
   }
-  return 'non'
+  return { statut: 'non', raison: null }
 }
 
 /**
@@ -2285,6 +2319,337 @@ async function tacheBienvenue(ctx: Contexte, abonnements: AbonnementResume[], pa
 }
 
 // ---------------------------------------------------------------------------
+// (k) Exemptions datees : sortie programmee (Brice, 06/10)
+// ---------------------------------------------------------------------------
+
+type LigneExemption = {
+  exemption_id: string
+  telegram_id: bigint
+  membre_id: string | null
+  motif: string
+  /** 'YYYY-MM-DD' (to_char : pas de decalage de fuseau sur une colonne date). */
+  jusquau: string
+  /** current_date de la base, 'YYYY-MM-DD' : celui de exemptionActive. */
+  aujourdhui_base: string
+}
+
+type ExemptionLue = { id: string; telegramId: number; membreId: string | null; motif: string; jusquau: string }
+
+/** Ce qui remplace la lecture quand le journal dit deja « fait » : la decision ne la regarde pas. */
+const LECTURE_INUTILE: LectureExemption = { presence: 'inconnu', intouchable: false, droit: 'inconnu' }
+
+/**
+ * Les emails connus d'un compte exempte, le plus sur d'abord : ceux du membre
+ * de l'exemption (cockpit_membre_emails, le principal en tete), puis ceux du
+ * rattachement du compte Telegram (son membre, son email, l'email de son
+ * client Stripe du compte melanie). Le premier sert au message quand le prive
+ * ne passe pas ; tous servent au droit (un abonnement pris sous l'une de ces
+ * adresses garde la personne). Jette si la base ne repond pas.
+ */
+async function emailsExemption(ctx: Contexte, membreId: string | null, siens: Rattache[]): Promise<string[]> {
+  const emails: (string | null)[] = []
+  const membres = [...new Set([membreId, ...siens.map(r => r.membreId)].filter((m): m is string => Boolean(m)))]
+  if (membres.length) {
+    const lignes = await prisma.$queryRaw<{ email: string }[]>`
+      select email from public.cockpit_membre_emails
+      where membre_id::text = any(${membres}::text[])
+      order by (membre_id::text = ${membreId}::text) desc nulls last, principal desc, verifie desc, vu_le desc
+      limit 10`
+    emails.push(...lignes.map(l => l.email))
+  }
+  for (const r of siens) {
+    emails.push(r.email)
+    if (r.compte == null || r.compte === 'melanie') emails.push(await emailClient(ctx, r.clientStripe))
+  }
+  return [...new Set(emails.map(e => normaliserEmail(e)).filter((e): e is string => Boolean(e)))]
+}
+
+/**
+ * Le compte a-t-il deja ecrit au bot (une ligne dans
+ * cockpit_liveclub_conversations) ? Un bot ne peut pas ecrire le premier.
+ * null si la table ne repond pas : on tente alors le prive quand meme.
+ */
+async function botDemarre(ctx: Contexte, telegramId: number): Promise<boolean | null> {
+  try {
+    const lignes = await prisma.$queryRaw<{ ok: number }[]>`
+      select 1 as ok from public.cockpit_liveclub_conversations where telegram_id = ${telegramId}::bigint limit 1`
+    return lignes.length > 0
+  } catch (err) {
+    erreur(ctx, relationAbsente(err) ? 'conversations_table_absente' : 'conversations_illisibles', err)
+    return null
+  }
+}
+
+/**
+ * Clot une exemption echue : retire_le = now(). retire_par reste vide (c'est
+ * un uuid de compte, le passage n'en a pas) : la ligne du journal, acteur
+ * cron:liveclub, dit qui a clos. false sur une panne (le passage suivant
+ * reprend).
+ */
+async function cloreExemption(ctx: Contexte, exemptionId: string): Promise<boolean> {
+  try {
+    await prisma.$executeRaw`
+      update public.cockpit_liveclub_exemptions set retire_le = now()
+      where exemption_id = ${exemptionId}::uuid and retire_le is null`
+    return true
+  } catch (err) {
+    erreur(ctx, 'exemptions_ecriture', err)
+    return false
+  }
+}
+
+/** Presence en direct, puis (seulement s'il est la et pas admin) le droit SANS cette exemption. */
+async function lireCompteExempte(
+  ex: ExemptionLue,
+  emails: string[],
+): Promise<LectureExemption & { statutTg: string | null; raison: Droit['raison'] }> {
+  const p = await presence(ex.telegramId)
+  const intouchable = estIntouchable(p)
+  if (p.etat !== 'oui' || intouchable) return { presence: p.etat, intouchable, droit: 'inconnu', statutTg: p.statut, raison: null }
+  const d = await droitAvantSortieDetaille(ex.telegramId, emails, { exemptionIgnoree: ex.id })
+  return { presence: 'oui', intouchable: false, droit: d.statut, statutTg: p.statut, raison: d.raison }
+}
+
+/**
+ * Prevenir un compte exempte : en prive s'il a deja demarre le bot, sinon
+ * par email SEULEMENT si un email est connu ; sinon rien (on ne peut pas).
+ * 'sans_moyen' = ni l'un ni l'autre, rien n'est reserve ni ecrit.
+ */
+async function prevenirExempte(
+  ctx: Contexte,
+  ex: ExemptionLue,
+  email: string | null,
+  r: { regle: 'fin_exemption_j7' | 'fin_exemption_message'; details: Record<string, unknown> },
+  m: ModeleMessage,
+  parEmail: (email: string) => Promise<ResultatEmail>,
+): Promise<'parti' | 'deja' | 'sans_moyen' | 'echec'> {
+  if (!email && (await botDemarre(ctx, ex.telegramId)) === false) return 'sans_moyen'
+  let reserve: bigint | null
+  try {
+    reserve = await reserverGeste({
+      cle: `liveclub:${r.regle}:${ex.id}`,
+      deja: Prisma.sql`
+        select 1 from public.cockpit_liveclub_gestes d
+        where d.geste = 'rappel' and d.regle = ${r.regle} and d.resultat = 'fait'
+          and d.details->>'exemption_id' = ${ex.id}`,
+      geste: 'rappel', regle: r.regle, telegramId: ex.telegramId, membreId: ex.membreId,
+      abonnementId: null, details: { exemption_id: ex.id, ...r.details },
+    })
+  } catch (err) {
+    erreur(ctx, 'journal_reservation', err)
+    return 'echec'
+  }
+  if (reserve === null) return 'deja'
+  const envoi = await prevenir(ctx, [ex.telegramId], email, m, parEmail)
+  await cloreReservation(ctx, reserve, envoi)
+  return envoi ? 'parti' : 'echec'
+}
+
+/**
+ * Une exemption DATEE vaut sortie programmee (Brice, 06/10 : « dis clairement
+ * au bot de sortir cette personne au premier janvier »). Pour chaque
+ * exemption non retiree dont la date tombe dans les 7 prochains jours ou est
+ * passee (jour de Paris, et current_date de la base : jourLePlusAncien) :
+ * - J-7 a J0 : rappel « ton acces se termine le X, pour rester abonne-toi »,
+ *   une fois, seulement a un compte present, ni admin, sans autre droit ;
+ * - echue (le lendemain de jusquau) : decisionFinExemption. Sortie SANS ban
+ *   (sortir : plafond du passage, retirerDuLiveClub), message de fin, puis
+ *   l'exemption est close. Absent : close, sans sortie ni message. Admin ou
+ *   autre droit (abonnement, broker, acces manuel) : gardee, close. Droit ou
+ *   presence inconnus : rien. Une fois par exemption (details.exemption_id).
+ * SIMULE sans sortiesActives() : une ligne 'simule' par exemption, rien de
+ * clos, rien d'envoye.
+ */
+async function tacheExemptions(ctx: Contexte, rattaches: Rattache[]) {
+  const s = ctx.s.exemptions
+  const reel = sortiesActives()
+  if (reel) await rattraperMessagesFinExemption(ctx, rattaches)
+  let lignes: LigneExemption[]
+  try {
+    lignes = await prisma.$queryRaw<LigneExemption[]>`
+      select exemption_id::text as exemption_id, telegram_id, membre_id::text as membre_id, motif,
+             to_char(jusquau, 'YYYY-MM-DD') as jusquau, to_char(current_date, 'YYYY-MM-DD') as aujourdhui_base
+      from public.cockpit_liveclub_exemptions
+      where retire_le is null and jusquau is not null
+        and jusquau <= current_date + ${RAPPEL_FIN_EXEMPTION_JOURS + 1}::int
+      order by jusquau
+      limit 200`
+  } catch (err) {
+    erreur(ctx, relationAbsente(err) ? 'exemptions_table_absente' : 'exemptions_illisibles', err)
+    return
+  }
+  if (!lignes.length) return
+  const parCompte = new Map<number, Rattache[]>()
+  for (const r of rattaches) parCompte.set(r.telegramId, [...parCompte.get(r.telegramId) ?? [], r])
+  const jourDuPassage = jourParis(ctx.maintenant.toISOString())
+
+  for (const l of lignes) {
+    if (tempsEcoule(ctx)) return
+    const tid = Number(l.telegram_id)
+    if (!Number.isSafeInteger(tid)) continue
+    const phase = phaseExemption({ jusquau: l.jusquau, retireLe: null }, jourLePlusAncien(jourDuPassage, l.aujourdhui_base))
+    if (phase !== 'rappel_j7' && phase !== 'echue') continue
+    // Deja sorti ce matin par une autre tache : le passage suivant le verra absent, et clora.
+    if (ctx.sortis.has(tid)) continue
+    const ex: ExemptionLue = { id: l.exemption_id, telegramId: tid, membreId: l.membre_id, motif: l.motif, jusquau: l.jusquau }
+    const detail = { cle: 'exemption_id', valeur: ex.id }
+    const resultats = reel ? ['fait'] : ['fait', 'simule']
+
+    let deja: boolean
+    try {
+      deja = phase === 'rappel_j7'
+        ? await gesteExiste({ geste: 'rappel', regle: 'fin_exemption_j7', resultats, telegramId: tid, detail })
+        : await gesteExiste({ geste: 'fin_acces', regle: 'fin_exemption', resultats, telegramId: tid, detail })
+    } catch (err) {
+      erreur(ctx, 'journal_illisible', err)
+      s.inconnus++
+      continue
+    }
+
+    let emails: string[] = []
+    let lecture: Awaited<ReturnType<typeof lireCompteExempte>> = { ...LECTURE_INUTILE, statutTg: null, raison: null }
+    if (!deja) {
+      try {
+        emails = await emailsExemption(ctx, ex.membreId, parCompte.get(tid) ?? [])
+      } catch (err) {
+        // Sans les emails, un abonnement pris sous l'un d'eux echapperait au
+        // droit : on ne decide rien.
+        erreur(ctx, 'emails_membre_illisibles', err)
+        s.inconnus++
+        continue
+      }
+      lecture = await lireCompteExempte(ex, emails)
+    }
+    const email = emails[0] ?? null
+    const base = { exemption_id: ex.id, jusquau: ex.jusquau, motif_exemption: ex.motif }
+    const contexte = { telegramId: tid, membreId: ex.membreId, abonnementId: null }
+
+    // 1. Rappel J-7 (jusqu'au jour meme : rattrapage d'un passage saute).
+    if (phase === 'rappel_j7') {
+      const d = decisionRappelExemption(phase, deja, lecture, reel)
+      if (d === 'inconnu') { s.inconnus++; continue }
+      if (d === 'simuler') {
+        await tracer(ctx, { geste: 'rappel', resultat: 'simule', regle: 'fin_exemption_j7', details: base }, contexte)
+        s.simulees++
+        continue
+      }
+      if (d !== 'envoyer') continue
+      const issue = await prevenirExempte(ctx, ex, email, { regle: 'fin_exemption_j7', details: { jusquau: ex.jusquau } },
+        modeleRappelFinExemption(ex.jusquau), e => emailRappelFinExemption(e, ex.jusquau))
+      if (issue === 'parti') s.rappels_j7++
+      else if (issue === 'sans_moyen') s.sans_moyen++
+      else if (issue === 'echec') s.echecs++
+      continue
+    }
+
+    // 2. Echue : sortie, ou cloture.
+    const d = decisionFinExemption(phase, deja, lecture, reel)
+    switch (d) {
+      case 'rien':
+        continue
+      case 'inconnu':
+        s.inconnus++
+        continue
+      case 'deja_sortie':
+        // Sortie deja faite (ou simulee) : on ne refait rien. En reel, la
+        // cloture avait echoue apres la sortie : on la refait, sans ligne.
+        if (reel && !(await cloreExemption(ctx, ex.id))) s.echecs++
+        continue
+      case 'simuler':
+        await tracer(ctx, { geste: 'fin_acces', resultat: 'simule', regle: 'fin_exemption', details: { ...base, statut_tg: lecture.statutTg } }, contexte)
+        s.simulees++
+        continue
+      case 'clore_absent':
+      case 'clore_admin':
+      case 'clore_autre_droit': {
+        const garde = d !== 'clore_absent'
+        // Une simulation n'ecrit rien d'autre que ses lignes 'simule' : on compte.
+        if (!reel) { if (garde) s.gardees_autre_droit++; else s.closes_absent++; continue }
+        if (!(await cloreExemption(ctx, ex.id))) { s.echecs++; continue }
+        const cloture = d === 'clore_absent' ? 'absent' : d === 'clore_admin' ? 'admin' : 'autre_droit'
+        await tracer(ctx, {
+          geste: 'fin_acces', resultat: 'refuse', regle: 'fin_exemption',
+          details: { ...base, cloture, statut_tg: lecture.statutTg, ...(d === 'clore_autre_droit' ? { raison_droit: lecture.raison } : {}) },
+        }, contexte)
+        if (garde) s.gardees_autre_droit++
+        else s.closes_absent++
+        continue
+      }
+      case 'sortir': {
+        const issue = await sortir(ctx, tid, {
+          geste: 'fin_acces', regle: 'fin_exemption', membreId: ex.membreId,
+          details: { ...base, statut_tg: lecture.statutTg },
+        })
+        if (issue === 'plafond') continue
+        if (issue !== 'fait') { s.echecs++; continue }
+        s.sorties++
+        // Close APRES la sortie : close avant, une sortie ratee ne serait
+        // jamais retentee (le passage ne lit que les exemptions ouvertes).
+        if (!(await cloreExemption(ctx, ex.id))) s.echecs++
+        const m = await prevenirExempte(ctx, ex, email, { regle: 'fin_exemption_message', details: {} },
+          modeleFinExemption(), e => emailFinExemption(e))
+        if (m === 'parti') s.messages_fin++
+        else if (m === 'sans_moyen') s.sans_moyen++
+        else if (m === 'echec') s.echecs++
+        continue
+      }
+    }
+  }
+}
+
+/**
+ * Messages de fin d'exemption rates (ligne 'echec', aucune 'fait') pour une
+ * sortie 'fin_exemption' faite depuis moins de 7 jours : on retente, si le
+ * compte est toujours hors du groupe. L'exemption est deja close : on part du
+ * journal, pas de la table des exemptions. La reservation garde l'unicite.
+ */
+async function rattraperMessagesFinExemption(ctx: Contexte, rattaches: Rattache[]) {
+  const s = ctx.s.exemptions
+  let lignes: { telegram_id: bigint; membre_id: string | null; exemption_id: string; motif: string | null; jusquau: string | null }[]
+  try {
+    lignes = await prisma.$queryRaw`
+      select distinct on (g.details->>'exemption_id')
+        g.telegram_id, g.membre_id::text as membre_id, g.details->>'exemption_id' as exemption_id,
+        g.details->>'motif_exemption' as motif, g.details->>'jusquau' as jusquau
+      from public.cockpit_liveclub_gestes g
+      where g.geste = 'fin_acces' and g.regle = 'fin_exemption' and g.resultat = 'fait'
+        and g.telegram_id is not null and g.details->>'exemption_id' is not null
+        and g.fait_le > now() - interval '7 days'
+        and exists (
+          select 1 from public.cockpit_liveclub_gestes e
+          where e.geste = 'rappel' and e.regle = 'fin_exemption_message' and e.resultat = 'echec'
+            and e.details->>'exemption_id' = g.details->>'exemption_id')
+        and not exists (
+          select 1 from public.cockpit_liveclub_gestes f
+          where f.geste = 'rappel' and f.regle = 'fin_exemption_message' and f.resultat = 'fait'
+            and f.details->>'exemption_id' = g.details->>'exemption_id')
+      order by g.details->>'exemption_id', g.fait_le desc
+      limit 100`
+  } catch (err) {
+    erreur(ctx, 'journal_illisible', err)
+    return
+  }
+  for (const l of lignes) {
+    if (tempsEcoule(ctx)) return
+    const tid = Number(l.telegram_id)
+    if (!Number.isSafeInteger(tid)) continue
+    if ((await presence(tid)).etat !== 'non') continue
+    const ex: ExemptionLue = { id: l.exemption_id, telegramId: tid, membreId: l.membre_id, motif: l.motif ?? '', jusquau: l.jusquau ?? '' }
+    let emails: string[]
+    try {
+      emails = await emailsExemption(ctx, ex.membreId, rattaches.filter(r => r.telegramId === tid))
+    } catch (err) {
+      erreur(ctx, 'emails_membre_illisibles', err)
+      continue
+    }
+    const m = await prevenirExempte(ctx, ex, emails[0] ?? null, { regle: 'fin_exemption_message', details: {} },
+      modeleFinExemption(), e => emailFinExemption(e))
+    if (m === 'parti') s.messages_fin++
+    else if (m === 'echec') s.echecs++
+  }
+}
+
+// ---------------------------------------------------------------------------
 // (d) Purge des conversations privees
 // ---------------------------------------------------------------------------
 
@@ -2334,6 +2699,7 @@ export async function passageQuotidien(maintenant: Date = new Date()): Promise<S
       reouvertures: { liens_prives: 0, emails: 0, deja_revenus: 0, deja_faits: 0, sans_droit: 0, inconnus: 0, echecs: 0 },
       fenetre_30j: { simulees: 0, resiliations: 0, factures_annulees: 0, factures_en_echec: 0, messages: 0, plus_a_resilier: 0, reportees: 0, deja_faits: 0, inconnus: 0, echecs: 0 },
       bienvenue: { simules: 0, envoyes: 0, deja_envoyes: 0, deja_traites: 0, rattaches: 0, sans_email: 0, inconnus: 0, echecs: 0 },
+      exemptions: { rappels_j7: 0, sorties: 0, simulees: 0, messages_fin: 0, closes_absent: 0, gardees_autre_droit: 0, sans_moyen: 0, inconnus: 0, echecs: 0 },
       purge: { conversations: 0 },
       journal_echecs: 0,
       messages_perdus: 0,
@@ -2378,10 +2744,19 @@ export async function passageQuotidien(maintenant: Date = new Date()): Promise<S
     await etape('reouvertures', () => tacheReouvertures(ctx, liste, parClient))
     await etape('fenetre_30j', () => tacheFenetre(ctx, liste, parClient))
     await etape('desabonnes', () => tacheDesabonnes(ctx, liste, parClient))
+    // Exemptions datees APRES les impayes et les desabonnes : un compte qui
+    // releve aussi de l'un d'eux recoit le message le plus precis (facture,
+    // abonnement termine) ; l'exemption est close au passage suivant (absent).
+    // Le droit s'y relit en direct, sans la liste Stripe.
+    await etape('exemptions', () => tacheExemptions(ctx, rattaches))
     await etape('prelevements', () => tachePrelevements(ctx, liste, parClient))
     await etape('bienvenue', () => tacheBienvenue(ctx, liste, parClient))
   } else {
     await etape('broker', () => tacheBroker(ctx))
+    // Stripe illisible : un compte relie, ou dont un email est connu, lit
+    // Stripe pour son droit, qui vaut alors 'inconnu' (aucune sortie). Un
+    // compte sans aucun lien ne depend pas de Stripe : meme decision qu'avant.
+    await etape('exemptions', () => tacheExemptions(ctx, rattaches))
   }
   // Le droit s'y relit en direct (droitLiveClub) : la liste Stripe du passage
   // n'est pas necessaire, une panne Stripe donne 'inconnu' et rien ne part.

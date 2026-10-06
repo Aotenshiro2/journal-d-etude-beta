@@ -38,13 +38,18 @@ export type Droit = {
 type LigneAcces = { acces_id: string; jusquau: Date }
 type LigneManuel = { acces_jusquau: Date }
 
-export async function droitLiveClub(telegramId: number): Promise<Droit> {
+/**
+ * exemptionIgnoree (06/10) : le passage quotidien juge la fin d'UNE exemption
+ * datee ; il demande le droit SANS elle (abonnement, broker, acces manuel,
+ * une autre exemption), sinon elle se protegerait elle-meme jusqu'a sa date.
+ */
+export async function droitLiveClub(telegramId: number, opts: { exemptionIgnoree?: string | null } = {}): Promise<Droit> {
   const erreurs: string[] = []
   const base: Omit<Droit, 'statut' | 'raison'> = {}
 
   // 1. Exemption active (fondateur, admin, equipe, favorise).
   try {
-    const ex = await exemptionActive(telegramId)
+    const ex = await exemptionActive(telegramId, opts.exemptionIgnoree ?? null)
     if (ex) return { statut: 'oui', raison: 'exemption', ...(ex.jusquau ? { fin: dateIso(ex.jusquau) } : {}) }
   } catch (err) {
     erreurs.push(`exemptions: ${messageErreur(err)}`)

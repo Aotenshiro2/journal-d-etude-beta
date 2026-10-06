@@ -389,6 +389,109 @@ export function brokerFini(jusquau: string, maintenant: Date): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Exemption datee = sortie programmee (Brice, 06/10). jusquau est INCLUS,
+// comme partout ailleurs (exemptionActive : jusquau >= current_date) :
+// l'exemption protege encore ce jour-la, elle est echue le lendemain, et le
+// passage de ce lendemain sort la personne si elle n'a pas d'autre droit.
+// Une exemption sans date (permanente) n'est jamais concernee.
+// ---------------------------------------------------------------------------
+
+/** Le rappel de fin d'exemption part dans les 7 jours qui precedent la date (rattrapage compris). */
+export const RAPPEL_FIN_EXEMPTION_JOURS = 7
+
+/** Jours pleins du jour `de` au jour `a` ('YYYY-MM-DD'), negatif si `a` est passe. */
+function joursEntreJours(de: string, a: string): number {
+  return Math.round((Date.parse(`${a.slice(0, 10)}T00:00:00Z`) - Date.parse(`${de.slice(0, 10)}T00:00:00Z`)) / JOUR_MS)
+}
+
+/**
+ * Le plus ancien de deux jours 'YYYY-MM-DD'. Le passage juge au jour de
+ * Paris, mais retirerDuLiveClub et droitLiveClub jugent au current_date de
+ * la base (UTC) : une exemption n'est echue que quand les deux le disent,
+ * sinon un passage lance entre minuit a Paris et minuit UTC verrait le
+ * retrait refuse pour « exempte ». A 7 h UTC (le cron), les deux concordent.
+ */
+export function jourLePlusAncien(a: string, b: string | null | undefined): string {
+  const x = a.slice(0, 10)
+  const y = b ? b.slice(0, 10) : null
+  return y && /^\d{4}-\d{2}-\d{2}$/.test(y) && y < x ? y : x
+}
+
+export type PhaseExemption = 'permanente' | 'retiree' | 'en_cours' | 'rappel_j7' | 'echue'
+
+/** Ou en est une exemption au jour `aujourdhui` ('YYYY-MM-DD'). */
+export function phaseExemption(e: { jusquau: string | null; retireLe: string | null }, aujourdhui: string): PhaseExemption {
+  if (e.retireLe) return 'retiree'
+  if (!e.jusquau || !/^\d{4}-\d{2}-\d{2}/.test(e.jusquau)) return 'permanente'
+  const n = joursEntreJours(aujourdhui, e.jusquau)
+  if (n < 0) return 'echue'
+  return n <= RAPPEL_FIN_EXEMPTION_JOURS ? 'rappel_j7' : 'en_cours'
+}
+
+/** Ce qu'on lit d'un compte avant de decider (presence en direct, droit hors de CETTE exemption). */
+export type LectureExemption = {
+  presence: 'oui' | 'non' | 'inconnu'
+  /** Createur ou admin du groupe (estIntouchable) : jamais sorti. */
+  intouchable: boolean
+  /** droitLiveClub sans compter cette exemption, plus les abonnements des emails connus. */
+  droit: 'oui' | 'non' | 'inconnu'
+}
+
+export type DecisionRappelExemption = 'rien' | 'deja_fait' | 'inconnu' | 'inutile' | 'simuler' | 'envoyer'
+
+/**
+ * Rappel J-7 avant la fin d'une exemption datee : « ton acces se termine le
+ * X, pour rester abonne-toi ». Une fois par exemption (dejaFait : une ligne
+ * 'fait', ou 'simule' tant que reel est faux). Seulement a quelqu'un qui est
+ * dans le groupe et qui sortira vraiment : absent, admin ou autre droit =
+ * inutile. Presence ou droit inconnus : rien, le passage suivant relit.
+ * reel = sortiesActives() : sans lui, le rappel est SIMULE (la sortie aussi).
+ */
+export function decisionRappelExemption(
+  phase: PhaseExemption,
+  dejaFait: boolean,
+  l: LectureExemption,
+  reel: boolean,
+): DecisionRappelExemption {
+  if (phase !== 'rappel_j7') return 'rien'
+  if (dejaFait) return 'deja_fait'
+  if (l.presence === 'inconnu') return 'inconnu'
+  if (l.presence === 'non' || l.intouchable) return 'inutile'
+  if (l.droit === 'inconnu') return 'inconnu'
+  if (l.droit === 'oui') return 'inutile'
+  return reel ? 'envoyer' : 'simuler'
+}
+
+export type DecisionFinExemption =
+  | 'rien' | 'deja_sortie' | 'inconnu' | 'clore_absent' | 'clore_admin' | 'clore_autre_droit' | 'simuler' | 'sortir'
+
+/**
+ * L'exemption est echue : sortie SANS ban du compte present, ni admin ni
+ * createur, sans autre droit (abonnement, periode payee, acces broker, acces
+ * manuel). Une fois par exemption (dejaSortie : une ligne 'fin_acces'
+ * 'fin_exemption' 'fait', ou 'simule' tant que reel est faux ; l'appelant
+ * clot alors l'exemption sans rien refaire). Absent du groupe : on clot, sans
+ * sortie ni message. Admin ou autre droit : gardee, on clot. Presence ou droit
+ * inconnus : rien. reel = sortiesActives() : sans lui, SIMULEE, et rien n'est
+ * clos (une simulation n'ecrit que son journal).
+ */
+export function decisionFinExemption(
+  phase: PhaseExemption,
+  dejaSortie: boolean,
+  l: LectureExemption,
+  reel: boolean,
+): DecisionFinExemption {
+  if (phase !== 'echue') return 'rien'
+  if (dejaSortie) return 'deja_sortie'
+  if (l.presence === 'inconnu') return 'inconnu'
+  if (l.presence === 'non') return 'clore_absent'
+  if (l.intouchable) return 'clore_admin'
+  if (l.droit === 'inconnu') return 'inconnu'
+  if (l.droit === 'oui') return 'clore_autre_droit'
+  return reel ? 'sortir' : 'simuler'
+}
+
+// ---------------------------------------------------------------------------
 // Presence dans le groupe (reponse brute de getChatMember)
 // ---------------------------------------------------------------------------
 
