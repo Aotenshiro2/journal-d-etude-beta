@@ -458,7 +458,7 @@ async function lienEnvoyeRecemment(telegramId: number): Promise<boolean> {
 
 type OptionsRetour = {
   /** D'ou vient la demande (details du journal). */
-  declencheur: 'start' | 'menu' | 'jeton_invalide' | 'bouton' | 'verification'
+  declencheur: 'start' | 'menu' | 'jeton_invalide' | 'bouton' | 'verification' | 'texte'
   /** Texte place avant l'explication (accueil, lien expire...). */
   entete?: string
   /** Boutons ajoutes sous le lien (le menu, sur /start et /menu). */
@@ -481,12 +481,19 @@ type OptionsRetour = {
  *
  * Sur un clic de bouton (`declencheur` 'bouton'), un lien deja envoye dans
  * les 10 dernieres minutes suffit : pas un lien neuf par clic.
+ *
+ * Sur un message ecrit (`declencheur` 'texte', 06/10, Julien : « reintegre
+ * moi sur le groupe » partait a l'agent, qui n'a pas d'outil pour le lien) :
+ * le lien seulement si le droit est 'oui' et l'absence du groupe certaine,
+ * pas plus d'une fois par 10 minutes ; sinon rien, et l'agent repond.
  */
 async function proposerRetourAuGroupe(chat: number, u: Utilisateur, updateId: number, o: OptionsRetour): Promise<boolean> {
-  if (o.declencheur === 'bouton' && await lienEnvoyeRecemment(u.id)) return false
+  const surTexte = o.declencheur === 'texte'
+  if ((o.declencheur === 'bouton' || surTexte) && await lienEnvoyeRecemment(u.id)) return false
   const presence = await estDansLeGroupe(u.id)
   if (presence === 'oui') return false
   const droit = o.droit ?? await droitLiveClub(u.id)
+  if (surTexte && (droit.statut !== 'oui' || presence !== 'non')) return false
 
   const contexte = { telegramId: u.id, membreId: droit.membreId ?? null, acteur: ACTEUR_BOT_MEMBRE, abonnementId: droit.abonnementId ?? null }
   const avant = o.entete ? `${o.entete}\n\n` : ''
@@ -834,11 +841,19 @@ async function traiterNonRattache(chat: number, u: Utilisateur, texte: string, u
 async function traiterTexteLibre(chat: number, u: Utilisateur, texte: string, updateId: number): Promise<void> {
   const r = await rattachementOuNull(u.id)
   if (r && r !== 'illisible') {
+    // (06/10) Droit ouvert mais hors du groupe : le lien d'abord, l'agent
+    // n'a pas d'outil pour le donner. Le message du membre est trace avant.
+    await versSupport(u.id, r, 'membre', texte)
+    if (await proposerRetourAuGroupe(chat, u, updateId, { declencheur: 'texte', boutons: clavierMenu(), reprendre: true })) return
     await converserAvecAgent(chat, u, texte, r, clavierMenu())
     return
   }
   const profil = await profilSansRattachement(u.id, r)
   if (profil.parcours === 'acces_offert') {
+    await versSupport(u.id, null, 'membre', masquerCodes(texte))
+    if (await proposerRetourAuGroupe(chat, u, updateId, {
+      declencheur: 'texte', boutons: clavierAccesOffert(), reprendre: true, droit: profil.droit,
+    })) return
     await converserAvecAgent(chat, u, texte, null, clavierAccesOffert(), contexteAccesOffert(profil.acces.texte))
     return
   }
@@ -855,7 +870,8 @@ async function traiterTexteLibre(chat: number, u: Utilisateur, texte: string, up
  * (r null : son message va au fil Support codes masques, comme tout compte
  * non rattache). `clavier` : le menu joint aux replis (menu complet, ou celui
  * de l'acces offert). `contexte` : la situation d'un acces offert, donnee a
- * l'agent d'emblee (contexteAccesOffert, prompt-membre.ts).
+ * l'agent d'emblee (contexteAccesOffert, prompt-membre.ts). Le message du
+ * membre est deja trace au fil Support par l'appelant (traiterTexteLibre).
  */
 async function converserAvecAgent(
   chat: number,
@@ -865,7 +881,6 @@ async function converserAvecAgent(
   clavier: Bouton[][],
   contexte?: string,
 ): Promise<void> {
-  await versSupport(u.id, r, 'membre', r ? texte : masquerCodes(texte))
   const repondre = repondeur(chat, u.id, r)
 
   if (await estEnAttenteHumain(u.id)) {
