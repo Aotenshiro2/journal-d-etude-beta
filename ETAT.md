@@ -343,3 +343,37 @@ Trois problemes reels (Brice, 08/10).
   (/api/cockpit/liveclub/membre) ne verifie toujours pas le droit ; le bouton
   « Contacter l'équipe » d'un compte de l'equipe passe encore le fil en
   attente d'un humain.
+
+## Commissions, depenses et repartition Brice / Mel (08/10/2026, NON commite, NON deploye)
+
+Regles de Brice du 08/10 (deux cotes, 70/30 a celui qui apporte la vente,
+Saro hors calcul, base = encaisse - frais Stripe - remboursements -
+intervenants dates, commission comptee le mois ou elle est RECUE et qui glisse
+tant qu'elle est attendue, depenses par cote ou communes, solde en grand
+livre, mois de Paris).
+- Base : migration `20261008170000_cockpit_repartition.sql` (ECRITE, PAS
+  APPLIQUEE) : cockpit_partenaires, cockpit_partenaire_taux (dates, une ligne
+  par changement), cockpit_commissions (depot relie a acces_id, taux FIGE,
+  attendue/recue/perdue), cockpit_intervenants (dates), cockpit_depenses,
+  cockpit_reglements. Lecture is_cockpit_member(), insertion navigateur
+  (pose_par = auth.uid()) sauf commissions (serveur seulement), retrait par
+  retire_le, statut d'une commission modifiable.
+- Calcul PUR : src/lib/repartition/pur.ts (centimes, partage au centime,
+  solde de Brice = parts - en main, reglements deduits). Tests :
+  scripts/verifier-repartition.mjs (15 blocs).
+- Serveur : src/lib/repartition/serveur.ts (lecture, controle avant carte,
+  execution). Route de lecture /api/cockpit/repartition pour le cockpit (le
+  bundle du cockpit n'embarque aucune regle de partage).
+- Agent du Cockpit : 7 outils a carte (proposer_depot_broker, qui pose
+  l'acces 6 mois par acces.ts puis inscrit le depot ;
+  proposer_commission_affiliation, proposer_marquer_commission,
+  proposer_taux_partenaire, proposer_intervenant, proposer_depense,
+  proposer_reglement) et 1 lecture sans carte (repartition_du_mois). Taux
+  inconnu = l'outil le dit au modele, qui le demande avant tout.
+- Frais Stripe : DEJA collectes (balance_transaction, collect_stripe.py et
+  push_membres_supabase.py ; lecture seule du 08/10 : 476 paiements Stripe
+  sur 476 avec frais). Rien ajoute. PayPal (37 paiements 2025, sans compte)
+  n'est pas compte et l'ecran le signale.
+- A suivre : appliquer la migration, deployer le journal puis le cockpit ;
+  aucun eval du prompt de l'agent ; les taux de RaiseFx sont a donner par
+  Melanie.

@@ -26,6 +26,9 @@ import {
 } from '@/lib/liveclub/pur'
 import { PRODUITS_LIVECLUB, nomBot } from '@/lib/liveclub/config'
 import { tracerGeste } from '@/lib/liveclub/support-pont'
+import {
+  estTypeRepartition, lireParamsRepartition, resumeRepartition, jourParis, moisParis, type TypeRepartition,
+} from '@/lib/repartition/pur'
 
 // La regle de la pause vit dans liveclub/pur.ts (testable sans base) ; elle
 // est reexportee ici pour les appelants de stripe-actions (29/09).
@@ -131,22 +134,33 @@ export type ActionAgent = {
     | 'retirer_telegram' | 'reintegrer_telegram'
     | 'pause_abonnement' | 'reprise_abonnement'
     | 'acces_broker' | 'exemption'
+    // La repartition Brice / Melanie (08/10) : depots, commissions, taux,
+    // intervenants, depenses, reglements (repartition/pur.ts et serveur.ts).
+    | TypeRepartition
   // 'telegram' pour les actions du groupe Live Club (retrait, reintegration,
   // acces broker, exemption) : pas un compte Stripe, mais la carte de
-  // confirmation affiche d'ou vient le pouvoir.
-  compte: CompteStripe | 'telegram'
+  // confirmation affiche d'ou vient le pouvoir. 'cockpit' pour la
+  // repartition : des lignes dans les tables du cockpit, aucun compte externe
+  // (sauf l'acces broker que pose un depot, via acces.ts).
+  compte: CompteStripe | 'telegram' | 'cockpit'
   params: Record<string, unknown>
 }
 
 /**
  * Les parametres d'une action tels qu'ils peuvent aller dans un log : le
  * nombre d'adresses d'un acces broker (jamais les adresses), une exemption
- * sans sa note.
+ * sans sa note, un depot sans l'email ni le client.
  */
 export function paramsPourLog(a: ActionAgent): Record<string, unknown> {
   if (a.type === 'acces_broker') return { emails: ((a.params.emails as string[]) ?? []).length }
   if (a.type === 'exemption') {
     return { telegram_id: a.params.telegram_id, motif: a.params.motif, jusquau: a.params.jusquau ?? null }
+  }
+  if (a.type === 'depot_broker' || a.type === 'commission_affiliation') {
+    return { partenaire: a.params.partenaire, montant: a.params.montant ?? null, le: a.params.le }
+  }
+  if (estTypeRepartition(a.type)) {
+    return Object.fromEntries(Object.entries(a.params).filter(([k]) => k !== 'note' && k !== 'qui'))
   }
   return a.params
 }
@@ -545,6 +559,15 @@ export function validerAction(brut: unknown): ActionAgent | string {
   if (!a.params || typeof a.params !== 'object') return 'Paramètres manquants.'
   const p = a.params
 
+  // La repartition (08/10) : validation stricte dans repartition/pur.ts, au
+  // jour et au mois de Paris. Aucun compte Stripe.
+  if (estTypeRepartition(a.type)) {
+    const maintenant = new Date()
+    const lu = lireParamsRepartition(a.type, p, { aujourdhui: jourParis(maintenant), moisCourant: moisParis(maintenant) })
+    if (typeof lu === 'string') return lu
+    return { type: a.type, compte: 'cockpit', params: lu }
+  }
+
   // Les actions du groupe Telegram n'ont pas de compte Stripe.
   if (a.type === 'retirer_telegram' || a.type === 'reintegrer_telegram') {
     const telegramId = lireTelegramId(p.telegram_id)
@@ -678,6 +701,7 @@ export function validerAction(brut: unknown): ActionAgent | string {
 /** Une phrase qui dit ce que l'action va faire, pour la carte de confirmation. */
 export function resumeAction(a: ActionAgent): string {
   const p = a.params
+  if (estTypeRepartition(a.type)) return resumeRepartition(a.type, p)
   if (a.type === 'code_promo') {
     const reduc = p.pourcentage != null
       ? `${p.pourcentage} %`
@@ -758,6 +782,14 @@ export class RefusAction extends Error {
  * (agent:<uuid> depuis les deux canaux de l'agent).
  */
 export async function executerAction(a: ActionAgent, acteur = 'agent'): Promise<string> {
+  // ── Repartition Brice / Melanie (08/10) ───────────────────────────────────
+  // Depots, commissions, taux, intervenants, depenses, reglements. Import
+  // dynamique : repartition/serveur.ts importe ce fichier (RefusAction).
+  if (estTypeRepartition(a.type)) {
+    const { executerActionRepartition } = await import('@/lib/repartition/serveur')
+    return executerActionRepartition(a, acteur)
+  }
+
   // ── Groupe Telegram ───────────────────────────────────────────────────────
   // Memes fonctions que le bouton du cockpit : memes refus (admin, exempte),
   // meme journal. Le lien d'invitation revient a l'humain dans la phrase de
