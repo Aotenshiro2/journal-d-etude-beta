@@ -1107,8 +1107,9 @@ async function tacheDesabonnes(ctx: Contexte, abonnements: AbonnementResume[], p
       }
       if (!debutImpaye) { s.inconnus++; continue }
     }
-    // La grace part de max(fin, fin payee) : un membre qui a paye en retard
-    // apres la resiliation garde sa periode payee, puis 7 jours (finAbonnement).
+    // La fin retenue est max(fin, fin payee) : un membre qui a paye en retard
+    // apres la resiliation garde sa periode payee (finAbonnement). Sortie au
+    // premier passage qui suit (GRACE_JOURS = 0 depuis le 08/10).
     if (!desabonneHorsGrace(a, ctx.maintenant, GRACE_JOURS, debutImpaye)) continue
     for (const r of rattaches) {
       if (tempsEcoule(ctx)) return

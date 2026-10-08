@@ -306,14 +306,15 @@ test('cas reel 29/09 : resilie par Stripe le 21/09, paye en retard le 28/09 pour
   assert.ok(!abonnementOuvreLeGroupeLe(r, ms('2026-10-08T07:00:00Z')))
   assert.equal(meilleurAbonnement([r], ms('2026-10-08T07:00:00Z')), null)
 
-  // Passage quotidien (cron 7 h UTC) : grace de 7 jours depuis la fin payee,
-  // pas depuis ended_at. Simulation de sortie seulement apres le 14/10.
-  assert.equal(GRACE_JOURS, 7)
+  // Passage quotidien (cron 7 h UTC) : sortie a la fin de la periode payee
+  // (GRACE_JOURS = 0, Brice 08/10), pas a ended_at. Fin payee le 07/10 a
+  // 14 h : encore dedans le 07/10 a 7 h, sortie au passage du 08/10.
+  assert.equal(GRACE_JOURS, 0)
   assert.equal(finAbonnement(r), '2026-10-07T14:00:00.000Z')
-  for (const jour of ['2026-09-29', '2026-10-07', '2026-10-08', '2026-10-14']) {
+  for (const jour of ['2026-09-29', '2026-10-07']) {
     assert.ok(!desabonneHorsGrace(r, new Date(`${jour}T07:00:00Z`), GRACE_JOURS), jour)
   }
-  assert.ok(desabonneHorsGrace(r, new Date('2026-10-15T07:00:00Z'), GRACE_JOURS))
+  assert.ok(desabonneHorsGrace(r, new Date('2026-10-08T07:00:00Z'), GRACE_JOURS))
 
   // Meme abonnement SANS le paiement du 28/09 (derniere facture impayee) :
   // l'ancien comportement reste, droit 'non' et grace depuis ended_at (sortie
@@ -347,7 +348,7 @@ test('cas reel 29/09 : resilie par Stripe le 21/09, paye en retard le 28/09 pour
   // Constat relecteur 29/09 : seule une facture payee APRES la resiliation prolonge.
   // a) Resiliation immediate par l'admin le 10/09 avec remboursement : la
   //    facture reste 'paid' (payee le 07/09, avant la resiliation). Pas de
-  //    prolongation, sortie a ended_at + 7 jours comme avant.
+  //    prolongation, sortie au premier passage apres ended_at.
   const le10 = sec('2026-09-10T10:00:00Z')
   const immediate = resumerAbonnement({
     ...brut, canceled_at: le10, ended_at: le10,
@@ -356,8 +357,8 @@ test('cas reel 29/09 : resilie par Stripe le 21/09, paye en retard le 28/09 pour
   assert.equal(immediate.payeJusquau, null)
   assert.ok(!abonnementOuvreLeGroupeLe(immediate, ms('2026-09-11T07:00:00Z')))
   assert.equal(finAbonnement(immediate), '2026-09-10T10:00:00.000Z')
-  assert.ok(!desabonneHorsGrace(immediate, new Date('2026-09-17T07:00:00Z'), GRACE_JOURS))
-  assert.ok(desabonneHorsGrace(immediate, new Date('2026-09-18T07:00:00Z'), GRACE_JOURS))
+  assert.ok(!desabonneHorsGrace(immediate, new Date('2026-09-10T07:00:00Z'), GRACE_JOURS))
+  assert.ok(desabonneHorsGrace(immediate, new Date('2026-09-11T07:00:00Z'), GRACE_JOURS))
   // b) Facture a 0 payee apres la resiliation (coupon a 100 %, solde crediteur) : rien d'encaisse.
   assert.equal(finPayeeTerminee({ ...brut, latest_invoice: { ...facturePayee, amount_paid: 0 } }), null)
   const factureSansMontant = { ...facturePayee }

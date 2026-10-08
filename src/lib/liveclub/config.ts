@@ -61,8 +61,13 @@ export function texteRaisonSortie(): string {
     + `Pas d'abonnement en cours ? ${texteAbonnement()}`
 }
 
-/** Jours de grace apres la fin d'un abonnement, comme Metricgram. */
-export const GRACE_JOURS = 7
+/**
+ * Jours de grace apres la fin d'un abonnement. 0 depuis le 08/10 (Brice) :
+ * un arret sort a la fin de la periode payee, au premier passage du matin qui
+ * suit ; les 7 jours venaient de Metricgram. Le delai des impayes est a part
+ * (5 jours apres le premier echec, etatImpaye dans pur.ts).
+ */
+export const GRACE_JOURS = 0
 /** Plafond de sorties REELLES par passage quotidien. */
 export const PLAFOND_SORTIES_PASSAGE = 20
 /** Plafond de messages IA par membre et par jour. */
@@ -107,8 +112,8 @@ export function sortiesActives(): boolean {
 /**
  * Interrupteur SEPARE de la sortie des impayes a 5 jours (Brice, 30/09) :
  * Metricgram ne sort pas un abonnement past_due (il n'agit qu'une fois
- * l'abonnement non actif, apres environ 14 jours de relances et 7 jours de
- * grace), donc ce geste peut s'activer avant la bascule sans conflit.
+ * l'abonnement non actif, apres environ 14 jours de relances et ses 7 jours
+ * de grace), donc ce geste pouvait s'activer avant la bascule sans conflit.
  * LIVECLUB_SORTIES_IMPAYES === '1', ou la bascule complete. Il ne commande
  * QUE la sortie reelle des impayes et son message : la fenetre de 30 jours,
  * le rattrapage des emails de bienvenue et les desabonnes restent sous

@@ -94,7 +94,7 @@ export function finAbonnement(a: AbonnementResume, debutImpaye: string | null = 
   return Date.parse(a.payeJusquau) > Date.parse(fin) ? a.payeJusquau : fin
 }
 
-/** Abonnement termine depuis plus de graceJours jours (GRACE_JOURS de config.ts, 7 comme Metricgram). */
+/** Abonnement termine depuis plus de graceJours jours (GRACE_JOURS de config.ts : 0, sortie a la fin de la periode payee). */
 export function desabonneHorsGrace(
   a: AbonnementResume,
   maintenant: Date,
