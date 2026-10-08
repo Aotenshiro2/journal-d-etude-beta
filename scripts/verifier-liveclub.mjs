@@ -23,7 +23,11 @@ import {
   JOURS_IMPAYE_SORTIE, JOURS_FENETRE_RETOUR,
   sortieAExpliquer, JOURS_RAISON_SORTIE, REGLE_RAISON_SORTIE,
   accesSansAbonnement, parcoursSansRattachement,
+  lireTelegramId, COMMANDE_BOT_MEMBRE, aiguillageMessagePrive, TEXTE_TRANSMIS_AU_COCKPIT, TEXTE_NON_TRANSMIS_AU_COCKPIT,
+  refusReintegration, etapeApresExemption, etapeApresReintegration, etapeApresAccesBroker,
+  MOTIFS_EXEMPTION, lireParamsExemption, uuidDeActeur,
 } from '../src/lib/liveclub/pur.ts'
+import { lireDemande, auteurDemande, MAX_TEXTE_DEMANDE, MAX_CITATION_DEMANDE } from '../src/lib/agent-cockpit-pur.ts'
 import {
   desabonneHorsGrace, finAbonnement,
   prelevementAPrevenir, montantAAnnoncer, clePrelevement, jourParis, RAPPEL_PRELEVEMENT_JOURS,
@@ -1365,6 +1369,145 @@ test('acces offert sans abonnement, compte non rattache (Nelly, 06/10)', () => {
   // Un droit ouvert par un abonnement n'est pas un acces offert (il passe par le rattachement).
   assert.equal(lire({ statut: 'oui', raison: 'abonnement', fin: '2026-11-01' }), null)
   assert.equal(parcoursSansRattachement('aucun', { statut: 'oui', raison: 'abonnement' }), 'non_rattache')
+})
+
+// Caracteres hors clavier (tirets longs, guillemets et apostrophes courbes,
+// points de suspension, espaces insecables), par leurs codes.
+const HORS_CLAVIER = new RegExp(`[${[0x2013, 0x2014, 0x2018, 0x2019, 0x201c, 0x201d, 0x2026, 0xa0, 0x202f].map(c => String.fromCharCode(c)).join('')}]`)
+
+test("l'equipe qui ecrit au bot des membres part a l'agent du Cockpit (Melanie, 08/10)", () => {
+  // Texte libre d'un compte de l'equipe : l'agent du Cockpit.
+  assert.equal(aiguillageMessagePrive('Tu peux re integrer dans le groupe live club : x@y.fr', true), 'agent_cockpit')
+  // Le meme texte d'un membre : le parcours d'un membre, inchange.
+  assert.equal(aiguillageMessagePrive('Tu peux re integrer dans le groupe live club : x@y.fr', false), 'membre')
+  // /start, /menu (avec jeton ou @nom_du_bot) restent au bot, meme pour l'equipe.
+  for (const c of ['/start', '/menu', '/start abcdefghijklmnopqrstuvwx', '/START', '/menu@aok_liveclub_bot', ' /start ']) {
+    assert.equal(aiguillageMessagePrive(c, true), 'commande', c)
+    assert.equal(aiguillageMessagePrive(c, false), 'commande', c)
+  }
+  // Une autre commande n'est pas une commande du bot : texte libre.
+  assert.equal(aiguillageMessagePrive('/reset', true), 'agent_cockpit')
+  assert.equal(aiguillageMessagePrive('/start un deux', true), 'agent_cockpit')
+  // Rien d'ecrit : ni l'agent ni le membre.
+  assert.equal(aiguillageMessagePrive('   ', true), 'sans_texte')
+  assert.equal(aiguillageMessagePrive('', false), 'sans_texte')
+  // La regex est sans etat (pas de drapeau g) : deux tests de suite donnent le meme resultat.
+  assert.ok(COMMANDE_BOT_MEMBRE.test('/menu') && COMMANDE_BOT_MEMBRE.test('/menu'))
+  assert.equal(COMMANDE_BOT_MEMBRE.exec('/start JETON')[2], 'JETON')
+  // Les deux phrases du bot, mot pour mot, en caracteres clavier.
+  assert.equal(TEXTE_TRANSMIS_AU_COCKPIT, "Tu es de l'équipe : je passe ta demande à l'agent du Cockpit, sa réponse arrive dans Agent AOK.")
+  assert.equal(TEXTE_NON_TRANSMIS_AU_COCKPIT, "Je n'ai pas pu la passer : écris-la directement à Agent AOK.")
+  for (const t of [TEXTE_TRANSMIS_AU_COCKPIT, TEXTE_NON_TRANSMIS_AU_COCKPIT]) assert.ok(!HORS_CLAVIER.test(t), t)
+})
+
+test('reintegration par l agent du Cockpit : le droit d abord (08/10)', () => {
+  // Droit ouvert : rien a refuser.
+  assert.equal(refusReintegration({ statut: 'oui' }, 'Paul', 'aok_liveclub_bot'), null)
+  // Aucun droit : refus, qui dit quel droit poser, et par ou la personne entre ensuite.
+  const sans = refusReintegration({ statut: 'non' }, 'Paul', 'aok_liveclub_bot')
+  assert.equal(sans.genre, 'refus')
+  assert.equal(sans.regle, 'sans_droit')
+  assert.ok(sans.message.startsWith("Paul n'a aucun droit ouvert au Live Club"))
+  for (const mot of ['accès broker', 'dépôt', 'exemption', "geste de l'équipe", '@aok_liveclub_bot']) assert.ok(sans.message.includes(mot), mot)
+  assert.ok(!HORS_CLAVIER.test(sans.message))
+  // Impaye : pas de droit a poser, la facture rouvre l'acces.
+  const impaye = refusReintegration({ statut: 'non', dette: { depuis: 'x' } }, 'Paul', 'aok_liveclub_bot')
+  assert.equal(impaye.genre, 'refus')
+  assert.equal(impaye.regle, 'impaye_ouvert')
+  assert.ok(impaye.message.includes('facture'))
+  // Droit illisible : une panne, rien n'est tente.
+  const inconnu = refusReintegration({ statut: 'inconnu' }, 'Paul', 'aok_liveclub_bot')
+  assert.equal(inconnu.genre, 'panne')
+  assert.equal(inconnu.regle, 'droit_inconnu')
+  // Au fil Support du compte : la ligne du refus dit pourquoi.
+  assert.equal(phraseGeste({ geste: 'reintegration', resultat: 'refuse', regle: 'sans_droit' }), 'Réintégration non faite (aucun droit ouvert).')
+  assert.equal(phraseGeste({ geste: 'reintegration', resultat: 'refuse', regle: 'impaye_ouvert' }), 'Réintégration non faite (paiement en retard).')
+  assert.equal(phraseGeste({ geste: 'reintegration', resultat: 'echec', regle: 'droit_inconnu' }), null)
+})
+
+test('etape humaine suivante apres un geste de l agent du Cockpit (08/10)', () => {
+  const bot = 'aok_liveclub_bot'
+  // Exemption (ou droit pose sans email).
+  assert.equal(etapeApresExemption('Paul', bot), "Dis à Paul d'ouvrir @aok_liveclub_bot et d'appuyer sur Démarrer : il gère son entrée tout seul.")
+  // Reintegration : le lien.
+  assert.equal(etapeApresReintegration('Paul', 'https://t.me/+abc'), 'Transmets ce lien à Paul : https://t.me/+abc')
+  // Acces broker, email parti : rien a faire.
+  assert.equal(etapeApresAccesBroker([{ email: 'a@x.fr', resultat: 'accorde', emailEnvoye: true }], bot),
+    'Rien à faire : a@x.fr reçoit un email avec son lien vers le bot.')
+  assert.equal(etapeApresAccesBroker([
+    { email: 'a@x.fr', resultat: 'accorde', emailEnvoye: true },
+    { email: 'b@x.fr', resultat: 'accorde', emailEnvoye: true, renvoi: true },
+    { email: 'c@x.fr', resultat: 'deja_accorde' },
+  ], bot), 'Rien à faire : chaque adresse accordée reçoit un email avec son lien vers le bot.')
+  // Email pas parti : dire a la personne d'ouvrir le bot (une ligne, seulement celles-la).
+  assert.equal(etapeApresAccesBroker([
+    { email: 'a@x.fr', resultat: 'accorde', emailEnvoye: true },
+    { email: 'b@x.fr', resultat: 'accorde', emailEnvoye: false },
+  ], bot), "Dis à b@x.fr d'ouvrir @aok_liveclub_bot et d'appuyer sur Démarrer : il gère son entrée tout seul.")
+  assert.equal(etapeApresAccesBroker([
+    { email: 'a@x.fr', resultat: 'accorde', emailEnvoye: false },
+    { email: 'b@x.fr', resultat: 'accorde' },
+    { email: 'c@x.fr', resultat: 'accorde', emailEnvoye: false },
+  ], bot), "Dis à a@x.fr, b@x.fr et c@x.fr d'ouvrir @aok_liveclub_bot et d'appuyer sur Démarrer : chacun gère son entrée tout seul.")
+  // Rien d'accorde (deja eu, deja abonne, illisible, echec).
+  assert.equal(etapeApresAccesBroker([
+    { email: 'a@x.fr', resultat: 'deja_accorde' }, { email: 'b@x.fr', resultat: 'deja_abonne' },
+  ], bot), "Rien d'autre à faire : aucun accès n'a été ouvert.")
+  for (const t of [etapeApresExemption('P', bot), etapeApresAccesBroker([], bot)]) {
+    assert.ok(!HORS_CLAVIER.test(t))
+    assert.ok(!t.includes('\n'), 'une seule ligne')
+  }
+})
+
+test('exemption proposee par l agent du Cockpit : parametres (08/10)', () => {
+  const jour = '2026-10-08'
+  assert.deepEqual(MOTIFS_EXEMPTION, ['fondateur', 'admin', 'equipe', 'favorise'])
+  // Le cas nominal, motif accentue accepte, date incluse.
+  assert.deepEqual(
+    lireParamsExemption({ telegram_id: 'u123456789', motif: 'Équipe', jusquau: '2027-01-01', note: '  geste  ', qui: ' Paul ' }, jour),
+    { telegram_id: 123456789, motif: 'equipe', jusquau: '2027-01-01', note: 'geste', qui: 'Paul' },
+  )
+  // Sans date : permanente ; aujourd'hui est accepte (inclus).
+  assert.equal(lireParamsExemption({ telegram_id: 123456789, motif: 'favorisé', qui: 'P' }, jour).jusquau, null)
+  assert.equal(lireParamsExemption({ telegram_id: 123456789, motif: 'favorise', jusquau: '', qui: 'P' }, jour).jusquau, null)
+  assert.equal(lireParamsExemption({ telegram_id: 123456789, motif: 'admin', jusquau: jour, qui: 'P' }, jour).jusquau, jour)
+  // Refus : pas de compte Telegram (on le demande, on ne le devine pas), motif inconnu, date passee ou illisible, qui absent.
+  const refus = (p) => typeof lireParamsExemption(p, jour) === 'string'
+  assert.ok(lireParamsExemption({ motif: 'admin', qui: 'P' }, jour).includes('demande le compte Telegram'))
+  assert.ok(refus({ telegram_id: '@paul', motif: 'admin', qui: 'P' }))
+  assert.ok(refus({ telegram_id: 123456789, motif: 'cadeau', qui: 'P' }))
+  assert.ok(refus({ telegram_id: 123456789, motif: 'admin', jusquau: '2026-10-07', qui: 'P' }))
+  assert.ok(refus({ telegram_id: 123456789, motif: 'admin', jusquau: '2026-02-30', qui: 'P' }))
+  assert.ok(refus({ telegram_id: 123456789, motif: 'admin', jusquau: '01/01/2027', qui: 'P' }))
+  assert.ok(refus({ telegram_id: 123456789, motif: 'admin' }))
+  // Le numero Telegram : avec ou sans u, jamais un pseudo.
+  assert.equal(lireTelegramId('u1899133088'), 1899133088)
+  assert.equal(lireTelegramId(255151279), 255151279)
+  assert.equal(lireTelegramId('melmom'), null)
+  // pose_par : l'uuid de l'acteur, jamais un texte libre.
+  assert.equal(uuidDeActeur('agent:0A1B2C3D-0000-4000-8000-000000000001'), '0a1b2c3d-0000-4000-8000-000000000001')
+  assert.equal(uuidDeActeur('cockpit:0a1b2c3d-0000-4000-8000-000000000001'), '0a1b2c3d-0000-4000-8000-000000000001')
+  assert.equal(uuidDeActeur('agent'), null)
+  assert.equal(uuidDeActeur('agent:melanie'), null)
+  assert.equal(uuidDeActeur('cron:liveclub'), null)
+})
+
+test('demandes de l equipe notees par l agent du Cockpit (08/10)', () => {
+  // Texte ramene a une ligne, citation gardee telle quelle (bornee).
+  assert.deepEqual(lireDemande({ texte: '  Pouvoir prolonger\n un accès broker  ', citation: ' tu peux prolonger ?\nmerci ' }),
+    { texte: 'Pouvoir prolonger un accès broker', citation: 'tu peux prolonger ?\nmerci' })
+  assert.equal(lireDemande({ texte: 'Un rapport mensuel des pauses', citation: '' }).citation, null)
+  assert.equal(lireDemande({ texte: 'Un rapport mensuel des pauses', citation: 'x'.repeat(900) }).citation.length, MAX_CITATION_DEMANDE)
+  // Refus rendus au modele : texte vide, trop court, trop long, entree illisible.
+  assert.equal(typeof lireDemande({ texte: '', citation: 'x' }), 'string')
+  assert.equal(typeof lireDemande({ texte: 'abc' }), 'string')
+  assert.equal(typeof lireDemande({ texte: 'x'.repeat(MAX_TEXTE_DEMANDE + 1) }), 'string')
+  assert.equal(typeof lireDemande({ texte: 'x'.repeat(MAX_TEXTE_DEMANDE) }), 'object')
+  assert.equal(typeof lireDemande(null), 'string')
+  // Auteur : le libelle du compte Telegram, sinon cockpit:<uuid>.
+  assert.equal(auteurDemande({ libelle: 'melanie', userId: 'u-1' }), 'melanie')
+  assert.equal(auteurDemande({ libelle: '  ', userId: 'u-1' }), 'cockpit:u-1')
+  assert.equal(auteurDemande({ userId: 'u-1' }), 'cockpit:u-1')
 })
 
 console.log(`\n${n} blocs verifies, tout est bon.`)

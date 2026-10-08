@@ -5,6 +5,7 @@ import {
   type ActionAgent, type CompteStripe,
 } from '@/lib/stripe-actions'
 import { prerequisAccesBroker } from '@/lib/liveclub/acces'
+import { lireDemande, type SourceDemande } from '@/lib/agent-cockpit-pur'
 import type Anthropic from '@anthropic-ai/sdk'
 
 // LE CERVEAU de l'agent cockpit, sans interface : prompt systeme, outil SQL
@@ -46,6 +47,7 @@ Les tables et vues du cockpit (schéma public, PostgreSQL) :
   - 'pause_debut', 'pause_j7', 'broker_j7' : les autres rappels. À chaque sortie réelle du groupe (pause_effective, broker_fin, desabonne quand les sorties seront actives), le membre reçoit un message : pourquoi, et comment revenir, en privé Telegram s'il a démarré le bot, sinon par email.
   - une pause posée par toi (carte confirmée) : geste 'pause', regle 'manuel', details paye_jusquau et reprise_le, sans telegram_id.
 - cockpit_liveclub_acces : acces_id, email (minuscules), motif (broker), source, debut (date), jusquau (date), pose_par, pose_le, invite_envoyee_le (null = l'email d'invitation n'est pas parti), telegram_id (null = le lien du bot n'a pas encore été ouvert), rappel_envoye_le, sorti_le, retire_le, retire_par, note. Les ACCÈS BROKER (affiliation RaiseFx) : 6 mois à partir du jour de l'ajout, NON RENOUVELABLES (une adresse n'a qu'une seule ligne, pour toujours). Actif = retire_le is null and sorti_le is null and jusquau >= current_date. Un membre présent avec un accès broker actif n'est PAS un écart.
+- cockpit_demandes : demande_id, cree_le, auteur (libellé du compte Telegram de l'équipe, ou 'cockpit:<uuid>' depuis la fenêtre du cockpit), source (agent_cockpit|agent_telegram), texte (la demande reformulée), citation (telle qu'écrite), statut (nouvelle|au_picker|faite|refusee), traite_le, note. Les demandes de l'équipe que tu as notées faute d'outil (noter_demande). En attente = statut 'nouvelle'.
 ⚠️ Ne confonds jamais retirer_live_club et fin_de_droits. Le second veut dire : la personne a résilié, mais sa période payée court encore, et la colonne fin_droits dit jusqu'à quand. On ne retire RIEN avant cette date — c'est de l'argent déjà encaissé. Le premier ne sort qu'une fois la date passée. Avant le 30/08/2026 la vue ne faisait pas la différence et visait 18 clients sur 76 qui avaient encore des jours payés.
 ⚠️ « retirer_live_club » est une SUGGESTION À VÉRIFIER, jamais un ordre. Un accès peut être ouvert par GESTE COMMERCIAL, décidé à la main et daté nulle part en base : un tier Skool premium ou vip sans abonnement actif en face n'est donc pas forcément une anomalie, et le tier de l'export peut être en retard sur ce qui a été accordé depuis. Avant de dire « à révoquer », regarde cockpit_actions_traitees — la personne a peut-être déjà été traitée, et « note » porte la raison. Présente toujours cette liste comme des gestes à confirmer par Brice ou Mélanie, jamais comme des révocations à exécuter : couper quelqu'un à qui un geste a été fait coûte plus cher que de laisser un accès ouvert une semaine de trop.
 - cockpit_kpis : snapshot_date, key, value_num, value_text (agrégats hebdo : audience_cumul, audience_indice, ns1_kit_cumul, ns2_skool_cumul…)
@@ -114,11 +116,14 @@ On peut joindre un PDF, une capture d'écran, un export CSV, un relevé bancaire
 - si le document est illisible, tronqué, ou sans rapport avec ce qu'on te demande, dis-le au lieu de deviner. Tu n'inventes jamais une ligne que tu n'as pas lue.
 
 LES ACTIONS STRIPE (03/09) :
-Tu disposes de neuf outils d'action : proposer_code_promo, proposer_revoquer_code, proposer_remboursement, proposer_produit, proposer_pause_abonnement, proposer_reprise_abonnement, proposer_retirer_telegram, proposer_reintegrer_telegram, proposer_acces_broker. Un appel N'EXÉCUTE RIEN : il affiche une carte de confirmation que Brice ou Mélanie doit cliquer : dis-le dans ta réponse. Règles strictes :
+Tu disposes de dix outils d'action : proposer_code_promo, proposer_revoquer_code, proposer_remboursement, proposer_produit, proposer_pause_abonnement, proposer_reprise_abonnement, proposer_retirer_telegram, proposer_reintegrer_telegram, proposer_acces_broker, proposer_exemption. Un appel N'EXÉCUTE RIEN : il affiche une carte de confirmation que Brice ou Mélanie doit cliquer : dis-le dans ta réponse. Après la confirmation, le résultat leur arrive directement et finit par l'étape humaine suivante (rien à faire, quoi dire à la personne, ou le lien à transmettre). Règles strictes :
+- AJOUTER, REMETTRE OU FAIRE REVENIR QUELQU'UN DANS LE GROUPE (règle de Brice, 08/10) : le groupe ne s'ouvre qu'à quelqu'un qui a un DROIT, parce que c'est le droit qui compte sa durée et qui le fait sortir à la fin. Un lien brut donné à quelqu'un sans droit l'ouvre pour toujours, sans que rien ne le compte ni ne le sorte. AVANT toute proposition, vérifie son droit par requêtes : exemption active (cockpit_liveclub_exemptions), accès broker actif (cockpit_liveclub_acces, par email ou telegram_id), abonnement Live Club vivant (cockpit_membre_emails ou cockpit_liveclub_rattachements, puis cockpit_abonnements), accès manuel (cockpit_acces_manuel). Le serveur revérifie de toute façon.
+  - SANS droit : pose d'abord le droit, jamais une réintégration. Un dépôt chez le broker partenaire (« il a fait un dépôt », « il a accès pour 6 mois ») = proposer_acces_broker avec son email (6 mois à partir d'aujourd'hui, l'email part avec son lien personnel vers le bot, qui le fait entrer tout seul). Un geste de l'équipe (fondateur, admin, équipe, favorisé, cadeau) = proposer_exemption, qui demande son compte Telegram : cherche le telegram_id (cockpit_telegram_membres, cockpit_liveclub_rattachements, cockpit_membre_telegram, archive) et, s'il reste inconnu, demande-le au lieu d'en deviner un. Une durée dite (« pour 3 mois ») devient la date de fin incluse ; sans durée, demande si l'exemption est permanente.
+  - AVEC un droit mais hors du groupe : rien à poser. Le bot des membres lui donne tout seul son lien de retour dès qu'il lui écrit (Démarrer, /menu, un bouton ou n'importe quel message). proposer_reintegrer_telegram ne sert que si la personne reste bloquée malgré son droit (ancien ban, bot jamais ouvert) : le serveur la refuse si le droit n'est pas ouvert, et dit quel droit poser.
 - TELEGRAM, qui sort qui (bascule du 06/10/2026) : c'est NOTRE bot qui gère seul les sorties, chaque matin : les désabonnés (arrêt ou fin d'abonnement) au premier passage qui suit la fin de la période payée, donc le lendemain matin, les impayés 5 jours après le premier échec (réouverture automatique dès que la facture passe), les débuts de pause, les fins d'accès broker et les fins d'exemption datée ; un impayé de plus de 30 jours est résilié. Metricgram n'a plus aucun droit d'expulsion (observateur, puis retiré). Ne propose donc JAMAIS de retirer quelqu'un pour un simple désabonnement ou un impayé : le passage quotidien s'en charge. Le retrait manuel ne sert qu'aux ÉCARTS (présent dans le groupe sans abonnement relié, sur décision de l'équipe) : vérifie par requêtes AVANT de proposer (aucun abonnement actif, ni accès manuel, ni exemption, ni accès broker).
 - TELEGRAM, exemptions : ne propose JAMAIS de retirer un compte qui a une exemption active dans cockpit_liveclub_exemptions (fondateur, admin, équipe, favorisé), ni un admin ou le créateur du groupe (statut_tg). Vérifie par requête avant de proposer ; le serveur refuse de toute façon.
 - TELEGRAM, le retrait n'est plus un bannissement (règle de Brice, 29/09) : la personne sort du groupe sans être bannie, et un lien d'invitation valide suffirait à la faire revenir. Ne dis jamais « banni » pour un retrait fait par nous. Quelqu'un en statut_tg kicked a été banni par Metricgram : le réintégrer lève ce ban.
-- TELEGRAM, historique Metricgram (avant le 06/10/2026) : Metricgram sortait parfois un membre qui avait droit ; les lignes 'sortie_abusive_metricgram' de cockpit_liveclub_gestes en gardent la trace. Pour faire revenir quelqu'un, proposer_reintegrer_telegram reste le bon geste (il lève aussi un ancien ban de Metricgram).
+- TELEGRAM, historique Metricgram (avant le 06/10/2026) : Metricgram sortait parfois un membre qui avait droit ; les lignes 'sortie_abusive_metricgram' de cockpit_liveclub_gestes en gardent la trace. Pour faire revenir quelqu'un QUI A UN DROIT et reste bloqué, proposer_reintegrer_telegram reste le bon geste (il lève aussi un ancien ban de Metricgram).
 - PAUSE : elle démarre toujours à la fin de la période payée (le serveur la calcule, tu ne choisis pas la date), 1 à 6 mois, reprise automatique. Côté Telegram, tu n'as rien à proposer : si le compte Telegram du membre est rattaché, le passage quotidien le sort du groupe quand la période payée est finie et le prévient, puis le bot lui renvoie un lien quand les prélèvements reprennent. Ne propose pas de pause sur un abonnement résilié, déjà en pause, ou dont l'arrêt est programmé (annule_a_la_fin vrai) : le serveur refuse, comme le bot du membre, et il faut d'abord annuler l'arrêt.
 - ACCÈS BROKER (RaiseFx) : quand Mélanie te colle des emails de clients du broker partenaire pour leur ouvrir le Live Club, propose proposer_acces_broker avec TOUTES les adresses collées, sans en retirer ni en inventer (50 au plus par carte). Chacune reçoit 6 mois à partir d'aujourd'hui et un email de support@ avec son lien personnel vers le bot, qui fait entrer la personne tout seul : personne n'a rien à faire à la main sur Telegram. NON RENOUVELABLE : une adresse qui a déjà eu un accès broker est refusée par le serveur, même si l'accès est terminé ; ne promets jamais un second accès. Tu peux vérifier avant dans cockpit_liveclub_acces. Une adresse déjà abonnée au Live Club est signalée sans rien accorder. Après la confirmation, rends le résultat adresse par adresse tel que le serveur le donne.
 - N'appelle un outil d'action QUE si on te le demande explicitement. Jamais de ta propre initiative, jamais « pendant que j'y suis ».
@@ -128,9 +133,12 @@ Tu disposes de neuf outils d'action : proposer_code_promo, proposer_revoquer_cod
 - S'il manque un paramètre (montant ? durée ? code ?), pose la question au lieu d'inventer.
 - Les autres gestes (marquer traité, répondre au support, envoyer un email) ne sont pas encore outillés : dis où le faire à la main dans le cockpit.
 
+LES DEMANDES QUE TU NE SAIS PAS ENCORE TRAITER (règle de Brice, 08/10) :
+Quand Brice ou Mélanie te demande une chose qu'aucun de tes outils ne couvre (une fonction qui n'existe pas, une règle à changer, un rapport qui n'existe pas), ne bricole pas et ne promets rien : dis simplement que tu ne sais pas encore le faire, appelle noter_demande (la demande reformulée en une phrase actionnable, et sa citation telle qu'écrite), puis réponds « C'est noté dans les demandes du Cockpit : on l'ajoutera aux tâches. » Aucun délai, aucune date. Une demande que tes outils couvrent (une requête, un outil proposer_*) ne se note pas : traite-la. Un geste qui se fait déjà à la main dans le cockpit : dis où, sans le noter. Une seule note par demande. Si noter_demande renvoie une erreur, dis que la demande n'a pas pu être notée, jamais « c'est noté ».
+
 Règles :
 - Réponds en TEXTE BRUT : l'écran n'interprète pas le markdown. Jamais de **, de tableaux avec |, de titres #. Pour aligner des données, fais des lignes simples : « Tristan Gautier · 6 tentatives · prochaine le 29/08 ».
-- La base est en LECTURE SEULE : requete_sql ne modifie jamais rien ; seules les trois actions Stripe ci-dessus existent, et elles passent par confirmation humaine.
+- La base est en LECTURE SEULE : requete_sql ne modifie jamais rien. Les seules écritures sont les outils proposer_*, qui passent par confirmation humaine, et noter_demande, une note sans effet en production.
 - Ne montre le SQL que si on te le demande.
 - Si une question est ambiguë (quel mois ? quel compte ?), pose la question plutôt que de choisir en silence.`
 
@@ -311,7 +319,7 @@ const OUTILS: Anthropic.Tool[] = [
   {
     name: 'proposer_reintegrer_telegram',
     description:
-      "Propose de réintégrer quelqu'un dans le groupe Live Club : levée du ban s'il y en a un (celui de Metricgram compris) puis lien d'invitation à usage unique (14 jours) que Brice/Mélanie transmettent. N'exécute rien : carte de confirmation.",
+      "Propose de réintégrer dans le groupe Live Club quelqu'un qui A UN DROIT OUVERT (abonnement vivant, exemption active, accès broker actif, accès manuel) mais reste bloqué : levée du ban s'il y en a un (celui de Metricgram compris) puis lien d'invitation à usage unique (14 jours) que Brice/Mélanie transmettent. N'exécute rien : carte de confirmation. SANS droit, le serveur refuse : pose d'abord le droit (proposer_acces_broker pour un dépôt chez le broker, proposer_exemption pour un geste de l'équipe), la personne entre ensuite seule par le bot.",
     input_schema: {
       type: 'object',
       properties: {
@@ -336,6 +344,35 @@ const OUTILS: Anthropic.Tool[] = [
         note: { type: 'string', description: 'Facultatif : contexte court (ex. lot RaiseFx de septembre).' },
       },
       required: ['emails'],
+    },
+  },
+  {
+    name: 'proposer_exemption',
+    description:
+      "Propose d'exempter un compte Telegram au Live Club : le GESTE DE L'ÉQUIPE (fondateur, admin, équipe, favorisé) qui ouvre le groupe sans abonnement ni accès broker. N'exécute rien : carte de confirmation. Il faut le telegram_id : s'il est inconnu, demande le compte Telegram de la personne au lieu d'en deviner un. Avec une date de fin (INCLUSE), le passage quotidien sort la personne le lendemain si elle n'a pas d'autre droit ; sans date, l'exemption est permanente. Refusé par le serveur si le compte a déjà une exemption active. Après la confirmation, la personne entre seule en ouvrant le bot des membres.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        telegram_id: { type: 'number', description: 'Le numéro du compte Telegram (u suivi de chiffres, sans le u).' },
+        motif: { type: 'string', enum: ['fondateur', 'admin', 'equipe', 'favorise'] },
+        jusquau: { type: 'string', description: 'Facultatif : date de fin INCLUSE, AAAA-MM-JJ, aujourd\'hui ou après. Vide = permanente.' },
+        note: { type: 'string', description: 'Facultatif : pourquoi, en quelques mots (visible dans le cockpit).' },
+        qui: { type: 'string', description: 'Nom ou pseudo, pour que la carte soit lisible.' },
+      },
+      required: ['telegram_id', 'motif', 'qui'],
+    },
+  },
+  {
+    name: 'noter_demande',
+    description:
+      "Note dans les demandes du Cockpit une demande de l'équipe qu'AUCUN de tes outils ne couvre (fonction absente, règle à changer, rapport qui n'existe pas), pour qu'elle remonte jusqu'aux tâches. Exécuté tout de suite, sans carte : c'est une note, rien ne change en production. Une seule fois par demande, jamais pour une demande que tes outils couvrent.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        texte: { type: 'string', description: 'La demande reformulée en UNE phrase actionnable (300 caractères au plus), ex. « Pouvoir prolonger un accès broker depuis l\'agent ».' },
+        citation: { type: 'string', description: 'La demande telle qu\'elle a été écrite, mot pour mot (500 caractères au plus).' },
+      },
+      required: ['texte', 'citation'],
     },
   },
   {
@@ -366,6 +403,40 @@ const TYPE_PAR_OUTIL: Record<string, ActionAgent['type']> = {
   proposer_pause_abonnement: 'pause_abonnement',
   proposer_reprise_abonnement: 'reprise_abonnement',
   proposer_acces_broker: 'acces_broker',
+  proposer_exemption: 'exemption',
+}
+
+/** Qui ecrit, et par quelle porte : l'auteur et la source d'une demande notee (cockpit_demandes). */
+export type CanalAgent = { source: SourceDemande; auteur: string }
+
+/**
+ * noter_demande (08/10) : la demande va dans cockpit_demandes, sans carte
+ * (une note, rien ne change en production). Le resultat retourne au modele ;
+ * une erreur lui dit que rien n'est note, pour qu'il ne reponde pas « c'est
+ * note ». Table absente (migration pas appliquee) comprise.
+ */
+async function noterDemande(entree: unknown, canal: CanalAgent): Promise<{ contenu: string; erreur: boolean }> {
+  const lu = lireDemande(entree)
+  if (typeof lu === 'string') return { contenu: JSON.stringify({ erreur: lu }), erreur: true }
+  try {
+    const lignes = await prisma.$queryRaw<{ demande_id: string }[]>`
+      insert into public.cockpit_demandes (auteur, source, texte, citation)
+      values (${canal.auteur}, ${canal.source}, ${lu.texte}, ${lu.citation})
+      returning demande_id::text as demande_id`
+    return { contenu: JSON.stringify({ notee: true, demande_id: lignes[0]?.demande_id ?? null }), erreur: false }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    const absente = /42P01|relation .* does not exist/i.test(message)
+    console.error(`[cockpit/agent] demande non notee : ${absente ? 'table cockpit_demandes absente' : message.split('\n')[0].slice(0, 200)}`)
+    return {
+      contenu: JSON.stringify({
+        erreur: absente
+          ? "La table des demandes n'existe pas encore (migration à appliquer) : la demande N'EST PAS notée."
+          : "La base a refusé la note : la demande N'EST PAS notée.",
+      }),
+      erreur: true,
+    }
+  }
 }
 
 /** Ce que la boucle renvoie, quel que soit le canal. */
@@ -389,6 +460,8 @@ export type ReponseAgent = {
  */
 function ceQuiManque(action: ActionAgent): string | null {
   if (action.type === 'acces_broker') return prerequisAccesBroker()
+  // Une exemption est une ligne en base : ni bot, ni cle Stripe.
+  if (action.type === 'exemption') return null
   if (action.compte === 'telegram') {
     return cleTelegramPresente()
       ? null
@@ -405,10 +478,13 @@ function ceQuiManque(action: ActionAgent): string | null {
  * mis en forme par le canal appelant (pieces jointes comprises au web) ; le
  * dernier message doit etre un message utilisateur. Jette en cas d'erreur —
  * cle absente comprise — et chaque canal habille l'erreur a sa facon.
+ * `canal` (08/10) : la source et l'auteur d'une demande notee par
+ * noter_demande ; par defaut, la fenetre du cockpit.
  */
 export async function boucleAgent(
   historique: Anthropic.MessageParam[],
   userId: string,
+  canal: CanalAgent = { source: 'agent_cockpit', auteur: `cockpit:${userId}` },
 ): Promise<ReponseAgent> {
   const client = aiClient('cockpit')
   const model = AI_MODEL.cockpit
@@ -506,6 +582,16 @@ export async function boucleAgent(
               ...(manque ? { cle_presente: false, cle_manquante: manque } : { cle_presente: true }),
             },
           }
+        }
+
+        // Une note, pas une action : executee ici, sans carte (08/10).
+        if (bloc.name === 'noter_demande') {
+          const note = await noterDemande(bloc.input, canal)
+          resultats.push({
+            type: 'tool_result', tool_use_id: bloc.id, content: note.contenu,
+            ...(note.erreur ? { is_error: true } : {}),
+          })
+          continue
         }
 
         const sql = String((bloc.input as { sql?: string })?.sql ?? '')

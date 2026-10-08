@@ -25,9 +25,12 @@ import { traiterBouton, traiterDemandeAdhesion, traiterMessagePrive } from '@/li
 // Tant que la variable n'est pas posee, on loggue le chat.id observe pour
 // pouvoir la poser (premier evenement = decouverte de l'identifiant).
 
-// 60 s : une reponse de l'agent (Haiku, quelques outils) doit tenir avant que
-// Telegram ne rejoue le webhook.
-export const maxDuration = 60
+// 60 s suffisaient a une reponse de l'agent des membres (Haiku, quelques
+// outils). 120 s depuis le 08/10 : le texte libre d'un compte de l'equipe est
+// transmis a l'agent du Cockpit (meme duree que sa route), qui peut reflechir
+// une ou deux minutes. Un rejeu de Telegram pendant ce temps est ecarte par le
+// dedoublonnage du bot (premierPassage).
+export const maxDuration = 120
 
 // Les six statuts de ChatMember, ceux qu'accepte la contrainte de statut_tg.
 const STATUTS_TG: unknown[] = ['creator', 'administrator', 'member', 'restricted', 'left', 'kicked']

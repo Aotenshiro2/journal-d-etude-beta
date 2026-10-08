@@ -20,15 +20,17 @@ import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db'
 import {
   finPeriodeAbonnement, calculerReprisePause, decouperEmails, normaliserEmail, preparerPoseDePause,
-  effacementMetadonneesPause, resumerAbonnement, expurgerLiensInvitation,
+  effacementMetadonneesPause, resumerAbonnement, expurgerLiensInvitation, lireTelegramId,
+  dateIso, formaterDateFr, lireParamsExemption, uuidDeActeur, refusReintegration,
+  etapeApresExemption, etapeApresReintegration, etapeApresAccesBroker,
 } from '@/lib/liveclub/pur'
-import { PRODUITS_LIVECLUB } from '@/lib/liveclub/config'
+import { PRODUITS_LIVECLUB, nomBot } from '@/lib/liveclub/config'
 import { tracerGeste } from '@/lib/liveclub/support-pont'
 
 // La regle de la pause vit dans liveclub/pur.ts (testable sans base) ; elle
 // est reexportee ici pour les appelants de stripe-actions (29/09).
-// expurgerLiensInvitation aussi (30/09).
-export { finPeriodeAbonnement, calculerReprisePause, expurgerLiensInvitation }
+// expurgerLiensInvitation aussi (30/09), lireTelegramId (08/10).
+export { finPeriodeAbonnement, calculerReprisePause, expurgerLiensInvitation, lireTelegramId }
 
 const API = 'https://api.stripe.com'
 
@@ -128,12 +130,25 @@ export type ActionAgent = {
   type: 'code_promo' | 'remboursement' | 'produit' | 'revoquer_code'
     | 'retirer_telegram' | 'reintegrer_telegram'
     | 'pause_abonnement' | 'reprise_abonnement'
-    | 'acces_broker'
+    | 'acces_broker' | 'exemption'
   // 'telegram' pour les actions du groupe Live Club (retrait, reintegration,
-  // acces broker) : pas un compte Stripe, mais la carte de confirmation
-  // affiche d'ou vient le pouvoir.
+  // acces broker, exemption) : pas un compte Stripe, mais la carte de
+  // confirmation affiche d'ou vient le pouvoir.
   compte: CompteStripe | 'telegram'
   params: Record<string, unknown>
+}
+
+/**
+ * Les parametres d'une action tels qu'ils peuvent aller dans un log : le
+ * nombre d'adresses d'un acces broker (jamais les adresses), une exemption
+ * sans sa note.
+ */
+export function paramsPourLog(a: ActionAgent): Record<string, unknown> {
+  if (a.type === 'acces_broker') return { emails: ((a.params.emails as string[]) ?? []).length }
+  if (a.type === 'exemption') {
+    return { telegram_id: a.params.telegram_id, motif: a.params.motif, jusquau: a.params.jusquau ?? null }
+  }
+  return a.params
 }
 
 // ---------------------------------------------------------------------------
@@ -175,16 +190,7 @@ export async function telegramPost(methode: string, corps: Record<string, unknow
   return json as Record<string, unknown>
 }
 
-/**
- * Le numero Telegram tel qu'il arrive (nombre, "123456789" ou "u123456789").
- * null = illisible : on refuse plutot que de deviner.
- */
-export function lireTelegramId(brut: unknown): number | null {
-  const s = String(brut ?? '').trim().replace(/^u/i, '')
-  if (!/^\d{5,15}$/.test(s)) return null
-  const n = Number(s)
-  return Number.isSafeInteger(n) ? n : null
-}
+// lireTelegramId vit dans liveclub/pur.ts depuis le 08/10 (reexporte en tete).
 
 export type GesteLiveClub = 'retirer' | 'reintegrer'
 
@@ -253,6 +259,57 @@ export async function exemptionActive(
     if (relationAbsente(err)) {
       console.warn('[liveclub] cockpit_liveclub_exemptions absente (migration 20260929190100 pas appliquee) : aucune exemption lue.')
       return null
+    }
+    throw err
+  }
+}
+
+/**
+ * Poser une exemption depuis l'agent du Cockpit (08/10), carte confirmee :
+ * meme table et meme regle que le formulaire du cockpit (une seule exemption
+ * ouverte par compte Telegram, index partiel). Une exemption deja active =
+ * refus, rien ne change (la modifier reste un geste du cockpit). Une
+ * exemption ECHUE mais pas encore close par le passage quotidien est close
+ * (retire_par = l'auteur), sinon l'index refuserait la nouvelle. pose_par :
+ * l'uuid de l'auteur, que la base ne connait pas hors d'une session
+ * (default auth.uid() vide). Une course perdue (index) = refus.
+ */
+export async function poserExemptionServeur(
+  p: { telegramId: number; motif: string; jusquau: string | null; note: string | null },
+  posePar: string,
+): Promise<{ ok: true; exemptionId: string; echueClose: boolean } | { ok: false; refus: string }> {
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const ouvertes = await tx.$queryRaw<{ exemption_id: string; motif: string; jusquau: Date | null; active: boolean }[]>`
+        select exemption_id::text as exemption_id, motif, jusquau,
+               (jusquau is null or jusquau >= current_date) as active
+        from public.cockpit_liveclub_exemptions
+        where telegram_id = ${p.telegramId} and retire_le is null
+        for update`
+      const active = ouvertes.find(o => o.active)
+      if (active) {
+        return {
+          ok: false as const,
+          refus: `u${p.telegramId} a déjà une exemption active (${active.motif}, `
+            + `${active.jusquau ? `jusqu'au ${formaterDateFr(dateIso(active.jusquau))}` : 'sans date de fin'}) : rien n'a été changé. `
+            + `Pour la modifier, retire-la d'abord dans le cockpit, puis repose-la.`,
+        }
+      }
+      for (const echue of ouvertes) {
+        await tx.$executeRaw`
+          update public.cockpit_liveclub_exemptions
+          set retire_le = now(), retire_par = ${posePar}::uuid
+          where exemption_id = ${echue.exemption_id}::uuid and retire_le is null`
+      }
+      const lignes = await tx.$queryRaw<{ exemption_id: string }[]>`
+        insert into public.cockpit_liveclub_exemptions (telegram_id, motif, jusquau, note, pose_par)
+        values (${p.telegramId}, ${p.motif}, ${p.jusquau}::date, ${p.note}, ${posePar}::uuid)
+        returning exemption_id::text as exemption_id`
+      return { ok: true as const, exemptionId: lignes[0].exemption_id, echueClose: ouvertes.length > 0 }
+    })
+  } catch (err) {
+    if (/23505|duplicate key/i.test(err instanceof Error ? err.message : String(err))) {
+      return { ok: false, refus: `u${p.telegramId} vient de recevoir une autre exemption : rien n'a été changé, relis la liste des exemptions.` }
     }
     throw err
   }
@@ -499,6 +556,14 @@ export function validerAction(brut: unknown): ActionAgent | string {
     return { type: a.type, compte: 'telegram', params: { telegram_id: telegramId, qui } }
   }
 
+  // Exemption (08/10) : un geste de l'equipe, cle = le compte Telegram.
+  // jusquau INCLUS, jamais deja passe (jour de la base, en UTC).
+  if (a.type === 'exemption') {
+    const lu = lireParamsExemption(p, dateIso(new Date()))
+    if (typeof lu === 'string') return lu
+    return { type: 'exemption', compte: 'telegram', params: lu }
+  }
+
   // Acces broker (RaiseFx, 29/09) : une liste d'emails colles par Melanie.
   // Liste ou texte (un par ligne, virgules) ; une seule adresse illisible et
   // c'est un refus, pour que le modele la montre au lieu de l'avaler.
@@ -647,7 +712,16 @@ export function resumeAction(a: ActionAgent): string {
   }
   if (a.type === 'reintegrer_telegram') {
     return `Réintégrer ${p.qui} (u${p.telegram_id}) dans le groupe Live Club : levée du ban s'il y en a un `
-      + `(celui de Metricgram compris) + lien d'invitation à usage unique (14 jours) à lui transmettre.`
+      + `(celui de Metricgram compris) + lien d'invitation à usage unique (14 jours) à lui transmettre. `
+      + `Refusé d'office s'il n'a aucun droit ouvert (abonnement, exemption, accès broker, accès manuel).`
+  }
+  if (a.type === 'exemption') {
+    const fin = p.jusquau
+      ? `jusqu'au ${formaterDateFr(String(p.jusquau))} inclus : le bot le sortira le lendemain s'il n'a pas d'autre droit`
+      : 'sans date de fin (permanente)'
+    return `Exempter ${p.qui} (u${p.telegram_id}) au Live Club, motif ${p.motif}, ${fin}. `
+      + `Il entre ensuite tout seul par le bot, sans abonnement. Refusé d'office s'il a déjà une exemption active.`
+      + (p.note ? ` Note : ${p.note}` : '')
   }
   if (a.type === 'acces_broker') {
     const emails = (p.emails as string[]) ?? []
@@ -690,6 +764,27 @@ export async function executerAction(a: ActionAgent, acteur = 'agent'): Promise<
   // resultat, jamais dans le journal.
   if (a.type === 'retirer_telegram' || a.type === 'reintegrer_telegram') {
     const id = Number(a.params.telegram_id)
+    const qui = String(a.params.qui)
+
+    // (08/10, Brice) La reintegration ne sert qu'a quelqu'un qui A un droit
+    // et reste bloque : sans droit, rien ne compterait sa duree et rien ne le
+    // sortirait a la fin. Droit lu en direct (droitLiveClub, abonnement Stripe
+    // compris) ; 'inconnu' = rien n'est tente. Import dynamique : droits.ts
+    // importe ce fichier (exemptionActive). Le refus est journalise comme les
+    // autres tentatives.
+    if (a.type === 'reintegrer_telegram') {
+      const { droitLiveClub } = await import('@/lib/liveclub/droits')
+      const refus = refusReintegration(await droitLiveClub(id), qui, nomBot())
+      if (refus) {
+        await journaliserGesteLiveClub(
+          { geste: 'reintegration', resultat: refus.genre === 'refus' ? 'refuse' : 'echec', regle: refus.regle, details: {} },
+          { telegramId: id, acteur },
+        )
+        if (refus.genre === 'refus') throw new RefusAction(refus.message)
+        throw new Error(refus.message)
+      }
+    }
+
     const issue = a.type === 'retirer_telegram'
       ? await retirerDuLiveClub(id)
       : await reintegrerAuLiveClub(id)
@@ -699,12 +794,38 @@ export async function executerAction(a: ActionAgent, acteur = 'agent'): Promise<
       // Refus (exempte, admin, deja dehors) : rien n'a ete fait, ce n'est pas
       // une panne. Erreur a part, pour que les canaux de l'agent ne l'affichent
       // ni comme un succes ni comme un echec.
-      if (issue.resultat === 'refuse') throw new RefusAction(`${a.params.qui} : ${issue.erreur}`)
+      if (issue.resultat === 'refuse') throw new RefusAction(`${qui} : ${issue.erreur}`)
       throw new Error(issue.erreur)
     }
+    // La derniere ligne dit l'etape humaine suivante (08/10).
     return issue.invite_link
-      ? `${a.params.qui} : ${issue.message} Lien : ${issue.invite_link}`
-      : `${a.params.qui} : ${issue.message} La table cockpit_telegram_membres l'enregistrera au prochain événement.`
+      ? `${qui} : ban levé s'il y en avait un, lien à usage unique valable 14 jours.\n`
+        + etapeApresReintegration(qui, issue.invite_link)
+      : `${qui} : ${issue.message} La table cockpit_telegram_membres l'enregistrera au prochain événement.`
+  }
+
+  // ── Exemption (08/10) ─────────────────────────────────────────────────────
+  // Le geste de l'equipe (fondateur, admin, equipe, favorise), cle = le compte
+  // Telegram. Rien n'est fait sur le groupe : la personne entre seule par le
+  // bot, qui lit l'exemption (droitLiveClub). Pas de ligne au journal du bot :
+  // la ligne d'exemption porte deja qui l'a posee et quand.
+  if (a.type === 'exemption') {
+    const posePar = uuidDeActeur(acteur)
+    if (!posePar) throw new Error("Auteur de l'action illisible : l'exemption n'a pas été posée.")
+    const qui = String(a.params.qui)
+    const id = Number(a.params.telegram_id)
+    const jusquau = typeof a.params.jusquau === 'string' ? a.params.jusquau : null
+    const issue = await poserExemptionServeur({
+      telegramId: id, motif: String(a.params.motif), jusquau,
+      note: typeof a.params.note === 'string' ? a.params.note : null,
+    }, posePar)
+    if (!issue.ok) throw new RefusAction(`${qui} : ${issue.refus}`)
+    const fin = jusquau
+      ? `jusqu'au ${formaterDateFr(jusquau)} inclus (le bot le sortira le lendemain s'il n'a pas d'autre droit)`
+      : 'sans date de fin'
+    return `${qui} (u${id}) est exempté au Live Club (${a.params.motif}), ${fin}.`
+      + (issue.echueClose ? ' Son ancienne exemption, échue, est close.' : '')
+      + `\n${etapeApresExemption(qui, nomBot())}`
   }
 
   // ── Acces broker (RaiseFx) ────────────────────────────────────────────────
@@ -743,8 +864,10 @@ export async function executerAction(a: ActionAgent, acteur = 'agent'): Promise<
     const detail = resultats.length > 25
       ? lignes.filter((_l, i) => !(resultats[i].resultat === 'accorde' && resultats[i].emailEnvoye))
       : lignes
+    // La derniere ligne dit l'etape humaine suivante (08/10).
     return `Accès broker : ${accordes} accordé${accordes > 1 ? 's' : ''} sur ${resultats.length}.`
       + (detail.length ? `\n${detail.join('\n')}` : ' Tous les emails sont partis.')
+      + `\n${etapeApresAccesBroker(resultats, nomBot())}`
   }
 
   const cle = cleAgent(a.compte as CompteStripe)

@@ -4,6 +4,7 @@ import { getUserId } from '@/lib/api-auth'
 import { aiErrorMessage } from '@/lib/ai'
 import { corsHeaders, corsPreflight } from '@/lib/support-cors'
 import { boucleAgent } from '@/lib/agent-cockpit'
+import { auteurDemande } from '@/lib/agent-cockpit-pur'
 import type Anthropic from '@anthropic-ai/sdk'
 
 // Le canal WEB de l'agent cockpit : la fenetre flottante ✦. Le cerveau
@@ -168,7 +169,8 @@ export async function POST(req: NextRequest) {
 
   let reponse: Awaited<ReturnType<typeof boucleAgent>>
   try {
-    reponse = await boucleAgent(historique, userId)
+    // Une demande notee depuis cette fenetre porte 'cockpit:<uuid>' (08/10).
+    reponse = await boucleAgent(historique, userId, { source: 'agent_cockpit', auteur: auteurDemande({ userId }) })
   } catch (err) {
     console.error('[cockpit/agent]', err)
     return NextResponse.json(

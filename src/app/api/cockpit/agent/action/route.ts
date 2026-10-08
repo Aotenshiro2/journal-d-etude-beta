@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getUserId } from '@/lib/api-auth'
 import { corsHeaders, corsPreflight } from '@/lib/support-cors'
-import { validerAction, executerAction, RefusAction } from '@/lib/stripe-actions'
+import { validerAction, executerAction, RefusAction, paramsPourLog } from '@/lib/stripe-actions'
 
 // Execution d'une action Stripe proposee par l'agent du cockpit — APRES le
 // clic de confirmation de Brice ou Melanie. Le modele ne passe jamais par
@@ -67,9 +67,8 @@ export async function POST(req: NextRequest) {
   try {
     const resultat = await executerAction(action, `agent:${userId}`)
     // Trace en clair dans les logs Vercel : qui a confirme quoi, quand.
-    // Acces broker : le nombre d'adresses, jamais les adresses.
-    console.log(`[cockpit/agent/action] ${userId} ${action.type} ${action.compte}`,
-      action.type === 'acces_broker' ? { emails: (action.params.emails as string[]).length } : action.params)
+    // Acces broker : le nombre d'adresses, jamais les adresses ; exemption : sans sa note.
+    console.log(`[cockpit/agent/action] ${userId} ${action.type} ${action.compte}`, paramsPourLog(action))
     return NextResponse.json({ resultat }, { headers: cors })
   } catch (err) {
     // Refus par une regle (exempte, admin, deja dehors) : rien n'a ete fait.

@@ -33,6 +33,11 @@
 //   de retour s'il est hors du groupe, jamais la demande d'email ni la raison
 //   d'une sortie ; un droit illisible = TEXTE_PANNE (sauf un email ou un code
 //   tape, qui gardent la verification) ; un droit 'non' = le parcours d'avant.
+// - (08/10, Melanie) un compte de l'EQUIPE (cockpit_telegram_comptes) qui
+//   ecrit du texte libre n'est pas un membre : sa demande part a l'agent du
+//   Cockpit, dans sa conversation avec Agent AOK (transmettreSiEquipe). Ni
+//   fil Support, ni « veut un humain », ni alerte email. /start, /menu et les
+//   boutons restent ceux d'un compte exempte.
 
 import { journaliserGesteLiveClub } from '@/lib/stripe-actions'
 import { prisma } from '@/lib/db'
@@ -66,7 +71,11 @@ import { CODE_ENVOIS_HEURE, CODE_VALIDITE_MINUTES, intentionNonRattache, masquer
 import {
   REGLE_RAISON_SORTIE, jetonBienForme, libelleBouton, messageErreur, normaliserEmail, pauseDejaProposee, relationAbsente,
   sortieAExpliquer, texteDette, type GesteDate,
+  COMMANDE_BOT_MEMBRE, aiguillageMessagePrive, TEXTE_TRANSMIS_AU_COCKPIT, TEXTE_NON_TRANSMIS_AU_COCKPIT,
 } from './pur'
+import {
+  compteCockpitTelegram, traiterTexteAgentTelegram, type CompteCockpitTelegram, type IssueAgentTelegram,
+} from '@/lib/agent-cockpit-telegram'
 
 // Formes minimales des updates Telegram utilises ici.
 type Utilisateur = { id: number; is_bot?: boolean; first_name?: string }
@@ -953,7 +962,7 @@ export async function traiterMessagePrive(message: MessageTg, updateId: number):
   }
 
   // /start <param> (deep link), /start, /menu. « @nom_du_bot » est tolere.
-  const commande = /^\/(start|menu)(?:@\w+)?(?:\s+(\S+))?\s*$/i.exec(texte)
+  const commande = COMMANDE_BOT_MEMBRE.exec(texte)
   if (commande) {
     const param = commande[2]
     // Au fil Support : la commande, jamais le jeton du lien personnel.
@@ -990,7 +999,51 @@ export async function traiterMessagePrive(message: MessageTg, updateId: number):
     return
   }
 
+  // (08/10) Le texte libre d'un compte de l'equipe va a l'agent du Cockpit.
+  if (await transmettreSiEquipe(chat, u, texte)) return
+
   await traiterTexteLibre(chat, u, texte.slice(0, 2000), updateId)
+}
+
+/**
+ * Le texte libre d'un compte de l'EQUIPE (cockpit_telegram_comptes : Brice,
+ * Melanie), Brice 08/10. Avant, Melanie, exemptee « fondateur », etait traitee
+ * en membre a acces offert : sa demande pour un tiers partait a l'agent des
+ * membres, qui la passait a l'equipe (fil Support en attente, alerte email).
+ * Desormais elle part a l'agent du Cockpit, exactement comme si elle l'avait
+ * ecrite a Agent AOK (traiterTexteAgentTelegram) : la reponse, et la carte de
+ * confirmation s'il y en a une, arrivent dans SA conversation avec Agent AOK.
+ * Ici, une ligne : la demande est passee, ou n'a pas pu l'etre. Rien au fil
+ * Support (ce n'est pas une conversation de membre), jamais « veut un
+ * humain ».
+ *
+ * Renvoie true si le compte est de l'equipe (message traite ici, transmis ou
+ * non). Comptes illisibles = false : le parcours d'un membre, comme avant.
+ * Le message a deja ete dedoublonne (nouveauPrive) : la transmission ne
+ * repasse pas par le dedoublonnage d'Agent AOK.
+ */
+async function transmettreSiEquipe(chat: number, u: Utilisateur, texte: string): Promise<boolean> {
+  let compte: CompteCockpitTelegram | null
+  try {
+    compte = await compteCockpitTelegram(u.id)
+  } catch (err) {
+    console.warn(`[liveclub/bot] comptes de l'equipe illisibles : ${messageErreur(err)}`)
+    return false
+  }
+  if (aiguillageMessagePrive(texte, compte !== null) !== 'agent_cockpit' || !compte) return false
+
+  let issue: IssueAgentTelegram
+  try {
+    issue = await traiterTexteAgentTelegram({
+      chatId: u.id, telegramId: u.id, texte, compte, updateId: null, transmis: true,
+      apresAccuse: async () => { await envoyerTelegram(chat, TEXTE_TRANSMIS_AU_COCKPIT) },
+    })
+  } catch (err) {
+    console.warn(`[liveclub/bot] transmission a l'agent du cockpit impossible : ${messageErreur(err)}`)
+    issue = 'non_livre'
+  }
+  if (issue === 'non_livre') await envoyerTelegram(chat, TEXTE_NON_TRANSMIS_AU_COCKPIT)
+  return true
 }
 
 // ---------------------------------------------------------------------------

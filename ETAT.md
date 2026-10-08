@@ -304,3 +304,42 @@ rattachement (non change).
   lecture de cockpit_liveclub_rattachements jetait (log « rattachement
   illisible pour u<id> »). /start et /menu donnaient alors TEXTE_NON_RATTACHE.
 - Tests : verifier-liveclub.mjs 31 blocs. tsc et eslint propres.
+
+## Equipe au bot des membres, droit avant reintegration, demandes au task picker (08/10/2026, NON commite, NON deploye)
+
+Trois problemes reels (Brice, 08/10).
+- L'equipe au bot des membres : un compte de cockpit_telegram_comptes qui ecrit
+  du TEXTE LIBRE a @aok_liveclub_bot n'est plus traite en membre
+  (transmettreSiEquipe, bot-membre.ts ; regle pure aiguillageMessagePrive,
+  pur.ts). Sa demande part a l'agent du Cockpit, dans SA conversation Agent AOK
+  (meme historique, memes verrous, carte de confirmation dans Agent AOK). Le
+  traitement de la route Agent AOK est sorti dans src/lib/agent-cockpit-telegram.ts
+  (traiterTexteAgentTelegram, traiterClicAgentTelegram), la route ne garde que
+  le webhook. Un message transmis passe d'abord par un accuse dans Agent AOK
+  (« Reçu depuis le bot Live Club ») : livre = « Tu es de l'équipe : je passe
+  ta demande... » au bot des membres, non livre (Agent AOK jamais ouvert, panne)
+  = « Je n'ai pas pu la passer... ». Il ne touche pas au dernier update_id
+  d'Agent AOK (autre sequence). Ni fil Support, ni « veut un humain », ni
+  alerte. /start, /menu, boutons : inchanges. maxDuration du webhook des
+  membres passe a 120 s.
+- Le droit avant la reintegration (agent-cockpit.ts, stripe-actions.ts) :
+  consigne « verifie le droit d'abord, sans droit pose le droit » ; nouvel
+  outil proposer_exemption (carte, poserExemptionServeur : refus si exemption
+  active, une echue non close est close, pose_par = uuid de l'acteur) ;
+  proposer_reintegrer_telegram refuse cote serveur si droitLiveClub n'est pas
+  'oui' (refusReintegration, journalise 'reintegration' 'refuse' sans_droit ou
+  impaye_ouvert, 'echec' droit_inconnu). Derniere ligne de chaque resultat
+  broker, exemption, reintegration : l'etape humaine suivante (etapeApres*,
+  pur.ts).
+- Demandes au task picker : outil noter_demande (sans carte) qui ecrit dans
+  cockpit_demandes (migration 20261008150000_cockpit_demandes.sql, ECRITE, PAS
+  APPLIQUEE) ; consigne « je ne sais pas encore, c'est note ». Cockpit :
+  « Demandes de l'équipe » sous le chat de l'onglet Support
+  (views/DemandesEquipe.tsx), table absente = etat vide.
+- Tests : verifier-liveclub.mjs 36 blocs (5 nouveaux). tsc et eslint propres ;
+  cockpit npm run build ok. Aucune eval de bot (aucun prompt de bot membre
+  touche) ; le prompt de l'agent du Cockpit n'a pas d'eval.
+- A suivre : appliquer la migration ; le bouton Reintegrer du cockpit
+  (/api/cockpit/liveclub/membre) ne verifie toujours pas le droit ; le bouton
+  « Contacter l'équipe » d'un compte de l'equipe passe encore le fil en
+  attente d'un humain.

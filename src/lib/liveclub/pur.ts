@@ -1185,6 +1185,8 @@ const RAISONS_DROIT: Record<string, string> = {
 const MOTIFS_REFUS: Record<string, string> = {
   exempte: 'membre exempté', admin_du_groupe: 'administrateur du groupe', absent_du_groupe: "déjà hors du groupe",
   plafond_passage: 'plafond du passage atteint, reportée',
+  // Reintegration demandee a l'agent du Cockpit sans droit ouvert (08/10, refusReintegration).
+  sans_droit: 'aucun droit ouvert', impaye_ouvert: 'paiement en retard',
 }
 
 export type GesteLu = {
@@ -1495,4 +1497,185 @@ export function relationAbsente(err: unknown): boolean {
 
 export function messageErreur(err: unknown): string {
   return (err instanceof Error ? err.message : String(err)).split('\n')[0].slice(0, 200)
+}
+
+/**
+ * Le numero Telegram tel qu'il arrive (nombre, "123456789" ou "u123456789").
+ * null = illisible : on refuse plutot que de deviner. Ici depuis le 08/10
+ * (stripe-actions.ts le reexporte) : la validation d'une exemption s'en sert.
+ */
+export function lireTelegramId(brut: unknown): number | null {
+  const s = String(brut ?? '').trim().replace(/^u/i, '')
+  if (!/^\d{5,15}$/.test(s)) return null
+  const n = Number(s)
+  return Number.isSafeInteger(n) ? n : null
+}
+
+// ---------------------------------------------------------------------------
+// L'equipe qui ecrit au bot des membres (Brice, 08/10). Melanie, exemptee
+// « fondateur », a ecrit au bot une demande pour un tiers : le bot l'a traitee
+// en membre a acces offert, et l'agent des membres a repondu « l'equipe est
+// prevenue » (fil Support en attente d'un humain, alerte email). Un compte de
+// cockpit_telegram_comptes qui ECRIT du texte libre au bot des membres parle
+// donc a l'agent du Cockpit : sa demande part dans SA conversation avec Agent
+// AOK. /start, /menu et les boutons restent ceux d'un compte exempte.
+// ---------------------------------------------------------------------------
+
+/** /start [parametre] et /menu, « @nom_du_bot » tolere : les commandes du bot des membres. */
+export const COMMANDE_BOT_MEMBRE = /^\/(start|menu)(?:@\w+)?(?:\s+(\S+))?\s*$/i
+
+export type AiguillageMessagePrive = 'sans_texte' | 'commande' | 'agent_cockpit' | 'membre'
+
+/**
+ * Ou va un message prive ecrit au bot des membres. Une commande reste au bot,
+ * meme pour l'equipe ; seul le texte libre d'un compte de l'equipe part a
+ * l'agent du Cockpit.
+ */
+export function aiguillageMessagePrive(texte: string, compteDEquipe: boolean): AiguillageMessagePrive {
+  const t = texte.trim()
+  if (!t) return 'sans_texte'
+  if (COMMANDE_BOT_MEMBRE.test(t)) return 'commande'
+  return compteDEquipe ? 'agent_cockpit' : 'membre'
+}
+
+/** Au compte de l'equipe, dans le bot des membres : sa demande est passee a l'agent du Cockpit. */
+export const TEXTE_TRANSMIS_AU_COCKPIT = "Tu es de l'équipe : je passe ta demande à l'agent du Cockpit, sa réponse arrive dans Agent AOK."
+/** La meme, quand Agent AOK n'a pas pu la recevoir (bot jamais ouvert, panne). */
+export const TEXTE_NON_TRANSMIS_AU_COCKPIT = "Je n'ai pas pu la passer : écris-la directement à Agent AOK."
+
+// ---------------------------------------------------------------------------
+// Les gestes d'acces de l'agent du Cockpit (Brice, 08/10). Une reintegration
+// SANS droit ouvre le groupe a quelqu'un que rien ne compte et que rien ne
+// sortira (cas reel : un client du broker « reintegre » par un lien brut). Le
+// droit d'abord (acces broker, exemption), l'entree ensuite, par le bot. Apres
+// chaque geste execute, la derniere ligne du resultat dit l'etape humaine
+// suivante, en une ligne.
+// ---------------------------------------------------------------------------
+
+export type RefusReintegration = { genre: 'refus' | 'panne'; regle: string; message: string }
+
+/**
+ * Le refus d'une reintegration demandee par l'agent du Cockpit, ou null si
+ * le droit est ouvert. `droit` est celui de droitLiveClub (droits.ts) ;
+ * 'inconnu' = une source illisible, rien n'est tente. `bot` : le nom du bot
+ * des membres, sans @.
+ */
+export function refusReintegration(
+  droit: { statut: 'oui' | 'non' | 'inconnu'; dette?: unknown },
+  qui: string,
+  bot: string,
+): RefusReintegration | null {
+  if (droit.statut === 'oui') return null
+  if (droit.statut === 'inconnu') {
+    return {
+      genre: 'panne', regle: 'droit_inconnu',
+      message: `Je n'arrive pas à lire le droit de ${qui} en ce moment (une source illisible) : rien n'a été fait. Réessaie dans quelques minutes.`,
+    }
+  }
+  if (droit.dette) {
+    return {
+      genre: 'refus', regle: 'impaye_ouvert',
+      message: `${qui} a un paiement en retard : son accès rouvre tout seul dès que la facture est réglée, `
+        + `et le bot lui donne le lien de la facture dès qu'il lui écrit.`,
+    }
+  }
+  return {
+    genre: 'refus', regle: 'sans_droit',
+    message: `${qui} n'a aucun droit ouvert au Live Club (ni abonnement actif, ni exemption, ni accès broker, ni accès manuel) : `
+      + `le réintégrer lui ouvrirait le groupe sans que rien ne compte sa durée ni ne le sorte à la fin. `
+      + `Pose d'abord son droit, il entrera ensuite tout seul par @${bot} : un accès broker s'il a fait un dépôt `
+      + `chez le broker partenaire (avec son email), une exemption si c'est un geste de l'équipe (avec son compte Telegram).`,
+  }
+}
+
+/** « a », « a et b », « a, b et c ». */
+function listeFr(elements: readonly string[]): string {
+  if (elements.length <= 1) return elements[0] ?? ''
+  return `${elements.slice(0, -1).join(', ')} et ${elements[elements.length - 1]}`
+}
+
+/** L'etape humaine apres une exemption posee, ou un droit pose sans email. */
+export function etapeApresExemption(qui: string, bot: string): string {
+  return `Dis à ${qui} d'ouvrir @${bot} et d'appuyer sur Démarrer : il gère son entrée tout seul.`
+}
+
+/** L'etape humaine apres une reintegration : le lien, a transmettre. */
+export function etapeApresReintegration(qui: string, lien: string): string {
+  return `Transmets ce lien à ${qui} : ${lien}`
+}
+
+/** Le resultat d'un acces broker tel que l'etape suivante le lit (acces.ts, ResultatAccesBroker). */
+export type IssueAccesLue = { email: string; resultat: string; emailEnvoye?: boolean }
+
+/**
+ * L'etape humaine apres un lot d'acces broker, en une ligne : rien a faire si
+ * chaque acces ouvert a vu partir son email (lien personnel vers le bot) ;
+ * sinon, dire aux adresses sans email d'ouvrir le bot (elles s'y relient par
+ * leur email, puis entrent seules). Aucun acces ouvert : rien a faire.
+ */
+export function etapeApresAccesBroker(resultats: readonly IssueAccesLue[], bot: string): string {
+  const accordes = resultats.filter(r => r.resultat === 'accorde')
+  if (accordes.length === 0) return "Rien d'autre à faire : aucun accès n'a été ouvert."
+  const sansEmail = accordes.filter(r => r.emailEnvoye !== true).map(r => r.email)
+  if (sansEmail.length === 0) {
+    return accordes.length === 1
+      ? `Rien à faire : ${accordes[0].email} reçoit un email avec son lien vers le bot.`
+      : 'Rien à faire : chaque adresse accordée reçoit un email avec son lien vers le bot.'
+  }
+  if (sansEmail.length === 1) return etapeApresExemption(sansEmail[0], bot)
+  return `Dis à ${listeFr(sansEmail)} d'ouvrir @${bot} et d'appuyer sur Démarrer : chacun gère son entrée tout seul.`
+}
+
+/** Les motifs d'une exemption (check de cockpit_liveclub_exemptions). */
+export const MOTIFS_EXEMPTION = ['fondateur', 'admin', 'equipe', 'favorise'] as const
+export type MotifExemption = (typeof MOTIFS_EXEMPTION)[number]
+
+export type ParamsExemption = {
+  telegram_id: number
+  motif: MotifExemption
+  /** 'YYYY-MM-DD', INCLUS ; null = permanente. */
+  jusquau: string | null
+  note: string | null
+  qui: string
+}
+
+/**
+ * Les parametres d'une exemption proposee par l'agent du Cockpit, ou la
+ * raison du refus (rendue au modele pour qu'il corrige). `aujourdhui` :
+ * 'YYYY-MM-DD', le jour contre lequel la base juge jusquau (current_date).
+ * Le motif accepte ses accents (« équipe », « favorisé »).
+ */
+export function lireParamsExemption(p: Record<string, unknown>, aujourdhui: string): ParamsExemption | string {
+  const telegramId = lireTelegramId(p.telegram_id)
+  if (telegramId === null) {
+    return "telegram_id invalide : le numéro du compte Telegram (u suivi de chiffres, sans le u). S'il est inconnu, demande le compte Telegram de la personne avant de proposer."
+  }
+  const motif = String(p.motif ?? '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+  if (!(MOTIFS_EXEMPTION as readonly string[]).includes(motif)) {
+    return 'motif : fondateur, admin, equipe ou favorise.'
+  }
+  const brut = p.jusquau == null ? '' : String(p.jusquau).trim()
+  let jusquau: string | null = null
+  if (brut) {
+    const t = Date.parse(`${brut}T00:00:00Z`)
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(brut) || !Number.isFinite(t) || new Date(t).toISOString().slice(0, 10) !== brut) {
+      return 'jusquau au format AAAA-MM-JJ (date de fin INCLUSE), ou vide pour une exemption permanente.'
+    }
+    if (brut < aujourdhui) return `jusquau est déjà passé (${brut}) : une date d'aujourd'hui ou après, ou vide pour une exemption permanente.`
+    jusquau = brut
+  }
+  const note = p.note == null ? null : String(p.note).trim().slice(0, 500) || null
+  const qui = String(p.qui ?? '').trim().slice(0, 80)
+  if (!qui) return 'Précise QUI (nom ou pseudo) pour que la carte de confirmation soit lisible.'
+  return { telegram_id: telegramId, motif: motif as MotifExemption, jusquau, note, qui }
+}
+
+/**
+ * L'uuid du compte du cockpit derriere un acteur 'agent:<uuid>' ou
+ * 'cockpit:<uuid>', ou null. Une exemption posee par le serveur porte cet
+ * uuid dans pose_par (la base ne connait pas auth.uid() hors d'une session).
+ */
+export function uuidDeActeur(acteur: string): string | null {
+  const m = /^(?:agent|cockpit):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(acteur.trim())
+  return m ? m[1].toLowerCase() : null
 }
