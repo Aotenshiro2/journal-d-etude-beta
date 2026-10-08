@@ -160,7 +160,7 @@ change que le nom du Carnet) :
   (jeton illisible, lien impossible, ban non leve, confirmation sur un
   abonnement qui n est plus lie) gardent support@.
 
-## Impayes du Live Club (30/09/2026, NON commite, NON deploye)
+## Impayes du Live Club (30/09/2026, deploye)
 
 Decisions de Brice du 30/09 (compte Stripe de Melanie regle sur « marquer
 l abonnement comme non paye », facture laissee ouverte). Tout est compte
@@ -232,7 +232,7 @@ facture envoyee (premierEchecFacture, pur.ts).
   Billing en ecriture depuis le 04/09) ; le passage le dira au premier cas
   reel. La reouverture par email passe par un jeton 'retour' de 30 jours.
 
-## Bot Live Club : une exemption datee vaut sortie programmee (06/10/2026, NON commite, NON deploye)
+## Bot Live Club : une exemption datee vaut sortie programmee (06/10/2026, deploye f968d1b)
 
 Demande de Brice (06/10) : « dis clairement au bot de sortir cette personne au
 premier janvier ». Avant : une exemption echue ne protegeait plus, mais un
@@ -262,7 +262,7 @@ compte relie a aucun abonnement n'etait jamais sorti.
   (pur.ts) pour fin_exemption, fin_exemption_j7, fin_exemption_message.
 - Synthese : exemptions { rappels_j7, sorties, simulees, messages_fin,
   closes_absent, gardees_autre_droit, sans_moyen, inconnus, echecs }.
-- Cockpit (depot workspace, NON commite, NON deploye) : sous la date de fin du
+- Cockpit (depot workspace, deploye) : sous la date de fin du
   formulaire, la regle (« Apres cette date, le bot sort la personne... Vide =
   exemption permanente. ») et la date de sortie calculee ; « sortie programmee
   le ... » (lendemain de jusquau) dans la liste des exemptions et la fiche
@@ -305,7 +305,7 @@ rattachement (non change).
   illisible pour u<id> »). /start et /menu donnaient alors TEXTE_NON_RATTACHE.
 - Tests : verifier-liveclub.mjs 31 blocs. tsc et eslint propres.
 
-## Equipe au bot des membres, droit avant reintegration, demandes au task picker (08/10/2026, NON commite, NON deploye)
+## Equipe au bot des membres, droit avant reintegration, demandes au task picker (08/10/2026, deploye f5a8b1d)
 
 Trois problemes reels (Brice, 08/10).
 - L'equipe au bot des membres : un compte de cockpit_telegram_comptes qui ecrit
@@ -344,7 +344,7 @@ Trois problemes reels (Brice, 08/10).
   « Contacter l'équipe » d'un compte de l'equipe passe encore le fil en
   attente d'un humain.
 
-## Commissions, depenses et repartition Brice / Mel (08/10/2026, NON commite, NON deploye)
+## Commissions, depenses et repartition Brice / Mel (08/10/2026, deploye ; intervenants par live d11afe8, migrations 20261008170000 et 20261008190000 appliquees)
 
 Regles de Brice du 08/10 (deux cotes, 70/30 a celui qui apporte la vente,
 Saro hors calcul, base = encaisse - frais Stripe - remboursements -
