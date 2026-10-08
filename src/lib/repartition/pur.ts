@@ -12,10 +12,14 @@
 //    (collect_stripe.py, _compte de chaque charge).
 // 2. Celui qui apporte la vente prend 70 %, l'autre 30 %. Saro est hors
 //    calcul : il n'apparait nulle part ici.
-// 3. Base du partage d'une vente : encaisse - frais Stripe - remboursements -
-//    part des intervenants du produit. Les intervenants, leur % et leurs
-//    produits vivent dans une table DATEE (cockpit_intervenants), jamais ici.
-//    Un produit sans intervenant declare se partage directement.
+// 3. Base du partage d'une vente : encaisse - frais Stripe - remboursements.
+//    Un intervenant (Adrien...) ne prend rien sur les ventes : il touche une
+//    SOMME FIXE PAR LIVE (correction de Brice, 08/10). Son tarif est DATE et
+//    rattache a un produit (cockpit_intervenants, jamais ici) ; chaque mois,
+//    le nombre de lives declare fait une DEPENSE du mois (nombre x tarif en
+//    vigueur ce mois-la), rattachee a ce produit, donc deduite de son cote
+//    avant le 70/30 (regle 5), et payee par celui qui le paie (Mel par
+//    defaut pour le Live Club, choisi dans la carte).
 // 4. Une commission (broker, affiliation) compte dans le mois ou elle est
 //    RECUE. Attendue, elle glisse de mois en mois jusqu'a recue ou perdue.
 // 5. Une depense rattachee a un cote ou a un produit est deduite de ce cote
@@ -27,10 +31,9 @@
 //      Solde de Brice = somme de ses parts - (ce qu'il a eu en main - ce qu'il a paye)
 //
 //    Positif : Mel lui doit ce montant. Negatif : il doit a Mel.
-//    HYPOTHESE (Brice, 08/10) : celui qui encaisse une vente paie lui-meme
-//    l'intervenant du produit. Sa part est donc deduite de ce que
-//    l'encaisseur a eu en main (le net de la vente), pas versee par l'autre.
-//    Les reglements faits (« c'est regle ») se deduisent du solde : un
+//    Les lives d'un intervenant sont une depense comme une autre : en main
+//    NEGATIF de celui qui les a payes, parts negatives en 70/30 du cote du
+//    produit. Les reglements faits (« c'est regle ») se deduisent du solde : un
 //    reglement de Mel a Brice, c'est de l'argent que Brice a eu en main.
 //    Mois en heure de Paris.
 //
@@ -219,17 +222,23 @@ export function jourDuPaiement(p: { horodatage?: string | Date | null; date_paie
 }
 
 // ---------------------------------------------------------------------------
-// Intervenants et taux des partenaires : deux tables DATEES, meme regle.
-// En vigueur a une date = la ligne a_partir_du la plus recente avant ou ce
-// jour-la ; a egalite, la derniere posee. Rien ne s'efface : un changement
-// est une ligne de plus, l'historique reste lisible.
+// Tarifs des intervenants et taux des partenaires : deux tables DATEES, meme
+// regle. En vigueur a une date = la ligne a_partir_du la plus recente avant
+// ou ce jour-la ; a egalite, la derniere posee. Rien ne s'efface : un
+// changement est une ligne de plus, l'historique reste lisible.
 // ---------------------------------------------------------------------------
 
-export type PartIntervenant = {
+/** Les unites d'un tarif d'intervenant : une liste FERMEE (la base a la meme). */
+export const UNITES_INTERVENANT = ['live'] as const
+export type UniteIntervenant = (typeof UNITES_INTERVENANT)[number]
+
+/** Le tarif d'un intervenant sur un produit, a partir d'une date (cockpit_intervenants). */
+export type TarifIntervenant = {
   intervenant: string
   offreId: string
-  /** 0 a 100 ; 0 = l'intervenant s'arrete a cette date. */
-  pourcentage: number
+  /** Centimes par unite (par live), positif. */
+  montantParUnite: number
+  unite: UniteIntervenant
   aPartirDu: string
   poseLe?: string | null
 }
@@ -239,26 +248,128 @@ function plusRecente<T extends { aPartirDu: string; poseLe?: string | null }>(a:
   return String(a.poseLe ?? '') >= String(b.poseLe ?? '') ? a : b
 }
 
-function cleIntervenant(nom: string): string {
+/** 'Adrien', ' adrien ', 'ADRIEN' -> la meme personne (accents et casse ignores). */
+export function cleIntervenant(nom: string): string {
   return sansAccents(nom).trim().toLowerCase().replace(/\s+/g, ' ')
 }
 
-/** Les intervenants d'un produit a une date, avec leur % (ceux a 0 % retires), par nom. */
-export function intervenantsEnVigueur(
-  parts: readonly PartIntervenant[], offreId: string | null, jour: string,
-): { intervenant: string; pourcentage: number }[] {
-  if (!offreId) return []
-  const parNom = new Map<string, PartIntervenant>()
-  for (const p of parts) {
-    if (p.offreId !== offreId || p.aPartirDu > jour) continue
-    const cle = cleIntervenant(p.intervenant)
-    const deja = parNom.get(cle)
-    parNom.set(cle, deja ? plusRecente(deja, p) : p)
+/** Les tarifs d'un intervenant en vigueur a une date, un par produit, tries par produit. */
+export function tarifsEnVigueur(
+  tarifs: readonly TarifIntervenant[], intervenant: string, jour: string,
+): TarifIntervenant[] {
+  const cle = cleIntervenant(intervenant)
+  const parProduit = new Map<string, TarifIntervenant>()
+  for (const t of tarifs) {
+    if (cleIntervenant(t.intervenant) !== cle || t.aPartirDu > jour) continue
+    const deja = parProduit.get(t.offreId)
+    parProduit.set(t.offreId, deja ? plusRecente(deja, t) : t)
   }
-  return [...parNom.values()]
-    .filter(p => p.pourcentage > 0)
-    .map(p => ({ intervenant: p.intervenant.trim(), pourcentage: p.pourcentage }))
-    .sort((a, b) => a.intervenant.localeCompare(b.intervenant))
+  return [...parProduit.values()].sort((a, b) => a.offreId.localeCompare(b.offreId))
+}
+
+export type TarifDuMois =
+  | {
+    ok: true
+    tarif: TarifIntervenant
+    /** Le tarif en vigueur le 1er du mois s'il etait different : il a change en cours de mois. */
+    avant: TarifIntervenant | null
+  }
+  | { ok: false; raison: 'aucun' | 'plusieurs'; offres: string[] }
+
+/**
+ * Le tarif qui s'applique aux lives d'un intervenant pour un mois : celui en
+ * vigueur le DERNIER jour du mois (un tarif qui demarre en cours de mois vaut
+ * pour tout le mois, puisqu'on declare un seul nombre par mois ; `avant` le
+ * signale). Sans offreId, le produit est deduit des tarifs : refus s'il y en
+ * a plusieurs ('plusieurs', avec la liste) ou aucun ('aucun').
+ */
+export function tarifDuMois(
+  tarifs: readonly TarifIntervenant[], intervenant: string, mois: string, offreId?: string | null,
+): TarifDuMois {
+  const { debut, fin } = bornesMois(mois)
+  const enVigueur = tarifsEnVigueur(tarifs, intervenant, fin).filter(t => !offreId || t.offreId === offreId)
+  if (enVigueur.length === 0) return { ok: false, raison: 'aucun', offres: [] }
+  if (enVigueur.length > 1) return { ok: false, raison: 'plusieurs', offres: enVigueur.map(t => t.offreId) }
+  const tarif = enVigueur[0]
+  const auDebut = tarifsEnVigueur(tarifs, intervenant, debut).find(t => t.offreId === tarif.offreId) ?? null
+  const avant = auDebut && auDebut.montantParUnite !== tarif.montantParUnite ? auDebut : null
+  return { ok: true, tarif, avant }
+}
+
+/** 'live' -> 'lives' au pluriel. */
+export function nomUnite(unite: UniteIntervenant, nombre: number): string {
+  return nombre > 1 ? `${unite}s` : unite
+}
+
+/** '50 € par live'. */
+export function libelleTarif(t: { montantParUnite: number; unite: UniteIntervenant }): string {
+  return `${euros(t.montantParUnite)} par ${t.unite}`
+}
+
+/** '6 lives x 50 €'. */
+export function libelleLives(quantite: number, prixUnitaire: number, unite: UniteIntervenant = 'live'): string {
+  return `${quantite} ${nomUnite(unite, quantite)} x ${euros(prixUnitaire)}`
+}
+
+/** « Lives d'Adrien », « Lives de Paul » : le libelle d'une depense de lives. */
+export function libelleDepenseLives(intervenant: string): string {
+  const nom = intervenant.replace(/\s+/g, ' ').trim()
+  return /^[aeiouyéèêëàâîïôûh]/i.test(nom) ? `Lives d'${nom}` : `Lives de ${nom}`
+}
+
+/** Les lives d'un intervenant pour un mois, devenus depense (montants en centimes). */
+export type DepenseLives = {
+  libelle: string
+  intervenant: string
+  offreId: string
+  mois: string
+  quantite: number
+  /** Centimes par live : le tarif en vigueur ce mois-la. */
+  prixUnitaire: number
+  /** Centimes : quantite x prixUnitaire. */
+  montant: number
+  /** Le cote du produit : la depense est deduite de ce cote avant son 70/30. */
+  cote: Cote
+  payeePar: Cote
+}
+
+/**
+ * LA DEPENSE D'UN MOIS a partir d'un nombre de lives et des tarifs dates :
+ * nombre x tarif en vigueur ce mois-la (tarifDuMois), rattachee au produit
+ * du tarif. `cote` = le cote de ce produit (le serveur le connait par ses
+ * ventes Stripe) ; payee par `payeePar`, sinon par ce cote (Mel pour le Live
+ * Club). Refus clair si aucun tarif, ou plusieurs produits possibles.
+ */
+export function depenseDesLives(
+  tarifs: readonly TarifIntervenant[],
+  o: {
+    intervenant: string; mois: string; nombre: number; offreId?: string | null
+    cote: Cote | ((offreId: string) => Cote | null); payeePar?: Cote | null
+  },
+): { ok: true; depense: DepenseLives; tarif: TarifIntervenant; avant: TarifIntervenant | null }
+  | { ok: false; raison: 'aucun' | 'plusieurs' | 'cote_inconnu' | 'nombre'; offres: string[] } {
+  if (!Number.isInteger(o.nombre) || o.nombre <= 0) return { ok: false, raison: 'nombre', offres: [] }
+  const t = tarifDuMois(tarifs, o.intervenant, o.mois, o.offreId)
+  if (!t.ok) return t
+  const cote = typeof o.cote === 'function' ? o.cote(t.tarif.offreId) : o.cote
+  if (!cote) return { ok: false, raison: 'cote_inconnu', offres: [t.tarif.offreId] }
+  const intervenant = t.tarif.intervenant.replace(/\s+/g, ' ').trim()
+  return {
+    ok: true,
+    tarif: t.tarif,
+    avant: t.avant,
+    depense: {
+      libelle: libelleDepenseLives(intervenant),
+      intervenant,
+      offreId: t.tarif.offreId,
+      mois: o.mois,
+      quantite: o.nombre,
+      prixUnitaire: t.tarif.montantParUnite,
+      montant: o.nombre * t.tarif.montantParUnite,
+      cote,
+      payeePar: o.payeePar ?? cote,
+    },
+  }
 }
 
 export type TauxPartenaire = {
@@ -308,7 +419,7 @@ export type Vente = {
   id: string
   cote: Cote
   offreId: string | null
-  /** Jour de Paris : il choisit les intervenants en vigueur. */
+  /** Jour de Paris : il choisit le mois de la vente. */
   jour: string
   /** Centimes encaisses (avant remboursement). */
   encaisse: number
@@ -319,23 +430,17 @@ export type Vente = {
 }
 
 export type VenteCalculee = Vente & {
-  intervenants: { intervenant: string; pourcentage: number; montant: number }[]
-  partIntervenants: number
-  /** encaisse - rembourse - frais - intervenants : ce qui se partage, et ce que l'encaisseur garde en main. */
+  /** encaisse - rembourse - frais : ce qui se partage, et ce que l'encaisseur garde en main. */
   net: number
 }
 
 /**
- * Une vente, ses intervenants et son net. L'assiette d'un intervenant est
- * l'encaisse rembourse deduit (l'argent global du produit), AVANT les frais
- * Stripe : c'est sa part de la vente, pas de ce que Stripe laisse.
+ * Une vente et son net : encaisse - remboursements - frais Stripe (inconnus
+ * = zero, signales a cote). Aucun intervenant ici : ses lives sont une
+ * depense du mois (depenseDesLives).
  */
-export function calculerVente(v: Vente, parts: readonly PartIntervenant[]): VenteCalculee {
-  const assiette = v.encaisse - v.rembourse
-  const intervenants = intervenantsEnVigueur(parts, v.offreId, v.jour)
-    .map(i => ({ ...i, montant: arrondi((assiette * i.pourcentage) / 100) }))
-  const partIntervenants = intervenants.reduce((s, i) => s + i.montant, 0)
-  return { ...v, intervenants, partIntervenants, net: assiette - (v.frais ?? 0) - partIntervenants }
+export function calculerVente(v: Vente): VenteCalculee {
+  return { ...v, net: v.encaisse - v.rembourse - (v.frais ?? 0) }
 }
 
 /**
@@ -445,6 +550,11 @@ export type Depense = {
   offreId: string | null
   /** Commune seulement : la part de Brice en % (null = 50/50). */
   partBricePct: number | null
+  /**
+   * Les lives d'un intervenant (null pour une depense ordinaire) : le
+   * montant vaut quantite x prixUnitaire, rattache au produit offreId.
+   */
+  lives?: { intervenant: string; quantite: number; prixUnitaire: number } | null
 }
 
 export type Reglement = {
@@ -470,8 +580,10 @@ export type LigneGrandLivre = {
   enMain: Record<Cote, number>
   /** Comment le flux se partage. Somme des parts = somme de enMain (0 pour un reglement). */
   parts: Record<Cote, number>
-  /** Le detail en une ligne (encaisse, frais, intervenants...). */
+  /** Le detail en une ligne (encaisse, frais, nombre de lives x tarif...). */
   detail?: string
+  /** Une depense de lives : l'intervenant, le nombre et le tarif (centimes). */
+  lives?: { intervenant: string; quantite: number; prixUnitaire: number }
 }
 
 export type DetailCote = {
@@ -482,13 +594,14 @@ export type DetailCote = {
   frais: number
   /** Nombre de ventes sans frais connus (comptes a zero). */
   fraisInconnus: number
-  intervenants: number
   /** Net des ventes : ce que l'encaisseur garde en main. */
   netVentes: number
   /** Commissions recues ce mois (cote Mel seulement). */
   commissions: number
-  /** Depenses rattachees a ce cote ou a l'un de ses produits. */
+  /** Depenses rattachees a ce cote ou a l'un de ses produits, lives des intervenants compris. */
   depenses: number
+  /** Dont les lives des intervenants (deja comptes dans depenses). */
+  intervenants: number
   /** Ce qui se partage en 70/30 : netVentes + commissions - depenses. */
   base: number
   /** La base partagee : la part de chacun. */
@@ -501,7 +614,6 @@ export type EntreeRepartition = {
   moisCourant: string
   /** Les ventes du mois (les autres sont ignorees, par le jour de Paris). */
   ventes: readonly Vente[]
-  intervenants: readonly PartIntervenant[]
   /** Toutes les commissions : le module garde les recues du mois et les attendues. */
   commissions: readonly Commission[]
   depenses: readonly Depense[]
@@ -515,8 +627,8 @@ export type EntreeRepartition = {
 export type Repartition = {
   mois: string
   cotes: Record<Cote, DetailCote>
-  /** Ce qui revient aux intervenants ce mois, a payer par celui qui a encaisse. */
-  intervenants: { intervenant: string; offreId: string; payePar: Cote; montant: number }[]
+  /** Ce qui revient aux intervenants ce mois : leurs lives (depenses), et qui les paie. */
+  intervenants: { intervenant: string; offreId: string; payePar: Cote; quantite: number; prixUnitaire: number; montant: number }[]
   communes: { total: number; parts: Record<Cote, number> }
   /** Somme des parts de chacun (ventes, commissions, depenses). */
   parts: Record<Cote, number>
@@ -548,8 +660,8 @@ const zero = (): Record<Cote, number> => ({ brice: 0, mel: 0 })
 
 function detailVide(): DetailCote {
   return {
-    nbVentes: 0, encaisse: 0, rembourse: 0, frais: 0, fraisInconnus: 0, intervenants: 0,
-    netVentes: 0, commissions: 0, depenses: 0, base: 0, parts: zero(),
+    nbVentes: 0, encaisse: 0, rembourse: 0, frais: 0, fraisInconnus: 0,
+    netVentes: 0, commissions: 0, depenses: 0, intervenants: 0, base: 0, parts: zero(),
   }
 }
 
@@ -563,12 +675,13 @@ export function soldeDesLignes(lignes: readonly LigneGrandLivre[]): number {
  * en tire les parts, ce que chacun a eu en main, et le solde.
  *
  * - Ventes : une ligne par cote et par produit. En main : l'encaisseur (le
- *   proprietaire du Stripe), pour le NET (frais, remboursements et
- *   intervenants deduits, puisqu'il paie l'intervenant). Parts : 70/30.
+ *   proprietaire du Stripe), pour le NET (frais et remboursements
+ *   deduits). Parts : 70/30.
  * - Commission recue ce mois : en main de qui l'a touchee (Mel sauf
  *   indication), parts 30 Brice / 70 Mel (cote Mel).
  * - Depense : en main NEGATIF de qui l'a payee. Parts negatives : 70/30 du
- *   cote ou du produit rattache, sinon la repartition commune.
+ *   cote ou du produit rattache, sinon la repartition commune. Les lives
+ *   d'un intervenant sont une depense rattachee a son produit.
  * - Reglement : en main + pour celui qui recoit, - pour celui qui verse,
  *   parts nulles.
  */
@@ -582,45 +695,35 @@ export function repartitionDuMois(e: EntreeRepartition): Repartition {
   const groupes = new Map<string, { cote: Cote; offreId: string | null; ventes: VenteCalculee[] }>()
   for (const v of e.ventes) {
     if (moisDe(v.jour) !== e.mois) continue
-    const calc = calculerVente(v, e.intervenants)
+    const calc = calculerVente(v)
     const cle = `${v.cote}|${v.offreId ?? ''}`
     const g = groupes.get(cle) ?? { cote: v.cote, offreId: v.offreId, ventes: [] }
     g.ventes.push(calc)
     groupes.set(cle, g)
   }
-  const parIntervenant = new Map<string, { intervenant: string; offreId: string; payePar: Cote; montant: number }>()
   const ordreGroupes = [...groupes.values()].sort((a, b) =>
     a.cote === b.cote ? nomOffre(a.offreId).localeCompare(nomOffre(b.offreId)) : (a.cote === 'mel' ? -1 : 1))
   for (const g of ordreGroupes) {
     const d = cotes[g.cote]
-    let encaisse = 0, rembourse = 0, frais = 0, inconnus = 0, interv = 0, net = 0
+    let encaisse = 0, rembourse = 0, frais = 0, inconnus = 0, net = 0
     for (const v of g.ventes) {
       encaisse += v.encaisse
       rembourse += v.rembourse
       if (v.frais === null) inconnus += 1
       else frais += v.frais
-      interv += v.partIntervenants
       net += v.net
-      for (const i of v.intervenants) {
-        const cle = `${cleIntervenant(i.intervenant)}|${v.offreId}|${g.cote}`
-        const deja = parIntervenant.get(cle) ?? { intervenant: i.intervenant, offreId: v.offreId ?? '', payePar: g.cote, montant: 0 }
-        deja.montant += i.montant
-        parIntervenant.set(cle, deja)
-      }
     }
     d.nbVentes += g.ventes.length
     d.encaisse += encaisse
     d.rembourse += rembourse
     d.frais += frais
     d.fraisInconnus += inconnus
-    d.intervenants += interv
     d.netVentes += net
     const enMain = zero()
     enMain[g.cote] = net
     const morceaux = [`${g.ventes.length} vente${g.ventes.length > 1 ? 's' : ''}`, `encaissé ${euros(encaisse)}`]
     if (rembourse) morceaux.push(`remboursé ${euros(rembourse)}`)
     morceaux.push(`frais Stripe ${euros(frais)}${inconnus ? ` (${inconnus} inconnus)` : ''}`)
-    if (interv) morceaux.push(`intervenants ${euros(interv)}`)
     lignes.push({
       genre: 'ventes',
       libelle: `${nomOffre(g.offreId)} (Stripe de ${NOM_COTE[g.cote]})`,
@@ -656,22 +759,37 @@ export function repartitionDuMois(e: EntreeRepartition): Repartition {
     })
   }
 
-  // Depenses du mois.
+  // Depenses du mois (les lives des intervenants en sont).
   const communes = { total: 0, parts: zero() }
+  const parIntervenant = new Map<string, Repartition['intervenants'][number]>()
   for (const d of e.depenses) {
     if (d.mois !== e.mois) continue
     const enMain = zero()
     enMain[d.payeePar] = -d.montant
     if (d.cote) {
       cotes[d.cote].depenses += d.montant
+      const lives = d.lives ?? null
+      if (lives) {
+        cotes[d.cote].intervenants += d.montant
+        const cle = `${cleIntervenant(lives.intervenant)}|${d.offreId ?? ''}|${d.payeePar}|${lives.prixUnitaire}`
+        const deja = parIntervenant.get(cle) ?? {
+          intervenant: lives.intervenant.trim(), offreId: d.offreId ?? '', payePar: d.payeePar,
+          quantite: 0, prixUnitaire: lives.prixUnitaire, montant: 0,
+        }
+        deja.quantite += lives.quantite
+        deja.montant += d.montant
+        parIntervenant.set(cle, deja)
+      }
       lignes.push({
         genre: 'depense',
         libelle: d.libelle,
         cote: d.cote,
         enMain,
         parts: partager(-d.montant, partBriceDuCote(d.cote)),
-        detail: `payée par ${NOM_COTE[d.payeePar]}, `
+        detail: (lives ? `${libelleLives(lives.quantite, lives.prixUnitaire)}, ` : '')
+          + `payée par ${NOM_COTE[d.payeePar]}, `
           + (d.offreId ? `produit ${nomOffre(d.offreId)} (côté ${NOM_COTE[d.cote]})` : `côté ${NOM_COTE[d.cote]}`),
+        ...(lives ? { lives: { intervenant: lives.intervenant.trim(), quantite: lives.quantite, prixUnitaire: lives.prixUnitaire } } : {}),
       })
       continue
     }
@@ -737,13 +855,6 @@ export function repartitionDuMois(e: EntreeRepartition): Repartition {
   if (e.horsStripe && e.horsStripe.nb > 0) {
     avertissements.push(`${e.horsStripe.nb} paiement${e.horsStripe.nb > 1 ? 's' : ''} hors Stripe (PayPal, virement...) pour ${euros(e.horsStripe.montant)} : non comptés, faute de savoir qui les a encaissés.`)
   }
-  const offresDuMois = new Set(e.ventes.filter(v => moisDe(v.jour) === e.mois).map(v => v.offreId))
-  for (const offreId of offresDuMois) {
-    if (!offreId) continue
-    const total = intervenantsEnVigueur(e.intervenants, offreId, bornesMois(e.mois).fin)
-      .reduce((s, i) => s + i.pourcentage, 0)
-    if (total > 100) avertissements.push(`Les intervenants de ${nomOffre(offreId)} dépassent 100 % (${pourcent(total)}).`)
-  }
 
   return {
     mois: e.mois,
@@ -776,7 +887,7 @@ export function repartitionDuMois(e: EntreeRepartition): Repartition {
 
 export const TYPES_REPARTITION = [
   'depot_broker', 'commission_affiliation', 'marquer_commission',
-  'taux_partenaire', 'intervenant', 'depense', 'reglement',
+  'taux_partenaire', 'intervenant', 'lives_du_mois', 'depense', 'reglement',
 ] as const
 export type TypeRepartition = (typeof TYPES_REPARTITION)[number]
 
@@ -828,6 +939,14 @@ function lireMois(v: unknown, defaut: string): string | string[] {
   if (!s) return [defaut]
   if (!moisValide(s)) return 'mois : au format AAAA-MM (ex. 2026-10).'
   return [s]
+}
+
+/** Vide -> 'live' (l'unite par defaut) ; une unite de la liste fermee, ou null. */
+function lireUnite(v: unknown): UniteIntervenant | null {
+  const s = v === null || v === undefined ? '' : String(v).trim().toLowerCase()
+  if (!s) return 'live'
+  const u = s === 'lives' ? 'live' : s
+  return (UNITES_INTERVENANT as readonly string[]).includes(u) ? (u as UniteIntervenant) : null
 }
 
 function lireEmail(v: unknown): string | null {
@@ -924,13 +1043,53 @@ export function lireParamsRepartition(
     if (!intervenant) return 'intervenant : son prénom (ex. Adrien).'
     const offreId = texteCourt(p.offre_id, 80)
     if (!offreId || /\s/.test(offreId)) return "offre_id : l'identifiant du produit, depuis cockpit_offres (ex. live-club)."
-    const pct = Number(String(p.pourcentage ?? '').replace(',', '.').replace('%', '').trim())
-    if (p.pourcentage === null || p.pourcentage === undefined || p.pourcentage === '' || !Number.isFinite(pct) || pct < 0 || pct > 100) {
-      return 'pourcentage : entre 0 et 100 (0 = il s\'arrête à cette date).'
-    }
+    const unite = lireUnite(p.unite)
+    if (!unite) return 'unite : live (la seule unité pour l\'instant).'
+    const montant = lireEuros(p.montant_par_live, 'montant_par_live (ce qu\'il touche par live, en euros)', { max: 100000 })
+    if (typeof montant === 'string') return `${montant} Si ce n'est pas dit, demande combien il prend par live.`
     const jour = lireJour(p.a_partir_du, 'a_partir_du', ctx.aujourdhui)
     if (typeof jour === 'string') return jour
-    return { intervenant, offre_id: offreId, pourcentage: Math.round(pct * 100) / 100, a_partir_du: jour[0], note }
+    return { intervenant, offre_id: offreId, montant_par_live: montant, unite, a_partir_du: jour[0], note }
+  }
+
+  if (type === 'lives_du_mois') {
+    const intervenant = texteCourt(p.intervenant, 80)
+    if (!intervenant) return 'intervenant : son prénom (ex. Adrien).'
+    const mois = lireMois(p.mois, ctx.moisCourant)
+    if (typeof mois === 'string') return mois
+    if (mois[0] > ctx.moisCourant) return `mois : ${mois[0]} n'est pas encore commencé, on déclare les lives faits.`
+    const brut = String(p.nombre ?? '').trim()
+    const nombre = Number(brut)
+    if (!brut || !Number.isInteger(nombre) || nombre < 1 || nombre > 1000) {
+      return 'nombre : le nombre de lives faits dans le mois, un entier positif (ex. 6).'
+    }
+    const vide = (v: unknown) => v === null || v === undefined || v === ''
+    let payeePar: Cote | null = null
+    if (!vide(p.payee_par)) {
+      payeePar = lireCote(p.payee_par)
+      if (!payeePar) return 'payee_par : brice ou mel (vide = le côté du produit, Mel pour le Live Club).'
+    }
+    let offreId: string | null = null
+    if (!vide(p.offre_id)) {
+      offreId = texteCourt(p.offre_id, 80)
+      if (!offreId || /\s/.test(offreId)) return "offre_id : l'identifiant du produit, depuis cockpit_offres (ex. live-club)."
+    }
+    // Poses par le serveur avant la carte (cote du produit, tarif du mois),
+    // relus a l'execution : la validation reste idempotente.
+    let cote: Cote | null = null
+    if (!vide(p.cote)) {
+      cote = lireCote(p.cote)
+      if (!cote) return 'cote : brice ou mel, le côté du produit.'
+    }
+    let prixUnitaire: number | null = null
+    if (!vide(p.prix_unitaire)) {
+      const prix = lireEuros(p.prix_unitaire, 'prix_unitaire', { max: 100000 })
+      if (typeof prix === 'string') return prix
+      prixUnitaire = prix
+    }
+    return {
+      intervenant, mois: mois[0], nombre, offre_id: offreId, cote, payee_par: payeePar, prix_unitaire: prixUnitaire, note,
+    }
   }
 
   if (type === 'depense') {
@@ -1001,11 +1160,27 @@ export function resumeRepartition(type: TypeRepartition, p: Record<string, unkno
       return `Taux de ${p.partenaire_nom}${p.nature ? ` (${p.nature})` : ''} : ${libelleTaux(t)} à partir du ${libelleJour(String(p.a_partir_du))}. `
         + `Les dépôts déjà inscrits gardent le taux de leur date.${note}`
     }
-    case 'intervenant':
-      return Number(p.pourcentage) === 0
-        ? `${p.intervenant} ne prend plus rien sur ${p.offre_id} à partir du ${libelleJour(String(p.a_partir_du))}.${note}`
-        : `${p.intervenant} prend ${pourcent(Number(p.pourcentage))} de l'encaissé de ${p.offre_id} à partir du `
-          + `${libelleJour(String(p.a_partir_du))}, payé par celui qui encaisse. Le reste de chaque vente se partage en 70/30.${note}`
+    case 'intervenant': {
+      const unite = (p.unite as UniteIntervenant | undefined) ?? 'live'
+      return `Tarif de ${p.intervenant} sur ${p.offre_id} : ${libelleTarif({ montantParUnite: centimes(p.montant_par_live) ?? 0, unite })} `
+        + `à partir du ${libelleJour(String(p.a_partir_du))}. Chaque mois, ses lives déclarés font une dépense de ce produit, `
+        + `déduite de son côté avant le 70/30.${note}`
+    }
+    case 'lives_du_mois': {
+      const n = Number(p.nombre)
+      const prix = p.prix_unitaire === null || p.prix_unitaire === undefined ? null : centimes(p.prix_unitaire)
+      const combien = prix === null
+        ? `${n} ${nomUnite('live', n)} au tarif en vigueur`
+        : `${libelleLives(n, prix)} = ${euros(n * prix)}`
+      const produit = p.offre_id
+        ? `rattachée au produit ${p.offre_id}${p.cote ? ` (côté ${NOM_COTE[p.cote as Cote]})` : ''}, déduite avant son 70/30`
+        : 'rattachée au produit de son tarif, déduite avant son 70/30'
+      const payeur = p.payee_par
+        ? `payée par ${NOM_COTE[p.payee_par as Cote]}`
+        : 'payée par le côté du produit'
+      return `Ajouter à ${libelleMois(String(p.mois))} une dépense d'intervenant : ${p.intervenant}, ${combien}, `
+        + `${produit}, ${payeur}.${note}`
+    }
     case 'depense': {
       const rattache = p.rattachement === 'commune'
         ? `commune, ${p.part_brice_pct === null || p.part_brice_pct === undefined ? '50/50' : `${pourcent(Number(p.part_brice_pct))} pour Brice`}`

@@ -9,13 +9,14 @@ import { moisValide } from '@/lib/repartition/pur'
  * POST /api/cockpit/repartition : la repartition Brice / Melanie d'un mois,
  * pour l'onglet Revenus du cockpit (08/10/2026). LECTURE seulement.
  *
- * Le calcul (cotes, 70/30, frais, intervenants, commissions recues,
- * depenses, reglements, solde) ne vit qu'une fois, dans
+ * Le calcul (cotes, 70/30, frais, commissions recues, depenses dont les
+ * lives des intervenants, reglements, solde) ne vit qu'une fois, dans
  * src/lib/repartition/pur.ts : l'agent du cockpit (outil
  * repartition_du_mois) et cet ecran lisent le meme resultat, et le cockpit
  * n'embarque aucune regle de partage dans son bundle (servi sans session).
- * Les ECRITURES du cockpit (depenses, taux, intervenants, reglements, statut
- * d'une commission) passent par Supabase, derriere is_cockpit_member() ;
+ * Les ECRITURES du cockpit (depenses, lives du mois, taux, tarifs des
+ * intervenants, reglements, statut d'une commission) passent par Supabase,
+ * derriere is_cockpit_member() ;
  * l'inscription d'un depot passe par l'agent (carte confirmee).
  *
  * Corps : { mois?: 'YYYY-MM' } (vide = mois en cours, heure de Paris).

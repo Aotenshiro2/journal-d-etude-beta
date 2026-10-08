@@ -6,11 +6,13 @@
 // - l'outil de lecture repartition_du_mois de l'agent (agent-cockpit.ts) ;
 // - la route /api/cockpit/repartition, qui sert l'onglet Revenus du cockpit
 //   (le calcul ne vit qu'ici : le cockpit affiche, il ne recalcule pas) ;
-// - executerAction (stripe-actions.ts), qui delegue ici les sept actions de
+// - executerAction (stripe-actions.ts), qui delegue ici les huit actions de
 //   la repartition apres la confirmation humaine.
 //
 // Tables absentes (migration 20261008170000 pas appliquee) : la lecture rend
 // des listes vides et le dit (tables_absentes), l'ecriture refuse en clair.
+// Meme regle pour le tarif par live (migration 20261008190000) : tant que
+// ses colonnes manquent, les tarifs sont comptes vides et les lives refuses.
 
 import { prisma } from '@/lib/db'
 import { RefusAction, type ActionAgent } from '@/lib/stripe-actions'
@@ -18,15 +20,25 @@ import { accorderAccesBroker, prerequisAccesBroker } from '@/lib/liveclub/acces'
 import { nomBot } from '@/lib/liveclub/config'
 import { relationAbsente, uuidDeActeur } from '@/lib/liveclub/pur'
 import {
-  type Commission, type Cote, type Depense, type PartIntervenant, type Reglement, type Repartition,
-  type TauxPartenaire, type TypeRepartition, type Vente,
-  NOM_COTE, PART_APPORTEUR_PCT, PART_BRICE_COMMUNE_PCT, bornesMois, centimes, commissionDuTaux, coteDuCompte, deMois, etapeApresDepot, etapeApresMarquage,
-  euros, glissementCommission, intervenantsEnVigueur, jourDuPaiement, jourParis, libelleJour, libelleMois,
-  libelleTaux, moisDe, moisParis, moisPrevuCommission, moisValide, partsCommission, pourcent,
-  repartitionDuMois, tauxEnVigueur, venteDePaiement, versEuros,
+  type Commission, type Cote, type Depense, type DepenseLives, type Reglement, type Repartition,
+  type TarifIntervenant, type TauxPartenaire, type TypeRepartition, type UniteIntervenant, type Vente,
+  NOM_COTE, PART_APPORTEUR_PCT, PART_BRICE_COMMUNE_PCT, bornesMois, centimes, cleIntervenant, commissionDuTaux, coteDuCompte, deMois,
+  depenseDesLives, etapeApresDepot, etapeApresMarquage,
+  euros, glissementCommission, jourDuPaiement, jourParis, libelleDepenseLives, libelleJour, libelleLives, libelleMois,
+  libelleTarif, libelleTaux, moisDe, moisParis, moisPrevuCommission, moisValide, partsCommission, pourcent,
+  repartitionDuMois, tarifDuMois, tarifsEnVigueur, tauxEnVigueur, venteDePaiement, versEuros,
 } from '@/lib/repartition/pur'
 
 const MIGRATION = '20261008170000_cockpit_repartition.sql'
+const MIGRATION_LIVES = '20261008190000_cockpit_intervenants_par_live.sql'
+
+/** Une colonne manque (42703) : la migration du tarif par live n'est pas encore appliquee. */
+function colonneAbsente(err: unknown): boolean {
+  return /42703|column .* does not exist/i.test(err instanceof Error ? err.message : String(err))
+}
+
+/** Des centimes en texte '12.50' pour un ::numeric (exact, sans passer par un flottant). */
+const numeric = (c: number) => (Math.round(c) / 100).toFixed(2)
 
 /**
  * La raison lisible d'une erreur de la base. Une requete brute Prisma rend
@@ -100,7 +112,9 @@ type LigneIntervenant = {
   part_id: string
   intervenant: string
   offre_id: string
-  pourcentage: number
+  /** Euros par unite (par live). */
+  montant_par_unite: number
+  unite: UniteIntervenant
   a_partir_du: string
   note: string | null
   pose_le: Date
@@ -115,6 +129,10 @@ type LigneDepense = {
   cote: Cote | null
   offre_id: string | null
   part_brice_pct: number | null
+  /** Les lives d'un intervenant : les trois remplis ensemble, ou aucun. */
+  intervenant: string | null
+  quantite: number | null
+  prix_unitaire: number | null
   note: string | null
   via: string
   pose_le: Date
@@ -132,12 +150,15 @@ type LigneReglement = {
   pose_le: Date
 }
 
-/** Une lecture, ou une liste vide si la table n'existe pas encore (notee dans `absentes`). */
+/**
+ * Une lecture, ou une liste vide si la table n'existe pas encore, ou n'a pas
+ * encore ses colonnes (notee dans `absentes`).
+ */
 async function lireOuVide<T>(table: string, absentes: Set<string>, lire: () => Promise<T[]>): Promise<T[]> {
   try {
     return await lire()
   } catch (err) {
-    if (relationAbsente(err)) {
+    if (relationAbsente(err) || colonneAbsente(err)) {
       absentes.add(table)
       return []
     }
@@ -194,19 +215,48 @@ function lirePartenaires(): Promise<LignePartenaire[]> {
 
 function lireIntervenants(): Promise<LigneIntervenant[]> {
   return prisma.$queryRaw<LigneIntervenant[]>`
-    select part_id::text as part_id, intervenant, offre_id, pourcentage::float8 as pourcentage,
-           a_partir_du::text as a_partir_du, note, pose_le
+    select part_id::text as part_id, intervenant, offre_id, montant_par_unite::float8 as montant_par_unite,
+           unite, a_partir_du::text as a_partir_du, note, pose_le
     from public.cockpit_intervenants
     order by offre_id, a_partir_du desc, pose_le desc`
 }
 
-function lireDepenses(mois: string): Promise<LigneDepense[]> {
-  return prisma.$queryRaw<LigneDepense[]>`
-    select depense_id::text as depense_id, libelle, montant::float8 as montant, mois, payee_par, cote,
-           offre_id, part_brice_pct::float8 as part_brice_pct, note, via, pose_le
+async function lireDepenses(mois: string): Promise<LigneDepense[]> {
+  try {
+    return await prisma.$queryRaw<LigneDepense[]>`
+      select depense_id::text as depense_id, libelle, montant::float8 as montant, mois, payee_par, cote,
+             offre_id, part_brice_pct::float8 as part_brice_pct, intervenant, quantite,
+             prix_unitaire::float8 as prix_unitaire, note, via, pose_le
+      from public.cockpit_depenses
+      where mois = ${mois} and retire_le is null
+      order by pose_le`
+  } catch (err) {
+    // Base d'avant le tarif par live (20261008190000) : aucune depense de lives.
+    if (!colonneAbsente(err)) throw err
+    return prisma.$queryRaw<LigneDepense[]>`
+      select depense_id::text as depense_id, libelle, montant::float8 as montant, mois, payee_par, cote,
+             offre_id, part_brice_pct::float8 as part_brice_pct, null::text as intervenant, null::int as quantite,
+             null::float8 as prix_unitaire, note, via, pose_le
+      from public.cockpit_depenses
+      where mois = ${mois} and retire_le is null
+      order by pose_le`
+  }
+}
+
+/** Les tarifs d'UN intervenant (tous produits), pour les lives du mois. */
+async function tarifsDe(intervenant: string): Promise<TarifIntervenant[]> {
+  const cle = cleIntervenant(intervenant)
+  return (await lireIntervenants()).map(versTarif).filter(t => cleIntervenant(t.intervenant) === cle)
+}
+
+/** Les lives deja declares (non retires) d'un intervenant, pour un produit et un mois. */
+async function livesDejaDeclares(intervenant: string, offreId: string, mois: string) {
+  return prisma.$queryRaw<{ depense_id: string; quantite: number; prix_unitaire: number; montant: number; payee_par: Cote }[]>`
+    select depense_id::text as depense_id, quantite, prix_unitaire::float8 as prix_unitaire,
+           montant::float8 as montant, payee_par
     from public.cockpit_depenses
-    where mois = ${mois} and retire_le is null
-    order by pose_le`
+    where intervenant is not null and lower(intervenant) = lower(${intervenant.trim()})
+      and offre_id = ${offreId} and mois = ${mois} and retire_le is null`
 }
 
 function lireReglements(mois: string): Promise<LigneReglement[]> {
@@ -251,8 +301,80 @@ function versTaux(t: LigneTaux): TauxPartenaire {
   }
 }
 
-function versPart(i: LigneIntervenant): PartIntervenant {
-  return { intervenant: i.intervenant, offreId: i.offre_id, pourcentage: i.pourcentage, aPartirDu: i.a_partir_du, poseLe: iso(i.pose_le) }
+function versTarif(i: LigneIntervenant): TarifIntervenant {
+  return {
+    intervenant: i.intervenant, offreId: i.offre_id, montantParUnite: centimes(i.montant_par_unite) ?? 0,
+    unite: i.unite ?? 'live', aPartirDu: i.a_partir_du, poseLe: iso(i.pose_le),
+  }
+}
+
+function versDepense(d: LigneDepense): Depense {
+  const lives = d.intervenant && d.quantite && d.prix_unitaire !== null
+    ? { intervenant: d.intervenant, quantite: d.quantite, prixUnitaire: centimes(d.prix_unitaire) ?? 0 }
+    : null
+  return {
+    id: d.depense_id, libelle: d.libelle, montant: centimes(d.montant) ?? 0, mois: d.mois,
+    payeePar: d.payee_par, cote: d.cote, offreId: d.offre_id, partBricePct: d.part_brice_pct, lives,
+  }
+}
+
+/** Le cote de chaque produit d'apres ses ventes Stripe (le compte le plus frequent). */
+async function cotesDesProduits(offreIds: readonly string[]): Promise<Record<string, Cote>> {
+  if (offreIds.length === 0) return {}
+  const lignes = await prisma.$queryRaw<{ offre_id: string; compte: string; n: number }[]>`
+    select offre_id, compte, count(*)::int as n from public.cockpit_paiements
+    where offre_id = any(${[...offreIds]}::text[]) and compte is not null
+    group by offre_id, compte`
+  const meilleur = new Map<string, { compte: string; n: number }>()
+  for (const l of lignes) {
+    const deja = meilleur.get(l.offre_id)
+    if (!deja || l.n > deja.n) meilleur.set(l.offre_id, { compte: l.compte, n: l.n })
+  }
+  const cotes: Record<string, Cote> = {}
+  for (const [offreId, m] of meilleur) {
+    const c = coteDuCompte(m.compte)
+    if (c) cotes[offreId] = c
+  }
+  return cotes
+}
+
+/**
+ * Les tarifs qui valent pour les lives d'un mois, un par intervenant et par
+ * produit (le cockpit en fait son formulaire, l'agent sa lecture), avec le
+ * cote du produit et ce qui est deja declare ce mois-la.
+ */
+function tarifsDuMois(
+  intervenants: readonly LigneIntervenant[], depenses: readonly LigneDepense[], mois: string,
+  noms: Record<string, string>, cotes: Record<string, Cote>,
+) {
+  const tarifs = intervenants.map(versTarif)
+  const vus = new Set<string>()
+  const lignes = []
+  for (const t of tarifs) {
+    const cle = `${cleIntervenant(t.intervenant)}|${t.offreId}`
+    if (vus.has(cle)) continue
+    vus.add(cle)
+    const r = tarifDuMois(tarifs, t.intervenant, mois, t.offreId)
+    if (!r.ok) continue
+    const deja = depenses.find(d => d.intervenant && d.offre_id === r.tarif.offreId
+      && cleIntervenant(d.intervenant) === cleIntervenant(r.tarif.intervenant))
+    lignes.push({
+      intervenant: r.tarif.intervenant.trim(),
+      offre_id: r.tarif.offreId,
+      offre: noms[r.tarif.offreId] ?? r.tarif.offreId,
+      montant_par_unite: versEuros(r.tarif.montantParUnite),
+      unite: r.tarif.unite,
+      tarif: libelleTarif(r.tarif),
+      a_partir_du: r.tarif.aPartirDu,
+      change_en_cours_de_mois: r.avant ? libelleTarif(r.avant) : null,
+      cote: cotes[r.tarif.offreId] ?? null,
+      libelle_depense: libelleDepenseLives(r.tarif.intervenant),
+      deja_declare: deja
+        ? { depense_id: deja.depense_id, quantite: deja.quantite, prix_unitaire: deja.prix_unitaire, montant: deja.montant }
+        : null,
+    })
+  }
+  return lignes.sort((a, b) => a.intervenant.localeCompare(b.intervenant) || a.offre.localeCompare(b.offre))
 }
 
 /** Tout ce qu'il faut pour un mois, et le calcul. */
@@ -283,19 +405,18 @@ async function chargerMois(mois: string, moisCourant: string) {
     mois,
     moisCourant,
     ventes,
-    intervenants: intervenants.map(versPart),
     commissions: commissions.map(versCommission),
-    depenses: depenses.map((d): Depense => ({
-      id: d.depense_id, libelle: d.libelle, montant: centimes(d.montant) ?? 0, mois: d.mois,
-      payeePar: d.payee_par, cote: d.cote, offreId: d.offre_id, partBricePct: d.part_brice_pct,
-    })),
+    depenses: depenses.map(versDepense),
     reglements: reglements.map((r): Reglement => ({
       id: r.reglement_id, de: r.de, a: r.a, montant: centimes(r.montant) ?? 0, regleLe: r.regle_le, mois: r.mois,
     })),
     horsStripe,
     nomsOffres,
   })
-  return { repartition, commissions, intervenants, depenses, reglements, nomsOffres, absentes: [...absentes] }
+  const cotes = await cotesDesProduits([...new Set(intervenants.map(i => i.offre_id))])
+    .catch(() => ({} as Record<string, Cote>))
+  const tarifs = tarifsDuMois(intervenants, depenses, mois, nomsOffres, cotes)
+  return { repartition, commissions, intervenants, depenses, reglements, nomsOffres, tarifs, absentes: [...absentes] }
 }
 
 const paire = (r: Record<Cote, number>) => ({ brice: versEuros(r.brice), mel: versEuros(r.mel) })
@@ -306,9 +427,9 @@ export function repartitionEnEuros(r: Repartition) {
     const d = r.cotes[c]
     return {
       nb_ventes: d.nbVentes, encaisse: versEuros(d.encaisse), rembourse: versEuros(d.rembourse),
-      frais: versEuros(d.frais), frais_inconnus: d.fraisInconnus, intervenants: versEuros(d.intervenants),
+      frais: versEuros(d.frais), frais_inconnus: d.fraisInconnus,
       net_ventes: versEuros(d.netVentes), commissions: versEuros(d.commissions), depenses: versEuros(d.depenses),
-      base: versEuros(d.base), parts: paire(d.parts),
+      intervenants: versEuros(d.intervenants), base: versEuros(d.base), parts: paire(d.parts),
     }
   }
   return {
@@ -318,7 +439,7 @@ export function repartitionEnEuros(r: Repartition) {
     solde_brice: versEuros(r.solde),
     solde_avant_reglements: versEuros(r.soldeAvantReglements),
     formule: "Solde de Brice = somme de ses parts - (ce qu'il a eu en main - ce qu'il a payé). Positif : Mel lui doit ce montant. Négatif : il doit à Mel. Les règlements du mois s'en déduisent.",
-    hypothese: "Celui qui encaisse une vente paie lui-même l'intervenant du produit : sa part est déduite de ce que l'encaisseur a eu en main.",
+    hypothese: 'Une dépense compte pour celui qui l\'a payée : les lives d\'un intervenant sont payés par la personne notée sur la dépense (par défaut le côté du produit, Mel pour le Live Club).',
     // Les regles en clair, pour l'ecran du cockpit : son bundle est servi sans
     // session, il n'embarque donc aucune regle de partage (cockpit/CLAUDE.md).
     regles: {
@@ -326,7 +447,7 @@ export function repartitionEnEuros(r: Repartition) {
       depense: `Une dépense commune se partage ${PART_BRICE_COMMUNE_PCT}/${100 - PART_BRICE_COMMUNE_PCT}, sauf part donnée. `
         + 'Rattachée à un côté ou à un produit, elle est déduite de ce côté avant son partage.',
       commission: "Une commission compte dans le mois où elle est reçue. Tant qu'elle ne l'est pas, elle glisse de mois en mois.",
-      intervenant: "La part d'un intervenant se prend sur l'encaissé du produit, avant le partage. Un produit sans intervenant se partage directement.",
+      intervenant: "Un intervenant touche une somme fixe par live, rien sur les ventes. Chaque mois, ses lives (nombre x tarif en vigueur ce mois-là) font une dépense rattachée à son produit, déduite de ce côté avant le partage.",
     },
     part_apporteur_pct: PART_APPORTEUR_PCT,
     parts: paire(r.parts),
@@ -335,7 +456,9 @@ export function repartitionEnEuros(r: Repartition) {
     cotes: { mel: cote('mel'), brice: cote('brice') },
     communes: { total: versEuros(r.communes.total), parts: paire(r.communes.parts) },
     intervenants: r.intervenants.map(i => ({
-      intervenant: i.intervenant, offre_id: i.offreId, paye_par: i.payePar, montant: versEuros(i.montant),
+      intervenant: i.intervenant, offre_id: i.offreId, paye_par: i.payePar, quantite: i.quantite,
+      prix_unitaire: versEuros(i.prixUnitaire), montant: versEuros(i.montant),
+      detail: libelleLives(i.quantite, i.prixUnitaire),
     })),
     commissions: {
       recues: { nb: r.commissions.recues.nb, montant: versEuros(r.commissions.recues.montant) },
@@ -347,6 +470,9 @@ export function repartitionEnEuros(r: Repartition) {
     lignes: r.lignes.map(l => ({
       genre: l.genre, libelle: l.libelle, cote: l.cote, detail: l.detail ?? null,
       en_main: paire(l.enMain), parts: paire(l.parts),
+      lives: l.lives
+        ? { intervenant: l.lives.intervenant, quantite: l.lives.quantite, prix_unitaire: versEuros(l.lives.prixUnitaire) }
+        : null,
     })),
     avertissements: r.avertissements,
   }
@@ -368,8 +494,17 @@ export async function repartitionPourAgent(moisDemande: unknown): Promise<string
     return JSON.stringify({
       ...repartitionEnEuros(m.repartition),
       commissions_attendues: attendues,
+      // Les tarifs des intervenants qui valent ce mois-ci, et les lives deja
+      // declares : leurs lives sont des depenses (lignes genre depense).
+      tarifs_intervenants_du_mois: m.tarifs.map(t => ({
+        intervenant: t.intervenant, offre_id: t.offre_id, offre: t.offre, tarif: t.tarif, depuis: t.a_partir_du,
+        change_en_cours_de_mois: t.change_en_cours_de_mois,
+        lives_declares: t.deja_declare
+          ? `${libelleLives(t.deja_declare.quantite ?? 0, centimes(t.deja_declare.prix_unitaire) ?? 0)} = ${euros(centimes(t.deja_declare.montant) ?? 0)}`
+          : null,
+      })),
       tables_absentes: m.absentes,
-      ...(m.absentes.length ? { note_tables: `Tables pas encore en base (migration ${MIGRATION} à appliquer) : comptées vides.` } : {}),
+      ...(m.absentes.length ? { note_tables: `Tables ou colonnes pas encore en base (migrations ${MIGRATION} et ${MIGRATION_LIVES} à appliquer) : comptées vides.` } : {}),
     })
   } catch (err) {
     return JSON.stringify({ erreur: `Répartition illisible : ${erreurLisible(err)}` })
@@ -421,20 +556,28 @@ export async function repartitionPourCockpit(mois: string) {
       // La ligne qui fait foi aujourd'hui pour cet intervenant et ce produit :
       // la premiere de la liste (triee a_partir_du puis pose_le decroissants)
       // qui a deja commence. Les autres sont l'historique, ou a venir.
-      const cle = i.intervenant.trim().toLowerCase()
+      const cle = cleIntervenant(i.intervenant)
       const dernier = m.intervenants.find(x => x.offre_id === i.offre_id
-        && x.intervenant.trim().toLowerCase() === cle && x.a_partir_du <= aujourdhui)
+        && cleIntervenant(x.intervenant) === cle && x.a_partir_du <= aujourdhui)
       return {
         part_id: i.part_id, intervenant: i.intervenant, offre_id: i.offre_id,
-        offre: m.nomsOffres[i.offre_id] ?? i.offre_id, pourcentage: i.pourcentage, a_partir_du: i.a_partir_du,
-        note: i.note,
+        offre: m.nomsOffres[i.offre_id] ?? i.offre_id,
+        montant_par_unite: i.montant_par_unite, unite: i.unite, tarif: libelleTarif(versTarif(i)),
+        a_partir_du: i.a_partir_du, note: i.note,
         en_vigueur: dernier?.part_id === i.part_id,
         a_venir: i.a_partir_du > aujourdhui,
       }
     }),
+    // Les tarifs qui valent pour les lives du mois affiche (formulaire « Lives du mois »).
+    tarifs_du_mois: m.tarifs,
     depenses: m.depenses.map(d => ({
       depense_id: d.depense_id, libelle: d.libelle, montant: d.montant, mois: d.mois, payee_par: d.payee_par,
-      cote: d.cote, offre_id: d.offre_id, part_brice_pct: d.part_brice_pct, note: d.note, via: d.via,
+      cote: d.cote, offre_id: d.offre_id, part_brice_pct: d.part_brice_pct,
+      intervenant: d.intervenant, quantite: d.quantite, prix_unitaire: d.prix_unitaire,
+      lives: d.intervenant && d.quantite && d.prix_unitaire !== null
+        ? libelleLives(d.quantite, centimes(d.prix_unitaire) ?? 0)
+        : null,
+      note: d.note, via: d.via,
     })),
     reglements: m.reglements.map(r => ({
       reglement_id: r.reglement_id, de: r.de, a: r.a, montant: r.montant, regle_le: r.regle_le, mois: r.mois,
@@ -628,14 +771,38 @@ export async function controlerActionRepartition(a: ActionAgent): Promise<Contro
 
     if (type === 'intervenant') {
       const nom = await nomOffre(String(p.offre_id))
-      if (!nom) {
-        const offres = await prisma.$queryRaw<{ offre_id: string }[]>`
-          select offre_id from public.cockpit_offres order by offre_id limit 40`
-        return { erreur: `offre_id « ${p.offre_id} » inconnu. Les produits : ${offres.map(o => o.offre_id).join(', ')}.` }
+      if (!nom) return { erreur: await offreInconnue(String(p.offre_id)) }
+      const avant = tarifsEnVigueur(await tarifsDe(String(p.intervenant)), String(p.intervenant), String(p.a_partir_du))
+        .find(t => t.offreId === p.offre_id)
+      return {
+        action: a,
+        complement: `Produit : ${nom}. `
+          + (avant ? `Avant : ${libelleTarif(avant)} depuis le ${libelleJour(avant.aPartirDu)}.` : `Premier tarif de ${p.intervenant} sur ce produit.`)
+          + ' Les lives déjà déclarés gardent le tarif de leur mois.',
+        manque: null,
       }
-      const verdict = await verifierTotalIntervenants(String(p.offre_id), String(p.intervenant), Number(p.pourcentage), String(p.a_partir_du))
-      if (typeof verdict === 'string') return { erreur: verdict }
-      return { action: a, complement: `Produit : ${nom}. ${verdict.texte}`, manque: null }
+    }
+
+    if (type === 'lives_du_mois') {
+      const prepare = await preparerLives(p)
+      if ('erreur' in prepare) return { erreur: prepare.erreur }
+      const { depense, tarif, avant, nomProduit, payeParDefaut } = prepare
+      const params = {
+        ...p,
+        intervenant: depense.intervenant,
+        offre_id: depense.offreId,
+        cote: depense.cote,
+        payee_par: depense.payeePar,
+        prix_unitaire: versEuros(depense.prixUnitaire),
+      }
+      let complement = `${nomProduit} est côté ${NOM_COTE[depense.cote]}. Tarif : ${libelleTarif(tarif)} depuis le ${libelleJour(tarif.aPartirDu)}.`
+      if (avant) {
+        complement += ` Le tarif a changé en cours de mois (${libelleTarif(avant)} au 1er) : c'est le dernier qui vaut pour tout le mois.`
+      }
+      if (payeParDefaut) {
+        complement += ` Payée par ${NOM_COTE[depense.payeePar]} par défaut (le côté du produit) : à corriger si c'est l'autre qui le paie.`
+      }
+      return { action: { ...a, params }, complement, manque: null }
     }
 
     if (type === 'depense') {
@@ -660,27 +827,83 @@ export async function controlerActionRepartition(a: ActionAgent): Promise<Contro
     if (relationAbsente(err)) {
       return { erreur: `Les tables de la répartition ne sont pas encore en base (migration ${MIGRATION} à appliquer) : rien ne peut être noté pour l'instant. Dis-le simplement.` }
     }
+    if (colonneAbsente(err)) {
+      return { erreur: `Le tarif par live n'est pas encore en base (migration ${MIGRATION_LIVES} à appliquer) : rien ne peut être noté pour l'instant. Dis-le simplement.` }
+    }
     throw err
   }
 }
 
-/**
- * Les intervenants d'un produit a une date si cette ligne entrait en
- * vigueur : refus si le total depasse 100 %, sinon une phrase.
- */
-async function verifierTotalIntervenants(offreId: string, intervenant: string, pct: number, aPartirDu: string): Promise<string | { texte: string }> {
-  const lignes = (await lireIntervenants()).map(versPart).filter(l => l.offreId === offreId)
-  const avant = intervenantsEnVigueur(lignes, offreId, aPartirDu)
-  const apres = intervenantsEnVigueur(
-    [...lignes, { intervenant, offreId, pourcentage: pct, aPartirDu, poseLe: '9999-12-31' }], offreId, aPartirDu)
-  const total = apres.reduce((s, i) => s + i.pourcentage, 0)
-  if (total > 100) {
-    return `Avec ce changement, les intervenants de ${offreId} prendraient ${pourcent(total)} : plus de 100 %. Rien n'est proposé, vérifie les parts.`
+async function offreInconnue(offreId: string): Promise<string> {
+  const offres = await prisma.$queryRaw<{ offre_id: string }[]>`
+    select offre_id from public.cockpit_offres order by offre_id limit 40`
+  return `offre_id « ${offreId} » inconnu. Les produits : ${offres.map(o => o.offre_id).join(', ')}.`
+}
+
+type LivesPrepares =
+  | { erreur: string; refus?: boolean }
+  | {
+    depense: DepenseLives
+    tarif: TarifIntervenant
+    avant: TarifIntervenant | null
+    nomProduit: string
+    payeParDefaut: boolean
   }
-  const cle = intervenant.trim().toLowerCase()
-  const ancien = avant.find(i => i.intervenant.trim().toLowerCase() === cle)
-  const liste = apres.length ? apres.map(i => `${i.intervenant} ${pourcent(i.pourcentage)}`).join(', ') : 'aucun'
-  return { texte: `Avant : ${ancien ? pourcent(ancien.pourcentage) : 'rien'}. Intervenants après ce changement : ${liste}.` }
+
+/**
+ * Les lives d'un mois, prets a ecrire : tarif du mois (depenseDesLives, pur),
+ * cote du produit (ses ventes Stripe, ou celui de la carte), deja declares.
+ * Commun au controle avant la carte et a l'execution apres le clic : chaque
+ * refus dit au modele quoi demander (le tarif, le produit, le cote).
+ */
+async function preparerLives(p: Record<string, unknown>): Promise<LivesPrepares> {
+  const intervenant = String(p.intervenant)
+  const mois = String(p.mois)
+  const offreDemandee = typeof p.offre_id === 'string' && p.offre_id ? p.offre_id : null
+  const tarifs = await tarifsDe(intervenant)
+  const coteCarte = p.cote === 'brice' || p.cote === 'mel' ? p.cote : null
+  const premier = tarifDuMois(tarifs, intervenant, mois, offreDemandee)
+  // Le cote connu par les ventes du produit prime : celui de la carte ne sert
+  // que quand les ventes ne disent rien (le modele l'a demande).
+  const coteProduit = premier.ok ? ((await coteDuProduit(premier.tarif.offreId)) ?? coteCarte) : null
+  const r = depenseDesLives(tarifs, {
+    intervenant, mois, nombre: Number(p.nombre), offreId: offreDemandee,
+    cote: () => coteProduit,
+    payeePar: p.payee_par === 'brice' || p.payee_par === 'mel' ? p.payee_par : null,
+  })
+  if (!r.ok) {
+    const fin = libelleJour(bornesMois(mois).fin)
+    if (r.raison === 'aucun') {
+      const autres = tarifs.length
+        ? ` Tarifs connus : ${tarifs.map(t => `${t.offreId} ${libelleTarif(t)} depuis le ${libelleJour(t.aPartirDu)}`).join(', ')}.`
+        : ''
+      return {
+        erreur: `Aucun tarif connu pour ${intervenant}${offreDemandee ? ` sur ${offreDemandee}` : ''} en ${libelleMois(mois)}.${autres} `
+          + `Demande combien il touche par live et depuis quand, propose d'abord proposer_intervenant (a_partir_du au plus tard le ${fin}), puis ces lives.`,
+      }
+    }
+    if (r.raison === 'plusieurs') {
+      return { erreur: `${intervenant} a un tarif sur plusieurs produits (${r.offres.join(', ')}) : demande pour lequel sont ces lives, puis repropose avec offre_id.` }
+    }
+    if (r.raison === 'cote_inconnu') {
+      const nom = (await nomOffre(r.offres[0])) ?? r.offres[0]
+      return { erreur: `Je ne sais pas de quel côté est ${nom} (aucune vente Stripe connue) : demande s'il est côté brice ou mel, puis repropose avec cote.` }
+    }
+    return { erreur: 'nombre : le nombre de lives faits dans le mois, un entier positif.' }
+  }
+  const d = r.depense
+  const nomProduit = (await nomOffre(d.offreId)) ?? d.offreId
+  const deja = await livesDejaDeclares(d.intervenant, d.offreId, mois)
+  if (deja.length) {
+    const x = deja[0]
+    return {
+      refus: true,
+      erreur: `Les lives de ${d.intervenant} sur ${nomProduit} sont déjà déclarés pour ${libelleMois(mois)} : `
+        + `${libelleLives(x.quantite, centimes(x.prix_unitaire) ?? 0)} = ${euros(centimes(x.montant) ?? 0)}, payée par ${NOM_COTE[x.payee_par]}. `
+        + 'Pour corriger, retire cette dépense dans le cockpit (onglet Revenus, Dépenses), puis redéclare le bon nombre.',
+    }
+  }
+  return { depense: d, tarif: r.tarif, avant: r.avant, nomProduit, payeParDefaut: !(p.payee_par === 'brice' || p.payee_par === 'mel') }
 }
 
 // ---------------------------------------------------------------------------
@@ -697,6 +920,9 @@ export async function executerActionRepartition(a: ActionAgent, acteur: string):
   } catch (err) {
     if (relationAbsente(err)) {
       throw new Error(`Les tables de la répartition ne sont pas encore en base (migration ${MIGRATION} à appliquer) : rien n'a été écrit.`)
+    }
+    if (colonneAbsente(err)) {
+      throw new Error(`Le tarif par live n'est pas encore en base (migration ${MIGRATION_LIVES} à appliquer) : rien n'a été écrit.`)
     }
     throw err
   }
@@ -894,17 +1120,57 @@ async function executer(a: ActionAgent, posePar: string, acteur: string): Promis
     const offreId = String(p.offre_id)
     const nom = await nomOffre(offreId)
     if (!nom) throw new RefusAction(`offre_id « ${offreId} » inconnu : rien n'a été fait.`)
-    const verdict = await verifierTotalIntervenants(offreId, String(p.intervenant), Number(p.pourcentage), String(p.a_partir_du))
-    if (typeof verdict === 'string') throw new RefusAction(verdict)
+    const intervenant = String(p.intervenant)
+    const aPartirDu = String(p.a_partir_du)
+    const unite = (p.unite as UniteIntervenant | undefined) ?? 'live'
+    const montant = centimes(p.montant_par_live) ?? 0
+    if (montant <= 0) throw new RefusAction('Le tarif par live doit être positif : rien n\'a été fait.')
+    const avant = tarifsEnVigueur(await tarifsDe(intervenant), intervenant, aPartirDu).find(t => t.offreId === offreId)
     await prisma.$executeRaw`
-      insert into public.cockpit_intervenants (intervenant, offre_id, pourcentage, a_partir_du, note, pose_par, via)
-      values (${String(p.intervenant)}, ${offreId}, ${Number(p.pourcentage)}::numeric, ${String(p.a_partir_du)}::date,
+      insert into public.cockpit_intervenants (intervenant, offre_id, montant_par_unite, unite, a_partir_du, note, pose_par, via)
+      values (${intervenant}, ${offreId}, ${numeric(montant)}::numeric, ${unite}, ${aPartirDu}::date,
               ${note}, ${posePar}::uuid, 'agent')`
-    const pct = Number(p.pourcentage)
-    return (pct === 0
-      ? `${p.intervenant} ne prend plus rien sur ${nom} à partir du ${libelleJour(String(p.a_partir_du))}.`
-      : `${p.intervenant} prend ${pourcent(pct)} de l'encaissé de ${nom} à partir du ${libelleJour(String(p.a_partir_du))}, payé par celui qui encaisse.`)
-      + ` ${verdict.texte}\nRien à faire : la répartition en tient compte dès cette date.`
+    return `Tarif de ${intervenant} sur ${nom} : ${libelleTarif({ montantParUnite: montant, unite })} à partir du ${libelleJour(aPartirDu)}`
+      + (avant ? ` (avant : ${libelleTarif(avant)}).` : ' (premier tarif).')
+      + ` Les lives déjà déclarés gardent le tarif de leur mois.\n`
+      + `Rien à faire maintenant : à la fin de chaque mois, dis-moi combien de lives ${intervenant} a faits.`
+  }
+
+  if (type === 'lives_du_mois') {
+    const prepare = await preparerLives(p)
+    if ('erreur' in prepare) {
+      if (prepare.refus) throw new RefusAction(`${prepare.erreur} Rien n'a été fait.`)
+      // Le reste du message parle au modele : a l'humain, la premiere phrase suffit.
+      const premiere = prepare.erreur.split(/(?<=\.)\s/)[0]
+      throw new RefusAction(`${premiere} Rien n'a été fait, redemande la carte.`)
+    }
+    const d = prepare.depense
+    // La carte a montre un tarif : s'il a change depuis, on n'ecrit pas un
+    // autre montant que celui qui a ete confirme.
+    const prixCarte = p.prix_unitaire === null || p.prix_unitaire === undefined ? null : centimes(p.prix_unitaire)
+    if (prixCarte !== null && prixCarte !== d.prixUnitaire) {
+      throw new RefusAction(`Le tarif de ${d.intervenant} a changé depuis la carte (${euros(prixCarte)} sur la carte, `
+        + `${euros(d.prixUnitaire)} maintenant) : rien n'a été fait, redemande la carte.`)
+    }
+    const mois = d.mois
+    try {
+      await prisma.$executeRaw`
+        insert into public.cockpit_depenses
+          (libelle, montant, mois, payee_par, cote, offre_id, intervenant, quantite, prix_unitaire, note, pose_par, via)
+        values (${d.libelle}, ${numeric(d.montant)}::numeric, ${mois}, ${d.payeePar}, ${d.cote}, ${d.offreId},
+                ${d.intervenant}, ${d.quantite}::int, ${numeric(d.prixUnitaire)}::numeric, ${note}, ${posePar}::uuid, 'agent')`
+    } catch (err) {
+      // L'index unique (une declaration vivante par intervenant, produit et mois).
+      if (/23505|unique/i.test(texteErreur(err))) {
+        throw new RefusAction(`Les lives de ${d.intervenant} pour ${libelleMois(mois)} viennent d'être déclarés : rien n'a été refait.`)
+      }
+      throw err
+    }
+    const solde = await phraseSoldeDuMois(mois)
+    return `Dépense ajoutée à ${libelleMois(mois)} : ${d.libelle}, ${libelleLives(d.quantite, d.prixUnitaire)} = ${euros(d.montant)}, `
+      + `produit ${prepare.nomProduit} (côté ${NOM_COTE[d.cote]}), payée par ${NOM_COTE[d.payeePar]}, déduite de ce côté avant le 70/30.`
+      + (solde ? `\n${solde}` : '')
+      + `\nRien à faire : elle compte dans la répartition ${deMois(mois)}.`
   }
 
   if (type === 'depense') {

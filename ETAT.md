@@ -377,3 +377,17 @@ livre, mois de Paris).
 - A suivre : appliquer la migration, deployer le journal puis le cockpit ;
   aucun eval du prompt de l'agent ; les taux de RaiseFx sont a donner par
   Melanie.
+- 08/10/2026, CORRECTION du modele des intervenants (Brice : Adrien touche une
+  somme fixe selon le nombre de lives faits dans le mois, rien sur les
+  ventes) : plus aucun pourcentage d'intervenant, nulle part.
+  cockpit_intervenants = TARIF PAR LIVE date (montant_par_unite, unite
+  'live') ; chaque mois, l'outil proposer_lives_du_mois de l'agent (« Adrien a
+  fait 6 lives en octobre ») ou le formulaire « Lives du mois » du cockpit cree
+  une depense = nombre x tarif en vigueur ce mois-la (celui du dernier jour du
+  mois), rattachee au produit du tarif, deduite de son cote avant le 70/30,
+  payee par le cote du produit par defaut (Mel pour le Live Club). Une seule
+  declaration vivante par intervenant, produit et mois. Migration
+  `20261008190000_cockpit_intervenants_par_live.sql` ECRITE, PAS APPLIQUEE
+  (table vide verifiee en lecture seule le 08/10, garde dans la migration).
+  ORDRE : deployer le journal (il tolere les colonnes absentes), appliquer la
+  migration, deployer le cockpit. Tests : verifier-repartition.mjs 17 blocs.

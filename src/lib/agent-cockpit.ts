@@ -53,8 +53,8 @@ LA RÉPARTITION BRICE / MÉLANIE (six tables, 08/10, voir plus bas) :
 - cockpit_partenaires : partenaire_id (le nom en minuscules sans espace ni accent, ex. raisefx), nom, nature (broker|affiliation), note. Les brokers et partenaires qui versent des commissions.
 - cockpit_partenaire_taux : taux_id, partenaire_id, a_partir_du (date), taux_pct (% du dépôt ou de la vente) OU montant_fixe (euros par client), note, pose_le. DATÉS et jamais modifiés : le taux en vigueur à une date = a_partir_du le plus récent avant ou ce jour-là (à égalité, pose_le le plus récent).
 - cockpit_commissions : commission_id, partenaire_id, nature (depot|affiliation), acces_id (l'accès broker : joins cockpit_liveclub_acces pour l'email), email (seulement quand il n'y a pas d'accès), client, le (jour du dépôt), montant_base (le dépôt), taux_pct ou montant_fixe (FIGÉS à l'inscription), commission_attendue, lots_faits_le, statut (attendue|recue|perdue), montant_recu, recue_le, encaisse_par (mel|brice), note. Une attendue GLISSE de mois en mois tant qu'elle n'est pas payée ; une reçue compte dans le mois de recue_le.
-- cockpit_intervenants : part_id, intervenant, offre_id (de cockpit_offres), pourcentage (de l'encaissé du produit, 0 = arrêt), a_partir_du, note. DATÉS comme les taux.
-- cockpit_depenses : depense_id, libelle, montant, mois (AAAA-MM), payee_par (brice|mel), cote (null = commune), offre_id (rattachée à un produit), part_brice_pct (commune seulement, null = 50/50), note, retire_le (non null = saisie retirée, à ignorer).
+- cockpit_intervenants : part_id, intervenant, offre_id (de cockpit_offres), montant_par_unite (euros par live), unite (live), a_partir_du, note. Le TARIF PAR LIVE d'un intervenant sur un produit, DATÉ comme les taux (une ligne par changement).
+- cockpit_depenses : depense_id, libelle, montant, mois (AAAA-MM), payee_par (brice|mel), cote (null = commune), offre_id (rattachée à un produit), part_brice_pct (commune seulement, null = 50/50), intervenant, quantite, prix_unitaire (remplis tous les trois = les lives d'un intervenant ce mois-là, montant = quantite x prix_unitaire), note, retire_le (non null = saisie retirée, à ignorer).
 - cockpit_reglements : reglement_id, de, a (brice|mel), montant, regle_le, mois (le mois dont le solde est réglé), note, retire_le (non null = à ignorer).
 ⚠️ Ne confonds jamais retirer_live_club et fin_de_droits. Le second veut dire : la personne a résilié, mais sa période payée court encore, et la colonne fin_droits dit jusqu'à quand. On ne retire RIEN avant cette date — c'est de l'argent déjà encaissé. Le premier ne sort qu'une fois la date passée. Avant le 30/08/2026 la vue ne faisait pas la différence et visait 18 clients sur 76 qui avaient encore des jours payés.
 ⚠️ « retirer_live_club » est une SUGGESTION À VÉRIFIER, jamais un ordre. Un accès peut être ouvert par GESTE COMMERCIAL, décidé à la main et daté nulle part en base : un tier Skool premium ou vip sans abonnement actif en face n'est donc pas forcément une anomalie, et le tier de l'export peut être en retard sur ce qui a été accordé depuis. Avant de dire « à révoquer », regarde cockpit_actions_traitees — la personne a peut-être déjà été traitée, et « note » porte la raison. Présente toujours cette liste comme des gestes à confirmer par Brice ou Mélanie, jamais comme des révocations à exécuter : couper quelqu'un à qui un geste a été fait coûte plus cher que de laisser un accès ouvert une semaine de trop.
@@ -124,7 +124,7 @@ On peut joindre un PDF, une capture d'écran, un export CSV, un relevé bancaire
 - si le document est illisible, tronqué, ou sans rapport avec ce qu'on te demande, dis-le au lieu de deviner. Tu n'inventes jamais une ligne que tu n'as pas lue.
 
 LES ACTIONS STRIPE (03/09) :
-Tu disposes de dix outils d'action : proposer_code_promo, proposer_revoquer_code, proposer_remboursement, proposer_produit, proposer_pause_abonnement, proposer_reprise_abonnement, proposer_retirer_telegram, proposer_reintegrer_telegram, proposer_acces_broker, proposer_exemption (et sept pour la répartition, décrits plus bas : proposer_depot_broker, proposer_commission_affiliation, proposer_marquer_commission, proposer_taux_partenaire, proposer_intervenant, proposer_depense, proposer_reglement). Un appel N'EXÉCUTE RIEN : il affiche une carte de confirmation que Brice ou Mélanie doit cliquer : dis-le dans ta réponse. Après la confirmation, le résultat leur arrive directement et finit par l'étape humaine suivante (rien à faire, quoi dire à la personne, ou le lien à transmettre). Règles strictes :
+Tu disposes de dix outils d'action : proposer_code_promo, proposer_revoquer_code, proposer_remboursement, proposer_produit, proposer_pause_abonnement, proposer_reprise_abonnement, proposer_retirer_telegram, proposer_reintegrer_telegram, proposer_acces_broker, proposer_exemption (et huit pour la répartition, décrits plus bas : proposer_depot_broker, proposer_commission_affiliation, proposer_marquer_commission, proposer_taux_partenaire, proposer_intervenant, proposer_lives_du_mois, proposer_depense, proposer_reglement). Un appel N'EXÉCUTE RIEN : il affiche une carte de confirmation que Brice ou Mélanie doit cliquer : dis-le dans ta réponse. Après la confirmation, le résultat leur arrive directement et finit par l'étape humaine suivante (rien à faire, quoi dire à la personne, ou le lien à transmettre). Règles strictes :
 - AJOUTER, REMETTRE OU FAIRE REVENIR QUELQU'UN DANS LE GROUPE (règle de Brice, 08/10) : le groupe ne s'ouvre qu'à quelqu'un qui a un DROIT, parce que c'est le droit qui compte sa durée et qui le fait sortir à la fin. Un lien brut donné à quelqu'un sans droit l'ouvre pour toujours, sans que rien ne le compte ni ne le sorte. AVANT toute proposition, vérifie son droit par requêtes : exemption active (cockpit_liveclub_exemptions), accès broker actif (cockpit_liveclub_acces, par email ou telegram_id), abonnement Live Club vivant (cockpit_membre_emails ou cockpit_liveclub_rattachements, puis cockpit_abonnements), accès manuel (cockpit_acces_manuel). Le serveur revérifie de toute façon.
   - SANS droit : pose d'abord le droit, jamais une réintégration. Un dépôt chez le broker partenaire (« il a fait un dépôt », « il a accès pour 6 mois ») = proposer_acces_broker avec son email (6 mois à partir d'aujourd'hui, l'email part avec son lien personnel vers le bot, qui le fait entrer tout seul). Un geste de l'équipe (fondateur, admin, équipe, favorisé, cadeau) = proposer_exemption, qui demande son compte Telegram : cherche le telegram_id (cockpit_telegram_membres, cockpit_liveclub_rattachements, cockpit_membre_telegram, archive) et, s'il reste inconnu, demande-le au lieu d'en deviner un. Une durée dite (« pour 3 mois ») devient la date de fin incluse ; sans durée, demande si l'exemption est permanente.
   - AVEC un droit mais hors du groupe : rien à poser. Le bot des membres lui donne tout seul son lien de retour dès qu'il lui écrit (Démarrer, /menu, un bouton ou n'importe quel message). proposer_reintegrer_telegram ne sert que si la personne reste bloquée malgré son droit (ancien ban, bot jamais ouvert) : le serveur la refuse si le droit n'est pas ouvert, et dit quel droit poser.
@@ -144,15 +144,17 @@ Tu disposes de dix outils d'action : proposer_code_promo, proposer_revoquer_code
 LA RÉPARTITION BRICE / MÉLANIE (règles de Brice, 08/10) :
 - Deux côtés. Côté mel : les abonnements Live Club (Stripe de Mélanie, compte melanie), les commissions broker, les affiliations, les produits de Mel. Côté brice : les ventes de formation sur le Stripe de Brice (compte aoknowledge). cockpit_paiements.compte dit lequel ; un paiement hors Stripe (PayPal, virement) n'est pas compté.
 - Celui qui apporte la vente prend 70 %, l'autre 30 %. Saro est hors calcul.
-- Base d'une vente : encaissé - frais Stripe - remboursements - part des intervenants du produit (cockpit_intervenants, celui qui encaisse les paie). Une commission compte dans le mois où elle est REÇUE. Une dépense rattachée à un côté ou à un produit est déduite de ce côté avant son 70/30 ; commune, elle se partage 50/50 sauf répartition donnée.
+- Base d'une vente : encaissé - frais Stripe - remboursements. Une commission compte dans le mois où elle est REÇUE. Une dépense rattachée à un côté ou à un produit est déduite de ce côté avant son 70/30 ; commune, elle se partage 50/50 sauf répartition donnée.
+- Un intervenant (Adrien...) touche une SOMME FIXE PAR LIVE, rien sur les ventes. Son tarif est daté et rattaché à un produit (cockpit_intervenants). Chaque mois, le nombre de lives qu'il a faits devient une DÉPENSE du mois : nombre x tarif en vigueur ce mois-là, rattachée à son produit (le Live Club, côté Mel), donc déduite de ce côté avant le 70/30 : il est payé sur l'argent global, Brice et Mel se partagent le reste. Elle est payée par celui qui le paie, par défaut le côté du produit (Mel pour le Live Club).
 - « Combien je dois à Brice ? », « qui doit quoi ce mois-ci ? », « la répartition de septembre » : appelle TOUJOURS repartition_du_mois (lecture, sans carte) et ne calcule jamais toi-même ni par SQL. Rends d'abord sa phrase (« Mel doit X € à Brice »), puis deux à quatre lignes utiles : les parts de chacun, ce que chacun a eu en main, les règlements, et ses avertissements (frais inconnus, paiements hors Stripe). Mois en cours par défaut, au mois de Paris.
 - Les gestes, chacun par carte de confirmation, comme les autres :
   - « Rajoute X, il a déposé 500 EUR chez RaiseFx » = proposer_depot_broker avec l'email de X (demande-le s'il manque : son accès Live Club en dépend, n'en invente jamais). L'outil pose l'accès de 6 mois s'il n'existe pas (non renouvelable) ET inscrit le dépôt : ne propose jamais proposer_acces_broker en plus pour la même personne.
   - Taux inconnu (l'outil te le dit) : demande à Mélanie le taux du broker (en % du dépôt, par exemple 50 ou 100, ou un montant fixe par client) et depuis quand, propose proposer_taux_partenaire, puis seulement le dépôt. N'invente jamais un taux. Un nouveau partenaire demande sa nature (broker ou affiliation). Un taux change par une nouvelle ligne datée : les dépôts déjà inscrits gardent le leur.
   - « X a fait ses lots » = proposer_marquer_commission, etat lots_faits. « RaiseFx a payé 240 pour X » = etat recue, avec le montant réellement reçu et sa date (encaissée par Mel sauf indication). « C'est perdu » = perdue. Retrouve commission_id par requête (cockpit_commissions joint à cockpit_liveclub_acces pour l'email).
   - Une commission d'affiliation d'un autre partenaire = proposer_commission_affiliation.
-  - « Adrien prend 10 % sur le Live Club à partir d'octobre » = proposer_intervenant (offre_id lu dans cockpit_offres, « à partir d'octobre » = le 1er du mois) ; il s'arrête = pourcentage 0.
-  - Une dépense = proposer_depense : libellé, montant, qui l'a payée (demande si ce n'est pas dit), mois en cours par défaut, commune 50/50 par défaut, rattachée à brice, mel ou un produit seulement si on te le dit.
+  - « Adrien prend 50 EUR par live sur le Live Club à partir d'octobre » = proposer_intervenant (offre_id lu dans cockpit_offres, montant_par_live, « à partir d'octobre » = le 1er du mois). Un nouveau tarif = une nouvelle ligne datée : les mois déjà déclarés gardent le leur. N'invente jamais un tarif.
+  - « Adrien a fait 6 lives en octobre » = proposer_lives_du_mois (intervenant, mois, nombre). Payée par le côté du produit par défaut (Mel pour le Live Club) : dis-le dans ta réponse, et passe payee_par si on te dit qui le paie. Si l'outil répond qu'aucun tarif n'est connu pour ce mois, demande combien il touche par live et depuis quand, propose d'abord proposer_intervenant, puis les lives. Déjà déclarés ce mois-là : l'outil le dit, la correction se fait dans le cockpit (retirer la dépense, puis redéclarer).
+  - Une dépense = proposer_depense : libellé, montant, qui l'a payée (demande si ce n'est pas dit), mois en cours par défaut, commune 50/50 par défaut, rattachée à brice, mel ou un produit seulement si on te le dit. Jamais pour les lives d'un intervenant : c'est proposer_lives_du_mois.
   - « C'est réglé » = proposer_reglement : de qui à qui, combien, quand, et le mois dont le solde est réglé (en début de mois, c'est souvent le mois précédent : demande si ce n'est pas clair).
   - Corriger ou retirer une dépense, un règlement ou une commission déjà notés : dans le cockpit, onglet Revenus.
 
@@ -385,7 +387,7 @@ const OUTILS: Anthropic.Tool[] = [
       required: ['telegram_id', 'motif', 'qui'],
     },
   },
-  // La repartition Brice / Melanie (08/10) : sept gestes par carte, une
+  // La repartition Brice / Melanie (08/10) : huit gestes par carte, une
   // lecture sans carte. Validation dans repartition/pur.ts, controle avant la
   // carte et execution dans repartition/serveur.ts.
   {
@@ -459,17 +461,35 @@ const OUTILS: Anthropic.Tool[] = [
   {
     name: 'proposer_intervenant',
     description:
-      "Propose de définir la part d'un intervenant sur un produit (ex. Adrien, 10 % de l'encaissé du Live Club) à partir d'une date. N'exécute rien : carte de confirmation. pourcentage 0 = il s'arrête. Refusé si le total des intervenants du produit dépasse 100 %.",
+      "Propose de définir ou changer le TARIF PAR LIVE d'un intervenant sur un produit (ex. Adrien, 50 EUR par live sur le Live Club) à partir d'une date. N'exécute rien : carte de confirmation. Nouvelle ligne datée, l'historique reste : les lives déjà déclarés gardent le tarif de leur mois.",
     input_schema: {
       type: 'object',
       properties: {
         intervenant: { type: 'string', description: 'Son prénom.' },
         offre_id: { type: 'string', description: 'Le produit, depuis cockpit_offres.offre_id (ex. live-club).' },
-        pourcentage: { type: 'number', description: "Part de l'encaissé du produit, 0 à 100." },
+        montant_par_live: { type: 'number', description: 'Ce qu\'il touche par live, en euros (positif).' },
         a_partir_du: { type: 'string', description: "Facultatif : AAAA-MM-JJ. Vide = aujourd'hui. « À partir d'octobre » = le 1er octobre." },
         note: { type: 'string', description: 'Facultatif.' },
       },
-      required: ['intervenant', 'offre_id', 'pourcentage'],
+      required: ['intervenant', 'offre_id', 'montant_par_live'],
+    },
+  },
+  {
+    name: 'proposer_lives_du_mois',
+    description:
+      "Propose de déclarer les lives qu'un intervenant a faits dans un mois (« Adrien a fait 6 lives en octobre »). N'exécute rien : carte de confirmation. Après le clic, crée la dépense du mois : nombre x tarif en vigueur ce mois-là, rattachée au produit de son tarif (déduite de ce côté avant le 70/30), payée par payee_par (par défaut le côté du produit, Mel pour le Live Club). Tarif inconnu pour ce mois, ou lives déjà déclarés : l'outil te le dit.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        intervenant: { type: 'string', description: 'Son prénom.' },
+        mois: { type: 'string', description: 'Facultatif : AAAA-MM, le mois des lives (pas un mois à venir). Vide = mois en cours.' },
+        nombre: { type: 'integer', description: 'Le nombre de lives faits dans le mois (entier positif).' },
+        payee_par: { type: 'string', enum: ['brice', 'mel'], description: 'Facultatif : qui le paie. Vide = le côté du produit (Mel pour le Live Club).' },
+        offre_id: { type: 'string', description: 'Facultatif : le produit, seulement si l\'outil dit que l\'intervenant a un tarif sur plusieurs produits.' },
+        cote: { type: 'string', enum: ['brice', 'mel'], description: 'Facultatif : le côté du produit, seulement si l\'outil dit qu\'il ne le connaît pas.' },
+        note: { type: 'string', description: 'Facultatif.' },
+      },
+      required: ['intervenant', 'nombre'],
     },
   },
   {
@@ -511,7 +531,7 @@ const OUTILS: Anthropic.Tool[] = [
   {
     name: 'repartition_du_mois',
     description:
-      "LECTURE, sans carte : la répartition d'un mois entre Brice et Mel, calculée par le serveur selon les règles de Brice (côtés, 70/30, frais, intervenants, commissions reçues, dépenses, règlements) : le grand livre, les parts, ce que chacun a eu en main, et la phrase du solde (« Mel doit X € à Brice »). Toujours elle pour « qui doit combien à qui », jamais un calcul à la main.",
+      "LECTURE, sans carte : la répartition d'un mois entre Brice et Mel, calculée par le serveur selon les règles de Brice (côtés, 70/30, frais, commissions reçues, dépenses dont les lives des intervenants en nombre x tarif, règlements) : le grand livre, les parts, ce que chacun a eu en main, les tarifs des intervenants du mois, et la phrase du solde (« Mel doit X € à Brice »). Toujours elle pour « qui doit combien à qui », jamais un calcul à la main.",
     input_schema: {
       type: 'object',
       properties: {
@@ -566,6 +586,7 @@ const TYPE_PAR_OUTIL: Record<string, ActionAgent['type']> = {
   proposer_marquer_commission: 'marquer_commission',
   proposer_taux_partenaire: 'taux_partenaire',
   proposer_intervenant: 'intervenant',
+  proposer_lives_du_mois: 'lives_du_mois',
   proposer_depense: 'depense',
   proposer_reglement: 'reglement',
 }

@@ -8,7 +8,8 @@ import assert from 'node:assert/strict'
 import {
   euros, centimes, partager, arrondi, pourcent, partBriceDuCote, coteDuCompte, lireCote,
   jourParis, moisParis, jourDuPaiement, moisSuivant, moisPrecedent, bornesMois, libelleMois, libelleJour,
-  intervenantsEnVigueur, tauxEnVigueur, commissionDuTaux, libelleTaux, calculerVente, venteDePaiement,
+  tarifsEnVigueur, tarifDuMois, depenseDesLives, libelleTarif, libelleLives, libelleDepenseLives, UNITES_INTERVENANT,
+  tauxEnVigueur, commissionDuTaux, libelleTaux, calculerVente, venteDePaiement,
   moisPrevuCommission, glissementCommission, moisDeLaCommission, partsCommission,
   repartitionDuMois, phraseSolde, soldeDesLignes, slugPartenaire,
   TYPES_REPARTITION, estTypeRepartition, lireParamsRepartition, resumeRepartition,
@@ -23,22 +24,26 @@ const HORS_CLAVIER = new RegExp(`[${[0x2013, 0x2014, 0x2018, 0x2019, 0x201c, 0x2
 
 // Le jeu du mois d'octobre 2026, repris par plusieurs blocs.
 const MOIS = '2026-10'
-const INTERVENANTS = [
-  // Adrien : 5 % du Live Club depuis septembre, 10 % depuis le 1er octobre.
-  { intervenant: 'Adrien', offreId: 'live-club', pourcentage: 5, aPartirDu: '2026-09-01', poseLe: '2026-09-01T10:00:00Z' },
-  { intervenant: 'Adrien', offreId: 'live-club', pourcentage: 10, aPartirDu: '2026-10-01', poseLe: '2026-10-01T10:00:00Z' },
-  // Sur un autre produit, il ne compte pas pour le Live Club.
-  { intervenant: 'Adrien', offreId: 'masterclass', pourcentage: 40, aPartirDu: '2026-01-01', poseLe: '2026-01-01T10:00:00Z' },
-  // Un intervenant arrete (0 %) ne prend plus rien.
-  { intervenant: 'Lea', offreId: 'live-club', pourcentage: 8, aPartirDu: '2026-08-01', poseLe: '2026-08-01T10:00:00Z' },
-  { intervenant: 'Léa', offreId: 'live-club', pourcentage: 0, aPartirDu: '2026-09-15', poseLe: '2026-09-15T10:00:00Z' },
+// Les tarifs PAR LIVE (centimes), dates : un intervenant touche une somme
+// fixe par live et ne prend rien sur les ventes (Brice, 08/10).
+const TARIFS = [
+  // Adrien sur le Live Club : 40 € par live en septembre, 50 € depuis le 1er octobre.
+  { intervenant: 'Adrien', offreId: 'live-club', montantParUnite: 4000, unite: 'live', aPartirDu: '2026-09-01', poseLe: '2026-09-01T10:00:00Z' },
+  { intervenant: 'Adrien', offreId: 'live-club', montantParUnite: 5000, unite: 'live', aPartirDu: '2026-10-01', poseLe: '2026-10-01T10:00:00Z' },
+  // Léa : un tarif sur un autre produit, qui ne demarre qu'en novembre.
+  { intervenant: 'Léa', offreId: 'masterclass', montantParUnite: 8000, unite: 'live', aPartirDu: '2026-11-01', poseLe: '2026-10-08T10:00:00Z' },
 ]
-// Une vente cote Mel : 100 € encaisses, 20 € rembourses, 3 € de frais, Adrien a 10 %.
+// Une vente cote Mel (Live Club) : 100 € encaisses, 20 € rembourses, 3 € de frais.
 const VENTE_MEL = { id: 'stripe:ch_mel', cote: 'mel', offreId: 'live-club', jour: '2026-10-05', encaisse: 10000, rembourse: 2000, frais: 300 }
-// Une vente cote Brice : 500 € encaisses, 10 € de frais, aucun intervenant.
+// Une vente cote Brice : 500 € encaisses, 10 € de frais.
 const VENTE_BRICE = { id: 'stripe:ch_brice', cote: 'brice', offreId: 'formation-3000', jour: '2026-10-12', encaisse: 50000, rembourse: 0, frais: 1000 }
 // Une depense commune de 60 €, payee par Brice.
 const DEPENSE_COMMUNE = { id: 'd1', libelle: 'Canva', montant: 6000, mois: MOIS, payeePar: 'brice', cote: null, offreId: null, partBricePct: null }
+// Les lives d'Adrien en octobre : 4 lives x 50 €, rattaches au Live Club (cote Mel), payes par Mel.
+const DEPENSE_LIVES = {
+  id: 'd-lives', libelle: "Lives d'Adrien", montant: 20000, mois: MOIS, payeePar: 'mel', cote: 'mel', offreId: 'live-club',
+  partBricePct: null, lives: { intervenant: 'Adrien', quantite: 4, prixUnitaire: 5000 },
+}
 const COMMISSIONS = [
   // Depot de septembre, lots pas faits : attendue, elle a glisse en octobre.
   { id: 'c1', partenaire: 'RaiseFx', client: 'Jean', le: '2026-09-20', lotsFaitsLe: null, statut: 'attendue', attendue: 25000, recue: null, recueLe: null, encaissePar: 'mel' },
@@ -110,18 +115,67 @@ test('mois de Paris, pas de UTC', () => {
   assert.equal(libelleJour('2026-10-01'), '1er octobre 2026')
 })
 
-test('intervenants dates : le % en vigueur au jour de la vente', () => {
-  assert.deepEqual(intervenantsEnVigueur(INTERVENANTS, 'live-club', '2026-10-05'), [{ intervenant: 'Adrien', pourcentage: 10 }])
-  // Au 10 septembre : Adrien a 5 %, Lea encore a 8 % (arretee le 15).
-  assert.deepEqual(intervenantsEnVigueur(INTERVENANTS, 'live-club', '2026-09-10'),
-    [{ intervenant: 'Adrien', pourcentage: 5 }, { intervenant: 'Lea', pourcentage: 8 }])
-  // Avant tout intervenant, et sans produit : personne.
-  assert.deepEqual(intervenantsEnVigueur(INTERVENANTS, 'live-club', '2026-07-01'), [])
-  assert.deepEqual(intervenantsEnVigueur(INTERVENANTS, null, '2026-10-05'), [])
-  assert.deepEqual(intervenantsEnVigueur(INTERVENANTS, 'formation-3000', '2026-10-05'), [])
+test('tarifs dates des intervenants : le tarif par live du mois', () => {
+  assert.deepEqual([...UNITES_INTERVENANT], ['live'])
+  // Au jour : le tarif en vigueur, un par produit, nom sans casse ni accent.
+  assert.equal(tarifsEnVigueur(TARIFS, 'adrien', '2026-09-20')[0].montantParUnite, 4000)
+  assert.equal(tarifsEnVigueur(TARIFS, ' ADRIEN ', '2026-10-05')[0].montantParUnite, 5000)
+  assert.deepEqual(tarifsEnVigueur(TARIFS, 'Lea', '2026-10-31'), [])
+  // Le tarif d'un mois : celui en vigueur le dernier jour du mois.
+  const oct = tarifDuMois(TARIFS, 'Adrien', '2026-10')
+  assert.equal(oct.ok, true)
+  assert.equal(oct.tarif.montantParUnite, 5000)
+  assert.equal(oct.tarif.offreId, 'live-club')
+  assert.equal(oct.avant, null)
+  assert.equal(tarifDuMois(TARIFS, 'Adrien', '2026-09').tarif.montantParUnite, 4000)
+  // Avant tout tarif, ou un tarif qui ne demarre que le mois suivant : aucun.
+  assert.deepEqual(tarifDuMois(TARIFS, 'Adrien', '2026-08'), { ok: false, raison: 'aucun', offres: [] })
+  assert.deepEqual(tarifDuMois(TARIFS, 'Léa', '2026-10'), { ok: false, raison: 'aucun', offres: [] })
+  assert.equal(tarifDuMois(TARIFS, 'Lea', '2026-11').tarif.offreId, 'masterclass')
+  assert.deepEqual(tarifDuMois(TARIFS, 'Inconnu', '2026-10'), { ok: false, raison: 'aucun', offres: [] })
+  // Un changement en cours de mois : le dernier vaut pour tout le mois, l'ancien est signale.
+  const milieu = [...TARIFS, { intervenant: 'Adrien', offreId: 'live-club', montantParUnite: 6000, unite: 'live', aPartirDu: '2026-10-15', poseLe: '2026-10-15T10:00:00Z' }]
+  const change = tarifDuMois(milieu, 'Adrien', '2026-10')
+  assert.equal(change.tarif.montantParUnite, 6000)
+  assert.equal(change.avant.montantParUnite, 5000)
   // Deux lignes le meme jour : la derniere posee l'emporte.
-  const corrige = [...INTERVENANTS, { intervenant: 'Adrien', offreId: 'live-club', pourcentage: 12, aPartirDu: '2026-10-01', poseLe: '2026-10-02T09:00:00Z' }]
-  assert.deepEqual(intervenantsEnVigueur(corrige, 'live-club', '2026-10-05'), [{ intervenant: 'Adrien', pourcentage: 12 }])
+  const corrige = [...TARIFS, { intervenant: 'Adrien', offreId: 'live-club', montantParUnite: 5500, unite: 'live', aPartirDu: '2026-10-01', poseLe: '2026-10-02T09:00:00Z' }]
+  assert.equal(tarifDuMois(corrige, 'Adrien', '2026-10').tarif.montantParUnite, 5500)
+  // Un tarif sur deux produits le meme mois : il faut dire lequel.
+  const deux = [...TARIFS, { intervenant: 'Adrien', offreId: 'masterclass', montantParUnite: 9000, unite: 'live', aPartirDu: '2026-01-01', poseLe: '2026-01-01T10:00:00Z' }]
+  assert.deepEqual(tarifDuMois(deux, 'Adrien', '2026-10'), { ok: false, raison: 'plusieurs', offres: ['live-club', 'masterclass'] })
+  assert.equal(tarifDuMois(deux, 'Adrien', '2026-10', 'masterclass').tarif.montantParUnite, 9000)
+  // Les libelles.
+  assert.equal(libelleTarif({ montantParUnite: 5000, unite: 'live' }), '50 € par live')
+  assert.equal(libelleLives(6, 5000), '6 lives x 50 €')
+  assert.equal(libelleLives(1, 4990), '1 live x 49,90 €')
+  assert.equal(libelleDepenseLives('Adrien'), "Lives d'Adrien")
+  assert.equal(libelleDepenseLives(' Paul '), 'Lives de Paul')
+})
+
+test('la depense d un mois a partir d un nombre de lives et des tarifs dates', () => {
+  const r = depenseDesLives(TARIFS, { intervenant: 'adrien', mois: MOIS, nombre: 4, cote: 'mel' })
+  assert.equal(r.ok, true)
+  assert.deepEqual(r.depense, {
+    libelle: "Lives d'Adrien", intervenant: 'Adrien', offreId: 'live-club', mois: MOIS,
+    quantite: 4, prixUnitaire: 5000, montant: 20000, cote: 'mel', payeePar: 'mel',
+  })
+  // Le meme nombre en septembre : le tarif de septembre.
+  assert.equal(depenseDesLives(TARIFS, { intervenant: 'Adrien', mois: '2026-09', nombre: 4, cote: 'mel' }).depense.montant, 16000)
+  // Paye par Brice si on le dit, le cote du produit reste celui du produit.
+  const parBrice = depenseDesLives(TARIFS, { intervenant: 'Adrien', mois: MOIS, nombre: 6, cote: 'mel', payeePar: 'brice' })
+  assert.equal(parBrice.depense.payeePar, 'brice')
+  assert.equal(parBrice.depense.cote, 'mel')
+  assert.equal(parBrice.depense.montant, 30000)
+  // Le cote peut venir d'une fonction (le serveur le lit sur les ventes du produit).
+  assert.equal(depenseDesLives(TARIFS, { intervenant: 'Adrien', mois: MOIS, nombre: 1, cote: (o) => (o === 'live-club' ? 'mel' : null) }).depense.cote, 'mel')
+  assert.deepEqual(depenseDesLives(TARIFS, { intervenant: 'Adrien', mois: MOIS, nombre: 1, cote: () => null }),
+    { ok: false, raison: 'cote_inconnu', offres: ['live-club'] })
+  // Refus : aucun tarif ce mois-la, nombre illisible.
+  assert.equal(depenseDesLives(TARIFS, { intervenant: 'Adrien', mois: '2026-08', nombre: 4, cote: 'mel' }).raison, 'aucun')
+  for (const nombre of [0, -2, 2.5, Number.NaN]) {
+    assert.equal(depenseDesLives(TARIFS, { intervenant: 'Adrien', mois: MOIS, nombre, cote: 'mel' }).raison, 'nombre')
+  }
 })
 
 test('taux dates des partenaires : un depot fige le taux de sa date', () => {
@@ -143,34 +197,72 @@ test('taux dates des partenaires : un depot fige le taux de sa date', () => {
   assert.equal(libelleTaux({ tauxPct: null, montantFixe: 3000 }), '30 € par client')
 })
 
-test('une vente cote Mel avec frais, remboursement et intervenant', () => {
-  const v = calculerVente(VENTE_MEL, INTERVENANTS)
-  // Assiette de l'intervenant : 100 - 20 = 80 €, avant frais. Adrien : 10 % = 8 €.
-  assert.deepEqual(v.intervenants, [{ intervenant: 'Adrien', pourcentage: 10, montant: 800 }])
-  // Net : 80 - 3 - 8 = 69 €, partage 30 Brice / 70 Mel.
-  assert.equal(v.net, 6900)
+test('une vente cote Mel avec frais et remboursement, rien pour l intervenant', () => {
+  const v = calculerVente(VENTE_MEL)
+  // Net : 100 - 20 - 3 = 77 €. Aucun intervenant ne prend sur la vente.
+  assert.equal(v.net, 7700)
+  assert.equal('intervenants' in v, false)
   const r = repartitionDuMois({
-    mois: MOIS, moisCourant: MOIS, ventes: [VENTE_MEL], intervenants: INTERVENANTS,
+    mois: MOIS, moisCourant: MOIS, ventes: [VENTE_MEL],
     commissions: [], depenses: [], reglements: [], nomsOffres: { 'live-club': 'Live Club' },
   })
   assert.equal(r.lignes.length, 1)
   assert.equal(r.lignes[0].libelle, 'Live Club (Stripe de Mel)')
-  assert.deepEqual(r.lignes[0].enMain, { brice: 0, mel: 6900 })
-  assert.deepEqual(r.lignes[0].parts, { brice: 2070, mel: 4830 })
-  assert.equal(r.cotes.mel.encaisse, 10000)
-  assert.equal(r.cotes.mel.rembourse, 2000)
-  assert.equal(r.cotes.mel.frais, 300)
-  assert.equal(r.cotes.mel.intervenants, 800)
-  assert.equal(r.cotes.mel.base, 6900)
-  assert.deepEqual(r.intervenants, [{ intervenant: 'Adrien', offreId: 'live-club', payePar: 'mel', montant: 800 }])
-  // Mel a tout en main, Brice a droit a 30 % : Mel lui doit 20,70 €.
-  assert.equal(r.solde, 2070)
-  assert.equal(r.phrase, 'Mel doit 20,70 € à Brice')
+  assert.deepEqual(r.lignes[0].enMain, { brice: 0, mel: 7700 })
+  assert.deepEqual(r.lignes[0].parts, { brice: 2310, mel: 5390 })
+  assert.equal(r.cotes.mel.base, 7700)
+  assert.equal(r.cotes.mel.intervenants, 0)
+  assert.deepEqual(r.intervenants, [])
+  // Mel a tout en main, Brice a droit a 30 % : Mel lui doit 23,10 €.
+  assert.equal(r.solde, 2310)
+  assert.equal(r.phrase, 'Mel doit 23,10 € à Brice')
 })
 
-test('une vente cote Brice, sans intervenant', () => {
+test('EXEMPLE DE REFERENCE : vente Live Club, puis les lives d Adrien (4 x 50 €) payes par Mel', () => {
+  // Vente Live Club : 100 € encaisses, 20 € rembourses, 3 € de frais -> net 77 €.
+  // Lives d'Adrien en octobre : 4 lives x 50 € = 200 €, depense du Live Club (cote Mel), payee par Mel.
+  const lives = depenseDesLives(TARIFS, { intervenant: 'Adrien', mois: MOIS, nombre: 4, cote: 'mel', payeePar: 'mel' })
+  assert.equal(lives.depense.montant, 20000)
   const r = repartitionDuMois({
-    mois: MOIS, moisCourant: MOIS, ventes: [VENTE_BRICE], intervenants: INTERVENANTS,
+    mois: MOIS, moisCourant: MOIS, ventes: [VENTE_MEL],
+    commissions: [], depenses: [DEPENSE_LIVES], reglements: [], nomsOffres: { 'live-club': 'Live Club' },
+  })
+  // Le grand livre : la vente, puis la depense d'Adrien, en nombre x tarif.
+  assert.equal(r.lignes.length, 2)
+  const dep = r.lignes[1]
+  assert.equal(dep.genre, 'depense')
+  assert.equal(dep.libelle, "Lives d'Adrien")
+  assert.equal(dep.detail, '4 lives x 50 €, payée par Mel, produit Live Club (côté Mel)')
+  assert.deepEqual(dep.lives, { intervenant: 'Adrien', quantite: 4, prixUnitaire: 5000 })
+  assert.deepEqual(dep.enMain, { brice: 0, mel: -20000 })
+  assert.deepEqual(dep.parts, { brice: -6000, mel: -14000 })
+  // Cote Mel : base = 77 - 200 = -123 €, dont 200 € d'intervenant.
+  assert.equal(r.cotes.mel.netVentes, 7700)
+  assert.equal(r.cotes.mel.depenses, 20000)
+  assert.equal(r.cotes.mel.intervenants, 20000)
+  assert.equal(r.cotes.mel.base, -12300)
+  assert.deepEqual(r.cotes.mel.parts, { brice: 2310 - 6000, mel: 5390 - 14000 })
+  assert.deepEqual(r.intervenants, [{ intervenant: 'Adrien', offreId: 'live-club', payePar: 'mel', quantite: 4, prixUnitaire: 5000, montant: 20000 }])
+  // Parts de Brice : 23,10 - 60 = -36,90 €. En main de Brice : rien.
+  assert.deepEqual(r.parts, { brice: -3690, mel: -8610 })
+  assert.deepEqual(r.enMain, { brice: 0, mel: 7700 - 20000 })
+  // Solde = -36,90 : Brice doit 36,90 € a Mel (30 % du cote Mel, negatif ce mois-ci).
+  assert.equal(r.solde, -3690)
+  assert.equal(r.phrase, 'Brice doit 36,90 € à Mel')
+  assert.equal(r.parts.mel - r.enMain.mel, 3690)
+  for (const l of r.lignes) assert.ok(!HORS_CLAVIER.test(`${l.libelle} ${l.detail ?? ''}`), l.libelle)
+  // Payes par Brice : il a avance 200 €, Mel lui en doit 70 % moins les 23,10 € de la vente.
+  const parBrice = repartitionDuMois({
+    mois: MOIS, moisCourant: MOIS, ventes: [VENTE_MEL],
+    commissions: [], depenses: [{ ...DEPENSE_LIVES, payeePar: 'brice' }], reglements: [],
+  })
+  assert.equal(parBrice.solde, -3690 + 20000)
+  assert.equal(parBrice.phrase, 'Mel doit 163,10 € à Brice')
+})
+
+test('une vente cote Brice', () => {
+  const r = repartitionDuMois({
+    mois: MOIS, moisCourant: MOIS, ventes: [VENTE_BRICE],
     commissions: [], depenses: [], reglements: [],
   })
   // Net 490 €, 70 % Brice, 30 % Mel, tout en main de Brice.
@@ -183,7 +275,7 @@ test('une vente cote Brice, sans intervenant', () => {
 
 test('une depense commune payee par Brice', () => {
   const r = repartitionDuMois({
-    mois: MOIS, moisCourant: MOIS, ventes: [], intervenants: [],
+    mois: MOIS, moisCourant: MOIS, ventes: [],
     commissions: [], depenses: [DEPENSE_COMMUNE], reglements: [],
   })
   assert.deepEqual(r.lignes[0].enMain, { brice: -6000, mel: 0 })
@@ -194,13 +286,13 @@ test('une depense commune payee par Brice', () => {
   assert.equal(r.phrase, 'Mel doit 30 € à Brice')
   // Une repartition donnee (« sauf indication contraire ») : 20 % Brice.
   const r2 = repartitionDuMois({
-    mois: MOIS, moisCourant: MOIS, ventes: [], intervenants: [], commissions: [], reglements: [],
+    mois: MOIS, moisCourant: MOIS, ventes: [],commissions: [], reglements: [],
     depenses: [{ ...DEPENSE_COMMUNE, partBricePct: 20 }],
   })
   assert.equal(r2.solde, 4800)
   // Une depense rattachee au cote Mel, payee par Brice : deduite du cote Mel avant son 70/30.
   const r3 = repartitionDuMois({
-    mois: MOIS, moisCourant: MOIS, ventes: [], intervenants: [], commissions: [], reglements: [],
+    mois: MOIS, moisCourant: MOIS, ventes: [],commissions: [], reglements: [],
     depenses: [{ ...DEPENSE_COMMUNE, cote: 'mel', offreId: 'live-club' }],
   })
   assert.deepEqual(r3.lignes[0].parts, { brice: -1800, mel: -4200 })
@@ -209,7 +301,7 @@ test('une depense commune payee par Brice', () => {
   assert.equal(r3.solde, 4200)
   // Une depense d'un autre mois ne compte pas.
   const r4 = repartitionDuMois({
-    mois: MOIS, moisCourant: MOIS, ventes: [], intervenants: [], commissions: [], reglements: [],
+    mois: MOIS, moisCourant: MOIS, ventes: [],commissions: [], reglements: [],
     depenses: [{ ...DEPENSE_COMMUNE, mois: '2026-09' }],
   })
   assert.equal(r4.lignes.length, 0)
@@ -240,7 +332,7 @@ test('une commission non recue glisse au mois suivant, une recue compte dans son
   assert.equal(moisDeLaCommission(attendue), null)
 
   const r = repartitionDuMois({
-    mois: MOIS, moisCourant: MOIS, ventes: [], intervenants: [], depenses: [], reglements: [],
+    mois: MOIS, moisCourant: MOIS, ventes: [],depenses: [], reglements: [],
     commissions: COMMISSIONS,
   })
   // Seule la commission recue en octobre compte : 240 €, en main de Mel, 30 % a Brice.
@@ -253,13 +345,13 @@ test('une commission non recue glisse au mois suivant, une recue compte dans son
   assert.equal(r.solde, 7200)
   // En septembre, la commission recue fin septembre compte, celle d'octobre non.
   const s = repartitionDuMois({
-    mois: '2026-09', moisCourant: MOIS, ventes: [], intervenants: [], depenses: [], reglements: [],
+    mois: '2026-09', moisCourant: MOIS, ventes: [],depenses: [], reglements: [],
     commissions: COMMISSIONS,
   })
   assert.equal(s.commissions.recues.montant, 10000)
   // Encaissee par Brice (« sauf indication ») : en main de Brice, memes parts.
   const parBrice = repartitionDuMois({
-    mois: MOIS, moisCourant: MOIS, ventes: [], intervenants: [], depenses: [], reglements: [],
+    mois: MOIS, moisCourant: MOIS, ventes: [],depenses: [], reglements: [],
     commissions: [{ ...COMMISSIONS[1], encaissePar: 'brice' }],
   })
   assert.deepEqual(parBrice.lignes[0].enMain, { brice: 24000, mel: 0 })
@@ -268,33 +360,35 @@ test('une commission non recue glisse au mois suivant, une recue compte dans son
 
 test('le mois complet, puis un reglement qui se deduit du solde', () => {
   const entree = {
-    mois: MOIS, moisCourant: MOIS, ventes: [VENTE_MEL, VENTE_BRICE], intervenants: INTERVENANTS,
-    commissions: COMMISSIONS, depenses: [DEPENSE_COMMUNE], reglements: [],
+    mois: MOIS, moisCourant: MOIS, ventes: [VENTE_MEL, VENTE_BRICE],
+    commissions: COMMISSIONS, depenses: [DEPENSE_COMMUNE, DEPENSE_LIVES], reglements: [],
   }
   const r = repartitionDuMois(entree)
-  // Parts de Brice : 20,70 (Live Club) + 343 (formation) + 72 (commission) - 30 (Canva) = 405,70 €.
-  assert.equal(r.parts.brice, 2070 + 34300 + 7200 - 3000)
+  // Parts de Brice : 23,10 (Live Club) + 343 (formation) + 72 (commission) - 30 (Canva) - 60 (lives d'Adrien) = 348,10 €.
+  assert.equal(r.parts.brice, 2310 + 34300 + 7200 - 3000 - 6000)
   // En main de Brice : 490 (formation) - 60 (Canva payee) = 430 €.
   assert.equal(r.enMain.brice, 49000 - 6000)
-  // Solde = 405,70 - 430 = -24,30 : Brice doit 24,30 € a Mel.
-  assert.equal(r.soldeAvantReglements, -2430)
-  assert.equal(r.solde, -2430)
-  assert.equal(r.phrase, 'Brice doit 24,30 € à Mel')
+  // Solde = 348,10 - 430 = -81,90 : Brice doit 81,90 € a Mel.
+  assert.equal(r.soldeAvantReglements, -8190)
+  assert.equal(r.solde, -8190)
+  assert.equal(r.phrase, 'Brice doit 81,90 € à Mel')
   // Le solde de Mel est exactement l'oppose (toutes les lignes se partagent au centime).
   const soldeMel = r.parts.mel - r.enMain.mel
-  assert.equal(soldeMel, 2430)
+  assert.equal(soldeMel, 8190)
   assert.equal(soldeDesLignes(r.lignes), r.solde)
   assert.equal(r.cotes.brice.base + r.cotes.mel.base - r.communes.total, r.parts.brice + r.parts.mel)
+  assert.equal(r.cotes.mel.intervenants, 20000)
+  assert.equal(r.cotes.brice.intervenants, 0)
 
-  // Brice regle 20 € a Mel : il reste 4,30 €.
+  // Brice regle 20 € a Mel : il reste 61,90 €.
   const avecReglement = repartitionDuMois({
     ...entree,
     reglements: [{ id: 'r1', de: 'brice', a: 'mel', montant: 2000, regleLe: '2026-10-31', mois: MOIS }],
   })
-  assert.equal(avecReglement.soldeAvantReglements, -2430)
+  assert.equal(avecReglement.soldeAvantReglements, -8190)
   assert.deepEqual(avecReglement.reglements, { melVersBrice: 0, briceVersMel: 2000 })
-  assert.equal(avecReglement.solde, -430)
-  assert.equal(avecReglement.phrase, 'Brice doit 4,30 € à Mel')
+  assert.equal(avecReglement.solde, -6190)
+  assert.equal(avecReglement.phrase, 'Brice doit 61,90 € à Mel')
   const ligne = avecReglement.lignes.find(l => l.genre === 'reglement')
   assert.deepEqual(ligne.enMain, { brice: -2000, mel: 2000 })
   assert.deepEqual(ligne.parts, { brice: 0, mel: 0 })
@@ -302,7 +396,7 @@ test('le mois complet, puis un reglement qui se deduit du solde', () => {
   const solde = repartitionDuMois({
     ...entree,
     reglements: [
-      { id: 'r1', de: 'brice', a: 'mel', montant: 2430, regleLe: '2026-11-02', mois: MOIS },
+      { id: 'r1', de: 'brice', a: 'mel', montant: 8190, regleLe: '2026-11-02', mois: MOIS },
       { id: 'r2', de: 'mel', a: 'brice', montant: 99999, regleLe: '2026-11-02', mois: '2026-09' },
     ],
   })
@@ -325,7 +419,7 @@ test('ventes collectees : compte, remboursement, frais inconnus, hors Stripe', (
   assert.equal(venteDePaiement({ paiement_id: 'paypal:1', compte: null, montant: 500, frais: null, offre_id: null, date_paiement: '2026-10-03' }), null)
   // Frais inconnus et hors Stripe sont dits a cote du chiffre.
   const r = repartitionDuMois({
-    mois: MOIS, moisCourant: MOIS, ventes: [{ ...VENTE_BRICE, frais: null }], intervenants: [],
+    mois: MOIS, moisCourant: MOIS, ventes: [{ ...VENTE_BRICE, frais: null }],
     commissions: [], depenses: [], reglements: [], horsStripe: { nb: 2, montant: 100000 },
   })
   assert.equal(r.cotes.brice.fraisInconnus, 1)
@@ -334,16 +428,17 @@ test('ventes collectees : compte, remboursement, frais inconnus, hors Stripe', (
   assert.ok(r.avertissements.some(a => a.includes('2 paiements hors Stripe') && a.includes('1 000 €')))
   // Une vente d'un autre mois (jour de Paris) n'entre pas.
   const autre = repartitionDuMois({
-    mois: MOIS, moisCourant: MOIS, ventes: [{ ...VENTE_MEL, jour: '2026-09-30' }], intervenants: [],
+    mois: MOIS, moisCourant: MOIS, ventes: [{ ...VENTE_MEL, jour: '2026-09-30' }],
     commissions: [], depenses: [], reglements: [],
   })
   assert.equal(autre.lignes.length, 0)
-  // Intervenants au-dela de 100 % : signale.
-  const trop = repartitionDuMois({
-    mois: MOIS, moisCourant: MOIS, ventes: [VENTE_MEL], commissions: [], depenses: [], reglements: [],
-    intervenants: [...INTERVENANTS, { intervenant: 'Max', offreId: 'live-club', pourcentage: 95, aPartirDu: '2026-01-01' }],
+  // Les lives d'un autre mois ne comptent pas non plus.
+  const livesSeptembre = repartitionDuMois({
+    mois: MOIS, moisCourant: MOIS, ventes: [], commissions: [], reglements: [],
+    depenses: [{ ...DEPENSE_LIVES, mois: '2026-09' }],
   })
-  assert.ok(trop.avertissements.some(a => a.includes('dépassent 100 %')))
+  assert.equal(livesSeptembre.lignes.length, 0)
+  assert.deepEqual(livesSeptembre.intervenants, [])
 })
 
 test('phrase du solde', () => {
@@ -354,7 +449,7 @@ test('phrase du solde', () => {
 
 test('outils de l agent : parametres valides, refus clairs, validation idempotente', () => {
   const ctx = { aujourdhui: '2026-10-08', moisCourant: '2026-10' }
-  assert.deepEqual([...TYPES_REPARTITION], ['depot_broker', 'commission_affiliation', 'marquer_commission', 'taux_partenaire', 'intervenant', 'depense', 'reglement'])
+  assert.deepEqual([...TYPES_REPARTITION], ['depot_broker', 'commission_affiliation', 'marquer_commission', 'taux_partenaire', 'intervenant', 'lives_du_mois', 'depense', 'reglement'])
   assert.ok(estTypeRepartition('depense'))
   assert.ok(!estTypeRepartition('remboursement'))
   assert.equal(slugPartenaire('Raise FX'), 'raisefx')
@@ -384,10 +479,24 @@ test('outils de l agent : parametres valides, refus clairs, validation idempoten
   // Un taux peut partir d'une date passee (pour un depot deja fait).
   assert.equal(lireParamsRepartition('taux_partenaire', { partenaire: 'RaiseFx', taux_pct: 50, a_partir_du: '2026-09-01' }, ctx).a_partir_du, '2026-09-01')
 
-  // Intervenant : 0 = arret, au-dela de 100 = refus.
-  assert.equal(lireParamsRepartition('intervenant', { intervenant: 'Adrien', offre_id: 'live-club', pourcentage: 0 }, ctx).pourcentage, 0)
-  assert.equal(typeof lireParamsRepartition('intervenant', { intervenant: 'Adrien', offre_id: 'live-club', pourcentage: 120 }, ctx), 'string')
-  assert.equal(typeof lireParamsRepartition('intervenant', { intervenant: 'Adrien', offre_id: 'live club', pourcentage: 10 }, ctx), 'string')
+  // Intervenant : un tarif par live positif, unite live par defaut.
+  assert.deepEqual(lireParamsRepartition('intervenant', { intervenant: 'Adrien', offre_id: 'live-club', montant_par_live: '50', a_partir_du: '2026-10-01' }, ctx),
+    { intervenant: 'Adrien', offre_id: 'live-club', montant_par_live: 50, unite: 'live', a_partir_du: '2026-10-01', note: null })
+  assert.equal(typeof lireParamsRepartition('intervenant', { intervenant: 'Adrien', offre_id: 'live-club', montant_par_live: 0 }, ctx), 'string')
+  assert.ok(lireParamsRepartition('intervenant', { intervenant: 'Adrien', offre_id: 'live-club' }, ctx).includes('demande combien il prend par live'))
+  assert.equal(typeof lireParamsRepartition('intervenant', { intervenant: 'Adrien', offre_id: 'live club', montant_par_live: 50 }, ctx), 'string')
+  assert.equal(typeof lireParamsRepartition('intervenant', { intervenant: 'Adrien', offre_id: 'live-club', montant_par_live: 50, unite: 'heure' }, ctx), 'string')
+
+  // Lives du mois : un nombre entier positif, mois en cours par defaut, pas un mois a venir.
+  assert.deepEqual(lireParamsRepartition('lives_du_mois', { intervenant: 'Adrien', nombre: 6 }, ctx),
+    { intervenant: 'Adrien', mois: '2026-10', nombre: 6, offre_id: null, cote: null, payee_par: null, prix_unitaire: null, note: null })
+  assert.equal(lireParamsRepartition('lives_du_mois', { intervenant: 'Adrien', nombre: '4', mois: '2026-09', payee_par: 'Mélanie' }, ctx).payee_par, 'mel')
+  for (const nombre of [0, -1, 2.5, '', 'six', null]) {
+    assert.equal(typeof lireParamsRepartition('lives_du_mois', { intervenant: 'Adrien', nombre }, ctx), 'string', String(nombre))
+  }
+  assert.equal(typeof lireParamsRepartition('lives_du_mois', { intervenant: 'Adrien', nombre: 6, mois: '2026-11' }, ctx), 'string')
+  assert.equal(typeof lireParamsRepartition('lives_du_mois', { nombre: 6 }, ctx), 'string')
+  assert.equal(typeof lireParamsRepartition('lives_du_mois', { intervenant: 'Adrien', nombre: 6, payee_par: 'saro' }, ctx), 'string')
 
   // Depense : mois en cours par defaut, payeur obligatoire, commune par defaut.
   const dep = lireParamsRepartition('depense', { libelle: 'Canva', montant: 12, payee_par: 'Brice' }, ctx)
@@ -410,7 +519,11 @@ test('outils de l agent : parametres valides, refus clairs, validation idempoten
     commission_affiliation: lireParamsRepartition('commission_affiliation', { partenaire: 'Edgyx', client: 'Paul', montant: 139 }, ctx),
     marquer_commission: lireParamsRepartition('marquer_commission', { commission_id: id, etat: 'lots_faits', qui: 'Jean' }, ctx),
     taux_partenaire: lireParamsRepartition('taux_partenaire', { partenaire: 'Raise FX', montant_fixe: '30' }, ctx),
-    intervenant: lireParamsRepartition('intervenant', { intervenant: 'Adrien', offre_id: 'live-club', pourcentage: '10' }, ctx),
+    intervenant: lireParamsRepartition('intervenant', { intervenant: 'Adrien', offre_id: 'live-club', montant_par_live: '50' }, ctx),
+    // Telle que le serveur la complete avant la carte (produit, cote, payeur, tarif du mois).
+    lives_du_mois: lireParamsRepartition('lives_du_mois', {
+      intervenant: 'Adrien', mois: '2026-10', nombre: 6, offre_id: 'live-club', cote: 'mel', payee_par: 'mel', prix_unitaire: 50,
+    }, ctx),
     depense: lireParamsRepartition('depense', { libelle: 'Pub', montant: 50, payee_par: 'mel', rattachement: 'produit', offre_id: 'live-club', cote: 'mel' }, ctx),
     reglement: lireParamsRepartition('reglement', { de: 'brice', a: 'mel', montant: 24.3 }, ctx),
   }
@@ -424,6 +537,16 @@ test('outils de l agent : parametres valides, refus clairs, validation idempoten
   }
   assert.ok(resumeRepartition('reglement', exemples.reglement).includes('Brice a versé 24,30 € à Mel'))
   assert.ok(resumeRepartition('taux_partenaire', exemples.taux_partenaire).includes('30 € par client'))
+  assert.ok(resumeRepartition('intervenant', exemples.intervenant).includes('50 € par live'))
+  const carteLives = resumeRepartition('lives_du_mois', exemples.lives_du_mois)
+  assert.ok(carteLives.includes('Adrien, 6 lives x 50 € = 300 €'), carteLives)
+  assert.ok(carteLives.includes('payée par Mel'), carteLives)
+  assert.ok(carteLives.includes('octobre 2026'), carteLives)
+  // Ce que l'agent montre d'un intervenant : un montant par live, jamais un taux.
+  for (const t of [resumeRepartition('intervenant', exemples.intervenant), carteLives]) assert.ok(!t.includes('%'), t)
+  // Avant que le serveur la complete : pas de null ni d'undefined dans la carte.
+  const brute = resumeRepartition('lives_du_mois', lireParamsRepartition('lives_du_mois', { intervenant: 'Adrien', nombre: 6 }, ctx))
+  assert.ok(!brute.includes('null') && !brute.includes('undefined'), brute)
 })
 
 test('etape humaine suivante, une ligne', () => {
