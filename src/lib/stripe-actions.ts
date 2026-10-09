@@ -433,7 +433,10 @@ export async function reintegrerAuLiveClub(telegramId: number): Promise<IssueGes
   try {
     await telegramPost('unbanChatMember', { chat_id: chatId, user_id: telegramId, only_if_banned: true })
   } catch (err) {
-    return {
+    // (09/10, Michael Penella) Sorti depuis quelques jours, ou jamais venu :
+    // Telegram ne le connait plus dans le groupe (« member not found ») et
+    // refuse l'unban. Rien a lever : on passe au lien, comme estDansLeGroupe.
+    if (!/user not found|participant_id_invalid|member not found/i.test(messageErreur(err))) return {
       ok: false, geste, resultat: 'echec', regle: 'telegram', statutHttp: 502,
       details: { etape: 'unbanChatMember', erreur: messageErreur(err) },
       erreur: `Telegram a refusé de lever le ban de u${telegramId} : ${messageErreur(err)}`,
