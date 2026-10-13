@@ -6,9 +6,13 @@
 // refuse) : c'est a l'appelant d'en faire un 'inconnu', jamais un 'non'.
 // latest_invoice est toujours expand (derniereFacture). La pause, elle, se date par
 // les metadonnees posees avec elle (voir metadonneesPause dans pur.ts).
+//
+// Les produits Live Club sont lus en base depuis le 13/10 (produitsLiveClub,
+// produits.ts : les deux produits de base plus ceux inscrits par l'agent).
 
 import { stripeDelete, stripeGet, stripePost } from '@/lib/stripe-actions'
-import { PRODUITS_LIVECLUB, cleStripeLecture, cleStripeEcriture, estProduitLiveClub } from './config'
+import { cleStripeLecture, cleStripeEcriture, estProduitLiveClub } from './config'
+import { lireProduitsLiveClub, produitsLiveClub } from './produits'
 import {
   type AbonnementResume, resumerAbonnement, preparerPoseDePause, metadonneesAdoption,
   effacementMetadonneesPause, nbMoisPauseValide, statutDonneDroit, normaliserEmail, requeteRechercheEmail,
@@ -64,8 +68,9 @@ export async function abonnementsLiveClubDuClient(clientStripe: string): Promise
   q.append('expand[]', 'data.latest_invoice')
   const liste = await stripeGet(cle, `/v1/subscriptions?${q}`)
   const data = (liste.data as Record<string, unknown>[] | undefined) ?? []
+  const produits = await produitsLiveClub()
   const resumes = data
-    .map(s => resumerAbonnement(s, PRODUITS_LIVECLUB))
+    .map(s => resumerAbonnement(s, produits))
     .filter((a): a is AbonnementResume => a !== null)
   const complets: AbonnementResume[] = []
   for (const a of resumes) complets.push(await completerImpaye(cle, a))
@@ -125,7 +130,7 @@ export async function lireAbonnement(abonnementId: string): Promise<AbonnementRe
   if (!ID_ABONNEMENT.test(abonnementId)) return null
   try {
     const sub = await stripeGet(cleLecture(), `/v1/subscriptions/${abonnementId}?expand[]=latest_invoice`)
-    return resumerAbonnement(sub, PRODUITS_LIVECLUB)
+    return resumerAbonnement(sub, await produitsLiveClub())
   } catch (err) {
     if (introuvable(err)) return null
     throw err
@@ -174,6 +179,7 @@ export type FiltreAbonnements = {
  */
 export async function listerAbonnementsLiveClub(filtre: FiltreAbonnements = {}): Promise<AbonnementResume[]> {
   const cle = cleLecture()
+  const produits = await produitsLiveClub()
   const maxPages = Math.max(1, Math.min(filtre.maxPages ?? 50, 200))
   const resultat: AbonnementResume[] = []
   let apres: string | null = null
@@ -184,7 +190,7 @@ export async function listerAbonnementsLiveClub(filtre: FiltreAbonnements = {}):
     const liste = await stripeGet(cle, `/v1/subscriptions?${q}`)
     const data = (liste.data as Record<string, unknown>[] | undefined) ?? []
     for (const s of data) {
-      const r = resumerAbonnement(s, PRODUITS_LIVECLUB)
+      const r = resumerAbonnement(s, produits)
       if (r) resultat.push(r)
     }
     if (liste.has_more !== true || data.length === 0) {
@@ -296,7 +302,7 @@ export async function fermerFenetreImpaye(abonnementId: string, maintenantMs: nu
   if (!ID_ABONNEMENT.test(abonnementId)) throw new Error('abonnement invalide (sub_...).')
   const cle = cleEcriture()
   const sub = await stripeGet(cle, `/v1/subscriptions/${abonnementId}?expand[]=latest_invoice`)
-  const r = resumerAbonnement(sub, PRODUITS_LIVECLUB)
+  const r = resumerAbonnement(sub, await produitsLiveClub())
   if (!r) throw new Error("Cet abonnement n'est pas un abonnement Live Club.")
   if (!enRetardDePaiement(r.statut)) return { resilie: false, motif: `statut_${r.statut || 'inconnu'}` }
   const lu = await completerImpaye(cle, r)
@@ -320,7 +326,7 @@ export async function fermerFenetreImpaye(abonnementId: string, maintenantMs: nu
 async function abonnementVivant(abonnementId: string): Promise<Record<string, unknown>> {
   if (!ID_ABONNEMENT.test(abonnementId)) throw new Error('abonnement invalide (sub_...).')
   const sub = await stripeGet(cleEcriture(), `/v1/subscriptions/${abonnementId}?expand[]=latest_invoice`)
-  if (!resumerAbonnement(sub, PRODUITS_LIVECLUB)) throw new Error("Cet abonnement n'est pas un abonnement Live Club.")
+  if (!resumerAbonnement(sub, await produitsLiveClub())) throw new Error("Cet abonnement n'est pas un abonnement Live Club.")
   const statut = String(sub.status ?? '')
   if (!statutDonneDroit(statut)) {
     throw new Error(`L'abonnement est « ${statut} » : on ne touche qu'a un abonnement vivant.`)
@@ -328,8 +334,8 @@ async function abonnementVivant(abonnementId: string): Promise<Record<string, un
   return sub
 }
 
-function resumeOuErreur(sub: Record<string, unknown>): AbonnementResume {
-  const r = resumerAbonnement(sub, PRODUITS_LIVECLUB)
+async function resumeOuErreur(sub: Record<string, unknown>): Promise<AbonnementResume> {
+  const r = resumerAbonnement(sub, await produitsLiveClub())
   if (!r) throw new Error("Stripe a renvoye un abonnement qui n'est pas Live Club.")
   return r
 }
@@ -340,7 +346,7 @@ export async function programmerArret(abonnementId: string): Promise<AbonnementR
   const sub = await stripePost(cleEcriture(), `/v1/subscriptions/${abonnementId}`, {
     cancel_at_period_end: 'true', 'expand[]': 'latest_invoice',
   })
-  return resumeOuErreur(sub)
+  return await resumeOuErreur(sub)
 }
 
 /**
@@ -352,7 +358,7 @@ export async function programmerArret(abonnementId: string): Promise<AbonnementR
  */
 export async function annulerArret(abonnementId: string): Promise<AbonnementResume> {
   const brut = await abonnementVivant(abonnementId)
-  const avant = resumeOuErreur(brut)
+  const avant = await resumeOuErreur(brut)
   if (!avant.arretPrevu) throw new Error("Aucun arret n'est programme sur cet abonnement.")
   const cle = cleEcriture()
   const chemin = `/v1/subscriptions/${abonnementId}`
@@ -364,7 +370,7 @@ export async function annulerArret(abonnementId: string): Promise<AbonnementResu
     // Une valeur vide efface le champ chez Stripe.
     sub = await stripePost(cle, chemin, { cancel_at: '', 'expand[]': 'latest_invoice' })
   }
-  const apres = resumeOuErreur(sub)
+  const apres = await resumeOuErreur(sub)
   if (apres.arretPrevu) throw new Error("Stripe garde un arret programme sur cet abonnement : rien n'est annule.")
   return apres
 }
@@ -386,7 +392,7 @@ export type IssuePause = {
 export async function pauser(abonnementId: string, nbMois: number): Promise<IssuePause> {
   if (!nbMoisPauseValide(nbMois)) throw new Error('Duree de pause : un nombre entier de mois, de 1 a 6.')
   const sub = await abonnementVivant(abonnementId)
-  const avant = resumeOuErreur(sub)
+  const avant = await resumeOuErreur(sub)
   if (avant.pauseActive) throw new Error('Une pause est deja posee sur cet abonnement.')
   if (avant.arretPrevu) throw new Error("Un arret est programme : il faut l'annuler avant de poser une pause.")
   // Meme pose que l'agent du cockpit (preparerPoseDePause, pur.ts) : les
@@ -400,7 +406,7 @@ export async function pauser(abonnementId: string, nbMois: number): Promise<Issu
   return {
     payeJusquau: new Date(pose.finPeriodeSec * 1000).toISOString(),
     repriseLe: pose.reprise.toISOString(),
-    abonnement: resumeOuErreur(apres),
+    abonnement: await resumeOuErreur(apres),
   }
 }
 
@@ -435,7 +441,7 @@ export async function adopterPause(abonnementId: string): Promise<IssueAdoption 
     payeJusquau: new Date(adoption.finPeriodeSec * 1000).toISOString(),
     repriseLe: adoption.repriseSec === null ? null : new Date(adoption.repriseSec * 1000).toISOString(),
     finGardee: adoption.finGardee,
-    abonnement: resumeOuErreur(apres),
+    abonnement: await resumeOuErreur(apres),
   }
 }
 
@@ -449,7 +455,7 @@ export async function adopterPause(abonnementId: string): Promise<IssueAdoption 
  */
 export async function effacerMetadonneesPause(abonnementId: string): Promise<boolean> {
   const sub = await abonnementVivant(abonnementId)
-  if (!resumeOuErreur(sub).metaPauseRestante) return false
+  if (!(await resumeOuErreur(sub)).metaPauseRestante) return false
   await stripePost(cleEcriture(), `/v1/subscriptions/${abonnementId}`, effacementMetadonneesPause())
   return true
 }
@@ -462,7 +468,7 @@ export type SessionCheckoutResume = {
   paiement: string
   /** complete ET (paid OU abonnement active/trialing). */
   payee: boolean
-  /** Un des produits Live Club est dans les line_items (ou l'abonnement). */
+  /** Un des produits Live Club (liste dynamique, produits.ts) est dans les line_items (ou l'abonnement). */
   estLiveClub: boolean
   abonnementId: string | null
   abonnementStatut: string | null
@@ -507,8 +513,17 @@ export async function lireSessionCheckout(sessionId: string): Promise<SessionChe
   const abonnementId = sub ? String(sub.id ?? '') || null
     : typeof s.subscription === 'string' ? s.subscription : null
   const abonnementStatut = sub ? String(sub.status ?? '') || null : null
-  const estLiveClub = produitsLignes.some(p => estProduitLiveClub(p))
-    || Boolean(sub && resumerAbonnement(sub, PRODUITS_LIVECLUB))
+  // Liste dynamique (13/10) : un paiement par le lien d'un produit Live Club
+  // inscrit par l'agent (tarif particulier) entre aussi. Liste incomplete
+  // (base illisible, aucune liste lue) et produit inconnu : on ne sait pas,
+  // donc on jette (la page dit « reessaie dans une minute ») plutot que
+  // « ce paiement ne concerne pas le Live Club ».
+  const liste = await lireProduitsLiveClub()
+  const estLiveClub = produitsLignes.some(p => estProduitLiveClub(p, liste.produits))
+    || Boolean(sub && resumerAbonnement(sub, liste.produits))
+  if (!estLiveClub && !liste.complete) {
+    throw new Error('liste des produits Live Club illisible : session non tranchee.')
+  }
 
   const statut = String(s.status ?? '')
   const paiement = String(s.payment_status ?? '')

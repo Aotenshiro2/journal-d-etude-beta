@@ -1679,3 +1679,384 @@ export function uuidDeActeur(acteur: string): string | null {
   const m = /^(?:agent|cockpit):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(acteur.trim())
   return m ? m[1].toLowerCase() : null
 }
+
+// ---------------------------------------------------------------------------
+// Produits du Live Club : liste DYNAMIQUE (Brice, 13/10)
+//
+// « Prepare-moi un acces Live Club pour Yassine a 1 EUR/mois » : un tarif
+// particulier est un produit Stripe de plus. Tant que les produits etaient
+// ecrits en dur (PRODUITS_LIVECLUB, config.ts), ce produit n'ouvrait aucun
+// droit. La liste vit en base (cockpit_liveclub_produits) ; produits.ts la lit
+// par le lecteur ci-dessous. Les produits de base (`connus`) sont TOUJOURS
+// dedans, quoi que dise la base.
+// ---------------------------------------------------------------------------
+
+const ID_PRODUIT_STRIPE = /^prod_[A-Za-z0-9]{6,}$/
+const ID_TARIF_STRIPE = /^price_[A-Za-z0-9]{6,}$/
+
+/** Les produits de base d'abord, puis ceux lus en base (identifiants valides, sans doublon). */
+export function fusionnerProduitsLiveClub(connus: readonly string[], lus: readonly unknown[]): string[] {
+  const liste = [...connus]
+  for (const p of lus) {
+    const id = typeof p === 'string' ? p.trim() : ''
+    if (ID_PRODUIT_STRIPE.test(id) && !liste.includes(id)) liste.push(id)
+  }
+  return liste
+}
+
+export type ListeProduitsLiveClub = {
+  produits: readonly string[]
+  /**
+   * false = la base n'a pas pu etre lue et aucune liste n'a ete lue avant :
+   * seuls les produits de base sont connus. Un abonnement d'un autre produit
+   * peut alors manquer : un 'non' ne doit rien decider (droits.ts en fait un
+   * 'inconnu').
+   */
+  complete: boolean
+  /** base = lue (ou en cache frais) ; base_absente = table pas encore migree ; cache_perime = panne, derniere liste lue ; repli = panne sans liste lue. */
+  source: 'base' | 'base_absente' | 'cache_perime' | 'repli'
+}
+
+export type OptionsLecteurProduits = {
+  /** Les produits de base, jamais perdus. */
+  connus: readonly string[]
+  /** Duree de vie d'une liste lue, en ms (60 s par defaut). */
+  dureeMs?: number
+  /** Apres une panne, delai avant de retenter la base, en ms (15 s par defaut). */
+  retenterMs?: number
+  /** Horloge (tests). */
+  maintenant?: () => number
+  /** La table n'existe pas encore (migration pas appliquee) : pas une panne, aucun produit de plus. */
+  estAbsente?: (err: unknown) => boolean
+  /** Appele a chaque panne (log). */
+  surPanne?: (err: unknown) => void
+}
+
+export type LecteurProduitsLiveClub = {
+  lire: () => Promise<ListeProduitsLiveClub>
+  /** Oublie le cache (apres une inscription) : la prochaine lecture relit la base. */
+  oublier: () => void
+}
+
+/**
+ * Le lecteur de la liste, avec un cache court. `lireBase` rend les
+ * identifiants lus (jette sur une panne). Ne jette jamais :
+ * - liste fraiche en cache : rendue telle quelle ;
+ * - sinon relecture (une seule a la fois, les appels simultanes l'attendent) ;
+ * - table absente : les produits de base, complete (rien d'autre ne peut exister) ;
+ * - panne : la derniere liste lue si elle existe (complete), sinon les
+ *   produits de base seuls, NON complete ; pas de nouvel essai avant
+ *   retenterMs.
+ */
+export function creerLecteurProduitsLiveClub(
+  lireBase: () => Promise<readonly unknown[]>,
+  o: OptionsLecteurProduits,
+): LecteurProduitsLiveClub {
+  const duree = o.dureeMs ?? 60_000
+  const retenter = o.retenterMs ?? 15_000
+  const maintenant = o.maintenant ?? (() => Date.now())
+  let derniere: { produits: string[]; source: 'base' | 'base_absente'; lueLe: number } | null = null
+  let pasAvant = 0
+  let enCours: Promise<ListeProduitsLiveClub> | null = null
+
+  const repli = (): ListeProduitsLiveClub => derniere
+    ? { produits: derniere.produits, complete: true, source: 'cache_perime' }
+    : { produits: [...o.connus], complete: false, source: 'repli' }
+
+  async function relire(): Promise<ListeProduitsLiveClub> {
+    try {
+      const lus = await lireBase()
+      derniere = { produits: fusionnerProduitsLiveClub(o.connus, Array.isArray(lus) ? lus : []), source: 'base', lueLe: maintenant() }
+    } catch (err) {
+      if (o.estAbsente?.(err)) {
+        derniere = { produits: [...o.connus], source: 'base_absente', lueLe: maintenant() }
+      } else {
+        o.surPanne?.(err)
+        pasAvant = maintenant() + retenter
+        return repli()
+      }
+    }
+    pasAvant = 0
+    return { produits: derniere.produits, complete: true, source: derniere.source }
+  }
+
+  return {
+    lire: async () => {
+      const t = maintenant()
+      if (derniere && t - derniere.lueLe < duree) {
+        return { produits: derniere.produits, complete: true, source: derniere.source }
+      }
+      if (t < pasAvant) return repli()
+      if (!enCours) enCours = relire().finally(() => { enCours = null })
+      return enCours
+    },
+    oublier: () => { derniere = null; pasAvant = 0 },
+  }
+}
+
+/** Les parametres d'un marquage « ce produit ouvre le Live Club » (agent du Cockpit, 13/10). */
+export type ParamsMarquageLiveClub = {
+  produit_id: string
+  note: string | null
+  /** Rempli par le serveur avant la carte (nom lu chez Stripe), pour la carte seulement. */
+  produit_nom: string | null
+}
+
+export function lireParamsMarquageLiveClub(p: Record<string, unknown>): ParamsMarquageLiveClub | string {
+  const produit = String(p.produit_id ?? '').trim()
+  if (!ID_PRODUIT_STRIPE.test(produit)) {
+    return 'produit_id invalide (prod_..., depuis cockpit_catalogue.produit_id ou le résultat de proposer_produit).'
+  }
+  const note = p.note == null ? null : String(p.note).trim().slice(0, 300) || null
+  const nom = p.produit_nom == null ? null : String(p.produit_nom).trim().slice(0, 120) || null
+  return { produit_id: produit, note, produit_nom: nom }
+}
+
+// ---------------------------------------------------------------------------
+// Liens de paiement de l'agent du Cockpit (Brice, 13/10)
+//
+// « Fais-le et donne-moi son lien de paiement » : l'agent cree un Payment Link
+// Stripe PERSONNEL (un seul paiement) pour le tarif d'un produit. Pour un
+// produit Live Club, le retour apres paiement est la page de bienvenue, qui
+// guide la personne vers le bot, qui la fait entrer seule.
+// ---------------------------------------------------------------------------
+
+export type ParamsLienPaiement = {
+  produit_id: string
+  /** null = le seul tarif actif du produit (resolu par le serveur avant la carte). */
+  price_id: string | null
+  /** Prerempli sur la page de paiement (prefilled_email), null = rien. */
+  email: string | null
+  qui: string
+  // Remplis par le SERVEUR avant la carte (lus chez Stripe), pour la carte
+  // seulement : l'execution relit tout chez Stripe.
+  produit_nom: string | null
+  montant_centimes: number | null
+  devise: string | null
+  /** day | week | month | year, null = paiement unique. */
+  recurrence: string | null
+  nb_intervalles: number | null
+  /** Le produit ouvre le Live Club (liste dynamique), au moment de la carte. */
+  live_club: boolean | null
+}
+
+const RECURRENCES = ['day', 'week', 'month', 'year']
+
+/**
+ * Les parametres d'un lien de paiement propose par l'agent, ou la raison du
+ * refus (rendue au modele). Les champs du serveur (produit_nom, montant...)
+ * sont gardes s'ils sont bien formes : le controle avant la carte les
+ * reecrit de toute facon d'apres Stripe.
+ */
+export function lireParamsLienPaiement(p: Record<string, unknown>): ParamsLienPaiement | string {
+  const produit = String(p.produit_id ?? '').trim()
+  if (!ID_PRODUIT_STRIPE.test(produit)) {
+    return 'produit_id invalide (prod_..., donné par le résultat de proposer_produit ou par cockpit_catalogue.produit_id).'
+  }
+  const prixBrut = p.price_id == null ? '' : String(p.price_id).trim()
+  if (prixBrut && !ID_TARIF_STRIPE.test(prixBrut)) return 'price_id invalide (price_..., depuis cockpit_catalogue.tarifs), ou vide.'
+  let email: string | null = null
+  if (p.email != null && String(p.email).trim() !== '') {
+    email = normaliserEmail(p.email)
+    if (!email) return `Email illisible (${String(p.email).trim().slice(0, 80)}) : corrige-le, ou propose sans email.`
+  }
+  const qui = String(p.qui ?? '').trim().slice(0, 80)
+  if (!qui) return 'Précise QUI va payer (prénom ou nom) : la carte et l\'étape suivante le nomment.'
+
+  const nom = p.produit_nom == null ? null : String(p.produit_nom).trim().slice(0, 120) || null
+  const montant = typeof p.montant_centimes === 'number' && Number.isInteger(p.montant_centimes) && p.montant_centimes >= 0
+    ? p.montant_centimes : null
+  const devise = typeof p.devise === 'string' && /^[a-z]{3}$/i.test(p.devise) ? p.devise.toLowerCase() : null
+  const recurrence = typeof p.recurrence === 'string' && RECURRENCES.includes(p.recurrence) ? p.recurrence : null
+  const nb = typeof p.nb_intervalles === 'number' && Number.isInteger(p.nb_intervalles) && p.nb_intervalles >= 1
+    ? p.nb_intervalles : null
+  const liveClub = typeof p.live_club === 'boolean' ? p.live_club : null
+  return {
+    produit_id: produit, price_id: prixBrut || null, email, qui,
+    produit_nom: nom, montant_centimes: montant, devise, recurrence, nb_intervalles: nb, live_club: liveClub,
+  }
+}
+
+/** Un tarif Stripe tel que le lien de paiement le lit. */
+export type TarifLu = {
+  id: string
+  produit: string
+  actif: boolean
+  /** Centimes, null = tarif sans montant fixe (paliers, montant libre). */
+  montant: number | null
+  devise: string
+  /** day | week | month | year, null = paiement unique. */
+  recurrence: string | null
+  nbIntervalles: number
+}
+
+/** Un objet price de Stripe, ou null s'il est illisible. */
+export function lireTarifStripe(brut: unknown): TarifLu | null {
+  const x = (brut && typeof brut === 'object' ? brut : {}) as Record<string, unknown>
+  const id = String(x.id ?? '')
+  if (!ID_TARIF_STRIPE.test(id)) return null
+  const p = x.product
+  const produit = typeof p === 'string' ? p : String((p as { id?: unknown } | null | undefined)?.id ?? '')
+  const rec = x.recurring as { interval?: unknown; interval_count?: unknown } | null | undefined
+  const recurrence = rec && RECURRENCES.includes(String(rec.interval)) ? String(rec.interval) : null
+  const n = typeof rec?.interval_count === 'number' && Number.isInteger(rec.interval_count) && rec.interval_count > 0
+    ? rec.interval_count : 1
+  return {
+    id, produit, actif: x.active === true,
+    montant: typeof x.unit_amount === 'number' && Number.isInteger(x.unit_amount) ? x.unit_amount : null,
+    devise: String(x.currency ?? 'eur').toLowerCase(),
+    recurrence, nbIntervalles: recurrence ? n : 1,
+  }
+}
+
+/** « 1 € par mois », « 297 € tous les 3 mois », « 50 € en une fois ». */
+export function libelleTarif(t: { montant: number | null; devise: string; recurrence: string | null; nbIntervalles: number }): string {
+  const montant = t.montant === null ? 'montant libre' : formaterMontant(t.montant, t.devise)
+  const noms = t.recurrence ? INTERVALLES_FR[t.recurrence] : undefined
+  if (!noms) return `${montant} en une fois`
+  return `${montant} ${parPeriode(t.nbIntervalles === 1 ? noms[0] : `${t.nbIntervalles} ${noms[1]}`)}`
+}
+
+/**
+ * Le tarif du lien : celui demande (price_id), sinon le SEUL tarif actif du
+ * produit. Sinon la raison, rendue au modele : plusieurs tarifs (il demande
+ * lequel), aucun, archive, sans montant fixe, ou d'un autre produit.
+ */
+export function choisirTarif(tarifs: readonly TarifLu[], produitId: string, demande: string | null): TarifLu | string {
+  const duProduit = tarifs.filter(t => t.produit === produitId)
+  let choisi: TarifLu | undefined
+  if (demande) {
+    choisi = tarifs.find(t => t.id === demande)
+    if (!choisi || choisi.produit !== produitId) return `Le tarif ${demande} n'appartient pas au produit ${produitId}.`
+    if (!choisi.actif) return `Le tarif ${demande} est archivé : choisis un tarif actif du produit.`
+  } else {
+    const actifs = duProduit.filter(t => t.actif)
+    if (actifs.length === 0) {
+      return `Le produit ${produitId} n'a aucun tarif actif : il faut en créer un (proposer_produit) ou le réactiver au Dashboard Stripe.`
+    }
+    if (actifs.length > 1) {
+      return `Le produit ${produitId} a ${actifs.length} tarifs actifs : `
+        + actifs.slice(0, 6).map(t => `${libelleTarif(t)} (${t.id})`).join(', ')
+        + `. Demande lequel, puis repropose avec price_id.`
+    }
+    choisi = actifs[0]
+  }
+  if (choisi.montant === null) {
+    return `Le tarif ${choisi.id} n'a pas de montant fixe : un lien personnel demande un prix fixe.`
+  }
+  return choisi
+}
+
+/**
+ * Ce qui interdit un lien Live Club, ou null. La page de bienvenue ne lit que
+ * le compte melanie et ne fait entrer que sur un ABONNEMENT (elle cherche
+ * l'abonnement de la session) : un paiement unique y finirait sur « on ne
+ * retrouve pas ton abonnement ».
+ */
+export function refusLienLiveClub(compte: string, tarif: { recurrence: string | null }): string | null {
+  if (compte !== 'melanie') {
+    return 'Un lien Live Club se crée sur le compte melanie : c\'est le seul que lisent la page de bienvenue et le bot.'
+  }
+  if (!tarif.recurrence) {
+    return 'Ce tarif est un paiement unique : la page de bienvenue du Live Club ne fait entrer que sur un abonnement. '
+      + 'Il faut un tarif mensuel ou annuel (proposer_produit avec recurrence).'
+  }
+  return null
+}
+
+/**
+ * Le corps de POST /v1/payment_links (form-urlencoded). Lien PERSONNEL :
+ * restrictions.completed_sessions.limit = 1 (Stripe desactive le lien apres
+ * un paiement). Live Club : retour sur la page de bienvenue, avec
+ * {CHECKOUT_SESSION_ID} que Stripe remplace (la page le donne au journal,
+ * qui verifie la session et rend le lien du bot). Sinon, la page de
+ * confirmation de Stripe.
+ */
+export function corpsLienPaiement(o: { priceId: string; liveClub: boolean; urlBienvenue: string; qui: string }): Record<string, string> {
+  const corps: Record<string, string> = {
+    'line_items[0][price]': o.priceId,
+    'line_items[0][quantity]': '1',
+    'restrictions[completed_sessions][limit]': '1',
+    'metadata[cree_par]': 'agent_cockpit',
+    'metadata[pour]': o.qui.slice(0, 100),
+  }
+  if (o.liveClub) {
+    corps['after_completion[type]'] = 'redirect'
+    corps['after_completion[redirect][url]'] = o.urlBienvenue
+    corps['metadata[live_club]'] = 'oui'
+  }
+  return corps
+}
+
+/** L'URL a envoyer : celle de Stripe, plus ?prefilled_email= quand l'email est connu. */
+export function urlLienAvecEmail(url: string, email: string | null): string {
+  if (!email) return url
+  return `${url}${url.includes('?') ? '&' : '?'}prefilled_email=${encodeURIComponent(email)}`
+}
+
+/** L'etape humaine apres un lien de paiement, en une ligne. */
+export function etapeApresLienPaiement(qui: string, liveClub: boolean): string {
+  return liveClub
+    ? `Envoie ce lien à ${qui} : une fois payé, il est guidé vers le bot, qui le fait entrer tout seul.`
+    : `Envoie ce lien à ${qui} : il ne sert qu'à un seul paiement.`
+}
+
+/** Le resultat d'un lien de paiement cree : quoi, l'URL seule sur sa ligne (rien apres), puis l'etape suivante. */
+export function phraseLienPaiementCree(o: {
+  qui: string; produitNom: string; tarif: string; liveClub: boolean; url: string; emailPrerempli: boolean
+}): string {
+  return `Lien de paiement personnel pour ${o.qui} : « ${o.produitNom} », ${o.tarif}, un seul paiement possible`
+    + (o.emailPrerempli ? ', email prérempli' : '') + '.\n'
+    + `${o.url}\n`
+    + etapeApresLienPaiement(o.qui, o.liveClub)
+}
+
+/** Masque une cle Stripe dans un message d'erreur (Stripe en cite une partie). */
+export function masquerCleStripe(message: string): string {
+  return message.replace(/\b[rsp]k_(?:live|test)_[A-Za-z0-9*]+/g, '[clé]')
+}
+
+/** Stripe refuse faute de permission sur une cle restreinte. */
+export function estRefusDePermission(message: string): boolean {
+  return /does not have the required permissions|rak_[a-z_]+/i.test(message)
+}
+
+/**
+ * Le message quand la cle d'ecriture refuse de creer un Payment Link : la
+ * permission exacte a demander a Adil, sans rien d'autre. `message` = erreur
+ * de Stripe (la permission qu'il cite, rak_..., est reprise).
+ */
+export function permissionLienPaiementManquante(compte: string, variable: string, message: string): string {
+  const cite = /rak_[a-z_]+/i.exec(message)?.[0]
+  return `Rien n'a été créé : la clé d'écriture du compte ${compte} (${variable}) n'a pas le droit de créer des liens de paiement. `
+    + `Demande à Adil d'ajouter à cette clé restreinte la permission « Payment Links » en écriture `
+    + `(Stripe, Développeurs, Clés API, la clé de l'agent, Modifier, Payment Links : Écriture)`
+    + (cite ? `, Stripe la nomme ${cite}` : '')
+    + `, puis redemande-moi le lien.`
+}
+
+/**
+ * Le resultat d'un produit cree par l'agent : ses identifiants (le modele
+ * enchaine le lien de paiement avec produit_id), s'il ouvre le Live Club,
+ * puis l'etape suivante. inscription : 'faite' | 'deja' (inscrit dans
+ * cockpit_liveclub_produits), 'table_absente' ou 'echec' (PAS inscrit),
+ * null pour un produit hors Live Club.
+ */
+export function phraseProduitCree(o: {
+  nom: string; compte: string; produitId: string; priceId: string; tarif: string
+  inscription: 'faite' | 'deja' | 'table_absente' | 'echec' | null
+}): string {
+  const tete = `Produit « ${o.nom} » créé sur ${o.compte} : ${o.produitId}, tarif ${o.priceId} (${o.tarif}).`
+  const suite = `Étape suivante : demande-moi le lien de paiement de la personne (produit ${o.produitId}).`
+  if (o.inscription === 'faite' || o.inscription === 'deja') {
+    return `${tete}\nIl ouvre le Live Club : un abonné entre par le bot, la page de bienvenue le reconnaît et la collecte le classe en live-club.\n${suite}`
+  }
+  if (o.inscription === 'table_absente') {
+    return `${tete}\nATTENTION : il n'ouvre PAS encore le Live Club, la table cockpit_liveclub_produits n'existe pas (migration à appliquer). `
+      + `Une fois appliquée, demande-moi de le marquer comme produit Live Club.\n${suite}`
+  }
+  if (o.inscription === 'echec') {
+    return `${tete}\nATTENTION : il n'ouvre PAS encore le Live Club, la base a refusé de l'inscrire. Demande-moi de le marquer comme produit Live Club.\n${suite}`
+  }
+  return `${tete}\n${suite}`
+}

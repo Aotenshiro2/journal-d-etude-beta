@@ -11,6 +11,7 @@ import { prisma } from '@/lib/db'
 import { exemptionActive } from '@/lib/stripe-actions'
 import { rattachementActif, membreParEmail } from './rattacher'
 import { abonnementsLiveClubDuClient, abonnementsLiveClubParEmail, type AbonnementResume } from './stripe'
+import { lireProduitsLiveClub } from './produits'
 import { dateIso, detteOuverte, finDuDroit, meilleurAbonnement, messageErreur, relationAbsente, type Dette } from './pur'
 
 export { meilleurAbonnement }
@@ -153,6 +154,14 @@ export async function droitLiveClub(telegramId: number, opts: { exemptionIgnoree
     } catch (err) {
       erreurs.push(`acces_manuel: ${messageErreur(err)}`)
     }
+  }
+
+  // 5. La liste des produits Live Club (13/10) : lue en base, avec les deux
+  // produits de base toujours dedans. Si elle n'a pas pu etre lue (et aucune
+  // avant), un abonnement d'un produit inscrit depuis (tarif particulier)
+  // a pu etre ignore : pas de 'non' sur une liste incomplete.
+  if (!(await lireProduitsLiveClub()).complete) {
+    erreurs.push('produits: liste des produits Live Club illisible')
   }
 
   if (erreurs.length) {

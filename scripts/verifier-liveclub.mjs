@@ -26,6 +26,10 @@ import {
   lireTelegramId, COMMANDE_BOT_MEMBRE, aiguillageMessagePrive, TEXTE_TRANSMIS_AU_COCKPIT, TEXTE_NON_TRANSMIS_AU_COCKPIT,
   refusReintegration, etapeApresExemption, etapeApresReintegration, etapeApresAccesBroker,
   MOTIFS_EXEMPTION, lireParamsExemption, uuidDeActeur,
+  fusionnerProduitsLiveClub, creerLecteurProduitsLiveClub, lireParamsMarquageLiveClub,
+  lireParamsLienPaiement, lireTarifStripe, libelleTarif, choisirTarif, refusLienLiveClub, corpsLienPaiement,
+  urlLienAvecEmail, etapeApresLienPaiement, phraseLienPaiementCree, masquerCleStripe, estRefusDePermission,
+  permissionLienPaiementManquante, phraseProduitCree,
 } from '../src/lib/liveclub/pur.ts'
 import { lireDemande, auteurDemande, MAX_TEXTE_DEMANDE, MAX_CITATION_DEMANDE } from '../src/lib/agent-cockpit-pur.ts'
 import {
@@ -40,7 +44,7 @@ import {
 import {
   GRACE_JOURS, URLS_ABONNEMENT, URL_ABONNEMENT, URL_PORTAIL_CARTE, texteAbonnement,
   ARGUMENT_TARIF_PAUSE, TEXTE_PAUSE_AVANT_ARRET, sortiesActives, sortiesImpayesActives, PLAFOND_RESILIATIONS_PASSAGE,
-  texteRaisonSortie,
+  texteRaisonSortie, PRODUITS_LIVECLUB, URL_BIENVENUE_LIVECLUB, estProduitLiveClub,
 } from '../src/lib/liveclub/config.ts'
 
 const PRODUITS = ['prod_UcOraPncQlbrW4', 'prod_UynMpOvBtGTsIw']
@@ -1508,6 +1512,212 @@ test('demandes de l equipe notees par l agent du Cockpit (08/10)', () => {
   assert.equal(auteurDemande({ libelle: 'melanie', userId: 'u-1' }), 'melanie')
   assert.equal(auteurDemande({ libelle: '  ', userId: 'u-1' }), 'cockpit:u-1')
   assert.equal(auteurDemande({ userId: 'u-1' }), 'cockpit:u-1')
+})
+
+// Blocs asynchrones (13/10) : le lecteur de la liste des produits est async.
+const testAsync = async (nom, f) => { await f(); n++; console.log(`ok  ${nom}`) }
+
+// Le produit de Yassine (compte melanie, lu en lecture seule chez Stripe le 13/10).
+const PRODUIT_YASSINE = 'prod_VR1P7PggEH30B9'
+const TARIF_YASSINE = 'price_1UQ9MnCbHiN0O0XimKBHXyiv'
+
+await testAsync('produits Live Club : liste en base, cache court, repli sur les deux produits de base (Brice 13/10)', async () => {
+  // Fusion : la base d'abord, puis la base de donnees, sans doublon ni identifiant douteux.
+  assert.deepEqual(
+    fusionnerProduitsLiveClub(PRODUITS_LIVECLUB, [PRODUIT_YASSINE, PRODUITS_LIVECLUB[0], 'price_123456', null, 42, ' prod_ABCDEF12 ']),
+    [...PRODUITS_LIVECLUB, PRODUIT_YASSINE, 'prod_ABCDEF12'],
+  )
+  assert.deepEqual(fusionnerProduitsLiveClub(PRODUITS_LIVECLUB, []), [...PRODUITS_LIVECLUB])
+
+  let t = 1_000_000
+  let appels = 0
+  let lecture = () => [PRODUIT_YASSINE]
+  const pannes = []
+  const lecteur = creerLecteurProduitsLiveClub(async () => { appels++; return lecture() }, {
+    connus: PRODUITS_LIVECLUB, dureeMs: 60_000, retenterMs: 15_000, maintenant: () => t,
+    estAbsente: relationAbsente, surPanne: e => pannes.push(e),
+  })
+  let l = await lecteur.lire()
+  assert.deepEqual(l, { produits: [...PRODUITS_LIVECLUB, PRODUIT_YASSINE], complete: true, source: 'base' })
+  // Reconnu avec la liste lue, pas avec la seule base du code (le bug du 13/10).
+  assert.ok(estProduitLiveClub(PRODUIT_YASSINE, l.produits))
+  assert.ok(!estProduitLiveClub(PRODUIT_YASSINE))
+  assert.ok(estProduitLiveClub(PRODUITS_LIVECLUB[1]))
+  // Un abonnement au produit de Yassine : un abonnement Live Club avec la liste, rien sans elle.
+  const subYassine = { id: 'sub_YASSINE12345', status: 'active', customer: 'cus_YASSINE12345',
+    items: { data: [{ price: { product: PRODUIT_YASSINE, unit_amount: 100, currency: 'eur', recurring: { interval: 'month', interval_count: 1 } } }] } }
+  assert.equal(resumerAbonnement(subYassine, l.produits)?.produit, PRODUIT_YASSINE)
+  assert.equal(resumerAbonnement(subYassine, PRODUITS_LIVECLUB), null)
+
+  // Cache de 60 s : pas de relecture avant, relecture apres.
+  t += 59_000
+  await lecteur.lire()
+  assert.equal(appels, 1)
+  t += 2_000
+  await lecteur.lire()
+  assert.equal(appels, 2)
+
+  // Panne APRES une lecture reussie : la derniere liste lue, toujours complete.
+  lecture = () => { throw new Error('connexion refusee') }
+  t += 61_000
+  l = await lecteur.lire()
+  assert.deepEqual(l, { produits: [...PRODUITS_LIVECLUB, PRODUIT_YASSINE], complete: true, source: 'cache_perime' })
+  assert.equal(pannes.length, 1)
+  // Pas de nouvel essai avant 15 s, puis un essai.
+  t += 10_000
+  await lecteur.lire()
+  assert.equal(appels, 3)
+  t += 6_000
+  await lecteur.lire()
+  assert.equal(appels, 4)
+  // La base revient : relue tout de suite.
+  lecture = () => [PRODUIT_YASSINE, 'prod_NOUVEAU123']
+  t += 16_000
+  assert.deepEqual((await lecteur.lire()).produits, [...PRODUITS_LIVECLUB, PRODUIT_YASSINE, 'prod_NOUVEAU123'])
+  // oublier() (apres une inscription) : relecture immediate, sans attendre 60 s.
+  const avant = appels
+  lecture = () => [PRODUIT_YASSINE]
+  lecteur.oublier()
+  await lecteur.lire()
+  assert.equal(appels, avant + 1)
+
+  // Panne SANS aucune liste lue : les deux produits de base, jamais perdus, liste NON complete.
+  const froid = creerLecteurProduitsLiveClub(async () => { throw new Error('base injoignable') }, {
+    connus: PRODUITS_LIVECLUB, maintenant: () => t, estAbsente: relationAbsente, surPanne: () => {},
+  })
+  l = await froid.lire()
+  assert.deepEqual(l, { produits: [...PRODUITS_LIVECLUB], complete: false, source: 'repli' })
+  assert.ok(PRODUITS_LIVECLUB.every(p => estProduitLiveClub(p, l.produits)))
+
+  // Table absente (migration pas appliquee) : pas une panne, aucun produit de plus, liste complete.
+  const absente = creerLecteurProduitsLiveClub(async () => {
+    throw new Error('relation "public.cockpit_liveclub_produits" does not exist')
+  }, { connus: PRODUITS_LIVECLUB, maintenant: () => t, estAbsente: relationAbsente })
+  assert.deepEqual(await absente.lire(), { produits: [...PRODUITS_LIVECLUB], complete: true, source: 'base_absente' })
+
+  // Reponse illisible : la base du code seule, rien de douteux ne passe.
+  const bizarre = creerLecteurProduitsLiveClub(async () => 'pas une liste', { connus: PRODUITS_LIVECLUB, maintenant: () => t })
+  assert.deepEqual((await bizarre.lire()).produits, [...PRODUITS_LIVECLUB])
+
+  // Appels simultanes : une seule lecture de la base.
+  let simultanes = 0
+  const lent = creerLecteurProduitsLiveClub(async () => { simultanes++; await new Promise(r => setTimeout(r, 5)); return [PRODUIT_YASSINE] },
+    { connus: PRODUITS_LIVECLUB, maintenant: () => t })
+  const [a, b] = await Promise.all([lent.lire(), lent.lire()])
+  assert.equal(simultanes, 1)
+  assert.deepEqual(a, b)
+
+  // Marquer un produit existant : parametres.
+  assert.deepEqual(lireParamsMarquageLiveClub({ produit_id: ` ${PRODUIT_YASSINE} `, note: ' Yassine, ETM ' }),
+    { produit_id: PRODUIT_YASSINE, note: 'Yassine, ETM', produit_nom: null })
+  assert.equal(typeof lireParamsMarquageLiveClub({ produit_id: TARIF_YASSINE }), 'string')
+  assert.equal(typeof lireParamsMarquageLiveClub({}), 'string')
+})
+
+test('lien de paiement : parametres, un seul paiement, retour sur la page de bienvenue, email prerempli (Brice 13/10)', () => {
+  // Parametres du modele.
+  assert.deepEqual(lireParamsLienPaiement({ produit_id: PRODUIT_YASSINE, email: ' Yassine.T@Gmail.com ', qui: ' Yassine ' }), {
+    produit_id: PRODUIT_YASSINE, price_id: null, email: 'yassine.t@gmail.com', qui: 'Yassine',
+    produit_nom: null, montant_centimes: null, devise: null, recurrence: null, nb_intervalles: null, live_club: null,
+  })
+  assert.equal(lireParamsLienPaiement({ produit_id: PRODUIT_YASSINE, price_id: TARIF_YASSINE, qui: 'Yassine', email: '' }).email, null)
+  assert.equal(typeof lireParamsLienPaiement({ produit_id: 'Live Club ETM', qui: 'Yassine' }), 'string')
+  assert.equal(typeof lireParamsLienPaiement({ produit_id: PRODUIT_YASSINE, price_id: 'prod_ABCDEF12', qui: 'Yassine' }), 'string')
+  assert.equal(typeof lireParamsLienPaiement({ produit_id: PRODUIT_YASSINE, email: 'yassine@', qui: 'Yassine' }), 'string')
+  assert.equal(typeof lireParamsLienPaiement({ produit_id: PRODUIT_YASSINE }), 'string')
+  // Champs du serveur (controle avant la carte) : gardes s'ils sont bien formes, sinon ignores.
+  const controle = lireParamsLienPaiement({
+    produit_id: PRODUIT_YASSINE, price_id: TARIF_YASSINE, qui: 'Yassine', produit_nom: 'Live Club ETM (tarif symbolique)',
+    montant_centimes: 100, devise: 'EUR', recurrence: 'month', nb_intervalles: 1, live_club: true,
+  })
+  assert.equal(controle.montant_centimes, 100)
+  assert.equal(controle.devise, 'eur')
+  assert.equal(controle.live_club, true)
+  const douteux = lireParamsLienPaiement({ produit_id: PRODUIT_YASSINE, qui: 'Y', montant_centimes: -5, recurrence: 'hourly', live_club: 'oui' })
+  assert.equal(douteux.montant_centimes, null)
+  assert.equal(douteux.recurrence, null)
+  assert.equal(douteux.live_club, null)
+
+  // Le corps du Payment Link : un seul paiement, retour sur la page de bienvenue.
+  const corps = corpsLienPaiement({ priceId: TARIF_YASSINE, liveClub: true, urlBienvenue: URL_BIENVENUE_LIVECLUB, qui: 'Yassine' })
+  assert.equal(corps['line_items[0][price]'], TARIF_YASSINE)
+  assert.equal(corps['line_items[0][quantity]'], '1')
+  assert.equal(corps['restrictions[completed_sessions][limit]'], '1')
+  assert.equal(corps['after_completion[type]'], 'redirect')
+  assert.equal(corps['after_completion[redirect][url]'], 'https://aoknowledge.com/live-club/bienvenue?session_id={CHECKOUT_SESSION_ID}')
+  // Encode en form-urlencoded puis decode (ce que fait Stripe) : le gabarit arrive intact.
+  assert.equal(new URLSearchParams(new URLSearchParams(corps).toString()).get('after_completion[redirect][url]'), URL_BIENVENUE_LIVECLUB)
+  assert.equal(corps['metadata[pour]'], 'Yassine')
+  // Hors Live Club : pas de redirection, toujours un seul paiement.
+  const autre = corpsLienPaiement({ priceId: TARIF_YASSINE, liveClub: false, urlBienvenue: URL_BIENVENUE_LIVECLUB, qui: 'Paul' })
+  assert.equal(autre['after_completion[type]'], undefined)
+  assert.equal(autre['after_completion[redirect][url]'], undefined)
+  assert.equal(autre['restrictions[completed_sessions][limit]'], '1')
+
+  // Email prerempli.
+  assert.equal(urlLienAvecEmail('https://buy.stripe.com/test_abc', 'yassine.t+lc@gmail.com'),
+    'https://buy.stripe.com/test_abc?prefilled_email=yassine.t%2Blc%40gmail.com')
+  assert.equal(urlLienAvecEmail('https://buy.stripe.com/abc?locale=fr', 'a@b.fr'), 'https://buy.stripe.com/abc?locale=fr&prefilled_email=a%40b.fr')
+  assert.equal(urlLienAvecEmail('https://buy.stripe.com/abc', null), 'https://buy.stripe.com/abc')
+
+  // Le tarif : le seul actif, ou celui demande ; sinon la raison, pour le modele.
+  const mensuel = lireTarifStripe({ id: TARIF_YASSINE, object: 'price', product: PRODUIT_YASSINE, active: true, unit_amount: 100, currency: 'eur',
+    recurring: { interval: 'month', interval_count: 1 } })
+  assert.deepEqual(mensuel, { id: TARIF_YASSINE, produit: PRODUIT_YASSINE, actif: true, montant: 100, devise: 'eur', recurrence: 'month', nbIntervalles: 1 })
+  assert.equal(libelleTarif(mensuel), '1 € par mois')
+  const trimestre = lireTarifStripe({ id: 'price_TRIM123456', product: { id: PRODUIT_YASSINE }, active: true, unit_amount: 29700, currency: 'eur',
+    recurring: { interval: 'month', interval_count: 3 } })
+  assert.equal(libelleTarif(trimestre), '297 € tous les 3 mois')
+  const comptant = lireTarifStripe({ id: 'price_COMPT12345', product: 'prod_AUTRE12345', active: true, unit_amount: 5050, currency: 'eur', recurring: null })
+  assert.equal(libelleTarif(comptant), '50,50 € en une fois')
+  assert.equal(lireTarifStripe({ id: 'pas_un_tarif' }), null)
+  assert.equal(choisirTarif([mensuel], PRODUIT_YASSINE, null), mensuel)
+  assert.equal(choisirTarif([mensuel, trimestre], PRODUIT_YASSINE, 'price_TRIM123456'), trimestre)
+  assert.match(choisirTarif([mensuel, trimestre], PRODUIT_YASSINE, null), /2 tarifs actifs.*price_TRIM123456.*Demande lequel/)
+  assert.match(choisirTarif([{ ...mensuel, actif: false }], PRODUIT_YASSINE, null), /aucun tarif actif/)
+  assert.match(choisirTarif([{ ...mensuel, actif: false }], PRODUIT_YASSINE, TARIF_YASSINE), /archivé/)
+  assert.match(choisirTarif([comptant], PRODUIT_YASSINE, 'price_COMPT12345'), /n'appartient pas/)
+  assert.match(choisirTarif([{ ...mensuel, montant: null }], PRODUIT_YASSINE, null), /montant fixe/)
+  // Un lien Live Club : compte melanie et abonnement seulement (la page de bienvenue cherche l'abonnement).
+  assert.equal(refusLienLiveClub('melanie', mensuel), null)
+  assert.match(refusLienLiveClub('aoknowledge', mensuel), /compte melanie/)
+  assert.match(refusLienLiveClub('melanie', comptant), /abonnement/)
+
+  // Le resultat : l'URL seule sur sa ligne (rien apres elle), puis l'etape suivante.
+  const url = urlLienAvecEmail('https://buy.stripe.com/abc', 'yassine.t@gmail.com')
+  const lignes = phraseLienPaiementCree({ qui: 'Yassine', produitNom: 'Live Club ETM (tarif symbolique)', tarif: '1 € par mois',
+    liveClub: true, url, emailPrerempli: true }).split('\n')
+  assert.equal(lignes.length, 3)
+  assert.match(lignes[0], /Yassine.*Live Club ETM \(tarif symbolique\).*1 € par mois.*un seul paiement.*email prérempli/)
+  assert.equal(lignes[1], 'https://buy.stripe.com/abc?prefilled_email=yassine.t%40gmail.com')
+  assert.equal(lignes[2], 'Envoie ce lien à Yassine : une fois payé, il est guidé vers le bot, qui le fait entrer tout seul.')
+  assert.equal(etapeApresLienPaiement('Paul', false), "Envoie ce lien à Paul : il ne sert qu'à un seul paiement.")
+
+  // Cle d'ecriture sans la permission : la permission exacte a demander a Adil, la cle jamais citee.
+  const refus = "The provided key 'rk_live_51AbC***********************XyZ9' does not have the required permissions for this endpoint "
+    + "on account 'acct_1AbC'. Having the 'rak_payment_link_write' permission would allow this request to continue."
+  assert.ok(estRefusDePermission(refus))
+  assert.ok(!estRefusDePermission('No such price: price_123'))
+  assert.ok(!masquerCleStripe(refus).includes('rk_live'))
+  const message = permissionLienPaiementManquante('melanie', 'STRIPE_AGENT_KEY_MELANIE', masquerCleStripe(refus))
+  assert.match(message, /^Rien n'a été créé/)
+  assert.match(message, /Adil/)
+  assert.match(message, /Payment Links » en écriture/)
+  assert.match(message, /rak_payment_link_write/)
+  assert.match(message, /STRIPE_AGENT_KEY_MELANIE/)
+
+  // Produit cree par l'agent : ses identifiants, son statut Live Club, jamais « PRODUITS_STRIPE a la main ».
+  const cree = phraseProduitCree({ nom: 'Live Club ETM (tarif symbolique)', compte: 'melanie', produitId: PRODUIT_YASSINE,
+    priceId: TARIF_YASSINE, tarif: '1 € par mois', inscription: 'faite' })
+  assert.ok(cree.includes(PRODUIT_YASSINE) && cree.includes(TARIF_YASSINE))
+  assert.match(cree, /ouvre le Live Club/)
+  assert.match(cree.split('\n').pop(), /^Étape suivante : demande-moi le lien de paiement/)
+  for (const inscription of ['faite', 'deja', 'table_absente', 'echec', null]) {
+    assert.ok(!/PRODUITS_STRIPE|push_membres/.test(phraseProduitCree({ nom: 'X', compte: 'melanie', produitId: PRODUIT_YASSINE,
+      priceId: TARIF_YASSINE, tarif: '1 € par mois', inscription })), String(inscription))
+  }
+  assert.match(phraseProduitCree({ nom: 'X', compte: 'melanie', produitId: PRODUIT_YASSINE, priceId: TARIF_YASSINE,
+    tarif: '1 € par mois', inscription: 'table_absente' }), /PAS encore le Live Club.*migration/)
 })
 
 console.log(`\n${n} blocs verifies, tout est bon.`)

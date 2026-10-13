@@ -2,9 +2,11 @@ import { prisma } from '@/lib/db'
 import { aiClient, AI_MODEL, logAiUsage, textOf } from '@/lib/ai'
 import {
   validerAction, resumeAction, cleAgent, cleTelegramPresente, nomVariableCle,
+  controlerActionStripe, aControleStripe,
   type ActionAgent, type CompteStripe,
 } from '@/lib/stripe-actions'
 import { prerequisAccesBroker } from '@/lib/liveclub/acces'
+import { cleStripeLecture } from '@/lib/liveclub/config'
 import { lireDemande, type SourceDemande } from '@/lib/agent-cockpit-pur'
 import { controlerActionRepartition, repartitionPourAgent } from '@/lib/repartition/serveur'
 import type Anthropic from '@anthropic-ai/sdk'
@@ -48,6 +50,7 @@ Les tables et vues du cockpit (schéma public, PostgreSQL) :
   - 'pause_debut', 'pause_j7', 'broker_j7' : les autres rappels. À chaque sortie réelle du groupe (pause_effective, broker_fin, desabonne quand les sorties seront actives), le membre reçoit un message : pourquoi, et comment revenir, en privé Telegram s'il a démarré le bot, sinon par email.
   - une pause posée par toi (carte confirmée) : geste 'pause', regle 'manuel', details paye_jusquau et reprise_le, sans telegram_id.
 - cockpit_liveclub_acces : acces_id, email (minuscules), motif (broker), source, debut (date), jusquau (date), pose_par, pose_le, invite_envoyee_le (null = l'email d'invitation n'est pas parti), telegram_id (null = le lien du bot n'a pas encore été ouvert), rappel_envoye_le, sorti_le, retire_le, retire_par, note. Les ACCÈS BROKER (affiliation RaiseFx) : 6 mois à partir du jour de l'ajout, NON RENOUVELABLES (une adresse n'a qu'une seule ligne, pour toujours). Actif = retire_le is null and sorti_le is null and jusquau >= current_date. Un membre présent avec un accès broker actif n'est PAS un écart.
+- cockpit_liveclub_produits : produit_id, compte (melanie), nom, pose_par, pose_le, note, retire_le. Les produits Stripe qui OUVRENT LE LIVE CLUB, les deux produits de base compris : un abonné à l'un d'eux entre par le bot, la page de bienvenue le reconnaît, le passage quotidien le compte et la collecte classe ses paiements en live-club. Actif = retire_le is null. Un tarif particulier (accès à prix symbolique, élève, geste) = un produit de plus, inscrit ici par proposer_produit (live_club vrai) ou proposer_marquer_live_club.
 - cockpit_demandes : demande_id, cree_le, auteur (libellé du compte Telegram de l'équipe, ou 'cockpit:<uuid>' depuis la fenêtre du cockpit), source (agent_cockpit|agent_telegram), texte (la demande reformulée), citation (telle qu'écrite), statut (nouvelle|au_picker|faite|refusee), traite_le, note. Les demandes de l'équipe que tu as notées faute d'outil (noter_demande). En attente = statut 'nouvelle'.
 LA RÉPARTITION BRICE / MÉLANIE (six tables, 08/10, voir plus bas) :
 - cockpit_partenaires : partenaire_id (le nom en minuscules sans espace ni accent, ex. raisefx), nom, nature (broker|affiliation), note. Les brokers et partenaires qui versent des commissions.
@@ -124,7 +127,7 @@ On peut joindre un PDF, une capture d'écran, un export CSV, un relevé bancaire
 - si le document est illisible, tronqué, ou sans rapport avec ce qu'on te demande, dis-le au lieu de deviner. Tu n'inventes jamais une ligne que tu n'as pas lue.
 
 LES ACTIONS STRIPE (03/09) :
-Tu disposes de dix outils d'action : proposer_code_promo, proposer_revoquer_code, proposer_remboursement, proposer_produit, proposer_pause_abonnement, proposer_reprise_abonnement, proposer_retirer_telegram, proposer_reintegrer_telegram, proposer_acces_broker, proposer_exemption (et huit pour la répartition, décrits plus bas : proposer_depot_broker, proposer_commission_affiliation, proposer_marquer_commission, proposer_taux_partenaire, proposer_intervenant, proposer_lives_du_mois, proposer_depense, proposer_reglement). Un appel N'EXÉCUTE RIEN : il affiche une carte de confirmation que Brice ou Mélanie doit cliquer : dis-le dans ta réponse. Après la confirmation, le résultat leur arrive directement et finit par l'étape humaine suivante (rien à faire, quoi dire à la personne, ou le lien à transmettre). Règles strictes :
+Tu disposes de douze outils d'action : proposer_code_promo, proposer_revoquer_code, proposer_remboursement, proposer_produit, proposer_lien_paiement, proposer_marquer_live_club, proposer_pause_abonnement, proposer_reprise_abonnement, proposer_retirer_telegram, proposer_reintegrer_telegram, proposer_acces_broker, proposer_exemption (et huit pour la répartition, décrits plus bas : proposer_depot_broker, proposer_commission_affiliation, proposer_marquer_commission, proposer_taux_partenaire, proposer_intervenant, proposer_lives_du_mois, proposer_depense, proposer_reglement). Un appel N'EXÉCUTE RIEN : il affiche une carte de confirmation que Brice ou Mélanie doit cliquer : dis-le dans ta réponse. Après la confirmation, le résultat leur arrive directement et finit par l'étape humaine suivante (rien à faire, quoi dire à la personne, ou le lien à transmettre). Règles strictes :
 - AJOUTER, REMETTRE OU FAIRE REVENIR QUELQU'UN DANS LE GROUPE (règle de Brice, 08/10) : le groupe ne s'ouvre qu'à quelqu'un qui a un DROIT, parce que c'est le droit qui compte sa durée et qui le fait sortir à la fin. Un lien brut donné à quelqu'un sans droit l'ouvre pour toujours, sans que rien ne le compte ni ne le sorte. AVANT toute proposition, vérifie son droit par requêtes : exemption active (cockpit_liveclub_exemptions), accès broker actif (cockpit_liveclub_acces, par email ou telegram_id), abonnement Live Club vivant (cockpit_membre_emails ou cockpit_liveclub_rattachements, puis cockpit_abonnements), accès manuel (cockpit_acces_manuel). Le serveur revérifie de toute façon.
   - SANS droit : pose d'abord le droit, jamais une réintégration. Un dépôt chez le broker partenaire (« il a fait un dépôt », « il a accès pour 6 mois ») = proposer_acces_broker avec son email (6 mois à partir d'aujourd'hui, l'email part avec son lien personnel vers le bot, qui le fait entrer tout seul). Un geste de l'équipe (fondateur, admin, équipe, favorisé, cadeau) = proposer_exemption, qui demande son compte Telegram : cherche le telegram_id (cockpit_telegram_membres, cockpit_liveclub_rattachements, cockpit_membre_telegram, archive) et, s'il reste inconnu, demande-le au lieu d'en deviner un. Une durée dite (« pour 3 mois ») devient la date de fin incluse ; sans durée, demande si l'exemption est permanente.
   - AVEC un droit mais hors du groupe : rien à poser. Le bot des membres lui donne tout seul son lien de retour dès qu'il lui écrit (Démarrer, /menu, un bouton ou n'importe quel message). proposer_reintegrer_telegram ne sert que si la personne reste bloquée malgré son droit (ancien ban, bot jamais ouvert) : le serveur la refuse si le droit n'est pas ouvert, et dit quel droit poser.
@@ -133,6 +136,10 @@ Tu disposes de dix outils d'action : proposer_code_promo, proposer_revoquer_code
 - TELEGRAM, le retrait n'est plus un bannissement (règle de Brice, 29/09) : la personne sort du groupe sans être bannie, et un lien d'invitation valide suffirait à la faire revenir. Ne dis jamais « banni » pour un retrait fait par nous. Quelqu'un en statut_tg kicked a été banni par Metricgram : le réintégrer lève ce ban.
 - TELEGRAM, historique Metricgram (avant le 06/10/2026) : Metricgram sortait parfois un membre qui avait droit ; les lignes 'sortie_abusive_metricgram' de cockpit_liveclub_gestes en gardent la trace. Pour faire revenir quelqu'un QUI A UN DROIT et reste bloqué, proposer_reintegrer_telegram reste le bon geste (il lève aussi un ancien ban de Metricgram).
 - PAUSE : elle démarre toujours à la fin de la période payée (le serveur la calcule, tu ne choisis pas la date), 1 à 6 mois, reprise automatique. Côté Telegram, tu n'as rien à proposer : si le compte Telegram du membre est rattaché, le passage quotidien le sort du groupe quand la période payée est finie et le prévient, puis le bot lui renvoie un lien quand les prélèvements reprennent. Ne propose pas de pause sur un abonnement résilié, déjà en pause, ou dont l'arrêt est programmé (annule_a_la_fin vrai) : le serveur refuse, comme le bot du membre, et il faut d'abord annuler l'arrêt.
+- ACCÈS PAYANT À UN TARIF PARTICULIER ET LIENS DE PAIEMENT (règle de Brice, 13/10) : « prépare un accès Live Club pour X à 1 EUR par mois », « donne-moi son lien de paiement ». Tu sais le faire de bout en bout, une carte à la fois :
+  1. Le produit. S'il n'existe pas : proposer_produit sur le compte melanie, avec recurrence (month ou year) et live_club vrai pour un accès Live Club. Le résultat donne son produit_id (prod_...) et son tarif (price_...), et le produit est alors reconnu partout tout seul (bot, page de bienvenue, passage quotidien, collecte) : il n'y a RIEN à modifier à la main, ne parle jamais d'une liste de produits à compléter. Un produit qui existe déjà mais n'ouvre pas le Live Club (absent de cockpit_liveclub_produits) : proposer_marquer_live_club avec son produit_id.
+  2. Le lien. Après la confirmation du produit (ou s'il existait déjà), proposer_lien_paiement avec le produit_id, qui (le prénom de la personne) et son email s'il est connu (prérempli sur la page de paiement). Le lien est PERSONNEL : un seul paiement possible. Pour un produit Live Club, la personne arrive après le paiement sur la page de bienvenue, qui la guide vers le bot, qui la fait entrer tout seul : aucun droit à poser à la main, aucune réintégration.
+  Le produit_id d'un produit existant : cockpit_catalogue (produit_id, tarifs avec price_id ; s'il a plusieurs tarifs actifs, demande lequel et passe price_id). Un produit créé aujourd'hui n'y apparaît qu'après la prochaine collecte : prends alors le produit_id donné plus haut dans la conversation par le résultat de proposer_produit, sinon demande-le. Ne dis jamais que tu ne sais pas faire un lien de paiement et ne le note jamais en demande.
 - ACCÈS BROKER (RaiseFx) : quand Mélanie te colle des emails de clients du broker partenaire pour leur ouvrir le Live Club, propose proposer_acces_broker avec TOUTES les adresses collées, sans en retirer ni en inventer (50 au plus par carte). Chacune reçoit 6 mois à partir d'aujourd'hui et un email de support@ avec son lien personnel vers le bot, qui fait entrer la personne tout seul : personne n'a rien à faire à la main sur Telegram. NON RENOUVELABLE : une adresse qui a déjà eu un accès broker est refusée par le serveur, même si l'accès est terminé ; ne promets jamais un second accès. Tu peux vérifier avant dans cockpit_liveclub_acces. Une adresse déjà abonnée au Live Club est signalée sans rien accorder. Après la confirmation, rends le résultat adresse par adresse tel que le serveur le donne.
 - N'appelle un outil d'action QUE si on te le demande explicitement. Jamais de ta propre initiative, jamais « pendant que j'y suis ».
 - Une seule action proposée à la fois.
@@ -555,7 +562,7 @@ const OUTILS: Anthropic.Tool[] = [
   {
     name: 'proposer_produit',
     description:
-      "Propose la création d'un produit Stripe avec son tarif. N'exécute rien : carte de confirmation.",
+      "Propose la création d'un produit Stripe avec son tarif. N'exécute rien : carte de confirmation. Avec live_club vrai (compte melanie, recurrence obligatoire), le produit ouvre le Live Club dès sa création : bot, page de bienvenue, passage quotidien et collecte le reconnaissent, rien à faire à la main. Le résultat donne produit_id et price_id : enchaîne ensuite proposer_lien_paiement si quelqu'un doit payer ce tarif.",
     input_schema: {
       type: 'object',
       properties: {
@@ -564,8 +571,38 @@ const OUTILS: Anthropic.Tool[] = [
         montant: { type: 'number', description: 'Prix en devise.' },
         devise: { type: 'string', enum: ['eur', 'usd'], description: 'Défaut eur.' },
         recurrence: { type: 'string', enum: ['month', 'year'], description: 'Vide = paiement comptant.' },
+        live_club: { type: 'boolean', description: 'Vrai = ce produit ouvre le Live Club (accès à un tarif particulier). Compte melanie et recurrence obligatoires. Défaut faux.' },
       },
       required: ['compte', 'nom', 'montant'],
+    },
+  },
+  {
+    name: 'proposer_lien_paiement',
+    description:
+      "Propose de créer un LIEN DE PAIEMENT Stripe PERSONNEL (Payment Link, un seul paiement possible) pour le tarif d'un produit. N'exécute rien : carte de confirmation, qui affiche le produit, le montant et le retour après paiement lus chez Stripe. Pour un produit Live Club, la personne arrive après le paiement sur la page de bienvenue, qui la guide vers le bot, qui la fait entrer tout seul. Le résultat donne l'URL à envoyer.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        compte: { type: 'string', enum: ['aoknowledge', 'melanie'], description: 'Le compte du produit (melanie pour le Live Club).' },
+        produit_id: { type: 'string', description: 'prod_..., donné par le résultat de proposer_produit ou par cockpit_catalogue.produit_id.' },
+        price_id: { type: 'string', description: 'Facultatif : price_..., seulement si le produit a plusieurs tarifs actifs (cockpit_catalogue.tarifs). Vide = son seul tarif actif.' },
+        email: { type: 'string', description: "Facultatif : l'email de la personne, prérempli sur la page de paiement." },
+        qui: { type: 'string', description: 'Qui va payer (prénom ou nom), pour la carte et pour le message à lui envoyer.' },
+      },
+      required: ['compte', 'produit_id', 'qui'],
+    },
+  },
+  {
+    name: 'proposer_marquer_live_club',
+    description:
+      "Propose de marquer un produit Stripe EXISTANT du compte melanie comme produit Live Club (par exemple un tarif particulier créé avant le 13/10 ou au Dashboard) : ses abonnés entreront par le bot, la page de bienvenue les reconnaîtra, la collecte les classera en live-club. N'exécute rien : carte de confirmation. Refusé s'il ouvre déjà le Live Club (cockpit_liveclub_produits).",
+    input_schema: {
+      type: 'object',
+      properties: {
+        produit_id: { type: 'string', description: 'prod_..., depuis cockpit_catalogue.produit_id (compte melanie).' },
+        note: { type: 'string', description: 'Facultatif : pour qui ou pourquoi, en quelques mots.' },
+      },
+      required: ['produit_id'],
     },
   },
 ]
@@ -574,6 +611,8 @@ const TYPE_PAR_OUTIL: Record<string, ActionAgent['type']> = {
   proposer_code_promo: 'code_promo',
   proposer_remboursement: 'remboursement',
   proposer_produit: 'produit',
+  proposer_lien_paiement: 'lien_paiement',
+  proposer_marquer_live_club: 'marquer_live_club',
   proposer_revoquer_code: 'revoquer_code',
   proposer_retirer_telegram: 'retirer_telegram',
   proposer_reintegrer_telegram: 'reintegrer_telegram',
@@ -650,6 +689,13 @@ function ceQuiManque(action: ActionAgent): string | null {
   if (action.type === 'acces_broker') return prerequisAccesBroker()
   // Une exemption est une ligne en base : ni bot, ni cle Stripe.
   if (action.type === 'exemption') return null
+  // Marquer un produit Live Club (13/10) : une ligne en base, apres lecture
+  // du produit chez Stripe (cle de l'agent ou cle de lecture de melanie).
+  if (action.type === 'marquer_live_club') {
+    return cleAgent('melanie') !== null || cleStripeLecture() !== null
+      ? null
+      : "Aucune clé Stripe du compte melanie n'est posée sur le projet journal (STRIPE_AGENT_KEY_MELANIE ou STRIPE_READ_KEY_MELANIE) : rien ne peut être exécuté."
+  }
   if (action.compte === 'telegram') {
     return cleTelegramPresente()
       ? null
@@ -771,6 +817,17 @@ export async function boucleAgent(
               const raison = err instanceof Error ? err.message.split('\n').filter(Boolean).pop() ?? '' : String(err)
               controle = { erreur: `Lecture impossible avant la carte (${raison.slice(0, 200)}) : réessaie dans un instant.` }
             }
+            if ('erreur' in controle) {
+              resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify({ erreur: controle.erreur }), is_error: true })
+              continue
+            }
+            action = controle.action
+            complement = controle.complement
+            manqueControle = controle.manque
+          } else if (aControleStripe(action.type)) {
+            // Lien de paiement, produit Live Club (13/10) : produit et tarif
+            // lus chez Stripe avant la carte. Un refus retourne au modele.
+            const controle = await controlerActionStripe(action)
             if ('erreur' in controle) {
               resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify({ erreur: controle.erreur }), is_error: true })
               continue

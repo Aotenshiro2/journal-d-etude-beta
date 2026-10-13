@@ -391,3 +391,51 @@ livre, mois de Paris).
   (table vide verifiee en lecture seule le 08/10, garde dans la migration).
   ORDRE : deployer le journal (il tolere les colonnes absentes), appliquer la
   migration, deployer le cockpit. Tests : verifier-repartition.mjs 17 blocs.
+
+## Acces a un tarif particulier : produits Live Club dynamiques et liens de paiement (13/10/2026, NON commite, NON deploye)
+
+Probleme reel (Brice, 13/10) : « un acces Live Club pour Yassine, eleve ETM, a
+1 EUR par mois ». L'agent a cree le produit (prod_VR1P7PggEH30B9, tarif
+price_1UQ9MnCbHiN0O0XimKBHXyiv, 1 EUR/mois, compte melanie, lu en lecture
+seule le 13/10) mais (1) les produits Live Club etaient en dur
+(PRODUITS_LIVECLUB) : ce produit n'ouvrait aucun droit, et (2) aucun outil ne
+faisait de lien de paiement.
+- Produits Live Club : table cockpit_liveclub_produits (migration
+  `sites/Aoknowledgecom/supabase/migrations/20261013120000_cockpit_liveclub_produits.sql`,
+  ECRITE, PAS APPLIQUEE ; les deux produits de base y sont inseres). Lue par
+  src/lib/liveclub/produits.ts (cache 60 s par instance, une lecture a la
+  fois, table absente = produits de base seuls). Les deux produits de base
+  restent dans config.ts et ne se perdent jamais. Panne sans liste deja lue :
+  liste NON complete, droitLiveClub fait d'un 'non' un 'inconnu', la page de
+  bienvenue repond « reessaie dans une minute » au lieu de « ne concerne pas
+  le Live Club ». Lecteur pur et teste : creerLecteurProduitsLiveClub (pur.ts).
+  Tous les appels de stripe.ts et la pause de stripe-actions.ts lisent la liste.
+- Agent du cockpit : proposer_produit prend live_club (compte melanie et
+  recurrence obligatoires, inscription dans la table apres creation, le
+  resultat donne prod_ et price_ et ne parle plus de PRODUITS_STRIPE) ;
+  proposer_marquer_live_club (produit EXISTANT, relu chez Stripe, refuse s'il
+  est deja inscrit) ; proposer_lien_paiement (Payment Link, controle avant la
+  carte : produit et tarif lus chez Stripe, seul tarif actif ou price_id ;
+  Live Club = compte melanie + tarif recurrent, after_completion redirect
+  vers https://aoknowledge.com/live-club/bienvenue?session_id={CHECKOUT_SESSION_ID},
+  restrictions.completed_sessions.limit = 1, ?prefilled_email= si email ;
+  tout relu a l'execution ; cle sans la permission = message qui dit quoi
+  demander a Adil, rien de cree). Consigne : produit (live_club vrai) puis
+  lien, une carte a la fois. Cockpit : libelles des deux nouvelles cartes
+  (AgentCockpit.tsx, depot workspace).
+- Page de bienvenue verifiee dans le code : le site lit session_id, POST
+  /api/liveclub/bienvenue, qui exige session du compte melanie, produit Live
+  Club (liste dynamique), complete et payee, et un ABONNEMENT (d'ou le refus
+  d'un lien Live Club sur un tarif comptant), puis jeton d'entree, email de
+  bienvenue et lien personnel vers le bot.
+- Pipeline : push_membres_supabase.py lit la meme table (charger_produits_live_club,
+  avant de classer les abonnements ; table absente ou panne = les deux
+  ecrits, une ligne le dit). Dry-run du 13/10 : « table absente », passage
+  normal.
+- Tests : verifier-liveclub.mjs 38 blocs (2 nouveaux : liste et cache,
+  parametres du lien). tsc et eslint propres ; cockpit tsc et build ok ;
+  py_compile ok. Aucune eval (prompt de l'agent du cockpit sans eval).
+- A FAIRE : appliquer la migration, deployer le journal puis le cockpit,
+  donner a STRIPE_AGENT_KEY_MELANIE la permission Payment Links en ecriture
+  (Adil), puis marquer le produit de Yassine (proposer_marquer_live_club
+  prod_VR1P7PggEH30B9) et demander son lien.

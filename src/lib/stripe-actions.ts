@@ -13,8 +13,10 @@
 //   STRIPE_AGENT_KEY_MELANIE      (recurrent Live Club)
 // Permissions minimales de la cle restreinte : Charges = ecriture (couvre les
 // remboursements), Coupons = ecriture (couvre les codes promotionnels),
-// Produits = ecriture (couvre les tarifs). Tant que la cle manque, la carte
-// de confirmation le dit au lieu d'un bouton Confirmer.
+// Produits = ecriture (couvre les tarifs), Payment Links = ecriture (liens de
+// paiement de l'agent, 13/10 : sans elle, le resultat dit quoi demander a
+// Adil). Tant que la cle manque, la carte de confirmation le dit au lieu d'un
+// bouton Confirmer.
 
 import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db'
@@ -23,8 +25,12 @@ import {
   effacementMetadonneesPause, resumerAbonnement, expurgerLiensInvitation, lireTelegramId,
   dateIso, formaterDateFr, lireParamsExemption, uuidDeActeur, refusReintegration,
   etapeApresExemption, etapeApresReintegration, etapeApresAccesBroker,
+  lireParamsLienPaiement, lireParamsMarquageLiveClub, lireTarifStripe, choisirTarif, libelleTarif,
+  refusLienLiveClub, corpsLienPaiement, urlLienAvecEmail, phraseLienPaiementCree, phraseProduitCree,
+  masquerCleStripe, estRefusDePermission, permissionLienPaiementManquante, type TarifLu,
 } from '@/lib/liveclub/pur'
-import { PRODUITS_LIVECLUB, nomBot } from '@/lib/liveclub/config'
+import { URL_BIENVENUE_LIVECLUB, cleStripeLecture, estProduitLiveClub, nomBot } from '@/lib/liveclub/config'
+import { inscrireProduitLiveClub, lireProduitsLiveClub, produitsLiveClub } from '@/lib/liveclub/produits'
 import { tracerGeste } from '@/lib/liveclub/support-pont'
 import {
   estTypeRepartition, lireParamsRepartition, resumeRepartition, jourParis, moisParis, type TypeRepartition,
@@ -134,6 +140,9 @@ export type ActionAgent = {
     | 'retirer_telegram' | 'reintegrer_telegram'
     | 'pause_abonnement' | 'reprise_abonnement'
     | 'acces_broker' | 'exemption'
+    // Acces payant a un tarif particulier (13/10) : lien de paiement d'un
+    // produit, et marquage d'un produit existant comme produit Live Club.
+    | 'lien_paiement' | 'marquer_live_club'
     // La repartition Brice / Melanie (08/10) : depots, commissions, taux,
     // intervenants, depenses, reglements (repartition/pur.ts et serveur.ts).
     | TypeRepartition
@@ -158,6 +167,9 @@ export function paramsPourLog(a: ActionAgent): Record<string, unknown> {
   }
   if (a.type === 'depot_broker' || a.type === 'commission_affiliation') {
     return { partenaire: a.params.partenaire, montant: a.params.montant ?? null, le: a.params.le }
+  }
+  if (a.type === 'lien_paiement') {
+    return { produit_id: a.params.produit_id, price_id: a.params.price_id ?? null, email: a.params.email ? 'oui' : 'non' }
   }
   if (estTypeRepartition(a.type)) {
     return Object.fromEntries(Object.entries(a.params).filter(([k]) => k !== 'note' && k !== 'qui'))
@@ -610,7 +622,31 @@ export function validerAction(brut: unknown): ActionAgent | string {
     return { type: 'acces_broker', compte: 'telegram', params: { emails, note } }
   }
 
+  // Marquer un produit EXISTANT comme produit Live Club (13/10) : une ligne
+  // de cockpit_liveclub_produits. Compte melanie seulement : c'est le seul que
+  // lisent le bot, la page de bienvenue et le passage quotidien.
+  if (a.type === 'marquer_live_club') {
+    if (a.compte != null && a.compte !== 'melanie') {
+      return "Un produit Live Club vit sur le compte melanie : c'est le seul que lisent le bot et la page de bienvenue."
+    }
+    const lu = lireParamsMarquageLiveClub(p)
+    if (typeof lu === 'string') return lu
+    return { type: 'marquer_live_club', compte: 'melanie', params: lu }
+  }
+
   if (!estCompte(a.compte)) return 'Compte inconnu : aoknowledge ou melanie.'
+
+  // Lien de paiement PERSONNEL d'un produit (13/10). Le tarif, le nom et le
+  // statut Live Club sont lus chez Stripe avant la carte (controlerActionStripe)
+  // et relus a l'execution.
+  if (a.type === 'lien_paiement') {
+    const lu = lireParamsLienPaiement(p)
+    if (typeof lu === 'string') return lu
+    if (lu.live_club === true && a.compte !== 'melanie') {
+      return "Un lien Live Club se crée sur le compte melanie : c'est le seul que lisent la page de bienvenue et le bot."
+    }
+    return { type: 'lien_paiement', compte: a.compte, params: lu }
+  }
 
   if (a.type === 'pause_abonnement' || a.type === 'reprise_abonnement') {
     const abo = String(p.abonnement_id ?? '').replace(/^stripe:/, '')
@@ -695,7 +731,19 @@ export function validerAction(brut: unknown): ActionAgent | string {
     if (recurrence && !['month', 'year'].includes(recurrence)) {
       return 'Récurrence : month, year, ou rien (comptant).'
     }
-    return { type: 'produit', compte: a.compte, params: { nom, montant, devise, recurrence } }
+    // live_club (13/10) : le produit est inscrit comme produit Live Club a sa
+    // creation. Un abonnement du compte melanie : la page de bienvenue et le
+    // bot ne lisent que celui-la, et ne font entrer que sur un abonnement.
+    if (p.live_club != null && typeof p.live_club !== 'boolean') return 'live_club : vrai ou faux.'
+    const liveClub = p.live_club === true
+    if (liveClub && a.compte !== 'melanie') {
+      return "Un produit Live Club se crée sur le compte melanie : c'est le seul que lisent le bot et la page de bienvenue."
+    }
+    if (liveClub && !recurrence) {
+      return 'Un produit Live Club est un abonnement : précise recurrence (month ou year). '
+        + 'La page de bienvenue ne fait entrer que sur un abonnement.'
+    }
+    return { type: 'produit', compte: a.compte, params: { nom, montant, devise, recurrence, live_club: liveClub } }
   }
 
   return 'Type d’action inconnu.'
@@ -759,7 +807,180 @@ export function resumeAction(a: ActionAgent): string {
       + `et une adresse déjà abonnée est signalée sans rien accorder.`
       + (p.note ? ` Note : ${p.note}` : '')
   }
+  if (a.type === 'lien_paiement') {
+    const tarif = typeof p.montant_centimes === 'number' && typeof p.devise === 'string'
+      ? libelleTarif({
+        montant: p.montant_centimes, devise: p.devise,
+        recurrence: typeof p.recurrence === 'string' ? p.recurrence : null,
+        nbIntervalles: typeof p.nb_intervalles === 'number' ? p.nb_intervalles : 1,
+      })
+      : null
+    return `Créer un lien de paiement PERSONNEL pour ${p.qui} (un seul paiement possible) : `
+      + `« ${p.produit_nom ?? p.produit_id} »${tarif ? `, ${tarif}` : ''}, compte ${a.compte}`
+      + (p.email ? `, email prérempli ${p.email}` : '')
+      + (p.live_club === true
+        ? '. Après le paiement : la page de bienvenue du Live Club, qui le guide vers le bot, qui le fait entrer tout seul.'
+        : '. Après le paiement : la page de confirmation de Stripe.')
+  }
+  if (a.type === 'marquer_live_club') {
+    return `Marquer le produit « ${p.produit_nom ?? p.produit_id} » (${p.produit_id}, compte melanie) comme produit Live Club : `
+      + 'ses abonnés entreront par le bot, la page de bienvenue les reconnaîtra et la collecte les classera en live-club.'
+      + (p.note ? ` Note : ${p.note}` : '')
+  }
   return `Créer le produit « ${p.nom} » à ${p.montant} ${String(p.devise).toUpperCase()}${p.recurrence ? `/${p.recurrence === 'month' ? 'mois' : 'an'}` : ' (comptant)'} sur le compte ${a.compte}.`
+    + (p.live_club === true ? ' Il ouvrira le Live Club : bot, page de bienvenue et collecte le reconnaîtront.' : '')
+}
+
+// ---------------------------------------------------------------------------
+// Liens de paiement et produits Live Club (13/10) : le controle AVANT la carte
+// lit chez Stripe le produit et le tarif, pour que la carte dise exactement ce
+// qui sera cree (nom, montant, retour apres paiement). L'execution relit tout.
+// ---------------------------------------------------------------------------
+
+export type ControleCarteStripe =
+  | { erreur: string }
+  | { action: ActionAgent; complement: string | null; manque: string | null }
+
+/** Les types controles par controlerActionStripe avant la carte. */
+export function aControleStripe(type: ActionAgent['type']): boolean {
+  return type === 'lien_paiement' || type === 'marquer_live_club'
+}
+
+/** La cle qui LIT un compte : celle de l'agent (l'ecriture lit aussi), sinon la cle de lecture de melanie. */
+function cleLectureCompte(compte: CompteStripe): string | null {
+  return cleAgent(compte) ?? (compte === 'melanie' ? cleStripeLecture() : null)
+}
+
+const CLE_MELANIE_ABSENTE = "Aucune clé Stripe du compte melanie sur le projet journal (STRIPE_AGENT_KEY_MELANIE ou STRIPE_READ_KEY_MELANIE) : impossible de lire le produit."
+
+function introuvableStripe(err: unknown, quoi: 'product' | 'price'): boolean {
+  return new RegExp(`No such ${quoi}`, 'i').test(err instanceof Error ? err.message : String(err))
+}
+
+type PreparationLien = { produitNom: string; tarif: TarifLu; liveClub: boolean }
+
+/**
+ * Lit chez Stripe le produit et le tarif d'un lien de paiement, et dit si le
+ * produit ouvre le Live Club (liste dynamique). Une chaine = refus d'une regle
+ * (produit introuvable ou archive, tarif ambigu, lien Live Club impossible,
+ * liste illisible). Jette sur une panne.
+ */
+async function preparerLien(cle: string, compte: CompteStripe, p: Record<string, unknown>): Promise<PreparationLien | string> {
+  const produitId = String(p.produit_id)
+  let produit: Record<string, unknown>
+  try {
+    produit = await stripeGet(cle, `/v1/products/${produitId}`)
+  } catch (err) {
+    if (introuvableStripe(err, 'product')) return `Produit ${produitId} introuvable sur le compte ${compte}.`
+    throw err
+  }
+  const nom = String(produit.name ?? produitId).slice(0, 120)
+  if (produit.active !== true) return `Le produit « ${nom} » est archivé : il faut le réactiver au Dashboard Stripe avant d'en faire un lien.`
+
+  const demande = typeof p.price_id === 'string' && p.price_id ? p.price_id : null
+  let bruts: unknown[]
+  if (demande) {
+    try {
+      bruts = [await stripeGet(cle, `/v1/prices/${demande}`)]
+    } catch (err) {
+      if (introuvableStripe(err, 'price')) return `Tarif ${demande} introuvable sur le compte ${compte}.`
+      throw err
+    }
+  } else {
+    const liste = await stripeGet(cle, `/v1/prices?${new URLSearchParams({ product: produitId, active: 'true', limit: '20' })}`)
+    bruts = (liste.data as unknown[] | undefined) ?? []
+  }
+  const tarif = choisirTarif(
+    bruts.map(lireTarifStripe).filter((t): t is TarifLu => t !== null), produitId, demande,
+  )
+  if (typeof tarif === 'string') return tarif
+
+  const liste = await lireProduitsLiveClub()
+  const liveClub = estProduitLiveClub(produitId, liste.produits)
+  if (!liveClub && !liste.complete) {
+    return 'La liste des produits Live Club est illisible pour le moment : réessaie dans une minute.'
+  }
+  if (liveClub) {
+    const refus = refusLienLiveClub(compte, tarif)
+    if (refus) return refus
+  }
+  return { produitNom: nom, tarif, liveClub }
+}
+
+/**
+ * Controle avant la carte d'un lien de paiement ou d'un marquage Live Club.
+ * `erreur` retourne au modele (il corrige ou pose la question) ; sinon la
+ * carte part avec les champs lus chez Stripe et, au besoin, un avertissement.
+ */
+export async function controlerActionStripe(a: ActionAgent): Promise<ControleCarteStripe> {
+  try {
+    if (a.type === 'lien_paiement') {
+      const compte = a.compte as CompteStripe
+      const cle = cleLectureCompte(compte)
+      // Sans cle, la carte part sans bouton : ceQuiManque (agent-cockpit.ts) le dit.
+      if (!cle) return { action: a, complement: null, manque: null }
+      const prep = await preparerLien(cle, compte, a.params)
+      if (typeof prep === 'string') return { erreur: prep }
+      const action: ActionAgent = {
+        ...a,
+        params: {
+          ...a.params,
+          price_id: prep.tarif.id, produit_nom: prep.produitNom, montant_centimes: prep.tarif.montant,
+          devise: prep.tarif.devise, recurrence: prep.tarif.recurrence, nb_intervalles: prep.tarif.nbIntervalles,
+          live_club: prep.liveClub,
+        },
+      }
+      // Le compte de Melanie ne vend que le Live Club : un produit de ce
+      // compte qui ne l'ouvre pas est tres probablement un oubli.
+      const complement = !prep.liveClub && compte === 'melanie'
+        ? "ATTENTION : ce produit n'ouvre PAS le Live Club (il n'est pas inscrit comme produit Live Club) : "
+          + "la personne paierait sans entrer. Pour un accès Live Club, il faut d'abord le marquer (proposer_marquer_live_club)."
+        : null
+      return { action, complement, manque: null }
+    }
+
+    if (a.type === 'marquer_live_club') {
+      const cle = cleLectureCompte('melanie')
+      if (!cle) return { erreur: CLE_MELANIE_ABSENTE }
+      const produitId = String(a.params.produit_id)
+      let produit: Record<string, unknown>
+      try {
+        produit = await stripeGet(cle, `/v1/products/${produitId}`)
+      } catch (err) {
+        if (introuvableStripe(err, 'product')) {
+          return { erreur: `Produit ${produitId} introuvable sur le compte melanie (un produit du compte aoknowledge ne peut pas ouvrir le Live Club).` }
+        }
+        throw err
+      }
+      const nom = String(produit.name ?? produitId).slice(0, 120)
+      if (estProduitLiveClub(produitId, (await lireProduitsLiveClub()).produits)) {
+        return { erreur: `« ${nom} » (${produitId}) ouvre déjà le Live Club : rien à marquer. Pour faire payer quelqu'un, propose proposer_lien_paiement.` }
+      }
+      const prix = await stripeGet(cle, `/v1/prices?${new URLSearchParams({ product: produitId, active: 'true', limit: '20' })}`)
+      const recurrents = ((prix.data as unknown[] | undefined) ?? [])
+        .map(lireTarifStripe)
+        .filter((t): t is TarifLu => t !== null && t.actif && t.recurrence !== null)
+      const avertissements = [
+        produit.active !== true ? 'ATTENTION : ce produit est archivé chez Stripe.' : null,
+        recurrents.length === 0
+          ? "ATTENTION : il n'a aucun tarif récurrent actif, et la page de bienvenue ne fait entrer que sur un abonnement."
+          : null,
+      ].filter(Boolean)
+      return {
+        action: { ...a, params: { ...a.params, produit_nom: nom } },
+        complement: avertissements.length ? avertissements.join(' ') : null,
+        manque: null,
+      }
+    }
+
+    return { action: a, complement: null, manque: null }
+  } catch (err) {
+    const message = masquerCleStripe(messageErreur(err))
+    if (estRefusDePermission(message)) {
+      return { erreur: `Stripe refuse cette lecture à la clé du compte (${message}). Aucune carte : dis-le, la permission « Products » en lecture manque à la clé.` }
+    }
+    return { erreur: `Lecture Stripe impossible avant la carte (${message}) : réessaie dans un instant.` }
+  }
 }
 
 /**
@@ -905,6 +1126,33 @@ export async function executerAction(a: ActionAgent, acteur = 'agent'): Promise<
       + `\n${etapeApresAccesBroker(resultats, nomBot())}`
   }
 
+  // ── Produit existant -> produit Live Club (13/10) ─────────────────────────
+  // Une ligne de cockpit_liveclub_produits, apres relecture du produit chez
+  // Stripe (compte melanie). Aucune ecriture chez Stripe : la cle de lecture
+  // suffit.
+  if (a.type === 'marquer_live_club') {
+    const cleLu = cleLectureCompte('melanie')
+    if (!cleLu) throw new Error(`${CLE_MELANIE_ABSENTE} Rien n'a été marqué.`)
+    const produitId = String(a.params.produit_id)
+    let produit: Record<string, unknown>
+    try {
+      produit = await stripeGet(cleLu, `/v1/products/${produitId}`)
+    } catch (err) {
+      if (introuvableStripe(err, 'product')) throw new RefusAction(`Produit ${produitId} introuvable sur le compte melanie : rien n'a été marqué.`)
+      throw err
+    }
+    const nom = String(produit.name ?? produitId).slice(0, 120)
+    const issue = await inscrireProduitLiveClub({
+      produitId, nom, posePar: acteur, note: typeof a.params.note === 'string' ? a.params.note : null,
+    })
+    if (!issue.ok) throw new Error(`${issue.message} Rien n'a été marqué.`)
+    const suite = `Étape suivante : pour faire payer quelqu'un à ce tarif, demande-moi son lien de paiement (produit ${produitId}).`
+    return issue.deja
+      ? `« ${nom} » (${produitId}) ouvrait déjà le Live Club : rien n'a changé.\n${suite}`
+      : `« ${nom} » (${produitId}) ouvre maintenant le Live Club : ses abonnés entrent par le bot, la page de bienvenue `
+        + `les reconnaît (sous une minute) et la collecte les classe en live-club.\n${suite}`
+  }
+
   const cle = cleAgent(a.compte as CompteStripe)
   if (!cle) {
     throw new Error(
@@ -913,6 +1161,40 @@ export async function executerAction(a: ActionAgent, acteur = 'agent'): Promise<
     )
   }
   const p = a.params
+
+  // ── Lien de paiement personnel (13/10) ────────────────────────────────────
+  // Produit et tarif RELUS chez Stripe (la carte a pu vieillir), statut Live
+  // Club relu dans la liste : s'il a change depuis la carte, rien n'est cree.
+  // Un seul paiement possible (restrictions.completed_sessions.limit = 1).
+  if (a.type === 'lien_paiement') {
+    const compte = a.compte as CompteStripe
+    const qui = String(p.qui)
+    const prep = await preparerLien(cle, compte, p)
+    if (typeof prep === 'string') throw new RefusAction(`${prep} Rien n'a été créé.`)
+    if (typeof p.live_club === 'boolean' && p.live_club !== prep.liveClub) {
+      throw new RefusAction(`Le produit ${prep.liveClub ? 'ouvre maintenant' : "n'ouvre plus"} le Live Club depuis la carte : `
+        + "rien n'a été créé, redemande le lien.")
+    }
+    let lien: Record<string, unknown>
+    try {
+      lien = await stripePost(cle, '/v1/payment_links', corpsLienPaiement({
+        priceId: prep.tarif.id, liveClub: prep.liveClub, urlBienvenue: URL_BIENVENUE_LIVECLUB, qui,
+      }))
+    } catch (err) {
+      const message = masquerCleStripe(messageErreur(err))
+      if (estRefusDePermission(message)) {
+        throw new Error(permissionLienPaiementManquante(compte, nomVariableCle(compte), message))
+      }
+      throw new Error(`Stripe a refusé le lien de paiement (${message}) : rien n'a été créé.`)
+    }
+    const url = String(lien.url ?? '')
+    if (!/^https:\/\/\S+$/.test(url)) throw new Error("Stripe n'a pas rendu l'adresse du lien : vérifie au Dashboard (Liens de paiement) avant de le redemander.")
+    const email = typeof p.email === 'string' && p.email ? p.email : null
+    return phraseLienPaiementCree({
+      qui, produitNom: prep.produitNom, tarif: libelleTarif(prep.tarif), liveClub: prep.liveClub,
+      url: urlLienAvecEmail(url, email), emailPrerempli: email !== null,
+    })
+  }
 
   if (a.type === 'pause_abonnement' || a.type === 'reprise_abonnement') {
     const abo = String(p.abonnement_id)
@@ -925,7 +1207,7 @@ export async function executerAction(a: ActionAgent, acteur = 'agent'): Promise<
     // une facture a ete payee apres elle. null = pas un abonnement Live Club
     // (compte aoknowledge) : on ne parle alors que de ce que Stripe dit.
     const sub = await stripeGet(cle, `/v1/subscriptions/${abo}?expand[]=latest_invoice`)
-    const resume = resumerAbonnement(sub, PRODUITS_LIVECLUB)
+    const resume = resumerAbonnement(sub, await produitsLiveClub())
 
     if (a.type === 'reprise_abonnement') {
       // Vider pause_collection = lever la pause. Le prochain cycle preleve.
@@ -1066,14 +1348,33 @@ export async function executerAction(a: ActionAgent, acteur = 'agent'): Promise<
   }
 
   // produit
+  // live_club (13/10) : inscrit dans cockpit_liveclub_produits juste apres sa
+  // creation, ce qui suffit au bot, a la page de bienvenue, au passage
+  // quotidien et a la collecte (push_membres_supabase.py lit la meme table).
+  // Une inscription ratee ne fait pas echouer l'action (le produit existe deja
+  // chez Stripe) : le resultat le dit et propose le marquage.
   const produit = await stripePost(cle, '/v1/products', { name: String(p.nom) })
+  const centimes = Math.round(Number(p.montant) * 100)
   const prix: Record<string, string> = {
     product: String(produit.id),
-    unit_amount: String(Math.round(Number(p.montant) * 100)),
+    unit_amount: String(centimes),
     currency: String(p.devise),
   }
   if (p.recurrence) prix['recurring[interval]'] = String(p.recurrence)
-  await stripePost(cle, '/v1/prices', prix)
-  return `Produit « ${p.nom} » créé sur ${a.compte} avec son tarif. `
-    + `⚠️ Pense à l'ajouter à PRODUITS_STRIPE (push_membres_supabase.py) pour que ses paiements soient classés.`
+  const tarif = await stripePost(cle, '/v1/prices', prix)
+  let inscription: 'faite' | 'deja' | 'table_absente' | 'echec' | null = null
+  if (p.live_club === true) {
+    const issue = await inscrireProduitLiveClub({
+      produitId: String(produit.id), nom: String(p.nom), posePar: acteur, note: "créé par l'agent du cockpit",
+    })
+    inscription = issue.ok ? (issue.deja ? 'deja' : 'faite') : issue.raison
+  }
+  return phraseProduitCree({
+    nom: String(p.nom), compte: a.compte, produitId: String(produit.id), priceId: String(tarif.id),
+    tarif: libelleTarif({
+      montant: centimes, devise: String(p.devise),
+      recurrence: p.recurrence ? String(p.recurrence) : null, nbIntervalles: 1,
+    }),
+    inscription,
+  })
 }

@@ -4,8 +4,23 @@
 //
 // Les deux produits Stripe sont LA MEME offre (compte melanie). Ils vivent
 // dans le code SERVEUR du journal, jamais dans le navigateur.
+//
+// 13/10 (Brice, acces de Yassine a 1 EUR/mois) : ces deux-la sont la BASE,
+// reconnue quoi qu'il arrive. Les autres produits qui ouvrent le Live Club
+// (un tarif particulier = un produit Stripe de plus) vivent en base, table
+// cockpit_liveclub_produits, lue par produits.ts (lireProduitsLiveClub) avec
+// un cache court. Ne plus lire PRODUITS_LIVECLUB seul pour decider d'un droit.
 
 export const PRODUITS_LIVECLUB = ['prod_UcOraPncQlbrW4', 'prod_UynMpOvBtGTsIw'] as const
+
+/**
+ * Retour apres paiement d'un lien de paiement Live Club (after_completion des
+ * Payment Links crees par l'agent du cockpit, 13/10) : la page de bienvenue
+ * du site lit session_id, le journal verifie la session chez Stripe (compte
+ * melanie) et rend le lien personnel vers le bot (/api/liveclub/bienvenue).
+ * {CHECKOUT_SESSION_ID} est remplace par Stripe : a laisser tel quel.
+ */
+export const URL_BIENVENUE_LIVECLUB = 'https://aoknowledge.com/live-club/bienvenue?session_id={CHECKOUT_SESSION_ID}'
 
 /**
  * Les DEUX portes d'abonnement (Brice, 29/09) : tout message « abonne-toi »
@@ -75,8 +90,15 @@ export const PLAFOND_MESSAGES_IA_JOUR = 30
 /** Duree d'un acces broker (RaiseFx), non renouvelable. */
 export const MOIS_ACCES_BROKER = 6
 
-export function estProduitLiveClub(produit: string | null | undefined): boolean {
-  return Boolean(produit && (PRODUITS_LIVECLUB as readonly string[]).includes(produit))
+/**
+ * `produits` : la liste lue (lireProduitsLiveClub, produits.ts). Sans elle,
+ * seuls les deux produits de base sont reconnus.
+ */
+export function estProduitLiveClub(
+  produit: string | null | undefined,
+  produits: readonly string[] = PRODUITS_LIVECLUB,
+): boolean {
+  return Boolean(produit && produits.includes(produit))
 }
 
 /** chat_id du groupe (TELEGRAM_LIVECLUB_CHAT_ID), null s'il manque ou est illisible. */
