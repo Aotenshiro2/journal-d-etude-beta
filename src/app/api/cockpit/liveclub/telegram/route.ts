@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { traiterBouton, traiterDemandeAdhesion, traiterMessagePrive } from '@/lib/liveclub/bot-membre'
+import { accueilAPublier, nomPourAccueil, texteAccueil, type AvantEntree } from '@/lib/liveclub/accueil-groupe'
+import { appelTelegram } from '@/lib/liveclub/telegram'
 
 // Webhook du bot du groupe Telegram Live Club, @aok_liveclub_bot (chantier du
 // 10/09, etendu le 29/09).
@@ -106,6 +108,19 @@ export async function POST(req: NextRequest) {
     : acteur.id === u.id ? 'lui-même'
     : (acteur.username ? `@${acteur.username}` : [acteur.first_name, acteur.last_name].filter(Boolean).join(' ')) || null
 
+  // (13/10) L'accueil se decide sur la ligne AVANT l'upsert : jamais vu =
+  // nouveau, longtemps parti = retour (accueil-groupe.ts). Lecture ratee = pas
+  // d'accueil, la presence est tenue quand meme.
+  let avant: AvantEntree = null
+  let avantLu = true
+  try {
+    const lignes = await prisma.$queryRaw<{ present: boolean | null; sorti_le: Date | null }[]>`
+      select present, sorti_le from public.cockpit_telegram_membres where telegram_id = ${u.id}`
+    avant = lignes[0] ? { present: lignes[0].present, sortiLe: lignes[0].sorti_le } : null
+  } catch {
+    avantLu = false
+  }
+
   await prisma.$executeRaw`
     insert into public.cockpit_telegram_membres
       (telegram_id, pseudo, nom_affiche, present, entre_le, sorti_le, source, par_qui, maj_le)
@@ -144,6 +159,17 @@ export async function POST(req: NextRequest) {
       if (!/42703|column .*statut_tg.* does not exist/i.test(texte)) throw err
       console.warn('[liveclub/telegram] colonne statut_tg absente (migration 20260929190300 pas appliquee) : statut non ecrit.')
     }
+  }
+
+  // L'accueil dans le groupe, en best effort : un echec d'envoi ne fait pas
+  // rejouer l'update (et un rejeu ne republie pas : la ligne dit « present »).
+  const accueil = avantLu ? accueilAPublier(avant, cm.old_chat_member?.status, present, quand) : null
+  if (accueil) {
+    const r = await appelTelegram('sendMessage', {
+      chat_id: cm.chat.id,
+      text: texteAccueil(accueil, nomPourAccueil(pseudo, u.first_name)),
+    })
+    if (!r.ok) console.warn(`[liveclub/telegram] accueil (${accueil}) non publie : ${r.erreur.slice(0, 160)}`)
   }
 
   return NextResponse.json({ ok: true })
