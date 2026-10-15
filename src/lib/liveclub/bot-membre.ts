@@ -38,6 +38,11 @@
 //   Cockpit, dans sa conversation avec Agent AOK (transmettreSiEquipe). Ni
 //   fil Support, ni « veut un humain », ni alerte email. /start, /menu et les
 //   boutons restent ceux d'un compte exempte.
+//   (15/10, Brice) Une PHOTO de l'equipe (ou une capture en fichier JPEG,
+//   PNG, WEBP, avec ou sans legende) part aussi a l'agent du Cockpit, avec
+//   son image, telechargee ici avec le jeton de CE bot ; un message transfere
+//   garde son origine (« Message transféré de ... : »). Une photo d'un membre
+//   ordinaire : inchange (« Je ne lis que les messages écrits »).
 // - (13/10, Brice) un TARIF RESERVE pas encore paye (reserves.ts) : la
 //   personne, reconnue par son compte Telegram ou par son email verifie,
 //   recoit SON lien de paiement a la place des liens d'abonnement publics
@@ -81,13 +86,17 @@ import {
   COMMANDE_BOT_MEMBRE, aiguillageMessagePrive, TEXTE_TRANSMIS_AU_COCKPIT, TEXTE_NON_TRANSMIS_AU_COCKPIT,
 } from './pur'
 import {
-  compteCockpitTelegram, traiterTexteAgentTelegram, type CompteCockpitTelegram, type IssueAgentTelegram,
+  compteCockpitTelegram, telechargerImageTelegram, traiterTexteAgentTelegram, type CompteCockpitTelegram,
+  type IssueAgentTelegram,
 } from '@/lib/agent-cockpit-telegram'
+import {
+  lireMessageTelegram, texteDuTour, texteEchecImage, texteImageTropGrosse, type ImageDuTour, type MessageTgLu,
+} from '@/lib/agent-cockpit-telegram-pur'
 
 // Formes minimales des updates Telegram utilises ici.
 type Utilisateur = { id: number; is_bot?: boolean; first_name?: string }
 type Chat = { id: number; type: string }
-export type MessageTg = { message_id: number; chat: Chat; from?: Utilisateur; text?: string }
+export type MessageTg = MessageTgLu & { message_id: number; chat: Chat; from?: Utilisateur; text?: string }
 export type DemandeAdhesionTg = {
   chat: Chat
   from: Utilisateur
@@ -1033,6 +1042,10 @@ export async function traiterMessagePrive(message: MessageTg, updateId: number):
 
   const texte = (message.text ?? '').trim()
   if (!texte) {
+    // (15/10) Une photo ou une capture d'un compte de l'EQUIPE part a l'agent
+    // du Cockpit, avec son image. Un membre, ou ce que l'agent ne lit pas
+    // (vocal, PDF...) : comme avant.
+    if (await transmettreSiEquipe(chat, u, message)) return
     await versSupport(u.id, null, 'membre', '[message sans texte]')
     await envoyer(chat, `Je ne lis que les messages écrits. Écris-moi, ou utilise les boutons :`, clavierMenu())
     return
@@ -1082,7 +1095,7 @@ export async function traiterMessagePrive(message: MessageTg, updateId: number):
   }
 
   // (08/10) Le texte libre d'un compte de l'equipe va a l'agent du Cockpit.
-  if (await transmettreSiEquipe(chat, u, texte)) return
+  if (await transmettreSiEquipe(chat, u, message)) return
 
   await traiterTexteLibre(chat, u, texte.slice(0, 2000), updateId)
 }
@@ -1103,8 +1116,16 @@ export async function traiterMessagePrive(message: MessageTg, updateId: number):
  * non). Comptes illisibles = false : le parcours d'un membre, comme avant.
  * Le message a deja ete dedoublonne (nouveauPrive) : la transmission ne
  * repasse pas par le dedoublonnage d'Agent AOK.
+ *
+ * (15/10, Brice) Le meme traitement qu'Agent AOK pour une PHOTO de l'equipe
+ * (ou une capture en fichier JPEG, PNG, WEBP), legende comprise, et pour un
+ * message transfere (son origine en tete). L'image est telechargee ICI, avec
+ * le jeton du bot des membres : un file_id ne vaut que pour le bot qui l'a
+ * recu. Image trop lourde ou irrecuperable : dit en clair ici, rien n'est
+ * transmis. Ce que l'agent ne lit pas (vocal, video, PDF...) : false, le
+ * parcours d'avant (« Je ne lis que les messages écrits »).
  */
-async function transmettreSiEquipe(chat: number, u: Utilisateur, texte: string): Promise<boolean> {
+async function transmettreSiEquipe(chat: number, u: Utilisateur, message: MessageTg): Promise<boolean> {
   let compte: CompteCockpitTelegram | null
   try {
     compte = await compteCockpitTelegram(u.id)
@@ -1112,12 +1133,31 @@ async function transmettreSiEquipe(chat: number, u: Utilisateur, texte: string):
     console.warn(`[liveclub/bot] comptes de l'equipe illisibles : ${messageErreur(err)}`)
     return false
   }
-  if (aiguillageMessagePrive(texte, compte !== null) !== 'agent_cockpit' || !compte) return false
+  if (!compte) return false
+  // Un texte : les commandes du bot (/start, /menu) restent au bot, meme pour l'equipe.
+  const ecrit = (message.text ?? '').trim()
+  if (ecrit && aiguillageMessagePrive(ecrit, true) !== 'agent_cockpit') return false
+
+  const lecture = lireMessageTelegram(message)
+  if (lecture.genre === 'vide' || lecture.genre === 'non_lu') return false
+  if (lecture.genre === 'trop_gros') {
+    await envoyerTelegram(chat, texteImageTropGrosse(lecture.taille))
+    return true
+  }
+  let image: ImageDuTour | null = null
+  if (lecture.image) {
+    const telechargement = await telechargerImageTelegram('liveclub', lecture.image)
+    if (!telechargement.ok) {
+      await envoyerTelegram(chat, texteEchecImage(telechargement))
+      return true
+    }
+    image = telechargement.image
+  }
 
   let issue: IssueAgentTelegram
   try {
     issue = await traiterTexteAgentTelegram({
-      chatId: u.id, telegramId: u.id, texte, compte, updateId: null, transmis: true,
+      chatId: u.id, telegramId: u.id, texte: texteDuTour(lecture), image, compte, updateId: null, transmis: true,
       apresAccuse: async () => { await envoyerTelegram(chat, TEXTE_TRANSMIS_AU_COCKPIT) },
     })
   } catch (err) {

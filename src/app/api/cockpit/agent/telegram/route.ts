@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import {
-  compteCockpitTelegram, traiterClicAgentTelegram, traiterTexteAgentTelegram, tgCockpit, MAX_MESSAGE_LEN,
+  compteCockpitTelegram, telechargerImageTelegram, traiterClicAgentTelegram, traiterTexteAgentTelegram, tgCockpit,
 } from '@/lib/agent-cockpit-telegram'
+import {
+  lireMessageTelegram, texteDuTour, texteEchecImage, texteImageTropGrosse, texteNonLu, type ImageDuTour,
+} from '@/lib/agent-cockpit-telegram-pur'
 
 // Le canal TELEGRAM de l'agent cockpit (go Brice 04/09) : meme cerveau que la
 // fenetre ✦ du cockpit (src/lib/agent-cockpit.ts), autre porte d'entree.
@@ -43,13 +46,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true })
   }
 
-  // ── Un message texte ─────────────────────────────────────────────────────
+  // ── Un message : texte, photo, capture en fichier, legende, transfert ────
+  // (15/10, Brice) Avant, seul message.text etait lu : une photo, sa legende
+  // ou un message transfere portant une image etaient ignores EN SILENCE.
+  // La lecture est pure (lireMessageTelegram) ; rien n'est telecharge avant
+  // le verrou 2.
   const message = update.message
-  const texte = typeof message?.text === 'string' ? message.text.slice(0, MAX_MESSAGE_LEN).trim() : ''
   const chatId = Number(message?.chat?.id)
   const telegramId = Number(message?.from?.id)
   const updateId = Number(update.update_id ?? 0)
-  if (!texte || !chatId || !telegramId) return NextResponse.json({ ok: true })
+  if (!message || !chatId || !telegramId) return NextResponse.json({ ok: true })
+  const lecture = lireMessageTelegram(message)
+  if (lecture.genre === 'vide') return NextResponse.json({ ok: true })
 
   // Verrou 2 : seuls Brice et Melanie. Un inconnu recoit son identifiant —
   // c'est la seule information qu'on lui donne, et c'est celle qu'il faut
@@ -63,6 +71,28 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true })
   }
 
-  await traiterTexteAgentTelegram({ chatId, telegramId, texte, compte, updateId })
+  // Ce que l'agent ne lit pas, ou une image trop lourde : dit en clair, sans
+  // appeler le modele.
+  if (lecture.genre === 'trop_gros') {
+    await tgCockpit('sendMessage', { chat_id: chatId, text: texteImageTropGrosse(lecture.taille) })
+    return NextResponse.json({ ok: true })
+  }
+  if (lecture.genre === 'non_lu') {
+    await tgCockpit('sendMessage', { chat_id: chatId, text: texteNonLu(lecture.quoi) })
+    return NextResponse.json({ ok: true })
+  }
+
+  // L'image, avec le jeton d'Agent AOK (le file_id ne vaut que pour lui).
+  let image: ImageDuTour | null = null
+  if (lecture.image) {
+    const issue = await telechargerImageTelegram('cockpit', lecture.image)
+    if (!issue.ok) {
+      await tgCockpit('sendMessage', { chat_id: chatId, text: texteEchecImage(issue) })
+      return NextResponse.json({ ok: true })
+    }
+    image = issue.image
+  }
+
+  await traiterTexteAgentTelegram({ chatId, telegramId, texte: texteDuTour(lecture), image, compte, updateId })
   return NextResponse.json({ ok: true })
 }

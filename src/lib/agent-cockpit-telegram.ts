@@ -5,6 +5,10 @@ import { prisma } from '@/lib/db'
 import { boucleAgent } from '@/lib/agent-cockpit'
 import { auteurDemande } from '@/lib/agent-cockpit-pur'
 import { validerAction, executerAction, RefusAction, expurgerLiensInvitation, paramsPourLog } from '@/lib/stripe-actions'
+import {
+  MAX_OCTETS_IMAGE, TEXTE_IMAGE_REFUSEE, erreurDImage, historiquePourTour, messagesPourModele, typeImageDepuisOctets,
+  type ImageALire, type ImageDuTour,
+} from '@/lib/agent-cockpit-telegram-pur'
 
 // Le TRAITEMENT du canal Telegram de l'agent cockpit (« Agent AOK »), sorti de
 // la route /api/cockpit/agent/telegram le 08/10 pour servir a deux portes :
@@ -27,6 +31,13 @@ import { validerAction, executerAction, RefusAction, expurgerLiensInvitation, pa
 // La conversation est PERSISTEE cote serveur (cockpit_agent_conversations),
 // contrairement au web ou le navigateur porte l'historique : Telegram ne
 // renvoie que le dernier message. Toujours du TEXTE BRUT, comme au web.
+//
+// IMAGES (Brice, 15/10) : une photo, une capture envoyee en fichier (JPEG, PNG,
+// WEBP), leur legende, un message transfere. La lecture du message est pure
+// (agent-cockpit-telegram-pur.ts) ; l'image est telechargee ici, avec le jeton
+// du bot QUI a recu le message (un file_id ne vaut que pour son bot), et part
+// au modele en bloc image dans le tour courant SEULEMENT. L'historique n'en
+// garde que la trace « [image envoyée] » et la legende, jamais le base64.
 
 const MAX_MESSAGES_CONSERVES = 20
 export const MAX_MESSAGE_LEN = 4000
@@ -35,6 +46,83 @@ const API_TG = 'https://api.telegram.org'
 
 function jetonBot(): string | null {
   return process.env.TELEGRAM_BOT_TOKEN_COCKPIT?.trim() || null
+}
+
+/** Le bot qui a recu le message : Agent AOK, ou le bot des membres (@aok_liveclub_bot). */
+export type BotImage = 'cockpit' | 'liveclub'
+
+function jetonDuBot(bot: BotImage): string | null {
+  return (bot === 'cockpit' ? process.env.TELEGRAM_BOT_TOKEN_COCKPIT : process.env.TELEGRAM_LIVECLUB_BOT_TOKEN)?.trim() || null
+}
+
+export type IssueImage =
+  | { ok: true; image: ImageDuTour }
+  | { ok: false; raison: 'trop_gros'; taille: number }
+  | { ok: false; raison: 'pas_une_image' | 'illisible' }
+
+/** Une panne reseau, en un mot : jamais l'URL (elle porte le jeton du bot). */
+function genreErreur(err: unknown): string {
+  if (!(err instanceof Error)) return typeof err
+  const cause = (err as { cause?: { code?: unknown } }).cause
+  return `${err.name}${cause && typeof cause.code === 'string' ? ` ${cause.code}` : ''}`
+}
+
+/**
+ * Recupere l'image chez Telegram : getFile, puis le fichier, avec le jeton du
+ * bot qui a recu le message. Ne jette pas. JAMAIS l'URL du fichier dans un
+ * log ni dans un message : elle contient le jeton du bot. Le poids est
+ * verifie trois fois (annonce de getFile, Content-Length, octets lus), et le
+ * type vient des octets, pas de ce qu'annonce Telegram.
+ */
+export async function telechargerImageTelegram(bot: BotImage, image: ImageALire): Promise<IssueImage> {
+  const jeton = jetonDuBot(bot)
+  if (!jeton) {
+    console.error(`[cockpit/telegram] image : jeton du bot ${bot} absent du projet journal`)
+    return { ok: false, raison: 'illisible' }
+  }
+  try {
+    const reponse = await fetch(`${API_TG}/bot${jeton}/getFile`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file_id: image.fileId }),
+      signal: AbortSignal.timeout(15_000),
+    })
+    const json = await reponse.json().catch(() => null) as
+      { ok?: boolean; description?: string; result?: { file_path?: unknown; file_size?: unknown } } | null
+    if (!json?.ok) {
+      const description = String(json?.description ?? `HTTP ${reponse.status}`).slice(0, 200)
+      // Telegram ne sert pas aux bots un fichier de plus de 20 Mo.
+      if (/too big/i.test(description)) return { ok: false, raison: 'trop_gros', taille: image.taille ?? 0 }
+      console.error(`[cockpit/telegram] image : getFile refuse (${description})`)
+      return { ok: false, raison: 'illisible' }
+    }
+    const annonce = typeof json.result?.file_size === 'number' ? json.result.file_size : null
+    if (annonce !== null && annonce > MAX_OCTETS_IMAGE) return { ok: false, raison: 'trop_gros', taille: annonce }
+    const chemin = json.result?.file_path
+    if (typeof chemin !== 'string' || !/^[\w\-./]+$/.test(chemin) || chemin.includes('..')) {
+      console.error('[cockpit/telegram] image : chemin de fichier illisible')
+      return { ok: false, raison: 'illisible' }
+    }
+
+    const fichier = await fetch(`${API_TG}/file/bot${jeton}/${chemin}`, { signal: AbortSignal.timeout(20_000) })
+    if (!fichier.ok) {
+      console.error(`[cockpit/telegram] image : telechargement refuse (HTTP ${fichier.status})`)
+      return { ok: false, raison: 'illisible' }
+    }
+    const longueur = Number(fichier.headers.get('content-length'))
+    if (Number.isFinite(longueur) && longueur > MAX_OCTETS_IMAGE) {
+      await fichier.body?.cancel().catch(() => {})
+      return { ok: false, raison: 'trop_gros', taille: longueur }
+    }
+    const octets = new Uint8Array(await fichier.arrayBuffer())
+    if (octets.byteLength > MAX_OCTETS_IMAGE) return { ok: false, raison: 'trop_gros', taille: octets.byteLength }
+    const mediaType = typeImageDepuisOctets(octets)
+    if (!mediaType) return { ok: false, raison: 'pas_une_image' }
+    return { ok: true, image: { base64: Buffer.from(octets).toString('base64'), mediaType } }
+  } catch (err) {
+    console.error(`[cockpit/telegram] image : recuperation impossible (${genreErreur(err)})`)
+    return { ok: false, raison: 'illisible' }
+  }
 }
 
 /**
@@ -65,7 +153,12 @@ export async function tgCockpit(methode: string, params: Record<string, unknown>
   }
 }
 
-type MessageStocke = { role: 'user' | 'assistant'; content: string }
+/**
+ * Une ligne de cockpit_agent_conversations.messages. `id` (15/10) : la
+ * question d'un tour porte l'identifiant du tour (u<update_id> pour Agent
+ * AOK, t<uuid> pour un message transmis par le bot des membres).
+ */
+type MessageStocke = { role: 'user' | 'assistant'; content: string; id?: string }
 
 type LigneConversation = {
   chat_id: bigint
@@ -226,7 +319,13 @@ export type EntreeAgentTelegram = {
   /** La conversation avec Agent AOK (en prive, l'id du chat est celui du compte). */
   chatId: number
   telegramId: number
+  /**
+   * Le texte du tour (texteDuTour : origine d'un transfert, trace de l'image,
+   * texte ou legende). C'est lui qui va a l'historique.
+   */
   texte: string
+  /** (15/10) L'image du tour, deja telechargee : au modele seulement, jamais en base. */
+  image?: ImageDuTour | null
   compte: CompteCockpitTelegram
   /**
    * update_id du bot Agent AOK, pour le dedoublonnage. null = message transmis
@@ -252,12 +351,13 @@ export type IssueAgentTelegram = 'traite' | 'doublon' | 'non_livre'
 const TEXTE_ERREUR_AGENT = 'L’agent n’a pas pu répondre (erreur côté serveur). Réessaie dans un instant.'
 
 /**
- * Un message texte pour l'agent, d'ou qu'il vienne. Un message TRANSMIS par
- * le bot des membres passe d'abord par un accuse dans Agent AOK : s'il n'est
- * pas livre, rien n'est fait ('non_livre') ; s'il l'est, toute panne qui suit
- * est dite dans Agent AOK, jamais renvoyee a l'appelant. Un message d'Agent
- * AOK lui-meme garde le comportement d'avant : une panne de la base jette, la
- * route rend une erreur et Telegram rejoue.
+ * Un message pour l'agent (texte, et image depuis le 15/10), d'ou qu'il
+ * vienne. Un message TRANSMIS par le bot des membres passe d'abord par un
+ * accuse dans Agent AOK : s'il n'est pas livre, rien n'est fait
+ * ('non_livre') ; s'il l'est, toute panne qui suit est dite dans Agent AOK,
+ * jamais renvoyee a l'appelant. Un message d'Agent AOK lui-meme garde le
+ * comportement d'avant : une panne de la base jette, la route rend une erreur
+ * et Telegram rejoue.
  */
 export async function traiterTexteAgentTelegram(e: EntreeAgentTelegram): Promise<IssueAgentTelegram> {
   if (!e.transmis) return tourAgent(e)
@@ -282,10 +382,29 @@ export async function traiterTexteAgentTelegram(e: EntreeAgentTelegram): Promise
   }
 }
 
+/**
+ * Ajoute une reponse seule a l'historique (apres une erreur de l'agent), pour
+ * que le tour suivant sache que la question est restee sans reponse. Ne jette
+ * pas.
+ */
+async function ajouterReponseSeule(chatId: number, contenu: string): Promise<void> {
+  try {
+    const ligne = JSON.stringify([{ role: 'assistant', content: contenu }])
+    await prisma.$executeRaw`
+      update public.cockpit_agent_conversations
+      set messages = ${historiqueAvecAjout(Prisma.raw('messages'), Prisma.sql`${ligne}::jsonb`)},
+          maj_le = now()
+      where chat_id = ${chatId}`
+  } catch (err) {
+    console.error('[cockpit/telegram] historique apres une erreur', err)
+  }
+}
+
 async function tourAgent(e: EntreeAgentTelegram): Promise<IssueAgentTelegram> {
   const { chatId, telegramId, compte, updateId } = e
+  const image = e.image ?? null
   const texte = e.texte.slice(0, MAX_MESSAGE_LEN).trim()
-  if (!texte) return 'traite'
+  if (!texte && !image) return 'traite'
 
   const conv = await chargerConversation(chatId)
 
@@ -304,8 +423,8 @@ async function tourAgent(e: EntreeAgentTelegram): Promise<IssueAgentTelegram> {
     ? Prisma.sql`true`
     : Prisma.sql`c.dernier_update_id is distinct from excluded.dernier_update_id`
 
-  // /start ou /reset : repartir propre.
-  if (texte === '/start' || texte === '/reset') {
+  // /start ou /reset : repartir propre (jamais pour une image legendee ainsi).
+  if (!image && (texte === '/start' || texte === '/reset')) {
     await prisma.$executeRaw`
       insert into public.cockpit_agent_conversations as c (chat_id, telegram_id, messages, dernier_update_id)
       values (${chatId}, ${telegramId}, '[]'::jsonb, ${updateId})
@@ -319,24 +438,44 @@ async function tourAgent(e: EntreeAgentTelegram): Promise<IssueAgentTelegram> {
     return 'traite'
   }
 
-  // Cet instantane ne sert QU'AU MODELE : il n'est jamais reecrit en base.
-  // En fin de tour, seuls les deux messages de ce tour (question et reponse)
-  // sont ajoutes a l'historique present en base a ce moment-la (voir
-  // historiqueAvecAjout), pour ne pas effacer une ligne « ✓ » ecrite par un
-  // clic Confirmer pendant que l'agent reflechissait.
-  const messages = (Array.isArray(conv?.messages) ? conv!.messages : []) as MessageStocke[]
-  messages.push({ role: 'user', content: texte })
+  // LA QUESTION EST ECRITE DES SON ARRIVEE (15/10), la reponse en fin de tour.
+  // Avant, les deux partaient ensemble a la fin : un message transfere avec un
+  // commentaire arrive en DEUX updates quasi simultanes (le commentaire, puis
+  // l'image transferee), et le tour de l'image, lance pendant que le premier
+  // reflechissait, ne voyait pas la demande. Ecrite tout de suite, elle
+  // precede l'image dans l'historique.
+  // Toujours en AJOUT (historiqueAvecAjout), jamais en reecriture. La ligne
+  // porte l'identifiant du tour : un rejeu Telegram du meme update, arrive
+  // pendant que le premier reflechit, ne l'ajoute pas une seconde fois et
+  // s'arrete la (verrou de ligne de l'upsert : un seul des deux ecrit).
+  // Le dernier update_id, lui, n'est ecrit qu'en fin de tour, comme avant :
+  // les photos d'un album arrivent en parallele et dans le desordre, et un
+  // update_id ecrit trop tot ferait ignorer les precedents.
+  const idTour = updateId !== null ? `u${updateId}` : `t${randomUUID()}`
+  const question = JSON.stringify([{ role: 'user', content: texte, id: idTour }] satisfies MessageStocke[])
+  const ecrite = await prisma.$queryRaw<{ messages: unknown }[]>`
+    insert into public.cockpit_agent_conversations as c (chat_id, telegram_id, messages)
+    values (${chatId}, ${telegramId}, ${question}::jsonb)
+    on conflict (chat_id) do update
+    set messages = ${HISTORIQUE_UPSERT}, maj_le = now()
+    where not exists (
+      select 1
+      from jsonb_array_elements(case when jsonb_typeof(c.messages) = 'array' then c.messages else '[]'::jsonb end) as d(e)
+      where d.e->>'id' = ${idTour})
+    returning messages`
+  if (ecrite.length === 0) return 'doublon'
 
-  // L'historique pour le modele : notre format stocke est deja le sien.
-  const historique: Anthropic.MessageParam[] = messages
-    .filter((m) => m.content)
-    .map((m) => ({ role: m.role, content: m.content }))
+  // L'historique pour le modele : ce qui precede SA question dans la base
+  // (un tour concurrent ecrit apres lui n'est pas a lui), roles normalises,
+  // puis la question du tour, avec son image s'il y en a une.
+  const historique = messagesPourModele(historiquePourTour(ecrite[0].messages, idTour), { texte, image }) as Anthropic.MessageParam[]
 
   // SIGNE DE VIE (retour Brice 25/09) : sur une question lourde l'agent peut
   // prendre une ou deux minutes, et un silence de deux minutes ressemble a une
   // panne. Un accuse court part tout de suite, puis l'indicateur « en train
   // d'ecrire » est rafraichi toutes les 4 s (Telegram l'efface au bout de 5)
-  // jusqu'a la reponse. L'accuse n'entre pas dans l'historique du modele.
+  // jusqu'a la reponse. L'accuse n'entre pas dans l'historique du modele. Une
+  // photo y a droit comme un texte (15/10).
   await tgCockpit('sendMessage', { chat_id: chatId, text: 'Je vérifie…' })
   await tgCockpit('sendChatAction', { chat_id: chatId, action: 'typing' })
   const battement = setInterval(() => {
@@ -353,17 +492,18 @@ async function tourAgent(e: EntreeAgentTelegram): Promise<IssueAgentTelegram> {
   } catch (err) {
     clearInterval(battement)
     console.error('[cockpit/telegram]', err)
-    await tgCockpit('sendMessage', { chat_id: chatId, text: TEXTE_ERREUR_AGENT })
+    // Une image refusee par l'API (poids, dimensions, format) : dit en clair.
+    const texteErreur = image && erreurDImage(err) ? TEXTE_IMAGE_REFUSEE : TEXTE_ERREUR_AGENT
+    await tgCockpit('sendMessage', { chat_id: chatId, text: texteErreur })
+    await ajouterReponseSeule(chatId, texteErreur)
     return 'traite'
   }
 
   clearInterval(battement)
-  // Les deux messages de ce tour, les seuls que ce chemin ecrit en base. Un
-  // rejeu Telegram du MEME update, traite en parallele, n'ajoute rien une
-  // seconde fois : la clause where de chaque upsert l'ecarte quand ce
-  // update_id est deja ecrit.
+  // La reponse de ce tour, seule (la question est deja en base). Un rejeu
+  // Telegram du MEME update s'est arrete a l'ecriture de la question ; la
+  // clause where de chaque upsert reste en ceinture.
   const tour = JSON.stringify([
-    { role: 'user', content: texte },
     { role: 'assistant', content: reponse.reply },
   ] satisfies MessageStocke[])
 
