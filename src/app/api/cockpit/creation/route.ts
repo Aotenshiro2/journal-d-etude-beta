@@ -5,6 +5,7 @@ import { getUserId } from '@/lib/api-auth'
 import { aiClient, AI_MODEL, logAiUsage, aiErrorMessage } from '@/lib/ai'
 import { corsHeaders, corsPreflight } from '@/lib/support-cors'
 import {
+  MAX_REFERENCE,
   OUTILS,
   choisirPages,
   entreesPrompt1,
@@ -16,7 +17,9 @@ import {
   requeteTsquery,
   texteMatiere,
   texteMatierePdf,
+  texteReference,
   texteSysteme,
+  tiersReference,
   validerAssiste,
   validerGenere,
   validerTitre,
@@ -25,6 +28,7 @@ import {
   type ContenuTitre,
   type LigneDecoupage,
   type PageMatiere,
+  type PageReference,
 } from '@/lib/creation-pur'
 
 /**
@@ -41,7 +45,9 @@ import {
  * Les prompts et la matière ne sont pas dans le code : ils viennent de
  * cockpit_methode_textes (npm run pousser:methodes, apps/cockpit), et pour
  * les PDF d'un auteur, de cockpit_matiere_pages (texte page par page, extrait
- * par extraire_matiere_pdf.py côté pilotage). La sortie
+ * par extraire_matiere_pdf.py côté pilotage). La même table porte la
+ * RÉFÉRENCE commune (reference = true : les PDF d'ICT), cherchée pour tout
+ * découpage et envoyée dans un bloc à part : ce n'est la matière de personne. La sortie
  * est forcée par un outil unique au schéma du `contenu` du contrat commun
  * écran / serveur, validée ici (creation-pur.ts), puis rangée dans
  * cockpit_decoupage_propositions en « proposee ». Rien ne touche le
@@ -57,6 +63,12 @@ const PAS_DE_METHODE = "La méthode n'est pas encore en base : lancer npm run po
 const MATIERES = ['MANIFESTE.md', 'idees-du-moment.md', 'banque-contenus.md']
 /** Pages lues au plus, dans l'ordre du ts_rank, avant que choisirPages n'en garde environ 40 000 caractères. */
 const MAX_PAGES_LUES = 400
+/**
+ * Pages de la référence lues au plus, avant que choisirPages n'en garde
+ * environ MAX_REFERENCE caractères. Les notes du mentorship ICT sont des
+ * diapositives : ~200 caractères par page en moyenne (mesure du 16/10).
+ */
+const MAX_PAGES_REFERENCE_LUES = 200
 
 type Ligne = {
   id: string
@@ -181,35 +193,68 @@ export async function POST(req: NextRequest) {
 
     // La matière des PDF : pour tout découpage, les pages de SON auteur
     // (libellé de l'allowlist) qui parlent du titre, de la phrase, de la cible
-    // et de ses ancêtres. Rien trouvé : rien envoyé. Table absente (migration
-    // 20261016160000 pas encore appliquée) : on continue sans.
+    // et de ses ancêtres, jamais une page de référence. Rien trouvé : rien
+    // envoyé.
+    // La référence commune (reference = true, les PDF d'ICT) : la même
+    // requête, pour tout auteur, gardée à part jusqu'à environ MAX_REFERENCE
+    // caractères. Ce n'est la matière de personne.
+    // Les deux recherches partent ensemble. La matière comme la référence
+    // sont un plus : une panne de l'une ne bloque ni l'autre ni le geste, on
+    // continue sans elle (la liste des pages envoyées reste vide). Table ou
+    // colonne absente (migrations 20261016160000 et 20261016170000 pas encore
+    // appliquées) : pareil.
     const labelAuteur = ligne.auteur_label?.trim() || ligne.allow_label?.trim() || ''
     const mots = motsDuDecoupage(ligne.titre, ligne.phrase, noeuds, cible)
     const requete = requeteTsquery(mots)
-    let pagesPdf: PageMatiere[] = []
-    if (labelAuteur && requete) {
+    const panneMatiere = (quoi: string, err: unknown) => {
+      if (tableAbsente(err)) {
+        console.warn(`[cockpit/creation] ${quoi} : cockpit_matiere_pages ou sa colonne reference absente `
+          + '(migrations 20261016160000 et 20261016170000), on continue sans')
+      } else {
+        console.error(`[cockpit/creation] ${quoi}, on continue sans`, err)
+      }
+    }
+    const chercherPdfAuteur = async (): Promise<PageMatiere[]> => {
+      if (!labelAuteur || !requete) return []
       try {
         const trouvees = await prisma.$queryRaw<PageMatiere[]>`
           select m.source, m.page, m.texte
           from public.cockpit_matiere_pages m, to_tsquery('french', ${requete}) q
-          where lower(m.auteur) = lower(${labelAuteur}) and m.tsv @@ q
+          where lower(m.auteur) = lower(${labelAuteur}) and m.reference = false and m.tsv @@ q
           order by ts_rank(m.tsv, q) desc, m.source, m.page
           limit ${MAX_PAGES_LUES}`
-        pagesPdf = choisirPages(trouvees)
+        return choisirPages(trouvees)
       } catch (err) {
-        // La matière est un plus : une recherche en panne ne bloque pas le
-        // geste, on continue sans elle (la liste des pages envoyées reste vide).
-        if (tableAbsente(err)) {
-          console.warn('[cockpit/creation] cockpit_matiere_pages absente : migration 20261016160000 pas appliquée')
-        } else {
-          console.error('[cockpit/creation] lecture de la matière des PDF, on continue sans', err)
-        }
+        panneMatiere('lecture de la matière des PDF', err)
+        return []
       }
     }
+    const chercherReference = async (): Promise<PageReference[]> => {
+      if (!requete) return []
+      try {
+        const trouvees = await prisma.$queryRaw<PageReference[]>`
+          select m.auteur, m.source, m.page, m.texte
+          from public.cockpit_matiere_pages m, to_tsquery('french', ${requete}) q
+          where m.reference and m.tsv @@ q
+          order by ts_rank(m.tsv, q) desc, m.source, m.page
+          limit ${MAX_PAGES_REFERENCE_LUES}`
+        return choisirPages(trouvees, MAX_REFERENCE)
+      } catch (err) {
+        panneMatiere('lecture de la référence', err)
+        return []
+      }
+    }
+    const [pagesPdf, pagesReference] = await Promise.all([chercherPdfAuteur(), chercherReference()])
 
+    // Quatre blocs au plus avec cache_control (la limite de l'API) : le
+    // prompt, la matière de Brice, les PDF de l'auteur, la référence. Un bloc
+    // de plus devra se passer de cache_control.
     systeme = [{ type: 'text', text: texteSysteme(prompt, demande.geste), cache_control: cache }]
     if (matieres.length) systeme.push({ type: 'text', text: texteMatiere(matieres), cache_control: cache })
     if (pagesPdf.length) systeme.push({ type: 'text', text: texteMatierePdf(pagesPdf), cache_control: cache })
+    if (pagesReference.length) {
+      systeme.push({ type: 'text', text: texteReference(pagesReference), cache_control: cache })
+    }
     entree = entreesPrompt1({
       geste: demande.geste,
       auteur: ligne.auteur_label?.trim() || ligne.allow_label?.trim() || ligne.allow_email || 'auteur inconnu',
@@ -221,6 +266,7 @@ export async function POST(req: NextRequest) {
       matiereAuteur: matieres.length > 0,
       matiereCollee,
       pagesPdf: pagesPdf.length,
+      reference: { pages: pagesReference.length, tiers: tiersReference(pagesReference) },
       outil: outil.name,
     })
     stockee = {
@@ -229,6 +275,7 @@ export async function POST(req: NextRequest) {
       matiere_auteur: matieres.map((m) => m.nom),
       matiere_pdf: pagesPdf.map((p) => ({ source: p.source, page: p.page })),
       matiere_pdf_mots: mots,
+      reference_pdf: pagesReference.map((p) => ({ auteur: p.auteur, source: p.source, page: p.page })),
       matiere_collee: matiereCollee ? matiereCollee.slice(0, 2000) : null,
       matiere_collee_car: matiereCollee ? matiereCollee.length : 0,
       noeuds_lus: noeuds.length,

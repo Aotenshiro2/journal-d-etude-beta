@@ -1,7 +1,8 @@
 // L'ONGLET CREATION DU COCKPIT : la partie PURE de /api/cockpit/creation
 // (16/10/2026). Aucune base, aucun reseau, aucun import : lecture de la
 // demande et des noeuds, numerotation, serialisation de l'arbre, entrees des
-// prompts, mots de recherche et mise en forme de la matiere des PDF, schemas
+// prompts, mots de recherche et mise en forme de la matiere des PDF et de la
+// reference commune (ICT), schemas
 // des outils, validation de la sortie de l'IA.
 //
 // Les formes (noeud, demande, contenu) suivent le contrat commun ecran /
@@ -288,6 +289,8 @@ export function entreesPrompt1(p: {
   matiereCollee: string | null
   /** Le nombre de pages de PDF de l'auteur envoyees dans le systeme (0 = aucune). */
   pagesPdf?: number
+  /** Les pages de la REFERENCE commune envoyees dans le systeme, a part (absent ou 0 page = aucune). */
+  reference?: { pages: number; tiers: string[] }
   outil: string
 }): string {
   const { geste, ligne, cible } = p
@@ -323,6 +326,14 @@ export function entreesPrompt1(p: {
     ? serialiserArbre(ligne.noeuds, exclure)
     : geste === 'genere' ? '(vide : mode genere)' : "(vide : l'auteur n'a encore rien dit)"
 
+  // La reference n'est pas de la matiere : elle a sa ligne a elle, apres MATIERE.
+  const nRef = p.reference?.pages ?? 0
+  const reference = nRef > 0 && p.reference
+    ? `- RÉFÉRENCE : ${nRef} page${nRef > 1 ? 's' : ''} de ${p.reference.tiers.join(', ') || 'référence'} `
+      + `fournie${nRef > 1 ? 's' : ''} à part dans le système. Ce n'est pas la matière de l'auteur : `
+      + `${consigneReference(p.reference.tiers)}.`
+    : null
+
   return [
     'Entrées :',
     `- AUTEUR : ${p.auteur}`,
@@ -335,7 +346,8 @@ export function entreesPrompt1(p: {
     "- CE QUE L'AUTEUR A DÉJÀ DIT (une ligne par pièce) :",
     arbre,
     `- MATIERE : ${matiere}`,
-    p.matiereCollee ? `\nMATIÈRE COLLÉE PAR L'AUTEUR :\n<<<\n${p.matiereCollee}\n>>>` : null,
+    reference,
+    p.matiereCollee ?`\nMATIÈRE COLLÉE PAR L'AUTEUR :\n<<<\n${p.matiereCollee}\n>>>` : null,
     `\nRends ta sortie par l'outil ${p.outil}, et seulement par lui.`,
   ].filter((x): x is string => x !== null).join('\n')
 }
@@ -364,7 +376,7 @@ export function entreesPrompt2(titre: string, arbres: LigneDecoupage[], outil: s
 const CONSIGNES_COMMUNES = [
   'Réponds en français, tutoiement, phrases courtes, aucun tiret long. Les `ref` que tu renvoies sont celles du tableau, jamais les num.',
   'Dans les tableaux : num = la numérotation que l\'auteur voit, ref = l\'identifiant interne de la pièce, parent_ref = la ref de son parent (- = directement sous l\'aïeul), statut = a_redecouper (a des enfants), trou (marque q), mure (tient en une phrase), brut (pas encore jugé).',
-  'Marques (tableaux et outil) : v = [V] vécu de l\'auteur, b = [B] cas ou passage de la matière fournie (banque-contenus, ou une page d\'un PDF de l\'auteur : source « PDF <fichier>, p. <n> »), i = [I] mention dans idees-du-moment, m = [M] thèse sans cas, q = [?] rien encore (un trou, qui devient une question), fait = [fait], a_faire = [a faire]. Usage savoir : v, b, i, m, q. Usage production : fait, a_faire, q.',
+  'Marques (tableaux et outil) : v = [V] vécu de l\'auteur, b = [B] cas ou passage de la matière fournie (banque-contenus, ou une page d\'un PDF de l\'auteur : source « PDF <fichier>, p. <n> »), i = [I] mention dans idees-du-moment, m = [M] thèse sans cas (y compris une citation de la RÉFÉRENCE, jamais b : ce n\'est pas la matière de l\'auteur), q = [?] rien encore (un trou, qui devient une question), fait = [fait], a_faire = [a faire]. Usage savoir : v, b, i, m, q. Usage production : fait, a_faire, q.',
 ].join('\n')
 
 const CONSIGNES_GESTE: Record<Geste, string> = {
@@ -499,15 +511,15 @@ export function requeteTsquery(mots: string[]): string {
  * qui ferait deborder. La premiere passe toujours (coupee a `max` si elle
  * depasse a elle seule).
  */
-export function choisirPages(pages: PageMatiere[], max = MAX_MATIERE_PDF): PageMatiere[] {
-  const gardees: PageMatiere[] = []
+export function choisirPages<T extends PageMatiere>(pages: T[], max = MAX_MATIERE_PDF): T[] {
+  const gardees: T[] = []
   let total = 0
   for (const p of pages) {
     const texte = typeof p.texte === 'string' ? p.texte.trim() : ''
     if (!texte) continue
     if (gardees.length && total + texte.length > max) break
     const coupe = texte.slice(0, max)
-    gardees.push({ source: p.source, page: p.page, texte: coupe })
+    gardees.push({ ...p, texte: coupe })
     total += coupe.length
   }
   return gardees
@@ -526,6 +538,53 @@ export function texteMatierePdf(pages: PageMatiere[]): string {
       + "Chaque page commence par son libellé, « PDF <fichier>, p. <n> » : une feuille qui s'adosse à une page "
       + 'est marquée b, et ce libellé exact est sa source.',
     ...rangees.map((p) => `\n${libellePage(p.source, p.page)} :\n${p.texte.trim()}`),
+  ].join('\n')
+}
+
+// --- La reference commune (cockpit_matiere_pages, reference = true) -------------
+//
+// Les PDF d'un tiers (ICT : notes du mentorship, glossaire, SMT), extraits par
+// extraire_matiere_pdf.py --reference (migration 20261016170000). Ce n'est la
+// matiere d'aucun auteur : la route les cherche pour TOUT decoupage, avec la
+// meme requete que la matiere de l'auteur, en garde les meilleures jusqu'a
+// environ MAX_REFERENCE caracteres, et les envoie dans un bloc systeme a part.
+// Une feuille qui ne repose que sur elle se formule « ICT a dit [...] »,
+// marque [M], source « ICT, <fichier>, p. <n> » (methode, Prompt 1, regle 5).
+// Le tiers est la colonne auteur de la page : rien d'ICT n'est ecrit ici.
+
+/** Une page de reference : son tiers (la colonne auteur, ex. ICT) en plus. */
+export type PageReference = PageMatiere & { auteur: string }
+
+export const MAX_REFERENCE = 15_000
+
+/** Les tiers des pages, sans doublon, dans l'ordre alphabetique. */
+export function tiersReference(pages: PageReference[]): string[] {
+  const tiers = new Set(pages.map((p) => (typeof p.auteur === 'string' ? p.auteur.trim() : '')).filter(Boolean))
+  return [...tiers].sort((a, b) => a.localeCompare(b, 'fr'))
+}
+
+/** La consigne de citation. Un seul tiers : son nom en clair. Plusieurs : un gabarit. */
+export function consigneReference(tiers: string[]): string {
+  const t = tiers.length === 1 ? tiers[0] : '<tiers>'
+  return `une feuille qui ne repose que sur elle se formule « ${t} a dit [...] », marque m ([M]), source « ${t}, <fichier>, p. <n> »`
+    + (tiers.length > 1 ? ' (le tiers est le début du libellé de la page)' : '')
+}
+
+/** Le libelle d'une page de reference, celui que la feuille prend pour source : « ICT, MONTH 6 NOTES, p. 12 ». */
+export function libelleReference(auteur: string, source: string, page: number): string {
+  return `${auteur.trim() || 'Référence'}, ${source.replace(/\.pdf$/i, '').trim()}, p. ${page}`
+}
+
+/** Le bloc systeme de la reference : a part, nomme comme tel, rangee par tiers, fichier puis page. */
+export function texteReference(pages: PageReference[]): string {
+  const tiers = tiersReference(pages)
+  const rangees = [...pages].sort((a, b) =>
+    (a.auteur ?? '').localeCompare(b.auteur ?? '', 'fr') || a.source.localeCompare(b.source, 'fr') || a.page - b.page)
+  return [
+    `RÉFÉRENCE (${tiers.join(', ') || 'un tiers'}, pas la matière de l'auteur) : ${consigneReference(tiers)}. `
+      + "Elle aide à nommer, à vérifier et à citer. Pages retrouvées par une recherche sur l'objet et la cible, "
+      + 'chacune sous son libellé.',
+    ...rangees.map((p) => `\n${libelleReference(p.auteur ?? '', p.source, p.page)} :\n${p.texte.trim()}`),
   ].join('\n')
 }
 
