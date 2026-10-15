@@ -784,7 +784,7 @@ hors base, residus).
 - Formation incluse : URL_FORMATION_LIVECLUB (config.ts) = Skool ao-knowledge-trading-5563 avec l'affiliation de Mel (d009e97) ; a remplacer par l'espace formation du site.
 - Effacement en trois niveaux (197ea20) : voir docs/EFFACEMENT-DONNEES.md.
 
-## Academie : PDF proteges, offre par section, acces de l'alpha (16/10/2026, NON commite, migration 20261016140000 NON appliquee)
+## Academie : PDF proteges, offre par section, acces de l'alpha (16/10/2026, PUBLIE : journal 3f35951, site 25f3040, migration 20261016140000 appliquee ; formation importee, 36 acces alpha poses)
 
 Lot D:\6_Societe\Pilotage\Academie\lots\LOT-RESSOURCES-PROTEGEES-ET-ALPHA.md (GO de Brice le 15/10).
 - PDF proteges : bucket Supabase Storage PRIVE academie-ressources (migration
