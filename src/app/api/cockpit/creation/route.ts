@@ -6,12 +6,16 @@ import { aiClient, AI_MODEL, logAiUsage, aiErrorMessage } from '@/lib/ai'
 import { corsHeaders, corsPreflight } from '@/lib/support-cors'
 import {
   OUTILS,
+  choisirPages,
   entreesPrompt1,
   entreesPrompt2,
   estBrice,
   lireDemande,
   lireNoeuds,
+  motsDuDecoupage,
+  requeteTsquery,
   texteMatiere,
+  texteMatierePdf,
   texteSysteme,
   validerAssiste,
   validerGenere,
@@ -20,6 +24,7 @@ import {
   type ContenuGenere,
   type ContenuTitre,
   type LigneDecoupage,
+  type PageMatiere,
 } from '@/lib/creation-pur'
 
 /**
@@ -34,7 +39,9 @@ import {
  *   promesse d'un titre déjà choisi. Prompt 2.
  *
  * Les prompts et la matière ne sont pas dans le code : ils viennent de
- * cockpit_methode_textes (npm run pousser:methodes, apps/cockpit). La sortie
+ * cockpit_methode_textes (npm run pousser:methodes, apps/cockpit), et pour
+ * les PDF d'un auteur, de cockpit_matiere_pages (texte page par page, extrait
+ * par extraire_matiere_pdf.py côté pilotage). La sortie
  * est forcée par un outil unique au schéma du `contenu` du contrat commun
  * écran / serveur, validée ici (creation-pur.ts), puis rangée dans
  * cockpit_decoupage_propositions en « proposee ». Rien ne touche le
@@ -48,6 +55,8 @@ export const maxDuration = 300
 
 const PAS_DE_METHODE = "La méthode n'est pas encore en base : lancer npm run pousser:methodes."
 const MATIERES = ['MANIFESTE.md', 'idees-du-moment.md', 'banque-contenus.md']
+/** Pages lues au plus, dans l'ordre du ts_rank, avant que choisirPages n'en garde environ 40 000 caractères. */
+const MAX_PAGES_LUES = 400
 
 type Ligne = {
   id: string
@@ -170,8 +179,37 @@ export async function POST(req: NextRequest) {
       : []
     const matiereCollee = demande.matiere_collee?.trim() ? demande.matiere_collee : null
 
+    // La matière des PDF : pour tout découpage, les pages de SON auteur
+    // (libellé de l'allowlist) qui parlent du titre, de la phrase, de la cible
+    // et de ses ancêtres. Rien trouvé : rien envoyé. Table absente (migration
+    // 20261016160000 pas encore appliquée) : on continue sans.
+    const labelAuteur = ligne.auteur_label?.trim() || ligne.allow_label?.trim() || ''
+    const mots = motsDuDecoupage(ligne.titre, ligne.phrase, noeuds, cible)
+    const requete = requeteTsquery(mots)
+    let pagesPdf: PageMatiere[] = []
+    if (labelAuteur && requete) {
+      try {
+        const trouvees = await prisma.$queryRaw<PageMatiere[]>`
+          select m.source, m.page, m.texte
+          from public.cockpit_matiere_pages m, to_tsquery('french', ${requete}) q
+          where lower(m.auteur) = lower(${labelAuteur}) and m.tsv @@ q
+          order by ts_rank(m.tsv, q) desc, m.source, m.page
+          limit ${MAX_PAGES_LUES}`
+        pagesPdf = choisirPages(trouvees)
+      } catch (err) {
+        // La matière est un plus : une recherche en panne ne bloque pas le
+        // geste, on continue sans elle (la liste des pages envoyées reste vide).
+        if (tableAbsente(err)) {
+          console.warn('[cockpit/creation] cockpit_matiere_pages absente : migration 20261016160000 pas appliquée')
+        } else {
+          console.error('[cockpit/creation] lecture de la matière des PDF, on continue sans', err)
+        }
+      }
+    }
+
     systeme = [{ type: 'text', text: texteSysteme(prompt, demande.geste), cache_control: cache }]
     if (matieres.length) systeme.push({ type: 'text', text: texteMatiere(matieres), cache_control: cache })
+    if (pagesPdf.length) systeme.push({ type: 'text', text: texteMatierePdf(pagesPdf), cache_control: cache })
     entree = entreesPrompt1({
       geste: demande.geste,
       auteur: ligne.auteur_label?.trim() || ligne.allow_label?.trim() || ligne.allow_email || 'auteur inconnu',
@@ -182,12 +220,15 @@ export async function POST(req: NextRequest) {
       cible,
       matiereAuteur: matieres.length > 0,
       matiereCollee,
+      pagesPdf: pagesPdf.length,
       outil: outil.name,
     })
     stockee = {
       geste,
       cible,
       matiere_auteur: matieres.map((m) => m.nom),
+      matiere_pdf: pagesPdf.map((p) => ({ source: p.source, page: p.page })),
+      matiere_pdf_mots: mots,
       matiere_collee: matiereCollee ? matiereCollee.slice(0, 2000) : null,
       matiere_collee_car: matiereCollee ? matiereCollee.length : 0,
       noeuds_lus: noeuds.length,

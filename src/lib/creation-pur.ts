@@ -1,7 +1,8 @@
 // L'ONGLET CREATION DU COCKPIT : la partie PURE de /api/cockpit/creation
 // (16/10/2026). Aucune base, aucun reseau, aucun import : lecture de la
 // demande et des noeuds, numerotation, serialisation de l'arbre, entrees des
-// prompts, schemas des outils, validation de la sortie de l'IA.
+// prompts, mots de recherche et mise en forme de la matiere des PDF, schemas
+// des outils, validation de la sortie de l'IA.
 //
 // Les formes (noeud, demande, contenu) suivent le contrat commun ecran /
 // serveur du 16/10 (contrat-creation.md) : l'ecran du cockpit les lit telles
@@ -285,6 +286,8 @@ export function entreesPrompt1(p: {
   cible: string | null
   matiereAuteur: boolean
   matiereCollee: string | null
+  /** Le nombre de pages de PDF de l'auteur envoyees dans le systeme (0 = aucune). */
+  pagesPdf?: number
   outil: string
 }): string {
   const { geste, ligne, cible } = p
@@ -305,9 +308,14 @@ export function entreesPrompt1(p: {
     ? 'Juge les pièces SOUS la cible (garder, remplacer, deplacer) et propose ce qui manque sous elle. Le reste de l\'arbre est là pour le contexte.'
     : 'Propose trois découpages de la cible : ses pièces, et si besoin un niveau d\'enfants. Ce qui existe déjà sous elle ne t\'est pas montré, c\'est voulu (page blanche). Le reste de l\'arbre est là pour le contexte.'
 
+  const sources: string[] = []
+  if (p.matiereAuteur) sources.push('les extraits de MANIFESTE.md, idees-du-moment.md et banque-contenus.md fournis dans le système')
+  if (p.pagesPdf) {
+    sources.push(`${p.pagesPdf} page${p.pagesPdf > 1 ? 's' : ''} de ses PDF fournie${p.pagesPdf > 1 ? 's' : ''} dans le système (une feuille qui s'y adosse : marque b, source « PDF <fichier>, p. <n> »)`)
+  }
   let matiere: string
-  if (p.matiereAuteur && p.matiereCollee) matiere = 'les extraits de MANIFESTE.md, idees-du-moment.md et banque-contenus.md fournis dans le système, et la matière collée ci-dessous.'
-  else if (p.matiereAuteur) matiere = 'les extraits de MANIFESTE.md, idees-du-moment.md et banque-contenus.md fournis dans le système.'
+  if (sources.length && p.matiereCollee) matiere = `${sources.join(', ')}, et la matière collée ci-dessous.`
+  else if (sources.length) matiere = `${sources.join(', et ')}.`
   else if (p.matiereCollee) matiere = 'la matière collée ci-dessous, rien d\'autre.'
   else matiere = 'aucune. N\'invente rien : une pièce sans matière est marquée q et devient une question.'
 
@@ -356,7 +364,7 @@ export function entreesPrompt2(titre: string, arbres: LigneDecoupage[], outil: s
 const CONSIGNES_COMMUNES = [
   'Réponds en français, tutoiement, phrases courtes, aucun tiret long. Les `ref` que tu renvoies sont celles du tableau, jamais les num.',
   'Dans les tableaux : num = la numérotation que l\'auteur voit, ref = l\'identifiant interne de la pièce, parent_ref = la ref de son parent (- = directement sous l\'aïeul), statut = a_redecouper (a des enfants), trou (marque q), mure (tient en une phrase), brut (pas encore jugé).',
-  'Marques (tableaux et outil) : v = [V] vécu de l\'auteur, b = [B] cas de banque-contenus, i = [I] mention dans idees-du-moment, m = [M] thèse sans cas, q = [?] rien encore (un trou, qui devient une question), fait = [fait], a_faire = [a faire]. Usage savoir : v, b, i, m, q. Usage production : fait, a_faire, q.',
+  'Marques (tableaux et outil) : v = [V] vécu de l\'auteur, b = [B] cas ou passage de la matière fournie (banque-contenus, ou une page d\'un PDF de l\'auteur : source « PDF <fichier>, p. <n> »), i = [I] mention dans idees-du-moment, m = [M] thèse sans cas, q = [?] rien encore (un trou, qui devient une question), fait = [fait], a_faire = [a faire]. Usage savoir : v, b, i, m, q. Usage production : fait, a_faire, q.',
 ].join('\n')
 
 const CONSIGNES_GESTE: Record<Geste, string> = {
@@ -392,6 +400,132 @@ export function texteMatiere(matieres: Array<{ nom: string; contenu: string }>):
   return [
     "MATIÈRE DE L'AUTEUR (extraits fournis, la seule matière avec ce qu'il a dit et ce qu'il colle) :",
     ...matieres.map((m) => `\n=== ${m.nom} ===\n${m.contenu.trim()}`),
+  ].join('\n')
+}
+
+// --- La matiere des PDF de l'auteur (cockpit_matiere_pages) --------------------
+//
+// Le texte des PDF d'un auteur, une ligne par page, extrait par
+// extraire_matiere_pdf.py (automations du pilotage). La route cherche les
+// pages de l'auteur du decoupage (to_tsquery francais, en OU sur les mots
+// ci-dessous, tri par ts_rank) et n'en garde que les meilleures, jusqu'a
+// environ MAX_MATIERE_PDF caracteres. Une feuille adossee a une page est [B],
+// source « PDF <fichier>, p. <n> » (methode, Prompt 1, regle 5).
+
+export type PageMatiere = { source: string; page: number; texte: string }
+
+export const MAX_MOTS_RECHERCHE = 25
+export const MAX_MATIERE_PDF = 40_000
+const MIN_LONGUEUR_MOT = 4
+
+/**
+ * Des mots de 4 lettres et plus qui ne disent rien de l'objet. Le
+ * dictionnaire francais de Postgres en ecarte deja une partie : ceux-ci ne
+ * prennent pas une des 25 places.
+ */
+const MOTS_VIDES = new Set([
+  'ainsi', 'alors', 'après', 'apres', 'aussi', 'autre', 'autres', 'avant', 'avec', 'avoir', 'bien',
+  'celle', 'celles', 'celui', 'cela', 'ceci', 'cette', 'ceux', 'chaque', 'chez', 'comme', 'comment',
+  'contre', 'dans', 'déjà', 'deja', 'depuis', 'doit', 'donc', 'dont', 'elle', 'elles', 'encore',
+  'entre', 'était', 'etait', 'être', 'etre', 'fait', 'faire', 'faut', 'jamais', 'leur', 'leurs',
+  'lorsque', 'mais', 'même', 'meme', 'mêmes', 'moins', 'notre', 'nous', 'parce', 'pendant', 'peut',
+  'plus', 'plusieurs', 'pour', 'pourquoi', 'puis', 'quand', 'quel', 'quelle', 'quelles', 'quels',
+  'quelque', 'quelques', 'quoi', 'sans', 'selon', 'sera', 'sinon', 'soit', 'sont', 'sous', 'tant',
+  'toujours', 'tous', 'tout', 'toute', 'toutes', 'très', 'tres', 'trop', 'vers', 'voici', 'voilà',
+  'votre', 'vous',
+])
+
+/** Les ancetres d'un noeud, du plus proche au plus lointain (l'aieul n'en est pas : c'est l'objet). */
+export function ancetres(noeuds: Noeud[], id: string): Noeud[] {
+  const effectif = parentsEffectifs(noeuds)
+  const parId = new Map(noeuds.map((n) => [n.id, n]))
+  const res: Noeud[] = []
+  const vus = new Set<string>([id])
+  let p = effectif.get(id) ?? null
+  while (p !== null && !vus.has(p)) {
+    vus.add(p)
+    const n = parId.get(p)
+    if (!n) break
+    res.push(n)
+    p = effectif.get(p) ?? null
+  }
+  return res
+}
+
+/**
+ * Les mots significatifs de textes, dans leur ordre d'apparition : lettres
+ * seulement (« l'entière » donne « entière »), 4 caracteres et plus, en
+ * minuscules, sans les mots vides, dedoublonnes, `max` au plus.
+ * Exception : un sigle de 3 lettres ecrit en MAJUSCULES compte (FVG, BOS,
+ * OTE, SMT, PDA : le vocabulaire ICT des PDF de Melanie est fait de sigles).
+ */
+export function motsSignificatifs(textes: Array<string | null | undefined>, max = MAX_MOTS_RECHERCHE): string[] {
+  const mots: string[] = []
+  const vus = new Set<string>()
+  for (const t of textes) {
+    if (typeof t !== 'string') continue
+    for (const brut of t.normalize('NFC').match(/\p{L}+/gu) ?? []) {
+      const mot = brut.toLowerCase()
+      const sigle = [...brut].length === 3 && brut === brut.toUpperCase() && brut !== mot
+      if (([...mot].length < MIN_LONGUEUR_MOT && !sigle) || MOTS_VIDES.has(mot) || vus.has(mot)) continue
+      vus.add(mot)
+      mots.push(mot)
+      if (mots.length >= max) return mots
+    }
+  }
+  return mots
+}
+
+/**
+ * Les mots de la recherche dans la matiere d'un decoupage : le titre, la
+ * phrase, le texte de la cible puis celui de ses ancetres, du plus proche au
+ * plus lointain (au-dela de 25 mots, ce sont les plus lointains qui tombent).
+ * Cible null (l'aieul) : le titre et la phrase seulement.
+ */
+export function motsDuDecoupage(titre: string, phrase: string | null, noeuds: Noeud[], cible: string | null): string[] {
+  const n = cible ? noeuds.find((x) => x.id === cible) ?? null : null
+  const lignee = n ? [n, ...ancetres(noeuds, n.id)] : []
+  return motsSignificatifs([titre, phrase, ...lignee.map((x) => x.texte)])
+}
+
+/** La requete to_tsquery : les mots en OU. Que des lettres, donc rien a echapper. Vide = pas de recherche. */
+export function requeteTsquery(mots: string[]): string {
+  return mots.filter((m) => /^\p{L}+$/u.test(m)).join(' | ')
+}
+
+/**
+ * Les pages a envoyer, prises dans l'ordre recu (le meilleur ts_rank
+ * d'abord) jusqu'a environ `max` caracteres : on s'arrete a la premiere page
+ * qui ferait deborder. La premiere passe toujours (coupee a `max` si elle
+ * depasse a elle seule).
+ */
+export function choisirPages(pages: PageMatiere[], max = MAX_MATIERE_PDF): PageMatiere[] {
+  const gardees: PageMatiere[] = []
+  let total = 0
+  for (const p of pages) {
+    const texte = typeof p.texte === 'string' ? p.texte.trim() : ''
+    if (!texte) continue
+    if (gardees.length && total + texte.length > max) break
+    const coupe = texte.slice(0, max)
+    gardees.push({ source: p.source, page: p.page, texte: coupe })
+    total += coupe.length
+  }
+  return gardees
+}
+
+/** Le libelle d'une page, celui que la feuille prend pour source : « PDF la discipline en trading, p. 11 ». */
+export function libellePage(source: string, page: number): string {
+  return `PDF ${source.replace(/\.pdf$/i, '').trim()}, p. ${page}`
+}
+
+/** Le bloc systeme des pages de PDF : rangees par fichier puis par page, chacune sous son libelle. */
+export function texteMatierePdf(pages: PageMatiere[]): string {
+  const rangees = [...pages].sort((a, b) => a.source.localeCompare(b.source, 'fr') || a.page - b.page)
+  return [
+    "MATIÈRE DE L'AUTEUR : PAGES DE SES PDF (retrouvées par une recherche sur l'objet et la cible). "
+      + "Chaque page commence par son libellé, « PDF <fichier>, p. <n> » : une feuille qui s'adosse à une page "
+      + 'est marquée b, et ce libellé exact est sa source.',
+    ...rangees.map((p) => `\n${libellePage(p.source, p.page)} :\n${p.texte.trim()}`),
   ].join('\n')
 }
 
