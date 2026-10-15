@@ -2746,16 +2746,15 @@ test('comptes Telegram : journal, fil Support et resume du matin', () => {
 })
 
 test('formation incluse : une seule adresse (Skool pour l instant), dans le bot des membres et l email de bienvenue (Brice 15/10)', () => {
-  // Skool en attendant l'espace formation du site ; aucun ref tant que celui de Melanie est inconnu.
-  assert.equal(URL_FORMATION_LIVECLUB, 'https://www.skool.com/aoknowledge-trading')
-  assert.ok(!/[?&]ref=/.test(URL_FORMATION_LIVECLUB))
+  // Skool en attendant l'espace formation du site, avec le lien d'affiliation de Melanie (Brice 15/10).
+  assert.equal(URL_FORMATION_LIVECLUB, 'https://www.skool.com/ao-knowledge-trading-5563/about?ref=8d5bde6137124c10a3abe0535ca5f6ec')
   const lire = (f) => readFileSync(new URL(`../src/lib/${f}`, import.meta.url), 'utf8')
   const config = lire('liveclub/config.ts')
   assert.match(config, /A REMPLACER par l'espace formation d'aoknowledge\.com quand il sera en ligne/)
-  assert.equal((config.match(/skool\.com\/aoknowledge-trading/g) ?? []).length, 1, 'une seule adresse en dur')
+  assert.equal((config.match(/https:\/\/www\.skool\.com\/ao-knowledge-trading-5563/g) ?? []).length, 1, 'une seule adresse en dur')
   // Personne d'autre n'ecrit l'adresse en dur : tous lisent la constante.
   for (const f of ['liveclub/prompt-membre.ts', 'politique-information.ts', 'liveclub/emails.ts', 'liveclub/bot-membre.ts', 'support-prompt.ts']) {
-    assert.ok(!lire(f).includes('skool.com/aoknowledge-trading'), f)
+    assert.ok(!lire(f).includes('skool.com/ao-knowledge-trading-5563'), f)
   }
   // Le prompt des membres : la constante, jamais de presentation du Live Club a un membre, transmission si ca coince.
   const prompt = lire('liveclub/prompt-membre.ts')

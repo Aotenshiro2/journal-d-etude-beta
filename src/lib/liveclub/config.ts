@@ -44,9 +44,13 @@ export const SUPPORT = 'support@aoknowledge.com'
  * A REMPLACER par l'espace formation d'aoknowledge.com quand il sera en ligne.
  *
  * Une seule constante, lue par le bot des membres (politique-information.ts,
- * prompt-membre.ts) et par l'email de bienvenue (emails.ts).
+ * prompt-membre.ts) et par l'email de bienvenue (emails.ts). Lien d'affiliation
+ * Skool de Melanie, donne par Brice le 15/10 (le groupe est
+ * ao-knowledge-trading-5563 ; l'ancienne adresse aoknowledge-trading des
+ * videos de Brice n'est plus la bonne).
  */
-export const URL_FORMATION_LIVECLUB = lienFormation('https://www.skool.com/aoknowledge-trading', null)
+export const URL_FORMATION_LIVECLUB = lienFormation(
+  'https://www.skool.com/ao-knowledge-trading-5563/about', '8d5bde6137124c10a3abe0535ca5f6ec')
 
 /**
  * Le lien de la formation, avec le parametre d'affiliation de Melanie quand
