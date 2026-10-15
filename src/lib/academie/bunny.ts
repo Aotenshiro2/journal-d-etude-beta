@@ -44,6 +44,31 @@ export function configBunny(env: Record<string, string | undefined> = process.en
   return { libraryId, cle }
 }
 
+/**
+ * La configuration d'une bibliotheque nommee (colonne
+ * academie_lecons.bunny_bibliotheque, 15/10/2026). Une bibliotheque Bunny par
+ * usage (plan, section 12) : chacune a son identifiant et sa cle de jeton.
+ * - 'formation' : BUNNY_STREAM_LIBRARY_ID et BUNNY_STREAM_TOKEN_KEY (les
+ *   variables de l'essai, deja posees) ;
+ * - toute autre, par exemple 'promo' : BUNNY_STREAM_PROMO_LIBRARY_ID et
+ *   BUNNY_STREAM_PROMO_TOKEN_KEY.
+ * null si le nom est mal forme ou si l'une des deux variables manque (la
+ * route repond 503 'config' : on ne sert jamais un lien non signe).
+ */
+export function configBibliotheque(
+  nom: string | null | undefined,
+  env: Record<string, string | undefined> = process.env,
+): ConfigBunny | null {
+  const n = (nom ?? '').trim().toLowerCase()
+  if (!/^[a-z][a-z0-9_]{1,30}$/.test(n)) return null
+  if (n === 'formation') return configBunny(env)
+  const prefixe = `BUNNY_STREAM_${n.toUpperCase()}_`
+  return configBunny({
+    BUNNY_STREAM_LIBRARY_ID: env[`${prefixe}LIBRARY_ID`],
+    BUNNY_STREAM_TOKEN_KEY: env[`${prefixe}TOKEN_KEY`],
+  })
+}
+
 /** Le jeton de Bunny : SHA256 en hexadecimal (minuscules) de cle + video + expiration. */
 export function jetonLecture(cle: string, videoId: string, expiration: number): string {
   return createHash('sha256').update(`${cle}${videoId}${expiration}`, 'utf8').digest('hex')

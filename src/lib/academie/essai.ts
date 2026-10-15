@@ -2,9 +2,12 @@
 //
 // Pour l'essai, une constante suffit : ce sont les deux videos envoyees sur
 // la bibliotheque Bunny « Formation » du 12 au 15/10 pour mesurer le poids et
-// la qualite (PLAN-ACADEMIE.md, sections 11 et 12, V1 point 1). Plus tard, la
-// table academie_lecons (bunny_video_id) prendra le relais, et la route de
-// lecture demandera le droit module par module (droitsAcademie, section 4.3).
+// la qualite (PLAN-ACADEMIE.md, sections 11 et 12, V1 point 1).
+//
+// Depuis la migration 20261015210000, ces deux videos sont les lecons du
+// module « essai » (table academie_lecons) et la route de lecture passe par
+// les tables et droitsAcademie. Cette liste ne sert plus que de secours, si
+// les tables n'existent pas encore (code deploye avant la migration).
 //
 // La liste fait foi cote serveur : la page du site affiche les memes videos,
 // mais une video qui n'est pas ici repond 400, quoi que la page envoie.

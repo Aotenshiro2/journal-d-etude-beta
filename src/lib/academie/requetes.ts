@@ -1,0 +1,256 @@
+// Les requetes SQL de l'academie (15/10/2026), en texte, avec des parametres
+// positionnels ($1, $2...) passes a prisma.$queryRawUnsafe / $executeRawUnsafe
+// (parametres lies par le pilote : jamais de valeur collee dans le texte).
+//
+// Pourquoi des chaines plutot que des gabarits $queryRaw`...` : ce module n'a
+// aucun import, et scripts/essayer-migration-academie.mjs joue EXACTEMENT ces
+// requetes contre la vraie base, dans une transaction toujours annulee, juste
+// apres la migration 20261015210000. Ce que le test valide est donc ce que
+// les routes executent.
+//
+// Tables : sites/Aoknowledgecom/supabase/migrations/20261015210000_academie_tables.sql.
+// Toutes les colonnes uuid sortent en ::text, les compteurs en ::int.
+
+// ---------------------------------------------------------------------------
+// Droits (droits.ts)
+// ---------------------------------------------------------------------------
+
+/**
+ * $1 = uuid du compte. Le role metier (profiles.role) et les emails VERIFIES
+ * du compte, en minuscules : l'email de auth.users s'il est confirme, et ceux
+ * de profile_emails marques verified (seul handle_new_user les pose,
+ * migration 20260930130400).
+ */
+export const SQL_IDENTITE = `
+select
+  (select p.role::text from public.profiles p where p.id = $1::uuid) as role,
+  coalesce(array(
+    select distinct x.e from (
+      select lower(btrim(u.email)) as e
+        from auth.users u
+       where u.id = $1::uuid and u.email is not null and u.email_confirmed_at is not null
+      union
+      select lower(btrim(pe.email))
+        from public.profile_emails pe
+       where pe.profile_id = $1::uuid and pe.verified = true and pe.email is not null
+    ) x
+    where x.e <> ''
+  ), '{}'::text[]) as emails
+`
+
+/**
+ * $1 = emails verifies (text[]). Ce que le cockpit sait de ces emails :
+ * - etm : statut ETM actif (cockpit_statut_etm) ;
+ * - broker_jusquau : acces broker actif au Live Club (cockpit_liveclub_acces,
+ *   meme filtre que droitLiveClub) ;
+ * - manuel_jusquau : date d'acces posee a la main sur le membre
+ *   (cockpit_acces_manuel), que droitLiveClub compte aussi comme Live Club ;
+ * - secours_essai : la decision B de la page d'essai sans Stripe (rang Skool
+ *   vip ou premium, abonnement en cours vu par le cockpit, acces mentorat
+ *   manuel MentoratGrant).
+ */
+export const SQL_FAITS_COCKPIT = `
+select
+  exists (
+    select 1 from public.cockpit_statut_etm s
+      join public.cockpit_membre_emails me on me.membre_id = s.membre_id
+     where s.retire_le is null and lower(me.email) = any($1::text[])
+  ) as etm,
+  (
+    select max(a.jusquau)::text from public.cockpit_liveclub_acces a
+     where a.retire_le is null and a.sorti_le is null and a.jusquau >= current_date
+       and lower(a.email) = any($1::text[])
+  ) as broker_jusquau,
+  (
+    select max(am.acces_jusquau)::text from public.cockpit_acces_manuel am
+      join public.cockpit_membre_emails me on me.membre_id = am.membre_id
+     where am.acces_jusquau >= current_date and lower(me.email) = any($1::text[])
+  ) as manuel_jusquau,
+  (
+    exists (
+      select 1 from public.cockpit_membre_emails me
+        join public.cockpit_membres_etat e on e.membre_id = me.membre_id
+       where lower(me.email) = any($1::text[])
+         and (e.tier_skool::text in ('vip', 'premium') or e.abonnement_en_cours is true)
+    )
+    or exists (
+      select 1 from public."MentoratGrant" g
+       where g."revokedAt" is null and lower(btrim(g.email)) = any($1::text[])
+    )
+  ) as secours_essai
+`
+
+/**
+ * $1 = uuid du compte, $2 = emails verifies (text[]). Une ligne par contenu :
+ * - 'acces' : les acces ACTIFS du compte (user_id ou email verifie), avec les
+ *   contenus de leur offre (module_id vide = offre sans contenu) ;
+ * - 'base' : les contenus des offres compte gratuit et Live Club ;
+ * - 'essai' : le module d'essai, pour le secours de la decision B.
+ */
+export const SQL_ACCES = `
+select 'acces'::text as origine, a.source, o.slug, o.ouvre_tout,
+       c.module_id::text as module_id, c.section_id::text as section_id
+  from public.academie_acces a
+  join public.academie_offres o on o.id = a.offre_id
+  left join public.academie_offre_contenus c on c.offre_id = o.id
+ where a.retire_le is null and a.debut <= now() and (a.fin is null or a.fin > now())
+   and (a.user_id = $1::uuid or a.email = any($2::text[]))
+union all
+select 'base'::text, null::text, o.slug, o.ouvre_tout,
+       c.module_id::text, c.section_id::text
+  from public.academie_offres o
+  left join public.academie_offre_contenus c on c.offre_id = o.id
+ where o.slug in ('compte-gratuit', 'live-club')
+union all
+select 'essai'::text, null::text, m.slug, false, m.id::text, null::text
+  from public.academie_modules m
+ where m.slug = 'essai'
+`
+
+// ---------------------------------------------------------------------------
+// Catalogue (catalogue.ts)
+// ---------------------------------------------------------------------------
+
+/** Les modules visibles (publies ou a venir), dans l'ordre. */
+export const SQL_MODULES_VISIBLES = `
+select m.id::text as id, m.slug, m.titre, m.resume, m.ordre, m.parcours, m.statut, m.auteur, m.image
+  from public.academie_modules m
+ where m.statut in ('publie', 'a_venir')
+ order by m.ordre, m.titre
+`
+
+/** Les sections des modules visibles. */
+export const SQL_SECTIONS_VISIBLES = `
+select s.id::text as id, s.module_id::text as module_id, s.ordre, s.titre
+  from public.academie_sections s
+  join public.academie_modules m on m.id = s.module_id
+ where m.statut in ('publie', 'a_venir')
+ order by s.module_id, s.ordre, s.titre
+`
+
+/** Les lecons visibles (publiees ou a venir) des modules visibles. Sans identifiant d'hebergeur ni contenu. */
+export const SQL_LECONS_VISIBLES = `
+select l.id::text as id, l.module_id::text as module_id, l.section_id::text as section_id,
+       l.slug, l.ordre, l.titre, l.type, l.format, l.usage, l.duree_s, l.apercu, l.statut
+  from public.academie_lecons l
+  join public.academie_modules m on m.id = l.module_id
+ where m.statut in ('publie', 'a_venir') and l.statut in ('publie', 'a_venir')
+ order by l.module_id, l.ordre, l.titre
+`
+
+const COLONNES_LECON = `
+  l.id::text as id, l.module_id::text as module_id, l.section_id::text as section_id,
+  l.slug, l.ordre, l.titre, l.type, l.format, l.usage, l.hebergeur, l.bunny_bibliotheque, l.bunny_video_id,
+  l.wistia_id, l.duree_s, l.contenu, l.ressources, l.apercu, l.statut,
+  m.statut as module_statut, m.slug as module_slug, m.titre as module_titre`
+
+/** $1 = id de la lecon. Toute la lecon (identifiants d'hebergeur et contenu compris), quel que soit son statut. */
+export const SQL_LECON_PAR_ID = `
+select ${COLONNES_LECON}
+  from public.academie_lecons l
+  join public.academie_modules m on m.id = l.module_id
+ where l.id = $1::uuid
+`
+
+/** $1 = guid Bunny. Les lecons PUBLIEES (module publie) qui portent cette video. */
+export const SQL_LECONS_PAR_VIDEO = `
+select ${COLONNES_LECON}
+  from public.academie_lecons l
+  join public.academie_modules m on m.id = l.module_id
+ where l.bunny_video_id = $1 and l.statut = 'publie' and m.statut = 'publie'
+ order by m.ordre, l.ordre
+`
+
+// ---------------------------------------------------------------------------
+// Suivi (suivi.ts)
+// ---------------------------------------------------------------------------
+
+/**
+ * $1 = compte, $2 = lecon, $3 = ip (texte ou null), $4 = appareil (ou null).
+ * Un lien vient d'etre delivre : la progression est creee ou rafraichie
+ * (derniere_vue_le ; une nouvelle session si la precedente date de plus de 30
+ * minutes) et le journal note l'evenement 'lien'. Rend la progression.
+ */
+export const SQL_NOTER_LIEN = `
+with prog as (
+  insert into public.academie_progression as p (user_id, lecon_id, derniere_vue_le, nb_sessions)
+  values ($1::uuid, $2::uuid, now(), 1)
+  on conflict (user_id, lecon_id) do update set
+    nb_sessions = p.nb_sessions
+      + case when p.derniere_vue_le < now() - interval '30 minutes' then 1 else 0 end,
+    derniere_vue_le = now()
+  returning p.derniere_position_s, p.position_max_s, p.secondes_vues, p.pourcentage,
+            p.terminee_le, p.marquee_vue_le
+), journal as (
+  insert into public.academie_lectures (user_id, lecon_id, evenement, ip, appareil)
+  values ($1::uuid, $2::uuid, 'lien', $3::inet, $4::text)
+  returning 1
+)
+select prog.*, (select count(*)::int from journal) as journalise from prog
+`
+
+/** $1 = compte, $2 = lecon. L'etat d'une progression pour appliquer un signal, avec l'heure de la base. */
+export const SQL_ETAT_SIGNAL = `
+select p.position_max_s, p.derniere_position_s, p.secondes_vues, p.pourcentage, p.terminee_le,
+       p.marquee_vue_le, p.derniere_vue_le, p.dernier_signal_le, p.nb_signaux,
+       l.type, l.duree_s, l.statut, now() as maintenant
+  from public.academie_progression p
+  join public.academie_lecons l on l.id = p.lecon_id
+ where p.user_id = $1::uuid and p.lecon_id = $2::uuid
+`
+
+/**
+ * Applique un signal accepte, en UN ordre (mise a jour + journal) :
+ * $1 compte, $2 lecon, $3 nb_signaux lu (verrou optimiste : un signal
+ * concurrent ne met rien a jour), $4 position_max_s, $5 derniere_position_s,
+ * $6 secondes_vues, $7 pourcentage (ou null), $8 terminer (bool),
+ * $9 marque ('poser', 'retirer' ou null), $10 evenement du journal,
+ * $11 secondes creditees (ou null), $12 position (ou null), $13 ip,
+ * $14 appareil. Aucune ligne rendue = le signal a perdu la course.
+ */
+export const SQL_APPLIQUER_SIGNAL = `
+with maj as (
+  update public.academie_progression p set
+    position_max_s = $4::int,
+    derniere_position_s = $5::int,
+    secondes_vues = $6::int,
+    pourcentage = $7::smallint,
+    terminee_le = case when p.terminee_le is null and $8::boolean then now() else p.terminee_le end,
+    marquee_vue_le = case $9::text
+      when 'poser' then coalesce(p.marquee_vue_le, now())
+      when 'retirer' then null
+      else p.marquee_vue_le end,
+    dernier_signal_le = now(),
+    nb_signaux = p.nb_signaux + 1
+  where p.user_id = $1::uuid and p.lecon_id = $2::uuid and p.nb_signaux = $3::int
+  returning p.position_max_s, p.derniere_position_s, p.secondes_vues, p.pourcentage,
+            p.terminee_le, p.marquee_vue_le
+), journal as (
+  insert into public.academie_lectures (user_id, lecon_id, evenement, secondes, position_s, ip, appareil)
+  select $1::uuid, $2::uuid, $10::text, $11::int, $12::int, $13::inet, $14::text from maj
+  returning 1
+)
+select maj.*, (select count(*)::int from journal) as journalise from maj
+`
+
+/**
+ * $1 = compte, $2 = ip, $3 = appareil. Une connexion a l'academie, notee au
+ * plus une fois par 30 minutes (deux appels simultanes peuvent en noter deux :
+ * sans consequence).
+ */
+export const SQL_NOTER_CONNEXION = `
+insert into public.academie_lectures (user_id, evenement, ip, appareil)
+select $1::uuid, 'connexion', $2::inet, $3::text
+ where not exists (
+   select 1 from public.academie_lectures
+    where user_id = $1::uuid and evenement = 'connexion' and cree_le > now() - interval '30 minutes'
+ )
+`
+
+/** $1 = compte. Toute la progression du compte. */
+export const SQL_PROGRESSION_COMPTE = `
+select p.lecon_id::text as lecon_id, p.position_max_s, p.derniere_position_s, p.secondes_vues,
+       p.pourcentage, p.terminee_le, p.marquee_vue_le, p.derniere_vue_le
+  from public.academie_progression p
+ where p.user_id = $1::uuid
+`

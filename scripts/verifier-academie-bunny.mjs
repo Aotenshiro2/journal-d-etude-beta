@@ -95,8 +95,11 @@ const config = configBunny({
 })
 assert.ok(config, 'library_id ou token_auth_key absent du coffre')
 
+// Depuis le 15/10, la bibliotheque n'accepte que les domaines autorises : le
+// lecteur est demande avec le Referer du site, comme l'iframe de la page.
+// (scripts/verifier-academie.mjs verifie aussi le refus sans Referer.)
 async function statut(url) {
-  const res = await fetch(url, { signal: AbortSignal.timeout(20000) })
+  const res = await fetch(url, { signal: AbortSignal.timeout(20000), headers: { Referer: 'https://aoknowledge.com/' } })
   await res.arrayBuffer().catch(() => null)
   return res.status
 }

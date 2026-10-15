@@ -563,6 +563,63 @@ sections 4.3, 5 et 8). GO de Brice pour le code, PAS pour commit, push ni Vercel
   `bash /mnt/d/6_Societe/Pilotage/Academie/outils/poser-env-bunny-journal.sh`,
   puis commit et push du journal, puis le site (sites/Aoknowledgecom/ETAT.md).
 
+## Academie, base V1 : tables, droits, lecture, suivi (15/10/2026, NON commite, migration NON appliquee)
+
+Plan : D:\6_Societe\Pilotage\Academie\PLAN-ACADEMIE.md (4.2, 4.3, 5, 7, 12).
+GO de Brice pour la V1 ; commit, push et migration attendent la session
+principale.
+- Base : `sites/Aoknowledgecom/supabase/migrations/20261015210000_academie_tables.sql`
+  (ECRITE, PAS APPLIQUEE). academie_modules, _sections, _lecons (format,
+  usage, hebergeur bunny ou wistia, bibliotheque Bunny NOMMEE), _offres +
+  _offre_contenus (module entier ou section), _acces, _progression,
+  _lectures (journal de preuve). RLS forcee, aucune policy, rien pour anon
+  et authenticated ; service_role : catalogue complet, acces et progression
+  sans delete, journal en insert et select seulement. Pas de cle etrangere
+  vers auth.users (le journal survit a un compte supprime). Depart : offres
+  compte-gratuit, live-club, formation-complete (1 999, paypal), etm
+  (ouvre_tout) ; module essai publie, 2 lecons Bunny (durees lues chez
+  Bunny : 2163 et 3759 s), ouvert par l'offre live-club.
+- Regle : droitsAcademie (src/lib/academie/droits.ts, calcul pur dans
+  pur.ts). Union : admin, ETM (tout) ; tout compte (offre compte-gratuit,
+  usage externe_compte ou externe_libre, apercu) ; academie_acces actifs par
+  user_id ou email VERIFIE (email confirme de auth.users, profile_emails
+  verified) ; Live Club en direct (broker ou acces manuel du cockpit en
+  base, sinon Stripe MelTrade par email, cache oui 10 min / non 5 min, 4 s
+  max) qui ouvre l'offre live-club et les acces de source liveclub ;
+  secours de la decision B (rang Skool, abonnement vu par le cockpit,
+  MentoratGrant) pour le module essai seul. Exemptions Telegram : attendent
+  le lien Telegram (4.5). Stripe illisible = contenu 'inconnu' (503), jamais
+  un faux refus.
+- Routes (CORS de l'essai, no-store, compte tronque dans les logs) :
+  POST /api/academie/lecture ({ lecon } ou { video }, Bunny signe 4 h par
+  bibliotheque, Wistia = id, texte = contenu, pdf = ressources ; ligne
+  'lien' au journal) ; POST /api/academie/suivi (lecture, pause, fin, texte,
+  vu ; temps credite borne par le temps ecoule, 1 signal par lecon / 20 s,
+  3 s pour fin et vu, verrou optimiste) ; GET /api/academie/moi (modules,
+  sections, lecons, droits et raisons, progression, Continuer ; jamais
+  d'identifiant Bunny ni de contenu ; connexion notee une fois par 30 min).
+  Sans les tables, /lecture { video } repond comme avant (essai.ts +
+  aAccesAcademieEssai) : le code peut partir avant la migration.
+- SQL dans src/lib/academie/requetes.ts (chaines, $queryRawUnsafe avec
+  parametres) pour que le test joue exactement les requetes des routes.
+- Verifie : `node scripts/verifier-academie.mjs` (25 blocs hors ligne, puis
+  Bunny avec Referer aoknowledge.com : signe 200, sans jeton, expire et
+  sans Referer 403) ; `node scripts/essayer-migration-academie.mjs`
+  (migration + contraintes + requetes des routes dans une transaction
+  ANNULEE, tables absentes apres coup) ; requetes d'identite et du cockpit
+  rejouees en lecture seule sur les 33 comptes (totaux seulement) ; tsc,
+  eslint des fichiers, build ok ; next start : preflight et 401 sur les 3
+  routes. verifier-academie-bunny.mjs envoie maintenant le Referer (sans
+  lui, 403 depuis les domaines autorises du 15/10).
+- NON teste : 200, 403 et suivi avec une vraie session (apres migration).
+- A FAIRE : appliquer la migration, `npm run verifier:rls`, commit et push,
+  test de Brice sur /academie/essai (doit marcher pareil) ; cote site :
+  ecrans /academie (moi, lecture { lecon }, suivi toutes les 30 s avec
+  secondes jouees mesurees par player.js) ; politique de confidentialite et
+  duree de conservation du journal ; variables BUNNY_STREAM_<NOM>_* pour
+  une bibliotheque autre que formation ; retirer le secours essai apres le
+  transvasage.
+
 ## Noms et paroles des membres Telegram, passe 1 (15/10/2026, NON commite, NON deploye)
 
 Brice, 15/10 : suivre les noms et les paroles des membres dans l'ontologie.
