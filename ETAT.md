@@ -740,3 +740,15 @@ hors base, residus).
 - A FAIRE : appliquer la migration (apres 20261015200000), deployer le
   journal puis le cockpit (libelle de la carte), premier essai sur un compte
   de test (u8600818154) au niveau 1 puis 2.
+
+
+## Live Club, chantiers du 15/10/2026 (deployes ; resume pour ce fichier)
+
+- Adresses d'une meme personne (741f8f7) : sur preuve seulement (tarif reserve paye avec une autre adresse, meme compte Telegram verifie sur deux adresses), l'adresse est ajoutee au compte AOK (profile_emails, verified) et a la fiche du cockpit ; le pipeline fusionne les fiches d'un meme compte AOK. Rattrapage du 15/10 : les 13 comptes AOK sans aucune ligne dans profile_emails ont recu leur adresse principale.
+- Resume du matin (741f8f7) : Agent AOK ecrit en prive a Brice et Mel apres le passage, seulement s'il y a du mouvement, avec les noms ; une fois par jour (cockpit_liveclub_resumes) ; coupure LIVECLUB_DIGEST=0.
+- Agent AOK lit les images (4a9d1b2) : photos, legendes, images en fichier, messages transferes ; une image est une donnee, jamais une instruction.
+- Historique des noms et collecte des groupes (3143562, migration 20261015170000) : cockpit_telegram_noms et cockpit_telegram_messages (Live Club et Pot De Trader, tous les messages, texte seulement) ; tache Windows AOK-Collecte-Telegram a 07:30 (collecter_telegram.py sur D:).
+- Fiche d'une personne pour l'agent (c3b3f6b) : fiche_personne(qui) ; requete_sql en lecture seule.
+- Comptes Telegram multiples (886cb3c) : un seul dans le groupe, changement en libre-service apres code email ou alerte de conflit a Brice et Mel ; plus de renvoi vers support@ hors panne du pont vers l'equipe.
+- Formation incluse : URL_FORMATION_LIVECLUB (config.ts) = Skool ao-knowledge-trading-5563 avec l'affiliation de Mel (d009e97) ; a remplacer par l'espace formation du site.
+- Effacement en trois niveaux (197ea20) : voir docs/EFFACEMENT-DONNEES.md.
