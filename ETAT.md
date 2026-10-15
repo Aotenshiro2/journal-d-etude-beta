@@ -526,3 +526,39 @@ seule, legendee ou non : AUCUNE reponse (pas meme l'accuse).
   Aucun essai reel sur Telegram ni appel reel au modele.
 - A FAIRE : deployer le journal ; essai reel par Brice (capture transferee
   avec commentaire, photo legendee, photo seule, capture en fichier).
+
+## Academie, essai de la page protegee (15/10/2026, mis en ligne le 15/10 sur GO de Brice)
+
+Premier morceau de la page de lecon (D:\6_Societe\Pilotage\Academie\PLAN-ACADEMIE.md,
+sections 4.3, 5 et 8). GO de Brice pour le code, PAS pour commit, push ni Vercel.
+- Route POST /api/academie/lecture (src/app/api/academie/lecture/route.ts),
+  appelee par aoknowledge.com/academie/essai : Bearer = access_token
+  Supabase du site, corps { video }. 401 'jeton', 400 'video' (hors liste
+  d'essai), 403 'acces', 503 'config' (variables Bunny absentes) ou
+  'indisponible' (base ou Supabase Auth illisible), 200 { ok, url,
+  expire_le, raison }. CORS : aoknowledge.com, www.aoknowledge.com,
+  localhost:5173 (pas les previews Vercel, pas le port 5198 du launch.json).
+  Cache-Control no-store. Log : compte tronque (8 caracteres) + guid.
+- Droit (src/lib/academie/droits.ts, aAccesAcademieEssai) : decision B,
+  profiles.role = 'admin' (3 comptes le 15/10) OU checkMentoratAccess avec
+  une raison etm, manuel, liveclub, skool-vip, skool-premium. Carnet Premium
+  seul exclu. Le Live Club passe par cockpit_membres_etat (rafraichi chaque
+  matin), pas Stripe en direct. Un non-membre declenche quand meme la
+  verification Carnet chez Stripe (dernier essai de checkMentoratAccess).
+- Signature (src/lib/academie/bunny.ts) : SHA256_HEX(cle + guid + expiration),
+  lien de 4 h, player.mediadelivery.net/embed/{bibliotheque}/{guid}.
+  Variables BUNNY_STREAM_LIBRARY_ID et BUNNY_STREAM_TOKEN_KEY (pas encore
+  posees sur Vercel). Videos d'essai en constante (src/lib/academie/essai.ts).
+- Pas de migration, pas de journal de lecture en base (viendra avec les
+  tables academie_*).
+- Verifie : `node scripts/verifier-academie-bunny.mjs` (4 blocs hors ligne,
+  puis contre Bunny avec le coffre : signe = 200, sans jeton, expire, autre
+  cle = 403, pour les deux videos) ; tsc ok ; eslint des fichiers ok (le
+  lint complet garde ses 4 erreurs anciennes) ; build ok ; en local (next
+  start) : preflight 204 avec CORS pour les 3 origines et sans pour une
+  autre, 401 sans jeton et avec un faux jeton. Requete du role admin rejouee
+  en lecture seule. NON teste : 403 et 200 avec un vrai compte (il faut une
+  session reelle), a faire apres deploiement.
+- A FAIRE (sur GO) : poser les deux variables en production par
+  `bash /mnt/d/6_Societe/Pilotage/Academie/outils/poser-env-bunny-journal.sh`,
+  puis commit et push du journal, puis le site (sites/Aoknowledgecom/ETAT.md).
