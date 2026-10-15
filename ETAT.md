@@ -562,3 +562,38 @@ sections 4.3, 5 et 8). GO de Brice pour le code, PAS pour commit, push ni Vercel
 - A FAIRE (sur GO) : poser les deux variables en production par
   `bash /mnt/d/6_Societe/Pilotage/Academie/outils/poser-env-bunny-journal.sh`,
   puis commit et push du journal, puis le site (sites/Aoknowledgecom/ETAT.md).
+
+## Noms et paroles des membres Telegram, passe 1 (15/10/2026, NON commite, NON deploye)
+
+Brice, 15/10 : suivre les noms et les paroles des membres dans l'ontologie.
+Passe 1 = l'historique des noms et la collecte quotidienne des messages. La
+passe 2 (fiche de l'agent, conversations des bots) lira les deux tables.
+- Base : migration `20261015170000_cockpit_telegram_noms_messages.sql`
+  (ECRITE, PAS APPLIQUEE). cockpit_telegram_noms (une ligne par
+  telegram_id, pseudo, nom_affiche distincts, null compris, premier_vu,
+  dernier_vu, source de la premiere observation : groupe, message,
+  evenement, prive), ecrite SEULEMENT par la fonction
+  cockpit_telegram_noms_noter(jsonb, boolean). cockpit_telegram_messages
+  (cle chat_id, message_id, texte ou legende, a_media et type_media, jamais
+  le media), insert seul pour la cle de service (jamais ecrase). Lecture
+  is_cockpit_member(), rien pour anon.
+- Collecte : `D:\6_Societe\Pilotage\Data-Performance\automations\collecter_telegram.py`
+  (Python Windows, Telethon, session de Brice, lecture seule cote Telegram),
+  Live Club (forum, tous sujets) et Pot De Trader (-1002591690182), depuis
+  le 30/08/2026 au premier lancement. Tache AOK-Collecte-Telegram a creer
+  (creer_tache_collecte_telegram.ps1, pas lance).
+- Journal : src/lib/liveclub/noms.ts (best effort, ne leve jamais, ecrit
+  seulement) et noms-pur.ts. Webhook du groupe (chat_member) = source
+  'evenement' ; message prive au bot des membres (from) = source 'prive',
+  une ecriture par compte et par jour au plus (memoire par instance + garde
+  SQL p_une_fois_par_jour ; un nom qui change dans la journee s'ecrit).
+- Limites : Telegram ne garde pas l'historique des noms (nom d'un message =
+  nom du jour de la collecte). Un CONTACT de Brice porte, cote Telethon, le
+  nom que Brice lui a donne : le script n'ecrit pas ces noms (12 contacts sur
+  98 participants du Live Club, 13 sur 30 dans Pot De Trader le 15/10).
+- Tests : verifier-liveclub.mjs 57 blocs (2 nouveaux), tsc, eslint des
+  fichiers propres. Python : tester_collecter_telegram.py 11 blocs, dry-run
+  reel --limite 50 sur les deux groupes (aucune ecriture).
+- A FAIRE : appliquer la migration, puis premier lancement a la main,
+  creer la tache, deployer le journal (l'ordre n'importe pas pour le
+  journal : sans la migration il avertit et continue).

@@ -49,6 +49,11 @@
 //   (proposerTarifReserve) : /start, /menu, apres le code, texte libre,
 //   « Mon abonnement ». Jamais sur un email tape et non verifie. Rien ne
 //   change pour les autres comptes.
+// - (15/10, Brice) le nom et le pseudo de chaque message prive (champ from)
+//   vont a l'historique des noms (cockpit_telegram_noms, source 'prive'),
+//   une ecriture par compte et par jour au plus, en best effort (noms.ts).
+//   Ecriture seule : ni ce module ni l'agent des membres ne lisent cette
+//   table, ni celle des messages des groupes.
 
 import { journaliserGesteLiveClub } from '@/lib/stripe-actions'
 import { prisma } from '@/lib/db'
@@ -80,6 +85,7 @@ import {
 } from './verification'
 import { lienDeLaReserve, poserTelegramSurReserve, reserveOuvertePourCompte, type ReserveLue } from './reserves'
 import { CODE_ENVOIS_HEURE, CODE_VALIDITE_MINUTES, intentionNonRattache, masquerCodes } from './verification-pur'
+import { noterNomTelegram } from './noms'
 import {
   REGLE_RAISON_SORTIE, jetonBienForme, libelleBouton, messageErreur, normaliserEmail, pauseDejaProposee, relationAbsente,
   sortieAExpliquer, texteDette, texteTarifReserve, type GesteDate,
@@ -1039,6 +1045,11 @@ export async function traiterMessagePrive(message: MessageTg, updateId: number):
   if (!u?.id || u.is_bot) return
   const chat = message.chat.id
   if (!(await nouveauPrive(u.id, updateId))) return
+
+  // (15/10) L'historique des noms (cockpit_telegram_noms, source 'prive') : le
+  // champ from de l'update, une ecriture par compte et par jour au plus.
+  // Best effort, ne leve jamais (noms.ts). Rien n'est lu ici.
+  await noterNomTelegram(u, 'prive')
 
   const texte = (message.text ?? '').trim()
   if (!texte) {

@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { traiterBouton, traiterDemandeAdhesion, traiterMessagePrive } from '@/lib/liveclub/bot-membre'
 import { accueilAPublier, nomPourAccueil, texteAccueil, type AvantEntree } from '@/lib/liveclub/accueil-groupe'
 import { appelTelegram } from '@/lib/liveclub/telegram'
+import { noterNomTelegram } from '@/lib/liveclub/noms'
 
 // Webhook du bot du groupe Telegram Live Club, @aok_liveclub_bot (chantier du
 // 10/09, etendu le 29/09).
@@ -137,6 +138,11 @@ export async function POST(req: NextRequest) {
       source = 'evenement',
       par_qui = ${parQui},
       maj_le = now()`
+
+  // (15/10) L'historique des noms (cockpit_telegram_noms, source 'evenement') :
+  // le nom et le pseudo tels que l'evenement les donne, entree ou sortie.
+  // Best effort, ne leve jamais (lib/liveclub/noms.ts).
+  await noterNomTelegram(u, 'evenement', quand)
 
   // Le statut Telegram BRUT (29/09, chantier sortie de Metricgram) : `present`
   // ne distingue pas un depart volontaire (left) d'un bannissement (kicked),

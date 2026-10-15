@@ -67,8 +67,11 @@ import {
   detailAccesBroker, detailExemption, detailTarifReserve, detailAttenteHumain, detailDemande,
   ilYAMouvement, titreResume, composerResume, decouperResume, entreesHistoriqueResume,
 } from '../src/lib/liveclub/resume-pur.ts'
+import {
+  textePropre, identiteTelegram, ligneNom, cleNomDuJour, nomANoter, MAX_PSEUDO, MAX_NOM, MAX_MEMOIRE_NOMS,
+} from '../src/lib/liveclub/noms-pur.ts'
 
-const PRODUITS = ['prod_UcOraPncQlbrW4', 'prod_UynMpOvBtGTsIw']
+const PRODUITS =['prod_UcOraPncQlbrW4', 'prod_UynMpOvBtGTsIw']
 let n = 0
 const test = (nom, f) => { f(); n++; console.log(`ok  ${nom}`) }
 
@@ -2480,6 +2483,58 @@ test('resume : formats, et l historique de l agent apres normalisation', () => {
   // Ce que voit le tour de la question : tout ce qui precede, resume compris.
   const tour = historiquePourTour([...entrees, { role: 'user', content: 'et pour Julien ?', id: 'u900' }], 'u900')
   assert.equal(tour[tour.length - 1].content, texte)
+})
+
+test('historique des noms : identite Telegram et ligne ecrite (noms-pur, 15/10)', () => {
+  // Espaces resserres, bords retires, vide = null, coupe a la longueur.
+  assert.equal(textePropre('  Jean \n  Dupont ', 300), 'Jean Dupont')
+  assert.equal(textePropre('   ', 300), null)
+  assert.equal(textePropre(undefined, 300), null)
+  assert.equal(textePropre(42, 300), null)
+  assert.equal(textePropre('x'.repeat(400), MAX_NOM).length, MAX_NOM)
+  // Identite : nom = prenom + nom, pseudo sans arobase, null quand il manque.
+  assert.deepEqual(identiteTelegram({ id: 77, first_name: 'Jean', last_name: 'Dupont', username: '@jdup' }),
+    { telegramId: 77, pseudo: 'jdup', nomAffiche: 'Jean Dupont' })
+  assert.deepEqual(identiteTelegram({ id: 78, first_name: 'Lou' }), { telegramId: 78, pseudo: null, nomAffiche: 'Lou' })
+  assert.deepEqual(identiteTelegram({ id: '79', first_name: '  ', username: '' }), { telegramId: 79, pseudo: null, nomAffiche: null })
+  assert.equal(identiteTelegram({ id: 80, first_name: 'x', username: 'y'.repeat(100) }).pseudo.length, MAX_PSEUDO)
+  // Rien a noter : un bot, pas d'utilisateur, un identifiant illisible ou negatif (un canal).
+  assert.equal(identiteTelegram({ id: 81, is_bot: true, first_name: 'Bot' }), null)
+  assert.equal(identiteTelegram(undefined), null)
+  assert.equal(identiteTelegram({ first_name: 'Sans id' }), null)
+  assert.equal(identiteTelegram({ id: -100123, first_name: 'Canal' }), null)
+  assert.equal(identiteTelegram({ id: 1.5, first_name: 'x' }), null)
+  // La ligne passee a cockpit_telegram_noms_noter().
+  const i = identiteTelegram({ id: 77, first_name: 'Jean', last_name: 'Dupont', username: 'jdup' })
+  assert.deepEqual(ligneNom(i, 'prive', new Date('2026-10-15T06:15:00Z')),
+    { telegram_id: 77, pseudo: 'jdup', nom_affiche: 'Jean Dupont', vu_le: '2026-10-15T06:15:00.000Z', source: 'prive' })
+})
+
+test('historique des noms : une ecriture par compte et par jour en prive (noms-pur, 15/10)', () => {
+  const memoire = new Map()
+  const jean = identiteTelegram({ id: 77, first_name: 'Jean', username: 'jdup' })
+  // Premier message du jour : on ecrit. Les suivants du meme jour : non.
+  assert.equal(nomANoter(memoire, jean, '2026-10-15'), true)
+  assert.equal(nomANoter(memoire, jean, '2026-10-15'), false)
+  assert.equal(nomANoter(memoire, jean, '2026-10-15'), false)
+  // Un autre compte le meme jour : le sien.
+  const lou = identiteTelegram({ id: 78, first_name: 'Lou' })
+  assert.equal(nomANoter(memoire, lou, '2026-10-15'), true)
+  // Le lendemain : de nouveau une ecriture.
+  assert.equal(nomANoter(memoire, jean, '2026-10-16'), true)
+  assert.equal(nomANoter(memoire, jean, '2026-10-16'), false)
+  // Un nom qui change dans la journee s'ecrit (c'est l'information cherchee), une fois.
+  const jeanRenomme = identiteTelegram({ id: 77, first_name: 'Jean D.', username: 'jdup' })
+  assert.equal(nomANoter(memoire, jeanRenomme, '2026-10-16'), true)
+  assert.equal(nomANoter(memoire, jeanRenomme, '2026-10-16'), false)
+  // La cle ne confond pas un nom et un pseudo absents avec des chaines.
+  assert.notEqual(cleNomDuJour({ telegramId: 1, pseudo: null, nomAffiche: 'a' }, 'j'),
+    cleNomDuJour({ telegramId: 1, pseudo: 'null', nomAffiche: 'a' }, 'j'))
+  // La memoire est bornee : pleine, elle repart de zero au lieu de grossir.
+  const pleine = new Map()
+  for (let k = 1; k <= MAX_MEMOIRE_NOMS; k++) pleine.set(k, 'x')
+  assert.equal(nomANoter(pleine, identiteTelegram({ id: MAX_MEMOIRE_NOMS + 1, first_name: 'z' }), '2026-10-15'), true)
+  assert.equal(pleine.size, 1)
 })
 
 console.log(`\n${n} blocs verifies, tout est bon.`)
