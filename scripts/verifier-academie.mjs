@@ -27,9 +27,10 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import {
-  CacheCourt, appareilCourt, appliquerSignal, conclureLiveClub, etatLecon, ipDuClient, leconVue, lireDemandeLecture,
-  lireSignal, lireUuid, liveClubUtile, ouvertureLecon, ouvertureModule, ouvertureSection, preparerDroits,
-  ressourcesPropres, trierRaisons, ECART_MIN_S, SEUIL_VU,
+  CacheCourt, appareilCourt, appliquerSignal, cheminDansBucket, cheminFichierPropre, conclureLiveClub, etatLecon, ipDuClient,
+  leconVue, lireCsvAcces, lireDemandeLecture, lireDemandeRessource, lireOffresSections, lireSignal, lireUuid, liveClubUtile,
+  ouvertureLecon, ouvertureModule, ouvertureSection, preparerDroits, progressionDuModule, ressourcesPropres, trierRaisons,
+  ECART_MIN_S, MAX_RESSOURCES, SEUIL_VU,
 } from '../src/lib/academie/pur.ts'
 import { configBibliotheque, configBunny, jetonLecture, lienLecture, signerLecture, DUREE_LIEN_S } from '../src/lib/academie/bunny.ts'
 
@@ -214,6 +215,79 @@ bloc('acces non transmis (email non verifie) : rien de plus qu un compte gratuit
   assert.equal(acces(L1, d), 'ferme')
   assert.equal(acces(L2, d), 'ferme')
   assert.equal(acces(N1, d), 'ouvert')
+})
+
+bloc('offre limitee a une section (offres_sections) : Live Club = partie 1, formation complete = tout, pourcentage', () => {
+  // Ce que l'importeur pose pour { "live-club": ["partie-1"] } et « offres » : ["formation-complete"].
+  const formation = [{ origine: 'acces', source: 'offert', slug: 'formation-complete', ouvreTout: false, moduleId: F, sectionId: null }]
+  const lc = droitsDe({ liveClub: 'oui' })
+  const fc = droitsDe({ liveClub: 'non', lignes: formation })
+  const lcEtFc = droitsDe({ liveClub: 'oui', lignes: formation })
+  const etats = { l1: 'vu', l2: 'non_vu', l3: 'non_vu', l4: 'vu' }
+  const suivi = (d) => progressionDuModule(LECONS_F.map(l => ({ acces: acces(l, d), etat: etats[l.id] })))
+  // Live Club : L1 (partie 1), L3 (apercu), L4 (externe_compte) ouvertes ; L2 (partie 2) fermee, cadenas.
+  assert.deepEqual(LECONS_F.map(l => acces(l, lc)), ['ouvert', 'ferme', 'ouvert', 'ouvert'])
+  assert.equal(ouvertureSection(lc, { id: S2, moduleId: F }).acces, 'ferme')
+  assert.equal(juger(lc, F, LECONS_F).acces, 'partiel')
+  // Pourcentage sur les lecons accessibles : 2 vues sur 3 accessibles.
+  assert.deepEqual(suivi(lc), { lecons: 4, vues: 2, en_cours: 0, ouvertes: 0, commencees: 2, accessibles: 3, pourcentage: 67 })
+  // Formation complete : tout, et le pourcentage se compte sur les 4.
+  assert.deepEqual(LECONS_F.map(l => acces(l, fc)), ['ouvert', 'ouvert', 'ouvert', 'ouvert'])
+  assert.deepEqual(juger(fc, F, LECONS_F), { acces: 'entier', raisons: ['offert'] })
+  assert.equal(suivi(fc).pourcentage, 50)
+  // Les deux : la partie 2 ouverte par la formation, la partie 1 par les deux.
+  assert.deepEqual(ouvertureLecon(lcEtFc, L1).raisons, ['offert', 'liveclub'])
+  assert.deepEqual(ouvertureLecon(lcEtFc, L2).raisons, ['offert'])
+  // Rien d'accessible : le pourcentage se compte sur toutes les publiees ; module vide = 0.
+  assert.equal(progressionDuModule([{ acces: 'ferme', etat: 'vu' }, { acces: 'ferme', etat: 'non_vu' }]).pourcentage, 50)
+  assert.equal(progressionDuModule([]).pourcentage, 0)
+  // Etats comptes sur les publiees.
+  const p = progressionDuModule([{ acces: 'ouvert', etat: 'en_cours' }, { acces: 'ouvert', etat: 'ouvert' }, { acces: 'inconnu', etat: 'non_vu' }])
+  assert.deepEqual(p, { lecons: 3, vues: 0, en_cours: 1, ouvertes: 1, commencees: 2, accessibles: 2, pourcentage: 0 })
+})
+
+bloc('offres_sections du fichier de module : paires, doublons, erreurs', () => {
+  const cles = new Set(['partie-1', 'partie-2'])
+  assert.deepEqual(lireOffresSections(undefined, cles), [])
+  assert.deepEqual(lireOffresSections(null, cles), [])
+  assert.deepEqual(lireOffresSections({ 'live-club': ['partie-1', 'partie-1'], 'formation-complete': [] }, cles),
+    [{ offre: 'live-club', cle: 'partie-1' }])
+  assert.deepEqual(lireOffresSections({ 'live-club': ['partie-1'], autre: ['partie-2'] }, cles),
+    [{ offre: 'live-club', cle: 'partie-1' }, { offre: 'autre', cle: 'partie-2' }])
+  assert.throws(() => lireOffresSections({ 'live-club': ['partie-3'] }, cles), /section inconnue/)
+  assert.throws(() => lireOffresSections({ 'live-club': 'partie-1' }, cles), /liste/)
+  assert.throws(() => lireOffresSections(['live-club'], cles), /objet/)
+  assert.throws(() => lireOffresSections({ 'Live Club': ['partie-1'] }, cles), /mal formee/)
+})
+
+bloc('CSV des acces de l alpha : lecture, defauts, doublons, erreurs sans email', () => {
+  const csv = [
+    '﻿email;offre;source;note',
+    ' Eleve.Un@Exemple.fr ; formation-complete ; offert ; alpha du 17/10',
+    'eleve2@exemple.fr;formation-complete;;',
+    '# commentaire',
+    '',
+    'eleve.un@exemple.fr;formation-complete;paypal;doublon de la ligne 2',
+    'eleve3@exemple.fr;live-club;liveclub;note; avec un point-virgule',
+    'pas-un-email;formation-complete;offert;',
+    'eleve4@exemple.fr;Formation Complete;offert;',
+    'eleve5@exemple.fr;formation-complete;cadeau;',
+  ].join('\r\n')
+  const r = lireCsvAcces(csv)
+  assert.deepEqual(r.lignes, [
+    { numero: 2, email: 'eleve.un@exemple.fr', offre: 'formation-complete', source: 'offert', note: 'alpha du 17/10' },
+    { numero: 3, email: 'eleve2@exemple.fr', offre: 'formation-complete', source: 'offert', note: null },
+    { numero: 7, email: 'eleve3@exemple.fr', offre: 'live-club', source: 'liveclub', note: 'note; avec un point-virgule' },
+  ])
+  assert.equal(r.doublons, 1)
+  assert.deepEqual(r.erreurs, [
+    { numero: 8, motif: 'email illisible' },
+    { numero: 9, motif: 'offre mal formee' },
+    { numero: 10, motif: 'source inconnue (cadeau)' },
+  ])
+  // Aucun motif ne reprend l'email.
+  assert.ok(r.erreurs.every(e => !e.motif.includes('@')))
+  assert.deepEqual(lireCsvAcces('').lignes, [])
 })
 
 bloc('conclureLiveClub et ordre des raisons', () => {
@@ -447,6 +521,24 @@ bloc('ressources, IP, appareil', () => {
     'texte',
   ]), [{ titre: 'PDF', url: 'https://exemple.fr/a.pdf' }])
   assert.deepEqual(ressourcesPropres({ pas: 'une liste' }), [])
+  // Pieces jointes protegees ({ fichier }) et chemins du site (le workbook gratuit, /media/...).
+  assert.deepEqual(ressourcesPropres([
+    { titre: 'Workbook', url: '/media/academie/ressources/workbook-psychologie-v2.pdf' },
+    { titre: 'Support ep 01', fichier: 'formation-complete/ep-01-pourquoi-se-lancer.pdf' },
+    { titre: 'Les deux', url: 'https://exemple.fr/a.pdf', fichier: 'formation-complete/b.pdf' },
+    { titre: 'Remontee', fichier: '../secret.pdf' },
+    { titre: 'Absolu', fichier: '/formation-complete/a.pdf' },
+    { titre: 'Mal forme', fichier: 'formation-complete/../a.pdf', url: 'https://exemple.fr/repli.pdf' },
+    { titre: 'Autre domaine', url: '//evil.example/a.pdf' },
+    { titre: 'Antislash', url: '/\\evil.example/a.pdf' },
+    { titre: 'Espace', url: '/media/a b.pdf' },
+    { titre: '   ', url: 'https://exemple.fr/sans-titre.pdf' },
+  ]), [
+    { titre: 'Workbook', url: '/media/academie/ressources/workbook-psychologie-v2.pdf' },
+    { titre: 'Support ep 01', fichier: 'formation-complete/ep-01-pourquoi-se-lancer.pdf' },
+    { titre: 'Les deux', fichier: 'formation-complete/b.pdf' },
+  ])
+  assert.equal(ressourcesPropres(Array.from({ length: 80 }, (_, i) => ({ titre: `r${i}`, fichier: `p/r${i}.pdf` }))).length, MAX_RESSOURCES)
   assert.equal(ipDuClient('203.0.113.7, 10.0.0.1', null), '203.0.113.7')
   assert.equal(ipDuClient(null, '2001:db8::1'), '2001:db8::1')
   assert.equal(ipDuClient('pas-une-ip', null), null)
@@ -455,6 +547,28 @@ bloc('ressources, IP, appareil', () => {
   assert.equal(appareilCourt('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/129.0 Safari/537.36 Edg/129.0'), 'ordinateur windows edge')
   assert.equal(appareilCourt('Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/129.0 Mobile Safari/537.36'), 'mobile android chrome')
   assert.equal(appareilCourt(null), null)
+})
+
+bloc('pieces jointes protegees : chemin du bucket, demande de la route', () => {
+  assert.equal(cheminFichierPropre(' formation-complete/ep-01.pdf '), 'formation-complete/ep-01.pdf')
+  for (const mauvais of ['', '/a.pdf', 'a//b.pdf', '../a.pdf', 'a/../b.pdf', 'a/.cache/b.pdf', 'a b.pdf', 'a\\b.pdf', 'x'.repeat(301), 42, null]) {
+    assert.equal(cheminFichierPropre(mauvais), null, String(mauvais).slice(0, 20))
+  }
+  assert.equal(cheminDansBucket('formation-complete', 'Épisode 01 - Pourquoi se lancer ?.PDF'), 'formation-complete/episode-01-pourquoi-se-lancer.pdf')
+  assert.equal(cheminDansBucket('/formation-complete/', "L'IPDA & le temps.pdf"), 'formation-complete/l-ipda-le-temps.pdf')
+  assert.equal(cheminDansBucket('a/b', 'Ep.01.pdf'), 'a/b/ep-01.pdf')
+  assert.equal(cheminDansBucket('formation-complete', '!!!.pdf'), null)
+  assert.equal(cheminDansBucket('../x', 'a.pdf'), null)
+  assert.equal(cheminDansBucket('', 'a.pdf'), null)
+  // Ce que le script envoie, la route l'accepte.
+  assert.equal(cheminFichierPropre(cheminDansBucket('formation-complete', 'Ep 07 - Le Plan (v2).pdf')), 'formation-complete/ep-07-le-plan-v2.pdf')
+  const id = 'B03789D3-F998-44EC-8C3C-5D8C5977008C'
+  assert.deepEqual(lireDemandeRessource({ lecon_id: id, index: 0 }), { lecon: id.toLowerCase(), index: 0 })
+  assert.deepEqual(lireDemandeRessource({ lecon: id, index: 3 }), { lecon: id.toLowerCase(), index: 3 })
+  for (const mauvais of [{ lecon_id: id }, { lecon_id: id, index: -1 }, { lecon_id: id, index: 1.5 }, { lecon_id: id, index: '0' },
+    { lecon_id: id, index: MAX_RESSOURCES }, { lecon_id: 'x', index: 0 }, null]) {
+    assert.equal(lireDemandeRessource(mauvais), null)
+  }
 })
 
 bloc('cache court : duree, plafond', () => {

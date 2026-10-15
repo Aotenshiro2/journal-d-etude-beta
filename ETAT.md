@@ -783,3 +783,40 @@ hors base, residus).
 - Comptes Telegram multiples (886cb3c) : un seul dans le groupe, changement en libre-service apres code email ou alerte de conflit a Brice et Mel ; plus de renvoi vers support@ hors panne du pont vers l'equipe.
 - Formation incluse : URL_FORMATION_LIVECLUB (config.ts) = Skool ao-knowledge-trading-5563 avec l'affiliation de Mel (d009e97) ; a remplacer par l'espace formation du site.
 - Effacement en trois niveaux (197ea20) : voir docs/EFFACEMENT-DONNEES.md.
+
+## Academie : PDF proteges, offre par section, acces de l'alpha (16/10/2026, NON commite, migration 20261016140000 NON appliquee)
+
+Lot D:\6_Societe\Pilotage\Academie\lots\LOT-RESSOURCES-PROTEGEES-ET-ALPHA.md (GO de Brice le 15/10).
+- PDF proteges : bucket Supabase Storage PRIVE academie-ressources (migration
+  `20261016140000_academie_ressources_protegees.sql` : bucket prive, PDF, 50 Mo ;
+  aucune policy sur storage.objects ; evenement 'ressource' et colonne ressource
+  au journal des lectures). Piece jointe protegee = { titre, fichier } dans
+  academie_lecons.ressources ; { titre, url } reste publique (http(s) ou chemin
+  du site : le workbook /media/... etait ECARTE par ressourcesPropres, corrige).
+  Route POST /api/academie/ressource { lecon_id, index } (meme jeton, CORS et
+  regle que /lecture) : URL signee 5 min (src/lib/academie/stockage.ts, cle
+  SUPABASE_SERVICE_ROLE_KEY, presente en production), ligne 'ressource' au
+  journal (au mieux). /lecture rend aussi contenu et ressources d'une VIDEO.
+- Envoi : `node --env-file=.env.local scripts/envoyer-ressources-academie.mjs <dossier> <prefixe> [--ecrire]`
+  (a blanc par defaut, idempotent par MD5, PDF > 50 Mo ignores, refuse sans
+  bucket ou si public ; donne les lignes { titre, fichier } a coller).
+- Offre par section : champ offres_sections { "live-club": ["partie-1"] } du
+  fichier de module (importer-catalogue-academie.mjs, lireOffresSections dans
+  pur.ts) ; retire les liens par section de CE module qui ne sont plus listes.
+  Regle deja juste (section ouverte = ses lecons, module partiel) ; pourcentage
+  sorti en pur (progressionDuModule) et teste.
+- Alpha : `node --env-file=.env.local scripts/donner-acces-academie.mjs <csv> [--ecrire] [--retirer]`,
+  CSV email;offre;source;note, pose sur l'EMAIL (droitsAcademie le retrouve par
+  email verifie, aussi quand le compte est cree apres), pose_par
+  agent:alpha-2026-10, idempotent, retrait limite a ses propres lignes, bilan
+  chiffre (dont comptes verifies / non verifies / sans compte), jamais d'email.
+- Verifie : verifier-academie.mjs 33 blocs hors ligne ;
+  essayer-migration-ressources-academie.mjs (migration jouee 2 fois, bucket
+  prive, objet simule invisible pour anon et authenticated, journal, import en
+  sections, regle, acces de l'alpha, transaction ANNULEE, rien en base apres) ;
+  essais a blanc des trois scripts ; tsc, eslint des fichiers, next build ;
+  next start : preflight 204, 401 sans jeton. NON teste : 200 et 403 avec une
+  vraie session.
+- A FAIRE : appliquer la migration, deployer le journal puis le site, envoyer
+  les PDF (--ecrire), les declarer dans le fichier du module, importer, poser
+  les acces de l'alpha.

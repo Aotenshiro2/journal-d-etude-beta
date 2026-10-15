@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { droitsAcademie, type DroitsAcademie } from '@/lib/academie/droits'
 import { lireCatalogue, type Catalogue, type LeconCatalogue, type SectionCatalogue } from '@/lib/academie/catalogue'
 import { compteDuJeton, corsAcademie, entetesAcademie, origineDeLaRequete, refusAcademie, tronquer } from '@/lib/academie/http'
-import { etatLecon, ouvertureLecon, ouvertureModule, ouvertureSection, type EtatLecon, type Resultat } from '@/lib/academie/pur'
+import {
+  etatLecon, ouvertureLecon, ouvertureModule, ouvertureSection, progressionDuModule, type Resultat,
+} from '@/lib/academie/pur'
 import { noterConnexion, progressionDuCompte, type ProgressionLecon } from '@/lib/academie/suivi'
 import { messageErreur, relationAbsente } from '@/lib/liveclub/pur'
 
@@ -100,14 +102,9 @@ function construire(catalogue: Catalogue, droits: DroitsAcademie, progression: M
     })
     const publiees = jugees.filter(j => j.l.statut === 'publie')
     const acces = ouvertureModule(droits, m.id, publiees.map(j => j.r))
-    const etats = publiees.map(j => etatLecon(progression.get(j.l.id)))
-    const compter = (e: EtatLecon) => etats.filter(x => x === e).length
-    const vues = compter('vu')
     // Pourcentage sur les lecons que l'eleve a le droit de voir (Brice, 15/10/2026) : un membre du Live Club
     // atteint 100 % une fois sa partie finie, le cadenas montre la suite. Sans lecon ouverte, sur toutes.
-    const accessibles = publiees.filter(j => j.r.acces === 'ouvert')
-    const base = accessibles.length ? accessibles : publiees
-    const vuesBase = base.filter(j => etatLecon(progression.get(j.l.id)) === 'vu').length
+    const suivi = progressionDuModule(publiees.map(j => ({ acces: j.r.acces, etat: etatLecon(progression.get(j.l.id)) })))
 
     return {
       id: m.id,
@@ -125,15 +122,7 @@ function construire(catalogue: Catalogue, droits: DroitsAcademie, progression: M
       })),
       acces: acces.acces,
       raisons: acces.raisons,
-      progression: {
-        lecons: publiees.length,
-        vues,
-        en_cours: compter('en_cours'),
-        ouvertes: compter('ouvert'),
-        commencees: publiees.length - compter('non_vu'),
-        accessibles: accessibles.length,
-        pourcentage: base.length ? Math.round((vuesBase * 100) / base.length) : 0,
-      },
+      progression: suivi,
       sections: (sectionsParModule.get(m.id) ?? []).map(s => {
         const r = ouvertureSection(droits, s)
         return { id: s.id, ordre: s.ordre, titre: s.titre, acces: r.acces, raisons: r.raisons }

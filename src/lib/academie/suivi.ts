@@ -17,7 +17,7 @@ import {
   appliquerSignal, etatLecon, type EtatLecon, type EtatSuivi, type IssueSignal, type Signal, type TypeLecon, type VuPar,
 } from './pur'
 import {
-  SQL_APPLIQUER_SIGNAL, SQL_ETAT_SIGNAL, SQL_NOTER_CONNEXION, SQL_NOTER_LIEN, SQL_PROGRESSION_COMPTE,
+  SQL_APPLIQUER_SIGNAL, SQL_ETAT_SIGNAL, SQL_NOTER_CONNEXION, SQL_NOTER_LIEN, SQL_NOTER_RESSOURCE, SQL_PROGRESSION_COMPTE,
 } from './requetes'
 
 export type Progression = {
@@ -60,6 +60,13 @@ export async function noterLien(
 ): Promise<Progression | null> {
   const lignes = await prisma.$queryRawUnsafe<LigneProgression[]>(SQL_NOTER_LIEN, userId, leconId, o.ip, o.appareil)
   return lignes[0] ? progressionDeLigne(lignes[0]) : null
+}
+
+/** Une piece jointe protegee delivree : ligne 'ressource' au journal (fichier compris). Jette sur une panne. */
+export async function noterRessource(
+  userId: string, leconId: string, fichier: string, o: { ip: string | null; appareil: string | null },
+): Promise<void> {
+  await prisma.$executeRawUnsafe(SQL_NOTER_RESSOURCE, userId, leconId, fichier, o.ip, o.appareil)
 }
 
 /** Une connexion a l'academie (au plus une ligne par 30 minutes). Jette sur une panne. */

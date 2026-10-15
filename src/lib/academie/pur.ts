@@ -554,25 +554,231 @@ export function leconVue(p: { secondesVues: number; vuLe: Date | null } | null |
   return etatLecon(p) === 'vu'
 }
 
+export type ProgressionModule = {
+  /** Lecons publiees. */
+  lecons: number
+  vues: number
+  en_cours: number
+  ouvertes: number
+  /** Ouvertes au moins une fois (ouvert, en_cours ou vu). */
+  commencees: number
+  /** Lecons publiees que l'eleve a le droit de voir. */
+  accessibles: number
+  /** Part des lecons ACCESSIBLES a l'etat 'vu' (toutes les publiees s'il n'en a aucune). */
+  pourcentage: number
+}
+
+/**
+ * La progression d'un module pour /moi, sur ses lecons PUBLIEES (acces de
+ * ouvertureLecon, etat de etatLecon). Brice, 15/10 : le pourcentage se compte
+ * sur les lecons que l'eleve a le droit de voir ; un membre du Live Club
+ * atteint 100 % une fois sa partie finie, le cadenas montre la suite. Sans
+ * lecon ouverte, sur toutes.
+ */
+export function progressionDuModule(lecons: readonly { acces: Ouvert; etat: EtatLecon }[]): ProgressionModule {
+  const compter = (e: EtatLecon) => lecons.filter(l => l.etat === e).length
+  const accessibles = lecons.filter(l => l.acces === 'ouvert')
+  const base = accessibles.length ? accessibles : lecons
+  const vuesBase = base.filter(l => l.etat === 'vu').length
+  return {
+    lecons: lecons.length,
+    vues: compter('vu'),
+    en_cours: compter('en_cours'),
+    ouvertes: compter('ouvert'),
+    commencees: lecons.length - compter('non_vu'),
+    accessibles: accessibles.length,
+    pourcentage: base.length ? Math.round((vuesBase * 100) / base.length) : 0,
+  }
+}
+
 // ---------------------------------------------------------------------------
-// Ressources, adresse IP, appareil
+// Catalogue et acces par fichier (scripts d'import et de l'alpha)
 // ---------------------------------------------------------------------------
 
-export type Ressource = { titre: string; url: string }
+const SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/
 
-/** Les pieces jointes valables (titre et adresse http(s)), 50 au plus. */
+/**
+ * Le champ « offres_sections » d'un fichier de module
+ * (scripts/importer-catalogue-academie.mjs) : { "<offre>": ["<cle de
+ * section>", ...] }, ou chaque cle est celle d'une section du fichier (comme
+ * le champ « section » des lecons). Absent = aucun lien par section. Rend les
+ * paires sans doublon ; jette si le champ est mal forme ou si une cle est
+ * inconnue (l'import s'arrete, rien n'est ecrit).
+ */
+export function lireOffresSections(brut: unknown, clesConnues: ReadonlySet<string>): { offre: string; cle: string }[] {
+  if (brut === undefined || brut === null) return []
+  if (typeof brut !== 'object' || Array.isArray(brut)) {
+    throw new Error('offres_sections doit etre un objet { "<offre>": ["<cle de section>", ...] }')
+  }
+  const paires: { offre: string; cle: string }[] = []
+  const vues = new Set<string>()
+  for (const [offre, cles] of Object.entries(brut as Record<string, unknown>)) {
+    if (!SLUG_RE.test(offre)) throw new Error(`offres_sections : offre mal formee « ${offre} »`)
+    if (!Array.isArray(cles)) throw new Error(`offres_sections.${offre} doit etre une liste de cles de section`)
+    for (const cle of cles) {
+      if (typeof cle !== 'string' || !clesConnues.has(cle)) {
+        throw new Error(`offres_sections.${offre} : section inconnue « ${String(cle)} »`)
+      }
+      const k = `${offre}\u0000${cle}`
+      if (vues.has(k)) continue
+      vues.add(k)
+      paires.push({ offre, cle })
+    }
+  }
+  return paires
+}
+
+export type LigneCsvAcces = { numero: number; email: string; offre: string; source: SourceAcces; note: string | null }
+
+const EMAIL_RE = /^[^\s@;,<>]+@[^\s@;,<>]+\.[^\s@;,<>]+$/
+
+/**
+ * Le CSV des acces de l'alpha (scripts/donner-acces-academie.mjs) :
+ * « email;offre;source;note », une ligne par acces, en-tete facultatif, lignes
+ * vides et lignes en « # » ignorees. email en minuscules ; source vide =
+ * 'offert' ; note vide = null (1 000 caracteres au plus). Une meme paire
+ * email + offre n'est gardee qu'une fois (doublons comptes). Les erreurs
+ * donnent le numero de ligne et le motif, JAMAIS l'email.
+ */
+export function lireCsvAcces(texte: string): {
+  lignes: LigneCsvAcces[]
+  erreurs: { numero: number; motif: string }[]
+  doublons: number
+} {
+  const lignes: LigneCsvAcces[] = []
+  const erreurs: { numero: number; motif: string }[] = []
+  const vues = new Set<string>()
+  let doublons = 0
+  const brutes = texte.replace(/^﻿/, '').replace(/\r\n?/g, '\n').split('\n')
+  brutes.forEach((brute, i) => {
+    const numero = i + 1 // numero de ligne du fichier
+    const ligne = brute.trim()
+    if (!ligne || ligne.startsWith('#')) return
+    const morceaux = ligne.split(';')
+    const [emailBrut = '', offre = '', sourceBrute = ''] = morceaux.slice(0, 3).map(c => c.trim())
+    if (emailBrut.toLowerCase() === 'email') return // en-tete
+    const email = emailBrut.toLowerCase()
+    // La note garde ses propres « ; ».
+    const note = morceaux.slice(3).join(';').trim()
+    if (email.length < 3 || email.length > 320 || !EMAIL_RE.test(email)) { erreurs.push({ numero, motif: 'email illisible' }); return }
+    if (!SLUG_RE.test(offre)) { erreurs.push({ numero, motif: 'offre mal formee' }); return }
+    const source = sourceBrute || 'offert'
+    if (!estSource(source)) { erreurs.push({ numero, motif: `source inconnue (${source.slice(0, 30)})` }); return }
+    if (note.length > 1000) { erreurs.push({ numero, motif: 'note de plus de 1000 caracteres' }); return }
+    const cle = `${email}\u0000${offre}`
+    if (vues.has(cle)) { doublons++; return }
+    vues.add(cle)
+    lignes.push({ numero, email, offre, source, note: note || null })
+  })
+  return { lignes, erreurs, doublons }
+}
+
+// ---------------------------------------------------------------------------
+// Ressources (pieces jointes), adresse IP, appareil
+// ---------------------------------------------------------------------------
+
+/**
+ * Le bucket Supabase Storage PRIVE des pieces jointes payantes (migration
+ * 20261016140000_academie_ressources_protegees.sql). Aucune policy sur
+ * storage.objects : seul le serveur (cle de service) y lit, et l'eleve ne
+ * recoit qu'une URL signee de 5 minutes (route /api/academie/ressource).
+ */
+export const BUCKET_RESSOURCES = 'academie-ressources'
+
+/** Nombre de pieces jointes gardees par lecon. */
+export const MAX_RESSOURCES = 50
+
+/**
+ * Une piece jointe de lecon (academie_lecons.ressources) :
+ * - publique : { titre, url }, adresse http(s) ou chemin du site
+ *   (/media/academie/ressources/...), servie telle quelle ;
+ * - protegee : { titre, fichier }, chemin dans le bucket prive
+ *   (formation-complete/ep-01-pourquoi-se-lancer.pdf), ouverte par une URL
+ *   signee apres le droit.
+ */
+export type Ressource = { titre: string; url: string } | { titre: string; fichier: string }
+
+const FICHIER_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*(\/[A-Za-z0-9][A-Za-z0-9._-]*)*$/
+
+/**
+ * Un chemin de fichier du bucket, ou null : segments separes par « / », chacun
+ * commencant par une lettre ou un chiffre (donc ni « .. », ni chemin absolu),
+ * 300 caracteres au plus.
+ */
+export function cheminFichierPropre(valeur: unknown): string | null {
+  if (typeof valeur !== 'string') return null
+  const c = valeur.trim()
+  return c.length > 0 && c.length <= 300 && FICHIER_RE.test(c) ? c : null
+}
+
+/**
+ * Une adresse publique, ou null : http(s), ou chemin du site qui commence par
+ * un seul « / » (jamais « // » ni « /\ », que le navigateur lirait comme un
+ * autre domaine), sans espace ni barre oblique inverse.
+ */
+function adressePublique(valeur: unknown): string | null {
+  if (typeof valeur !== 'string') return null
+  const u = valeur.trim()
+  if (!u || u.length > 2000 || /[\s\\]/.test(u)) return null
+  if (/^https?:\/\/[^/]/i.test(u)) return u
+  if (/^\/[^/]/.test(u)) return u
+  return null
+}
+
+/**
+ * Les pieces jointes valables, MAX_RESSOURCES au plus, dans l'ordre du
+ * catalogue. Un « fichier » l'emporte sur une « url » (protegee d'abord) ; un
+ * fichier mal forme ecarte la piece jointe (jamais de repli sur l'url).
+ * L'index d'une piece jointe dans CETTE liste est celui que la page envoie a
+ * /api/academie/ressource.
+ */
 export function ressourcesPropres(brut: unknown): Ressource[] {
   if (!Array.isArray(brut)) return []
   const propres: Ressource[] = []
   for (const r of brut) {
     if (!r || typeof r !== 'object') continue
-    const { titre, url } = r as Record<string, unknown>
-    if (typeof titre !== 'string' || typeof url !== 'string') continue
-    if (!/^https?:\/\//i.test(url.trim())) continue
-    propres.push({ titre: titre.trim().slice(0, 300), url: url.trim() })
-    if (propres.length >= 50) break
+    const { titre, url, fichier } = r as Record<string, unknown>
+    if (typeof titre !== 'string' || !titre.trim()) continue
+    const t = titre.trim().slice(0, 300)
+    if (fichier !== undefined && fichier !== null) {
+      const f = cheminFichierPropre(fichier)
+      if (!f) continue
+      propres.push({ titre: t, fichier: f })
+    } else {
+      const u = adressePublique(url)
+      if (!u) continue
+      propres.push({ titre: t, url: u })
+    }
+    if (propres.length >= MAX_RESSOURCES) break
   }
   return propres
+}
+
+/** POST /api/academie/ressource : { lecon_id, index } (lecon accepte aussi). */
+export function lireDemandeRessource(corps: unknown): { lecon: string; index: number } | null {
+  const c = (corps && typeof corps === 'object' ? corps : {}) as Record<string, unknown>
+  const lecon = lireUuid(c.lecon_id ?? c.lecon)
+  const index = c.index
+  if (!lecon || typeof index !== 'number' || !Number.isInteger(index) || index < 0 || index >= MAX_RESSOURCES) return null
+  return { lecon, index }
+}
+
+/**
+ * Le chemin d'un fichier local dans le bucket : prefixe (segments propres,
+ * sans « / » au bord) + nom du fichier sans accents, en minuscules, chaque
+ * suite d'autres caracteres remplacee par « - ». null si le prefixe ou le nom
+ * ne donne rien de propre. « Épisode 01 - Pourquoi se lancer.PDF » ->
+ * « <prefixe>/episode-01-pourquoi-se-lancer.pdf ».
+ */
+export function cheminDansBucket(prefixe: string, nomLocal: string): string | null {
+  const p = prefixe.trim().replace(/^\/+|\/+$/g, '')
+  if (!cheminFichierPropre(p)) return null
+  const nom = nomLocal.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+  const point = nom.lastIndexOf('.')
+  const base = (point > 0 ? nom.slice(0, point) : nom).replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+  const ext = point > 0 ? nom.slice(point + 1).replace(/[^a-z0-9]/g, '') : ''
+  if (!base) return null
+  return cheminFichierPropre(`${p}/${base}${ext ? `.${ext}` : ''}`)
 }
 
 /** La premiere adresse de x-forwarded-for (ou x-real-ip) si c'est une IP, sinon null. */

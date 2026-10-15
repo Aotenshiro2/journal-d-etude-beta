@@ -19,10 +19,14 @@ import { messageErreur, relationAbsente } from '@/lib/liveclub/pur'
  *   200 { ok: true, raison, raisons, lecon: {...}, reprise_s, progression, ... } avec, selon la lecon
  *       (progression.etat : 'ouvert' des la premiere ouverture, puis en_cours ou vu ; l'ouverture
  *       cree ou rafraichit la ligne de progression pour une video, un texte ou un PDF) :
- *         video Bunny  : hebergeur 'bunny', url (lecteur signe 4 h), expire_le
- *         video Wistia : hebergeur 'wistia', wistia_id (le lecteur Wistia est branche cote site)
+ *         video Bunny  : hebergeur 'bunny', url (lecteur signe 4 h), expire_le, contenu, ressources
+ *         video Wistia : hebergeur 'wistia', wistia_id (le lecteur Wistia est branche cote site), contenu, ressources
  *         texte        : contenu, ressources
  *         pdf          : ressources
+ *       contenu d'une video : son texte en Markdown (consignes, liens), null s'il est vide.
+ *       ressources : [{ titre, url }] (publique : http(s) ou chemin du site) ou [{ titre, fichier }]
+ *       (protegee : la page demande une URL signee a /api/academie/ressource { lecon_id, index },
+ *       index = rang dans cette liste).
  *   400 { ok: false, erreur: 'lecon' | 'video' } corps illisible, ou video d'aucune lecon publiee
  *   401 { ok: false, erreur: 'jeton' }           pas de jeton, ou jeton refuse
  *   403 { ok: false, erreur: 'acces' }           compte sans droit sur cette lecon
@@ -146,9 +150,11 @@ export async function POST(req: NextRequest) {
   const lecon: LeconComplete = ouverte.lecon
   const resultat: Resultat = ouverte.resultat
 
-  // 5. Ce qu'on delivre.
+  // 5. Ce qu'on delivre. Une video porte aussi son texte (consignes, liens,
+  // sous le lecteur) s'il y en a un, et ses pieces jointes.
   let livraison: Record<string, unknown>
   if (lecon.type === 'video') {
+    const autour = { contenu: lecon.contenu?.trim() ? lecon.contenu : null, ressources: lecon.ressources }
     if (lecon.hebergeur === 'bunny' && lecon.bunnyVideoId) {
       const bibliotheque = lecon.bunnyBibliotheque ?? ''
       const config = configBibliotheque(bibliotheque)
@@ -158,9 +164,9 @@ export async function POST(req: NextRequest) {
       }
       const lien = signerLecture(lecon.bunnyVideoId, DUREE_LIEN_S, { config })
       if (!lien) return refus('config', 503)
-      livraison = { hebergeur: 'bunny', url: lien.url, expire_le: lien.expireLe }
+      livraison = { hebergeur: 'bunny', url: lien.url, expire_le: lien.expireLe, ...autour }
     } else if (lecon.hebergeur === 'wistia' && lecon.wistiaId) {
-      livraison = { hebergeur: 'wistia', wistia_id: lecon.wistiaId }
+      livraison = { hebergeur: 'wistia', wistia_id: lecon.wistiaId, ...autour }
     } else {
       console.warn(`[academie/lecture] video publiee sans hebergeur : lecon=${lecon.id}`)
       return refus('config', 503)

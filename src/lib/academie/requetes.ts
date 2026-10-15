@@ -10,7 +10,8 @@
 //
 // Tables : sites/Aoknowledgecom/supabase/migrations/20261015210000_academie_tables.sql,
 // etats et « vu » a 60 % : 20261016110000_academie_etats_vu.sql (vu_le, vu_par,
-// evenement texte_fin). Ces requetes demandent les deux migrations.
+// evenement texte_fin). Ces requetes demandent les deux migrations ;
+// SQL_NOTER_RESSOURCE demande aussi 20261016140000_academie_ressources_protegees.sql.
 // Toutes les colonnes uuid sortent en ::text, les compteurs en ::int.
 
 // ---------------------------------------------------------------------------
@@ -209,6 +210,20 @@ with prog as (
   returning 1
 )
 select prog.*, (select count(*)::int from journal) as journalise from prog
+`
+
+/**
+ * $1 = compte, $2 = lecon, $3 = chemin du fichier dans le bucket prive, $4 = ip
+ * (texte ou null), $5 = appareil (ou null). Une piece jointe PROTEGEE vient
+ * d'etre delivree (URL signee de 5 min) : ligne 'ressource' au journal, avec
+ * le fichier (preuve « tel document a ete ouvert »). La progression n'est pas
+ * touchee (l'ouverture de la lecon l'a deja creee).
+ * Demande la migration 20261016140000_academie_ressources_protegees.sql
+ * (evenement 'ressource', colonne ressource).
+ */
+export const SQL_NOTER_RESSOURCE = `
+insert into public.academie_lectures (user_id, lecon_id, evenement, ressource, ip, appareil)
+values ($1::uuid, $2::uuid, 'ressource', $3::text, $4::inet, $5::text)
 `
 
 /** $1 = compte, $2 = lecon. L'etat d'une progression pour appliquer un signal, avec l'heure de la base. */
