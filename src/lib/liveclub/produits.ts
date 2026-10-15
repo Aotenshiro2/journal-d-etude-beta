@@ -82,3 +82,49 @@ export async function inscrireProduitLiveClub(o: {
     return { ok: false, raison: 'echec', message: `La base a refusé l'inscription (${messageErreur(err)}).` }
   }
 }
+
+// ---------------------------------------------------------------------------
+// Le produit COMMUN des tarifs reserves (Brice, 13/10) : « Live Club (tarif
+// reserve) », cree une seule fois par le serveur, puis retrouve par sa ligne
+// dans cockpit_liveclub_produits (colonne role = 'tarif_reserve', une seule
+// active : index unique, migration 20261013160000). Chaque personne y a SON
+// tarif (price), a son nom.
+// ---------------------------------------------------------------------------
+
+/** Le produit commun inscrit en base, ou null. Jette si la base ne repond pas (colonne absente comprise). */
+export async function produitTarifsReservesInscrit(): Promise<string | null> {
+  const lignes = await prisma.$queryRaw<{ produit_id: string }[]>`
+    select produit_id from public.cockpit_liveclub_produits
+    where role = 'tarif_reserve' and retire_le is null
+    limit 1`
+  return lignes[0]?.produit_id ?? null
+}
+
+/**
+ * Inscrit le produit commun (produit Live Club ET role 'tarif_reserve'). Deja
+ * inscrit : il recoit le role (et revient s'il etait retire). Un AUTRE
+ * produit commun deja actif : l'index unique refuse (echec). Vide le cache de
+ * cette instance. Ne jette pas.
+ */
+export async function inscrireProduitTarifsReserves(o: { produitId: string; nom: string; posePar: string }): Promise<IssueInscriptionProduit> {
+  try {
+    const lignes = await prisma.$queryRaw<{ produit_id: string }[]>`
+      insert into public.cockpit_liveclub_produits (produit_id, compte, nom, pose_par, note, role)
+      values (${o.produitId}, 'melanie', ${o.nom.slice(0, 200)}, ${o.posePar.slice(0, 120)},
+              'produit commun des tarifs reserves', 'tarif_reserve')
+      on conflict (produit_id) do update
+        set role = 'tarif_reserve', retire_le = null, retire_par = null
+      returning produit_id`
+    lecteur.oublier()
+    return { ok: true, deja: lignes.length === 0 }
+  } catch (err) {
+    if (relationAbsente(err) || /column .*role.* does not exist|42703/i.test(messageErreur(err))) {
+      return {
+        ok: false, raison: 'table_absente',
+        message: "La colonne role de cockpit_liveclub_produits n'existe pas encore (migration 20261013160000_cockpit_liveclub_tarifs_reserves.sql à appliquer).",
+      }
+    }
+    console.error(`[liveclub/produits] produit commun non inscrit : ${messageErreur(err)}`)
+    return { ok: false, raison: 'echec', message: `La base a refusé d'inscrire le produit commun (${messageErreur(err)}).` }
+  }
+}

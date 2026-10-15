@@ -82,6 +82,7 @@ import {
 import { droitLiveClub, type Droit } from './droits'
 import { annulerReservationEmail, creerJeton, jetonExistant } from './jetons'
 import { preparerBienvenue } from './bienvenue'
+import { rapprocherTarifsReserves } from './reserves'
 import { appelTelegram, envoyer, lienDemandeAdhesion } from './telegram'
 import { tracerGeste, tracerMessageBot } from './support-pont'
 import {
@@ -172,6 +173,12 @@ export type SynthesePassage = {
    */
   exemptions: { rappels_j7: number; sorties: number; simulees: number; messages_fin: number; closes_absent: number; gardees_autre_droit: number; sans_moyen: number; inconnus: number; echecs: number }
   purge: { conversations: number }
+  /**
+   * (l) Tarifs reserves (13/10) : reservations ouvertes rapprochees des
+   * abonnements de leur tarif (meme email). payees : marquees payees ce
+   * passage ; en_attente : rien de paye ; illisibles : tarif pas lu chez Stripe.
+   */
+  tarifs_reserves: { payees: number; en_attente: number; illisibles: number }
   /** Lignes de journal perdues (table ou contrainte pas encore migree). */
   journal_echecs: number
   /** Messages qui n'ont pu partir ni en prive ni par email. */
@@ -2702,6 +2709,7 @@ export async function passageQuotidien(maintenant: Date = new Date()): Promise<S
       bienvenue: { simules: 0, envoyes: 0, deja_envoyes: 0, deja_traites: 0, rattaches: 0, sans_email: 0, inconnus: 0, echecs: 0 },
       exemptions: { rappels_j7: 0, sorties: 0, simulees: 0, messages_fin: 0, closes_absent: 0, gardees_autre_droit: 0, sans_moyen: 0, inconnus: 0, echecs: 0 },
       purge: { conversations: 0 },
+      tarifs_reserves: { payees: 0, en_attente: 0, illisibles: 0 },
       journal_echecs: 0,
       messages_perdus: 0,
       erreurs: [],
@@ -2762,6 +2770,13 @@ export async function passageQuotidien(maintenant: Date = new Date()): Promise<S
   // Le droit s'y relit en direct (droitLiveClub) : la liste Stripe du passage
   // n'est pas necessaire, une panne Stripe donne 'inconnu' et rien ne part.
   await etape('metricgram', () => tacheSortiesMetricgram(ctx, rattaches, abonnements))
+  // (l) Tarifs reserves (13/10) : lus par tarif chez Stripe, sans la liste du
+  // passage. Le filet de la page de bienvenue (personne revenue sans passer
+  // par elle). Un tarif illisible ne marque rien.
+  await etape('tarifs_reserves', async () => {
+    ctx.s.tarifs_reserves = await rapprocherTarifsReserves()
+    if (ctx.s.tarifs_reserves.illisibles > 0) erreur(ctx, 'tarifs_reserves_illisibles')
+  })
   await etape('purge', () => tachePurge(ctx))
 
   ctx.s.sorties_reelles = ctx.plafond.faites

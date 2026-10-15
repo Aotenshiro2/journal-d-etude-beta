@@ -38,6 +38,12 @@
 //   Cockpit, dans sa conversation avec Agent AOK (transmettreSiEquipe). Ni
 //   fil Support, ni « veut un humain », ni alerte email. /start, /menu et les
 //   boutons restent ceux d'un compte exempte.
+// - (13/10, Brice) un TARIF RESERVE pas encore paye (reserves.ts) : la
+//   personne, reconnue par son compte Telegram ou par son email verifie,
+//   recoit SON lien de paiement a la place des liens d'abonnement publics
+//   (proposerTarifReserve) : /start, /menu, apres le code, texte libre,
+//   « Mon abonnement ». Jamais sur un email tape et non verifie. Rien ne
+//   change pour les autres comptes.
 
 import { journaliserGesteLiveClub } from '@/lib/stripe-actions'
 import { prisma } from '@/lib/db'
@@ -67,10 +73,11 @@ import { enregistrerEchangeSupport, estEnAttenteHumain, texteAvecBoutons, tracer
 import {
   envoyerCodeSiConnu, rattacherParEmail, reserverCode, verifierCode, type CodeReserve, type IssueCode,
 } from './verification'
+import { lienDeLaReserve, poserTelegramSurReserve, reserveOuvertePourCompte, type ReserveLue } from './reserves'
 import { CODE_ENVOIS_HEURE, CODE_VALIDITE_MINUTES, intentionNonRattache, masquerCodes } from './verification-pur'
 import {
   REGLE_RAISON_SORTIE, jetonBienForme, libelleBouton, messageErreur, normaliserEmail, pauseDejaProposee, relationAbsente,
-  sortieAExpliquer, texteDette, type GesteDate,
+  sortieAExpliquer, texteDette, texteTarifReserve, type GesteDate,
   COMMANDE_BOT_MEMBRE, aiguillageMessagePrive, TEXTE_TRANSMIS_AU_COCKPIT, TEXTE_NON_TRANSMIS_AU_COCKPIT,
 } from './pur'
 import {
@@ -576,6 +583,56 @@ async function proposerRetourAuGroupe(chat: number, u: Utilisateur, updateId: nu
 }
 
 // ---------------------------------------------------------------------------
+// Tarif reserve (Brice, 13/10) : SON lien de paiement, pas les liens publics
+// ---------------------------------------------------------------------------
+
+type OptionsTarifReserve = {
+  /** Email VERIFIE (code, ou email du rattachement). Jamais un email tape et non verifie. */
+  emailVerifie: string | null
+  /** Texte place avant le message (accueil de /start, email verifie...). */
+  entete?: string
+  /** Le droit deja lu par l'appelant, pour ne pas le relire. */
+  droit?: Droit
+  /** La reservation deja lue par l'appelant. */
+  reserve?: ReserveLue
+  /** Texte libre : si l'equipe a la main (fil « veut un humain »), le bot ne parle pas a sa place. */
+  respecterAttenteHumain?: boolean
+}
+
+/**
+ * Une personne a qui l'equipe a ouvert un tarif reserve (reserves.ts), pas
+ * encore payee, sans droit ouvert : le bot lui donne SON lien de paiement,
+ * avec le bouton « Payer », a la place des liens d'abonnement publics. Elle
+ * est reconnue par son compte Telegram (pose par l'equipe) ou par son email
+ * verifie. Un droit ouvert (deja paye, exemption...), illisible, ou une
+ * dette d'un ancien abonnement (la dette d'abord) : rien ici. Le lien est
+ * reutilise s'il marche, sinon recree (jamais avant d'avoir verifie que rien
+ * n'est deja paye). Renvoie true si un message est parti : l'appelant
+ * n'envoie alors pas sa reponse habituelle.
+ */
+async function proposerTarifReserve(chat: number, u: Utilisateur, o: OptionsTarifReserve): Promise<boolean> {
+  const reserve = o.reserve ?? await reserveOuvertePourCompte(u.id, o.emailVerifie)
+  if (!reserve) return false
+  if (o.respecterAttenteHumain && await estEnAttenteHumain(u.id)) return false
+  const droit = o.droit ?? await droitLiveClub(u.id)
+  if (droit.statut !== 'non' || droit.dette) return false
+
+  const issue = await lienDeLaReserve(reserve)
+  // Deja paye (abonnement trouve a l'instant) sans droit lu sur ce compte : le
+  // parcours habituel (verification de l'email du paiement) le fera entrer.
+  if (issue.etat === 'payee') return false
+  const avant = o.entete ? `${o.entete}\n\n` : ''
+  if (issue.etat === 'panne') {
+    await envoyer(chat, `${avant}Ton abonnement Live Club est prêt, mais je n'arrive pas à préparer ton lien de paiement là, tout de suite. `
+      + `Réessaie dans quelques minutes avec /menu, ou écris à ${SUPPORT}.`, clavierEquipe())
+    return true
+  }
+  // Le bouton porte l'adresse : au fil Support, seul son libelle entre.
+  await envoyer(chat, `${avant}${texteTarifReserve(issue.tarif)}`, [[{ texte: 'Payer', url: issue.url }], ...clavierEquipe()])
+  return true
+}
+
+// ---------------------------------------------------------------------------
 // (5) /start <jeton>, (6) /start ou /menu, (7) texte libre
 // ---------------------------------------------------------------------------
 
@@ -749,6 +806,16 @@ async function apresCodeValide(chat: number, u: Utilisateur, email: string, upda
   // Pas de lien : dans le groupe, ou pas de droit ouvert. Un impaye encore
   // dans la fenetre de 30 jours : la dette d'abord (Brice, 30/09).
   const droit = await droitLiveClub(u.id)
+  // (13/10) Un tarif reserve a cet email, verifie a l'instant : son compte
+  // Telegram est note sur la reservation (le bot le reconnaitra des
+  // Demarrer), puis SON lien a la place des liens publics.
+  if (droit.statut === 'non' && !droit.dette) {
+    const reserve = await reserveOuvertePourCompte(u.id, email)
+    if (reserve) {
+      if (reserve.telegram_id === null) await poserTelegramSurReserve(reserve.reserve_id, u.id)
+      if (await proposerTarifReserve(chat, u, { emailVerifie: email, entete: `C'est bon, ton email est vérifié.`, droit, reserve })) return
+    }
+  }
   const suite = droit.statut !== 'non'
     ? `Tu es déjà dans le groupe, tout est bon. Que veux-tu faire ?`
     : droit.dette
@@ -769,7 +836,9 @@ async function apresCodeValide(chat: number, u: Utilisateur, email: string, upda
  * ni la raison d'une sortie, qu'on ne peut pas dire a quelqu'un qui a peut-etre
  * un acces offert.
  */
-async function traiterNonRattache(chat: number, u: Utilisateur, texte: string, updateId: number, droitIllisible = false): Promise<void> {
+async function traiterNonRattache(
+  chat: number, u: Utilisateur, texte: string, updateId: number, droitIllisible = false, droit?: Droit,
+): Promise<void> {
   const intention = intentionNonRattache(texte)
   // Un code tape n'est jamais lisible dans le fil Support, meme glisse dans
   // une phrase que lireCode n'a pas reconnue.
@@ -828,6 +897,10 @@ async function traiterNonRattache(chat: number, u: Utilisateur, texte: string, u
     await repondre(TEXTE_PANNE)
     return
   }
+  // (13/10) Son compte Telegram est sur un tarif reserve : SON lien, pas les
+  // liens publics. Pas sur un email ni un code (plus haut) : la verification
+  // d'abord, et apres le code, le bot donne le meme lien.
+  if (await proposerTarifReserve(chat, u, { emailVerifie: null, droit })) return
   // Sorti du groupe il y a peu (06/10) : la raison d'abord, a la place du
   // texte habituel. Pas sur un email ni un code (plus haut) : il est deja
   // dans la verification, la raison attend son prochain message.
@@ -854,6 +927,10 @@ async function traiterTexteLibre(chat: number, u: Utilisateur, texte: string, up
     // n'a pas d'outil pour le donner. Le message du membre est trace avant.
     await versSupport(u.id, r, 'membre', texte)
     if (await proposerRetourAuGroupe(chat, u, updateId, { declencheur: 'texte', boutons: clavierMenu(), reprendre: true })) return
+    // (13/10) Un tarif reserve pas encore paye : SON lien, pas l'agent (qui
+    // donnerait les liens d'abonnement publics). Si l'equipe a la main,
+    // l'agent dit d'attendre, comme d'habitude.
+    if (await proposerTarifReserve(chat, u, { emailVerifie: r.email, respecterAttenteHumain: true })) return
     await converserAvecAgent(chat, u, texte, r, clavierMenu())
     return
   }
@@ -871,7 +948,7 @@ async function traiterTexteLibre(chat: number, u: Utilisateur, texte: string, up
     await repondeur(chat, u.id, null)(TEXTE_PANNE)
     return
   }
-  await traiterNonRattache(chat, u, texte, updateId, profil.parcours === 'panne')
+  await traiterNonRattache(chat, u, texte, updateId, profil.parcours === 'panne', profil.droit)
 }
 
 /**
@@ -985,6 +1062,8 @@ export async function traiterMessagePrive(message: MessageTg, updateId: number):
     // avec le menu, au lieu du seul menu.
     if (r && r !== 'illisible') {
       if (await proposerRetourAuGroupe(chat, u, updateId, { declencheur, entete, boutons: clavierMenu(), reprendre: false })) return
+      // (13/10) Un tarif reserve a son email ou a son compte, pas encore paye : SON lien.
+      if (await proposerTarifReserve(chat, u, { emailVerifie: r.email, entete })) return
       await envoyerMenu(chat, u.id, entete, r)
       return
     }
@@ -995,6 +1074,9 @@ export async function traiterMessagePrive(message: MessageTg, updateId: number):
     if (profil.parcours === 'acces_offert' && await proposerRetourAuGroupe(chat, u, updateId, {
       declencheur, entete, boutons: clavierAccesOffert(), reprendre: false, droit: profil.droit,
     })) return
+    // (13/10) Son compte Telegram est sur un tarif reserve : SON lien, des Demarrer.
+    if (profil.parcours === 'non_rattache'
+      && await proposerTarifReserve(chat, u, { emailVerifie: null, entete, droit: profil.droit })) return
     await envoyerMenu(chat, u.id, entete, r, profil)
     return
   }
@@ -1182,6 +1264,8 @@ export async function traiterBouton(bouton: BoutonTg, updateId: number): Promise
       await envoyer(chat, TEXTE_PANNE)
       return
     }
+    // (13/10) Son compte Telegram est sur un tarif reserve : SON lien.
+    if (await proposerTarifReserve(chat, u, { emailVerifie: null, droit: p.droit })) return
     // Non rattache, sorti du groupe il y a peu (06/10) : la raison d'abord.
     if (await donnerRaisonDeLaSortie(chat, u.id, { boutons: clavierSansRattachement() })) return
     await envoyer(chat, TEXTE_NON_RATTACHE, clavierSansRattachement())
@@ -1196,6 +1280,8 @@ export async function traiterBouton(bouton: BoutonTg, updateId: number): Promise
   if (data === 'm:abo') {
     await repondreBouton(bouton.id)
     await retour()
+    // (13/10) Un tarif reserve pas encore paye : son abonnement, c'est SON lien.
+    if (await proposerTarifReserve(chat, u, { emailVerifie: r.email })) return
     const s = await situationDuMembre(u.id)
     await envoyer(chat, s.etat === 'ok' ? s.texte : s.etat === 'non_rattache' ? TEXTE_NON_RATTACHE : TEXTE_PANNE, clavierMenu())
     return

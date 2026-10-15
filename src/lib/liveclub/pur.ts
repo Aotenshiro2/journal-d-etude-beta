@@ -2060,3 +2060,363 @@ export function phraseProduitCree(o: {
   }
   return `${tete}\n${suite}`
 }
+
+// ---------------------------------------------------------------------------
+// Tarifs RESERVES du Live Club (Brice, 13/10)
+//
+// « Ouvre un abonnement a ce prix pour cette personne » : un prix PERSONNEL,
+// ouvert a UNE personne (son email), jamais repris pour quelqu'un d'autre. Le
+// nom d'un produit (« Live Club ETM ») ne dit rien du prix d'un autre eleve.
+// Table cockpit_liveclub_tarifs_reserves (migration 20261013160000) : l'agent
+// du cockpit la pose (proposer_abonnement_reserve), le bot des membres donne
+// SON lien a la personne (reconnue par son compte Telegram ou son email
+// verifie), la page de bienvenue et le passage quotidien la marquent payee.
+// La personne n'a acces qu'une fois payee : c'est l'abonnement qui ouvre le
+// groupe, comme pour tout abonne.
+// ---------------------------------------------------------------------------
+
+export const RECURRENCES_RESERVE = ['month', 'year'] as const
+export type RecurrenceReserve = (typeof RECURRENCES_RESERVE)[number]
+/** Montant d'un tarif reserve, en euros : le minimum que Stripe encaisse, et le plafond de proposer_produit. */
+export const MONTANT_RESERVE_MIN = 0.5
+export const MONTANT_RESERVE_MAX = 20000
+/** Nom du produit Stripe commun a tous les tarifs reserves. */
+export const NOM_PRODUIT_TARIFS_RESERVES = 'Live Club (tarif réservé)'
+/** Metadonnee du produit commun chez Stripe (retrouve si sa ligne en base manque). */
+export const META_ROLE_PRODUIT = 'aok_role'
+export const ROLE_PRODUIT_TARIFS_RESERVES = 'liveclub_tarif_reserve'
+/** Metadonnee d'un tarif (price) reserve : l'email de la personne. */
+export const META_RESERVE_POUR = 'reserve_pour'
+
+function estRecurrenceReserve(v: unknown): v is RecurrenceReserve {
+  return v === 'month' || v === 'year'
+}
+
+/** Les parametres de proposer_abonnement_reserve (agent du Cockpit, 13/10). */
+export type ParamsAbonnementReserve = {
+  qui: string
+  email: string
+  telegram_id: number | null
+  /** Euros. Obligatoire sans price_id ; avec price_id, compare au tarif lu. */
+  montant: number | null
+  recurrence: RecurrenceReserve | null
+  /** Un tarif existant a reprendre (price_...), null = un tarif cree a son nom. */
+  price_id: string | null
+  note: string | null
+  // Remplis par le SERVEUR avant la carte (lus chez Stripe), pour la carte
+  // seulement : l'execution relit tout.
+  montant_centimes: number | null
+  devise: string | null
+  produit_id: string | null
+  produit_nom: string | null
+  /** Le produit du tarif repris n'ouvre pas encore le Live Club : l'execution l'inscrit. */
+  inscrire_produit: boolean
+}
+
+/**
+ * Les parametres d'un abonnement reserve, ou la raison du refus (rendue au
+ * modele). Sans price_id, montant (0,50 a 20 000 euros, au centime) et
+ * recurrence (month | year) sont obligatoires. Un montant de 0 n'est pas un
+ * tarif : un acces gratuit est une exemption.
+ */
+export function lireParamsAbonnementReserve(p: Record<string, unknown>): ParamsAbonnementReserve | string {
+  const qui = String(p.qui ?? '').trim().slice(0, 80)
+  if (!qui) return 'Précise QUI (prénom ou nom) : la carte, le tarif et le message du bot le nomment.'
+  const email = normaliserEmail(p.email)
+  if (!email) {
+    return p.email == null || String(p.email).trim() === ''
+      ? "L'email de la personne est obligatoire : c'est lui qui la reconnaît (bot, paiement). Demande-le, n'en invente jamais."
+      : `Email illisible (${String(p.email).trim().slice(0, 80)}) : corrige-le.`
+  }
+  let telegramId: number | null = null
+  if (p.telegram_id != null && String(p.telegram_id).trim() !== '') {
+    telegramId = lireTelegramId(p.telegram_id)
+    if (telegramId === null) return 'telegram_id invalide (le numéro u… du compte Telegram, sans le u), ou vide.'
+  }
+  const prixBrut = p.price_id == null ? '' : String(p.price_id).trim()
+  if (prixBrut && !ID_TARIF_STRIPE.test(prixBrut)) return 'price_id invalide (price_...), ou vide pour créer un tarif à son nom.'
+  const priceId = prixBrut || null
+
+  let montant: number | null = null
+  if (p.montant != null && String(p.montant).trim() !== '') {
+    const m = Number(p.montant)
+    if (!Number.isFinite(m)) return 'montant illisible (en euros, par exemple 1 ou 29.90).'
+    if (m <= 0) return "Un tarif réservé se paie : pour un accès gratuit, c'est une exemption (proposer_exemption)."
+    if (m < MONTANT_RESERVE_MIN || m > MONTANT_RESERVE_MAX) {
+      return `montant entre ${String(MONTANT_RESERVE_MIN).replace('.', ',')} et ${MONTANT_RESERVE_MAX} euros (le minimum que Stripe encaisse est 0,50).`
+    }
+    if (Math.abs(Math.round(m * 100) - m * 100) > 1e-6) return 'montant au centime près (deux décimales au plus).'
+    montant = m
+  }
+  let recurrence: RecurrenceReserve | null = null
+  if (p.recurrence != null && String(p.recurrence).trim() !== '') {
+    if (!estRecurrenceReserve(p.recurrence)) return 'recurrence : month (par mois) ou year (par an).'
+    recurrence = p.recurrence
+  }
+  if (!priceId && montant === null) return 'Précise le montant (en euros), ou price_id pour reprendre un tarif existant qui lui est destiné.'
+  if (!priceId && recurrence === null) return 'Précise la récurrence : month (par mois) ou year (par an).'
+  const note = p.note == null ? null : String(p.note).trim().slice(0, 300) || null
+
+  const montantCentimes = typeof p.montant_centimes === 'number' && Number.isInteger(p.montant_centimes) && p.montant_centimes > 0
+    ? p.montant_centimes : null
+  const devise = typeof p.devise === 'string' && /^[a-z]{3}$/i.test(p.devise) ? p.devise.toLowerCase() : null
+  const produitId = typeof p.produit_id === 'string' && ID_PRODUIT_STRIPE.test(p.produit_id) ? p.produit_id : null
+  const produitNom = p.produit_nom == null ? null : String(p.produit_nom).trim().slice(0, 120) || null
+  return {
+    qui, email, telegram_id: telegramId, montant, recurrence, price_id: priceId, note,
+    montant_centimes: montantCentimes, devise, produit_id: produitId, produit_nom: produitNom,
+    inscrire_produit: p.inscrire_produit === true,
+  }
+}
+
+/** Les parametres d'un retrait de tarif reserve (proposer_retirer_tarif_reserve). */
+export type ParamsRetraitReserve = {
+  email: string
+  qui: string
+  // Remplis par le SERVEUR avant la carte (la reservation active lue en base).
+  reserve_id: string | null
+  tarif: string | null
+  payee: boolean
+}
+
+const UUID_RESERVE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+
+export function lireParamsRetraitReserve(p: Record<string, unknown>): ParamsRetraitReserve | string {
+  const email = normaliserEmail(p.email)
+  if (!email) return "L'email de la personne (celui de sa réservation) est obligatoire : cockpit_liveclub_tarifs_reserves.email."
+  const qui = String(p.qui ?? '').trim().slice(0, 80) || email
+  const id = typeof p.reserve_id === 'string' && UUID_RESERVE.test(p.reserve_id.toLowerCase()) ? p.reserve_id.toLowerCase() : null
+  const tarif = typeof p.tarif === 'string' ? p.tarif.slice(0, 80) : null
+  return { email, qui, reserve_id: id, tarif, payee: p.payee === true }
+}
+
+/** « 1 € par mois » d'un montant en euros (numeric de la base) et d'une recurrence month | year. */
+export function libelleTarifReserve(r: { montant: number | string; devise: string; recurrence: string }): string {
+  return libelleTarif({
+    montant: Math.round(Number(r.montant) * 100), devise: r.devise,
+    recurrence: estRecurrenceReserve(r.recurrence) ? r.recurrence : null, nbIntervalles: 1,
+  })
+}
+
+/** Une reservation telle que la lisent le bot et le rapprochement. */
+export type ReserveLue = {
+  reserve_id: string
+  qui: string
+  email: string
+  telegram_id: number | bigint | null
+  produit_id: string
+  price_id: string
+  montant: number | string
+  devise: string
+  recurrence: string
+  lien_id: string | null
+  lien_url: string | null
+  paye_le: Date | string | null
+  retire_le: Date | string | null
+}
+
+/**
+ * La reservation a donner a CE compte Telegram, ou null : active, pas encore
+ * payee, et soit a son email VERIFIE (code, ou email du rattachement), soit a
+ * son compte Telegram (pose par l'equipe). Jamais par un email tape et non
+ * verifie : un tarif reserve ne sert qu'a la personne nommee. L'email verifie
+ * passe avant le compte Telegram.
+ */
+export function reservePourCompte(
+  reserves: readonly ReserveLue[],
+  o: { telegramId: number; emailVerifie: string | null },
+): ReserveLue | null {
+  const ouvertes = reserves.filter(r => !r.retire_le && !r.paye_le)
+  const email = o.emailVerifie ? normaliserEmail(o.emailVerifie) : null
+  return (email ? ouvertes.find(r => r.email === email) : undefined)
+    ?? ouvertes.find(r => r.telegram_id !== null && Number(r.telegram_id) === o.telegramId)
+    ?? null
+}
+
+/** Un Payment Link relu chez Stripe (GET /v1/payment_links/:id). */
+export type LienStripeLu =
+  | { etat: 'lu'; actif: boolean; completees: number | null; limite: number | null }
+  | { etat: 'introuvable' }
+  | { etat: 'illisible' }
+
+/** Un objet payment_link de Stripe, lu pour savoir s'il marche encore. */
+export function lireLienStripe(brut: unknown): LienStripeLu {
+  const x = (brut && typeof brut === 'object' ? brut : {}) as Record<string, unknown>
+  if (!/^plink_/.test(String(x.id ?? ''))) return { etat: 'illisible' }
+  const c = (x.restrictions as { completed_sessions?: { count?: unknown; limit?: unknown } } | null | undefined)?.completed_sessions
+  const entier = (v: unknown) => (typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : null)
+  return { etat: 'lu', actif: x.active === true, completees: entier(c?.count), limite: entier(c?.limit) }
+}
+
+/**
+ * Le lien enregistre sert-il encore ? 'reutiliser' : il marche (actif, et
+ * pas encore paye par une session completee), ou on ne peut pas le relire
+ * (on donne ce qu'on a). 'recreer' : pas de lien, lien introuvable, desactive,
+ * ou deja paye une fois alors que la reservation n'est pas marquee payee.
+ * Avant de recreer, l'appelant cherche TOUJOURS un abonnement qui paie deja
+ * la reservation (abonnementDeLaReserve) : un second lien ne doit jamais
+ * faire payer deux fois.
+ */
+export function decisionLienReserve(
+  r: { lien_id: string | null; lien_url: string | null },
+  lu: LienStripeLu | null,
+): 'reutiliser' | 'recreer' {
+  if (!r.lien_id || !r.lien_url) return 'recreer'
+  if (!lu || lu.etat === 'illisible') return 'reutiliser'
+  if (lu.etat === 'introuvable') return 'recreer'
+  const epuise = lu.limite !== null && lu.completees !== null && lu.completees >= lu.limite
+  return lu.actif && !epuise ? 'reutiliser' : 'recreer'
+}
+
+/** Un abonnement Stripe tel que le rapprochement le lit : son email (client), ses tarifs. */
+export type AbonnementPourReserve = { id: string; statut: string; email: string | null; prix: readonly string[] }
+
+/**
+ * Le premier paiement est passe : tout sauf incomplete (premier paiement en
+ * attente ou rate), incomplete_expired et trialing (rien d'encaisse).
+ */
+export function abonnementAPaye(statut: string): boolean {
+  return !['incomplete', 'incomplete_expired', 'trialing', ''].includes(statut)
+}
+
+/**
+ * L'abonnement qui paie cette reservation, ou null. Le tarif est PERSONNEL :
+ * le rapprochement se fait D'ABORD par le tarif (price_id), l'email ne vient
+ * qu'en second (cas reel du 13/10 : Yassine a paye son tarif avec une autre
+ * adresse que celle connue). Dans l'ordre :
+ * - un abonnement VIVANT (actif, en retard de paiement) sur ce tarif paie la
+ *   reservation, quelle que soit l'adresse (le meme email passe d'abord) ;
+ * - sinon un abonnement termine sur ce tarif, seulement au meme email ;
+ * - jamais un abonnement dont le premier paiement n'est pas passe, ni un
+ *   abonnement d'un autre tarif (le prix public), meme au meme email.
+ */
+export function abonnementDeLaReserve(
+  r: { email: string; price_id: string },
+  abonnements: readonly AbonnementPourReserve[],
+): AbonnementPourReserve | null {
+  const email = normaliserEmail(r.email)
+  const memeEmail = (a: AbonnementPourReserve) => email !== null && normaliserEmail(a.email) === email
+  const duTarif = abonnements.filter(a => a.prix.includes(r.price_id) && abonnementAPaye(a.statut))
+  const vivants = duTarif.filter(a => statutDonneDroit(a.statut))
+  return vivants.find(memeEmail) ?? vivants[0] ?? duTarif.find(memeEmail) ?? null
+}
+
+/**
+ * Reprendre un tarif EXISTANT deja paye par un abonnement vivant : la
+ * personne est deja abonnee a ce tarif, il n'y a rien a reserver. La raison
+ * du refus, ou null.
+ */
+export function refusTarifDejaPaye(priceId: string, abonnements: readonly AbonnementPourReserve[]): string | null {
+  const vivant = abonnements.find(a => a.prix.includes(priceId) && abonnementAPaye(a.statut) && statutDonneDroit(a.statut))
+  return vivant
+    ? `Le tarif ${priceId} est déjà payé par un abonnement actif (${vivant.id}) : la personne est déjà abonnée à ce tarif, il n'y a rien à réserver.`
+    : null
+}
+
+/** Un abonnement Stripe (objet subscription, customer expand ou non) pour le rapprochement. */
+export function lireAbonnementPourReserve(sub: unknown, emailClient: string | null = null): AbonnementPourReserve | null {
+  const s = (sub && typeof sub === 'object' ? sub : {}) as Record<string, unknown>
+  const id = String(s.id ?? '')
+  if (!/^sub_[A-Za-z0-9]+$/.test(id)) return null
+  const items = (s.items as { data?: { price?: { id?: unknown } | null }[] } | undefined)?.data ?? []
+  const prix = items.map(i => String(i.price?.id ?? '')).filter(p => ID_TARIF_STRIPE.test(p))
+  const client = s.customer && typeof s.customer === 'object' ? s.customer as { email?: unknown } : null
+  const email = normaliserEmail(client?.email ?? emailClient)
+  return { id, statut: String(s.status ?? ''), email, prix }
+}
+
+/** Le message du bot a la personne : son tarif, le bouton Payer, et ce qui se passe apres. */
+export function texteTarifReserve(tarif: string): string {
+  return `Ton abonnement Live Club à ${tarif} est prêt : appuie sur « Payer ». Une fois payé, tu entres dans le groupe tout seul.`
+}
+
+/**
+ * L'etape humaine apres un abonnement reserve, en une ligne. Avec le compte
+ * Telegram, le bot reconnait la personne des Demarrer ; sans lui, apres la
+ * verification de son email par code.
+ */
+export function etapeApresAbonnementReserve(qui: string, bot: string, avecTelegram: boolean): string {
+  return avecTelegram
+    ? `Envoie ce lien à ${qui}, ou dis-lui d'écrire à @${bot} : le bot reconnaît son compte Telegram et lui donne ce même lien. Il entre dans le groupe une fois payé.`
+    : `Envoie ce lien à ${qui}, ou dis-lui d'écrire à @${bot} : après vérification de son email, le bot lui donne ce même lien. Il entre dans le groupe une fois payé.`
+}
+
+/** Le resultat d'un abonnement reserve : quoi, l'URL seule sur sa ligne, puis l'etape suivante. */
+export function phraseAbonnementReserveCree(o: {
+  qui: string; email: string; tarif: string; url: string; bot: string; avecTelegram: boolean
+  /** null = un tarif cree a son nom, sinon le tarif existant repris. */
+  priceRepris: string | null
+  produitInscrit: boolean
+}): string {
+  const origine = o.priceRepris ? `son tarif ${o.priceRepris} repris` : 'tarif créé à son nom'
+  return `Abonnement Live Club réservé à ${o.qui} (${o.email}) : ${o.tarif}, ${origine}, lien de paiement personnel (un seul paiement, email prérempli).`
+    + (o.produitInscrit ? ' Son produit ouvre maintenant le Live Club.' : '')
+    + `\n${o.url}\n`
+    + etapeApresAbonnementReserve(o.qui, o.bot, o.avecTelegram)
+}
+
+/** Le corps de POST /v1/prices d'un tarif cree pour une personne : son nom en nickname, son email en metadonnee. */
+export function corpsTarifReserve(o: {
+  produitId: string; montantCentimes: number; devise: string; recurrence: RecurrenceReserve; qui: string; email: string
+}): Record<string, string> {
+  return {
+    product: o.produitId,
+    unit_amount: String(o.montantCentimes),
+    currency: o.devise,
+    'recurring[interval]': o.recurrence,
+    nickname: `${o.qui.slice(0, 60)} (tarif réservé)`,
+    [`metadata[${META_RESERVE_POUR}]`]: o.email,
+    'metadata[cree_par]': 'agent_cockpit',
+  }
+}
+
+/**
+ * Ce qui interdit de reprendre ce tarif EXISTANT pour cette personne, ou
+ * null. Un tarif reserve ne sert qu'a la personne nommee : metadonnee
+ * reserve_pour d'une autre adresse, ou une reservation (meme retiree) d'une
+ * autre adresse sur ce tarif = refus. Un tarif d'un produit de base est le
+ * prix public. Mensuel ou annuel, montant fixe, actif.
+ */
+export function refusTarifRepris(o: {
+  email: string
+  tarif: TarifLu
+  reservePour: string | null
+  produitDeBase: boolean
+  produitActif: boolean
+  autresReserves: readonly { email: string }[]
+}): string | null {
+  const t = o.tarif
+  if (o.produitDeBase) {
+    return `Le tarif ${t.id} est un prix public du Live Club, pas un tarif réservé. Sans price_id, je crée un tarif à son nom.`
+  }
+  const autre = (o.reservePour && normaliserEmail(o.reservePour) !== o.email)
+    || o.autresReserves.some(r => normaliserEmail(r.email) !== o.email)
+  if (autre) {
+    return `Le tarif ${t.id} est réservé à une autre personne : il ne sert qu'à elle, jamais à quelqu'un d'autre. `
+      + 'Sans price_id, je crée un tarif à son nom.'
+  }
+  if (!t.actif) return `Le tarif ${t.id} est archivé : sans price_id, je crée un tarif à son nom.`
+  if (!o.produitActif) return `Le produit du tarif ${t.id} est archivé chez Stripe : sans price_id, je crée un tarif à son nom.`
+  if (!estRecurrenceReserve(t.recurrence) || t.nbIntervalles !== 1) {
+    return `Le tarif ${t.id} n'est ni mensuel ni annuel (${libelleTarif(t)}) : un tarif réservé est par mois ou par an.`
+  }
+  if (t.montant === null || t.montant <= 0) return `Le tarif ${t.id} n'a pas de montant fixe payant : un tarif réservé se paie.`
+  return null
+}
+
+/** Un montant ou une recurrence demandes qui contredisent le tarif repris, ou null. */
+export function ecartTarifDemande(
+  p: { montant: number | null; recurrence: RecurrenceReserve | null },
+  t: TarifLu,
+): string | null {
+  const ecarts: string[] = []
+  if (p.montant !== null && t.montant !== null && Math.round(p.montant * 100) !== t.montant) {
+    ecarts.push(`il coûte ${formaterMontant(t.montant, t.devise)}, pas ${formaterMontant(Math.round(p.montant * 100), t.devise)}`)
+  }
+  if (p.recurrence !== null && t.recurrence !== p.recurrence) {
+    ecarts.push(`il est ${t.recurrence === 'year' ? 'annuel' : t.recurrence === 'month' ? 'mensuel' : 'd\'une autre période'}`)
+  }
+  return ecarts.length
+    ? `Le tarif ${t.id} ne correspond pas : ${ecarts.join(', ')}. Vérifie avec Brice ou Mélanie, ou propose sans price_id pour créer un tarif à son nom.`
+    : null
+}

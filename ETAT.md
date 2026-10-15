@@ -439,3 +439,46 @@ faisait de lien de paiement.
   donner a STRIPE_AGENT_KEY_MELANIE la permission Payment Links en ecriture
   (Adil), puis marquer le produit de Yassine (proposer_marquer_live_club
   prod_VR1P7PggEH30B9) et demander son lien.
+
+## Tarifs reserves du Live Club (13-15/10/2026, NON commite, NON deploye)
+
+Brice, 13/10 : « ouvre un abonnement a ce prix pour cette personne », acces
+seulement une fois paye, et un tarif reserve est PERSONNEL (« Live Club ETM »
+ne dit rien du prix d'un autre eleve ETM).
+- Base : migration `20261013160000_cockpit_liveclub_tarifs_reserves.sql`
+  (ECRITE, PAS APPLIQUEE) : table cockpit_liveclub_tarifs_reserves (une
+  reservation active par email, un compte Telegram sur une seule, lien_id
+  plink_ et lien_url avec email prerempli, paye_le + abonnement_id, retrait
+  par retire_le), colonne role de cockpit_liveclub_produits (le produit commun
+  « Live Club (tarif réservé) », un seul actif). Lecture is_cockpit_member(),
+  ecriture serveur seulement.
+- Serveur : src/lib/liveclub/reserves.ts. Regles pures dans pur.ts (section
+  « Tarifs RESERVES »).
+- Agent du cockpit : proposer_abonnement_reserve (UNE carte : tarif cree a
+  son nom sur le produit commun, ou price_id repris s'il est a elle seule,
+  produit inscrit au Live Club si besoin, Payment Link personnel, ligne) et
+  proposer_retirer_tarif_reserve (lien desactive, tarif cree archive ; payee =
+  abonnement intact). Prompt : la suite produit + lien reste pour un produit
+  ouvert a tous.
+- Bot des membres : SON lien (bouton « Payer ») a la place des liens publics,
+  sans droit ouvert ni dette : /start, /menu, apres le code (le compte
+  Telegram est alors note sur la reservation), texte libre (avant l'agent),
+  « Mon abonnement ». Reconnaissance par compte Telegram ou email VERIFIE,
+  jamais un email tape. Adresse de reservation = connue pour l'envoi du code.
+  Avant tout lien, le bot verifie que le tarif n'est pas deja paye (jamais
+  deux paiements) ; un lien qui ne marche plus est recree.
+- Paye : page de bienvenue (session), passage quotidien (etape
+  tarifs_reserves, abonnements du tarif chez Stripe) et bot. Le tarif etant
+  personnel, rapprochement D'ABORD par price_id, l'email en second : un
+  abonnement vivant sur le tarif paie la reservation quelle que soit
+  l'adresse, un abonnement termine seulement au meme email. Cas reel du
+  13/10 : Yassine a paye son tarif (lien fait a la main) avec une autre
+  adresse. Reprendre un tarif deja paye par un abonnement vivant est refuse.
+- Cockpit : « Tarifs réservés Live Club » sous les acces broker (onglet
+  Membres), lien a copier, retrait par /api/cockpit/liveclub/reserves.
+- Tests : verifier-liveclub.mjs 43 blocs (5 nouveaux). tsc, eslint propres ;
+  cockpit tsc et build ok. Aucune eval (le prompt du bot des membres n'est pas
+  touche ; celui de l'agent du cockpit n'en a pas).
+- A FAIRE : appliquer la migration, deployer le journal puis le cockpit.
+  Rien a faire pour Yassine : il est deja abonne (paye le 13/10, entre par
+  le bot), aucune reservation a enregistrer.

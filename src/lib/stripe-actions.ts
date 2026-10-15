@@ -28,6 +28,7 @@ import {
   lireParamsLienPaiement, lireParamsMarquageLiveClub, lireTarifStripe, choisirTarif, libelleTarif,
   refusLienLiveClub, corpsLienPaiement, urlLienAvecEmail, phraseLienPaiementCree, phraseProduitCree,
   masquerCleStripe, estRefusDePermission, permissionLienPaiementManquante, type TarifLu,
+  lireParamsAbonnementReserve, lireParamsRetraitReserve, NOM_PRODUIT_TARIFS_RESERVES,
 } from '@/lib/liveclub/pur'
 import { URL_BIENVENUE_LIVECLUB, cleStripeLecture, estProduitLiveClub, nomBot } from '@/lib/liveclub/config'
 import { inscrireProduitLiveClub, lireProduitsLiveClub, produitsLiveClub } from '@/lib/liveclub/produits'
@@ -143,6 +144,9 @@ export type ActionAgent = {
     // Acces payant a un tarif particulier (13/10) : lien de paiement d'un
     // produit, et marquage d'un produit existant comme produit Live Club.
     | 'lien_paiement' | 'marquer_live_club'
+    // Tarif RESERVE a une personne (13/10) : tarif a son nom, lien personnel
+    // et reservation en une carte ; et son retrait (liveclub/reserves.ts).
+    | 'abonnement_reserve' | 'retirer_tarif_reserve'
     // La repartition Brice / Melanie (08/10) : depots, commissions, taux,
     // intervenants, depenses, reglements (repartition/pur.ts et serveur.ts).
     | TypeRepartition
@@ -171,6 +175,14 @@ export function paramsPourLog(a: ActionAgent): Record<string, unknown> {
   if (a.type === 'lien_paiement') {
     return { produit_id: a.params.produit_id, price_id: a.params.price_id ?? null, email: a.params.email ? 'oui' : 'non' }
   }
+  // Tarif reserve (13/10) : ni l'email ni le nom de la personne.
+  if (a.type === 'abonnement_reserve') {
+    return {
+      price_id: a.params.price_id ?? null, montant: a.params.montant ?? null, recurrence: a.params.recurrence ?? null,
+      telegram: a.params.telegram_id ? 'oui' : 'non',
+    }
+  }
+  if (a.type === 'retirer_tarif_reserve') return { reserve_id: a.params.reserve_id ?? null }
   if (estTypeRepartition(a.type)) {
     return Object.fromEntries(Object.entries(a.params).filter(([k]) => k !== 'note' && k !== 'qui'))
   }
@@ -634,6 +646,19 @@ export function validerAction(brut: unknown): ActionAgent | string {
     return { type: 'marquer_live_club', compte: 'melanie', params: lu }
   }
 
+  // Tarif RESERVE a une personne (13/10) : compte melanie seulement, comme
+  // tout le Live Club. Le tarif repris, le montant lu et l'inscription du
+  // produit sont remplis par le controle avant la carte (reserves.ts), et
+  // tout est relu a l'execution.
+  if (a.type === 'abonnement_reserve' || a.type === 'retirer_tarif_reserve') {
+    if (a.compte != null && a.compte !== 'melanie') {
+      return "Un tarif réservé du Live Club vit sur le compte melanie : c'est le seul que lisent le bot et la page de bienvenue."
+    }
+    const lu = a.type === 'abonnement_reserve' ? lireParamsAbonnementReserve(p) : lireParamsRetraitReserve(p)
+    if (typeof lu === 'string') return lu
+    return { type: a.type, compte: 'melanie', params: lu }
+  }
+
   if (!estCompte(a.compte)) return 'Compte inconnu : aoknowledge ou melanie.'
 
   // Lien de paiement PERSONNEL d'un produit (13/10). Le tarif, le nom et le
@@ -822,6 +847,31 @@ export function resumeAction(a: ActionAgent): string {
         ? '. Après le paiement : la page de bienvenue du Live Club, qui le guide vers le bot, qui le fait entrer tout seul.'
         : '. Après le paiement : la page de confirmation de Stripe.')
   }
+  if (a.type === 'abonnement_reserve') {
+    const tarif = typeof p.montant_centimes === 'number' && typeof p.devise === 'string'
+      ? libelleTarif({
+        montant: p.montant_centimes, devise: p.devise,
+        recurrence: typeof p.recurrence === 'string' ? p.recurrence : null, nbIntervalles: 1,
+      })
+      : `${p.montant} € par ${p.recurrence === 'year' ? 'an' : 'mois'}`
+    const produit = p.produit_nom ?? p.produit_id
+    return `Ouvrir à ${p.qui} (${p.email}${p.telegram_id ? `, compte Telegram u${p.telegram_id}` : ''}) un abonnement Live Club `
+      + `à un tarif RÉSERVÉ, ${tarif} : `
+      + (p.price_id
+        ? `son tarif existant ${p.price_id} (« ${produit} »)`
+        : `un tarif créé à son nom sur le produit « ${NOM_PRODUIT_TARIFS_RESERVES} »`)
+      + ', puis son lien de paiement personnel (un seul paiement, email prérempli). Ce tarif ne sert qu\'à cette personne, '
+      + 'et elle n\'entre dans le groupe qu\'une fois payé. Le bot des membres la reconnaîtra et lui donnera ce même lien.'
+      + (p.inscrire_produit === true ? ` Le produit « ${produit} » sera aussi inscrit comme produit Live Club.` : '')
+      + (p.note ? ` Note : ${p.note}` : '')
+  }
+  if (a.type === 'retirer_tarif_reserve') {
+    return `Retirer la réservation de ${p.qui} (${p.email}${p.tarif ? `, ${p.tarif}` : ''}, `
+      + `${p.payee === true ? 'payée' : 'en attente de paiement'}) : `
+      + (p.payee === true
+        ? 'son abonnement continue, rien ne change chez Stripe.'
+        : 'son lien de paiement est désactivé, et le bot ne le lui donnera plus.')
+  }
   if (a.type === 'marquer_live_club') {
     return `Marquer le produit « ${p.produit_nom ?? p.produit_id} » (${p.produit_id}, compte melanie) comme produit Live Club : `
       + 'ses abonnés entreront par le bot, la page de bienvenue les reconnaîtra et la collecte les classera en live-club.'
@@ -844,6 +894,7 @@ export type ControleCarteStripe =
 /** Les types controles par controlerActionStripe avant la carte. */
 export function aControleStripe(type: ActionAgent['type']): boolean {
   return type === 'lien_paiement' || type === 'marquer_live_club'
+    || type === 'abonnement_reserve' || type === 'retirer_tarif_reserve'
 }
 
 /** La cle qui LIT un compte : celle de l'agent (l'ecriture lit aussi), sinon la cle de lecture de melanie. */
@@ -914,6 +965,13 @@ async function preparerLien(cle: string, compte: CompteStripe, p: Record<string,
  */
 export async function controlerActionStripe(a: ActionAgent): Promise<ControleCarteStripe> {
   try {
+    // Tarif reserve (13/10) : la place en base, le tarif repris chez Stripe.
+    // Import dynamique : reserves.ts importe ce fichier.
+    if (a.type === 'abonnement_reserve' || a.type === 'retirer_tarif_reserve') {
+      const { controlerActionTarifReserve } = await import('@/lib/liveclub/reserves')
+      return await controlerActionTarifReserve(a)
+    }
+
     if (a.type === 'lien_paiement') {
       const compte = a.compte as CompteStripe
       const cle = cleLectureCompte(compte)
@@ -1151,6 +1209,14 @@ export async function executerAction(a: ActionAgent, acteur = 'agent'): Promise<
       ? `« ${nom} » (${produitId}) ouvrait déjà le Live Club : rien n'a changé.\n${suite}`
       : `« ${nom} » (${produitId}) ouvre maintenant le Live Club : ses abonnés entrent par le bot, la page de bienvenue `
         + `les reconnaît (sous une minute) et la collecte les classe en live-club.\n${suite}`
+  }
+
+  // ── Tarif reserve a une personne (13/10) ──────────────────────────────────
+  // Tarif a son nom (ou repris), lien personnel et reservation ; ou son
+  // retrait. Import dynamique : reserves.ts importe ce fichier.
+  if (a.type === 'abonnement_reserve' || a.type === 'retirer_tarif_reserve') {
+    const { executerActionTarifReserve } = await import('@/lib/liveclub/reserves')
+    return executerActionTarifReserve(a, acteur)
   }
 
   const cle = cleAgent(a.compte as CompteStripe)

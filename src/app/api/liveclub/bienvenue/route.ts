@@ -6,6 +6,7 @@ import { emailBienvenue } from '@/lib/liveclub/emails'
 import { DUREE_JETON_JOURS, preparerBienvenue, type PreparationBienvenue } from '@/lib/liveclub/bienvenue'
 import { messageErreur, relationAbsente } from '@/lib/liveclub/pur'
 import { journaliserGesteLiveClub } from '@/lib/stripe-actions'
+import { marquerReservesPayeesParSession } from '@/lib/liveclub/reserves'
 
 /**
  * POST /api/liveclub/bienvenue : la page apres paiement du Live Club
@@ -114,6 +115,13 @@ export async function POST(req: NextRequest) {
     return refus(`On ne retrouve pas ton abonnement. ${SUPPORT_TXT}`, 502)
   }
   const abonnementId = session.abonnementId
+
+  // Tarif reserve (13/10) : la reservation de cet email sur ce tarif est
+  // payee (paye_le, abonnement_id). L'acces vient de l'abonnement, comme pour
+  // tout abonne. Ne jette pas : le passage quotidien rattrape un oubli.
+  await marquerReservesPayeesParSession({
+    email: session.email, prix: session.prix, abonnementId, statut: session.abonnementStatut,
+  })
 
   // 2. Le jeton d'entree de cet abonnement (le meme a chaque rechargement)
   //    et la reservation de l'email, sous verrou.

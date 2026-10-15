@@ -8,7 +8,8 @@
 //    code neuf hache en base ; le bot repond TOUT DE SUITE, la meme phrase que
 //    l'adresse soit connue ou non ;
 // 3. envoyerCodeSiConnu, APRES la reponse : l'email ne part que si l'adresse
-//    est connue (client Stripe du compte melanie, acces broker, membre) et pas
+//    est connue (client Stripe du compte melanie, acces broker, membre, tarif
+//    reserve depuis le 13/10) et pas
 //    trop sollicitee ; le code n'est marque « envoye » (envoye_le) qu'a ce
 //    moment. Une adresse inconnue garde sa ligne, avec un code que personne
 //    n'a recu et qui ne sera JAMAIS accepte : les essais s'y comportent
@@ -24,6 +25,7 @@ import { prisma } from '@/lib/db'
 import { ErreurTableLiveClub } from './jetons'
 import { membreParEmail, rattacherTelegram } from './rattacher'
 import { abonnementsLiveClubParEmail, clientsStripeParEmail } from './stripe'
+import { adresseReservee } from './reserves'
 import { meilleurAbonnement, messageErreur, normaliserEmail, relationAbsente } from './pur'
 import { emailCodeVerification } from './emails-verification'
 import {
@@ -88,7 +90,8 @@ export async function reserverCode(telegramId: number, email: string): Promise<C
 
 /**
  * L'adresse est-elle celle d'un payeur ou d'un ayant droit ? Client Stripe du
- * compte melanie, acces broker en cours, ou membre du cockpit. Un oui d'une
+ * compte melanie, acces broker en cours, membre du cockpit, ou tarif reserve
+ * actif (13/10). Un oui d'une
  * source suffit. Sans oui, une seule source illisible = null (on ne sait
  * pas) : Stripe en panne ne doit pas faire passer un vrai payeur pour une
  * adresse inconnue, en silence.
@@ -112,6 +115,13 @@ async function adresseConnue(email: string): Promise<boolean | null> {
   }
   try {
     if (await membreParEmail(email)) return true
+  } catch {
+    illisibles++
+  }
+  // (13/10) Une adresse sur un tarif reserve est connue : la personne n'a pas
+  // encore paye, et c'est apres ce code que le bot lui donne SON lien.
+  try {
+    if (await adresseReservee(email)) return true
   } catch {
     illisibles++
   }

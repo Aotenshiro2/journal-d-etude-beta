@@ -477,6 +477,8 @@ export type SessionCheckoutResume = {
   prenom: string | null
   /** created de la session, en ISO (null s'il manque). */
   creeLe: string | null
+  /** Les tarifs payes (price_..., line_items et items de l'abonnement) : rapprochement d'un tarif reserve (13/10). */
+  prix: string[]
 }
 
 function premierMot(s: unknown): string | null {
@@ -502,7 +504,7 @@ export async function lireSessionCheckout(sessionId: string): Promise<SessionChe
     throw err
   }
 
-  const lignes = ((s.line_items as { data?: { price?: { product?: unknown } }[] } | undefined)?.data ?? [])
+  const lignes = ((s.line_items as { data?: { price?: { id?: unknown; product?: unknown } }[] } | undefined)?.data ?? [])
   const produitsLignes = lignes.map(l => {
     const p = l.price?.product
     return typeof p === 'string' ? p : (p as { id?: string } | undefined)?.id
@@ -510,6 +512,9 @@ export async function lireSessionCheckout(sessionId: string): Promise<SessionChe
   const sub = s.subscription && typeof s.subscription === 'object'
     ? s.subscription as Record<string, unknown>
     : null
+  const itemsAbonnement = (sub?.items as { data?: { price?: { id?: unknown } | null }[] } | undefined)?.data ?? []
+  const prix = [...new Set([...lignes.map(l => l.price?.id), ...itemsAbonnement.map(i => i.price?.id)]
+    .filter((p): p is string => typeof p === 'string' && /^price_[A-Za-z0-9]+$/.test(p)))]
   const abonnementId = sub ? String(sub.id ?? '') || null
     : typeof s.subscription === 'string' ? s.subscription : null
   const abonnementStatut = sub ? String(sub.status ?? '') || null : null
@@ -548,5 +553,6 @@ export async function lireSessionCheckout(sessionId: string): Promise<SessionChe
     email: normaliserEmail(details?.email ?? s.customer_email),
     prenom: premierMot(champPrenom) ?? premierMot(details?.name),
     creeLe: typeof s.created === 'number' ? new Date(s.created * 1000).toISOString() : null,
+    prix,
   }
 }

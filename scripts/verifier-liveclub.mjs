@@ -30,6 +30,10 @@ import {
   lireParamsLienPaiement, lireTarifStripe, libelleTarif, choisirTarif, refusLienLiveClub, corpsLienPaiement,
   urlLienAvecEmail, etapeApresLienPaiement, phraseLienPaiementCree, masquerCleStripe, estRefusDePermission,
   permissionLienPaiementManquante, phraseProduitCree,
+  lireParamsAbonnementReserve, lireParamsRetraitReserve, libelleTarifReserve, reservePourCompte, lireLienStripe,
+  decisionLienReserve, abonnementAPaye, abonnementDeLaReserve, lireAbonnementPourReserve, texteTarifReserve,
+  etapeApresAbonnementReserve, phraseAbonnementReserveCree, corpsTarifReserve, refusTarifRepris, ecartTarifDemande,
+  refusTarifDejaPaye, META_RESERVE_POUR,
 } from '../src/lib/liveclub/pur.ts'
 import { lireDemande, auteurDemande, MAX_TEXTE_DEMANDE, MAX_CITATION_DEMANDE } from '../src/lib/agent-cockpit-pur.ts'
 import {
@@ -1718,6 +1722,186 @@ test('lien de paiement : parametres, un seul paiement, retour sur la page de bie
   }
   assert.match(phraseProduitCree({ nom: 'X', compte: 'melanie', produitId: PRODUIT_YASSINE, priceId: TARIF_YASSINE,
     tarif: '1 € par mois', inscription: 'table_absente' }), /PAS encore le Live Club.*migration/)
+})
+
+// ---------------------------------------------------------------------------
+// Tarifs reserves (Brice, 13/10) : un prix PERSONNEL, ouvert a une personne.
+// ---------------------------------------------------------------------------
+
+const EMAIL_YASSINE = 'zouariyassine01@gmail.com'
+const reserve = (champs = {}) => ({
+  reserve_id: '0a289e31-0000-4000-8000-000000000001', qui: 'Yassine', email: EMAIL_YASSINE, telegram_id: null,
+  produit_id: PRODUIT_YASSINE, price_id: TARIF_YASSINE, montant: 1, devise: 'eur', recurrence: 'month',
+  lien_id: 'plink_1AbCdEfGh', lien_url: 'https://buy.stripe.com/abc?prefilled_email=x', paye_le: null, retire_le: null,
+  ...champs,
+})
+
+test('tarif reserve : parametres de l agent (une carte, email obligatoire, montant ou tarif repris) (Brice 13/10)', () => {
+  const ok = lireParamsAbonnementReserve({ qui: ' Yassine ', email: 'ZouariYassine01@Gmail.com', montant: 1, recurrence: 'month' })
+  assert.equal(typeof ok, 'object')
+  assert.equal(ok.qui, 'Yassine')
+  assert.equal(ok.email, EMAIL_YASSINE)
+  assert.equal(ok.montant, 1)
+  assert.equal(ok.recurrence, 'month')
+  assert.equal(ok.price_id, null)
+  assert.equal(ok.telegram_id, null)
+  assert.equal(ok.inscrire_produit, false)
+  // Le compte Telegram, avec ou sans le u.
+  assert.equal(lireParamsAbonnementReserve({ qui: 'Y', email: EMAIL_YASSINE, montant: 1, recurrence: 'month', telegram_id: 'u730269740' }).telegram_id, 730269740)
+  assert.match(lireParamsAbonnementReserve({ qui: 'Y', email: EMAIL_YASSINE, montant: 1, recurrence: 'month', telegram_id: 'abc' }), /telegram_id invalide/)
+  // L'email est obligatoire, jamais invente.
+  assert.match(lireParamsAbonnementReserve({ qui: 'Yassine', montant: 1, recurrence: 'month' }), /email.*obligatoire.*Demande-le/)
+  assert.match(lireParamsAbonnementReserve({ qui: 'Yassine', email: 'pas-un-email', montant: 1, recurrence: 'month' }), /Email illisible/)
+  assert.match(lireParamsAbonnementReserve({ email: EMAIL_YASSINE, montant: 1, recurrence: 'month' }), /QUI/)
+  // Sans tarif repris : montant et recurrence obligatoires, payant, au centime.
+  assert.match(lireParamsAbonnementReserve({ qui: 'Y', email: EMAIL_YASSINE, recurrence: 'month' }), /montant/)
+  assert.match(lireParamsAbonnementReserve({ qui: 'Y', email: EMAIL_YASSINE, montant: 1 }), /récurrence/)
+  assert.match(lireParamsAbonnementReserve({ qui: 'Y', email: EMAIL_YASSINE, montant: 0, recurrence: 'month' }), /exemption/)
+  assert.match(lireParamsAbonnementReserve({ qui: 'Y', email: EMAIL_YASSINE, montant: 0.3, recurrence: 'month' }), /0,50/)
+  assert.match(lireParamsAbonnementReserve({ qui: 'Y', email: EMAIL_YASSINE, montant: 1.005, recurrence: 'month' }), /centime/)
+  assert.match(lireParamsAbonnementReserve({ qui: 'Y', email: EMAIL_YASSINE, montant: 1, recurrence: 'week' }), /month.*year/)
+  assert.equal(lireParamsAbonnementReserve({ qui: 'Y', email: EMAIL_YASSINE, montant: 29.9, recurrence: 'year' }).montant, 29.9)
+  // Avec un tarif repris : montant et recurrence facultatifs (compares au tarif lu).
+  const repris = lireParamsAbonnementReserve({ qui: 'Yassine', email: EMAIL_YASSINE, price_id: TARIF_YASSINE })
+  assert.equal(repris.price_id, TARIF_YASSINE)
+  assert.equal(repris.montant, null)
+  assert.match(lireParamsAbonnementReserve({ qui: 'Y', email: EMAIL_YASSINE, price_id: 'prod_123456' }), /price_id invalide/)
+  // Les champs du serveur (controle avant la carte) survivent a la revalidation de l'execution.
+  const carte = lireParamsAbonnementReserve({ ...repris, montant_centimes: 100, devise: 'EUR', produit_id: PRODUIT_YASSINE,
+    produit_nom: 'Live Club ETM (tarif symbolique)', inscrire_produit: true })
+  assert.equal(carte.montant_centimes, 100)
+  assert.equal(carte.devise, 'eur')
+  assert.equal(carte.produit_id, PRODUIT_YASSINE)
+  assert.equal(carte.inscrire_produit, true)
+  // Le retrait : l'email de la reservation.
+  const retrait = lireParamsRetraitReserve({ email: EMAIL_YASSINE.toUpperCase() })
+  assert.equal(retrait.email, EMAIL_YASSINE)
+  assert.equal(retrait.reserve_id, null)
+  assert.equal(retrait.payee, false)
+  assert.match(lireParamsRetraitReserve({ qui: 'Yassine' }), /email/)
+  assert.equal(lireParamsRetraitReserve({ email: EMAIL_YASSINE, reserve_id: 'pas-un-uuid' }).reserve_id, null)
+})
+
+test('tarif reserve : personnel, jamais donne a un autre email ni a un email non verifie (Brice 13/10)', () => {
+  const r = reserve()
+  // L'email verifie de Yassine : sa reservation.
+  assert.equal(reservePourCompte([r], { telegramId: 111111111, emailVerifie: 'ZOUARIYASSINE01@gmail.com' }), r)
+  // Un autre eleve (ETM ou pas), un autre email : rien. Le nom du produit ne dit rien de son prix.
+  assert.equal(reservePourCompte([r], { telegramId: 111111111, emailVerifie: 'autre.eleve.etm@gmail.com' }), null)
+  // Aucun email verifie (compte non rattache qui n'a rien prouve) : rien.
+  assert.equal(reservePourCompte([r], { telegramId: 111111111, emailVerifie: null }), null)
+  // Son compte Telegram, pose par l'equipe : sa reservation, des Demarrer.
+  const avecTg = reserve({ telegram_id: 730269740n })
+  assert.equal(reservePourCompte([avecTg], { telegramId: 730269740, emailVerifie: null }), avecTg)
+  assert.equal(reservePourCompte([avecTg], { telegramId: 730269741, emailVerifie: null }), null)
+  // Payee ou retiree : plus de lien a donner.
+  assert.equal(reservePourCompte([reserve({ paye_le: '2026-10-14T10:00:00Z' })], { telegramId: 1, emailVerifie: EMAIL_YASSINE }), null)
+  assert.equal(reservePourCompte([reserve({ retire_le: '2026-10-14T10:00:00Z' })], { telegramId: 1, emailVerifie: EMAIL_YASSINE }), null)
+  // L'email verifie passe avant le compte Telegram.
+  const autre = reserve({ reserve_id: 'autre', email: 'paul@exemple.fr', telegram_id: 1234567 })
+  assert.equal(reservePourCompte([autre, r], { telegramId: 1234567, emailVerifie: EMAIL_YASSINE }), r)
+  // Le message du bot : son tarif, le bouton Payer, et l'entree une fois paye.
+  assert.equal(libelleTarifReserve(r), '1 € par mois')
+  assert.equal(libelleTarifReserve({ montant: '29.90', devise: 'eur', recurrence: 'year' }), '29,90 € par an')
+  assert.equal(texteTarifReserve('1 € par mois'),
+    'Ton abonnement Live Club à 1 € par mois est prêt : appuie sur « Payer ». Une fois payé, tu entres dans le groupe tout seul.')
+})
+
+test('tarif reserve : lien reutilise s il marche, recree sinon (apres verification du paiement) (Brice 13/10)', () => {
+  const r = reserve()
+  const lu = (actif, completees, limite) => lireLienStripe({ id: 'plink_1AbCdEfGh', active: actif,
+    restrictions: { completed_sessions: { count: completees, limit: limite } } })
+  assert.deepEqual(lu(true, 0, 1), { etat: 'lu', actif: true, completees: 0, limite: 1 })
+  assert.deepEqual(lireLienStripe({ id: 'x' }), { etat: 'illisible' })
+  assert.equal(decisionLienReserve(r, lu(true, 0, 1)), 'reutiliser')
+  // Desactive, ou deja paye une fois alors que paye_le est vide : recreer (l'appelant cherche d'abord le paiement).
+  assert.equal(decisionLienReserve(r, lu(false, 0, 1)), 'recreer')
+  assert.equal(decisionLienReserve(r, lu(true, 1, 1)), 'recreer')
+  assert.equal(decisionLienReserve(r, { etat: 'introuvable' }), 'recreer')
+  // Pas relu (cle ou panne) : on donne ce qu'on a.
+  assert.equal(decisionLienReserve(r, { etat: 'illisible' }), 'reutiliser')
+  assert.equal(decisionLienReserve(r, null), 'reutiliser')
+  // Aucun lien enregistre : en creer un.
+  assert.equal(decisionLienReserve(reserve({ lien_id: null, lien_url: null }), null), 'recreer')
+})
+
+test('tarif reserve : rapprochement apres paiement, par le tarif d abord, l email en second (cas reel Yassine, 13/10)', () => {
+  const r = reserve()
+  const sub = (id, statut, email, prix) => ({ id, statut, email, prix })
+  // L'abonnement de Yassine sur son tarif, a son email : la reservation est payee.
+  const sien = sub('sub_YASSINE123', 'active', 'ZouariYassine01@gmail.com', [TARIF_YASSINE])
+  assert.equal(abonnementDeLaReserve(r, [sien]), sien)
+  // CAS REEL du 13/10 : Yassine a paye SON tarif (lien fait a la main) avec une AUTRE adresse.
+  // Le tarif est personnel : un abonnement vivant sur ce tarif paie la reservation.
+  const autreAdresse = sub('sub_YASSINE_AUTRE', 'active', 'yassine.autre@outlook.fr', [TARIF_YASSINE])
+  assert.equal(abonnementDeLaReserve(r, [autreAdresse]), autreAdresse)
+  assert.equal(abonnementDeLaReserve(r, [sub('sub_RETARD1234', 'past_due', 'yassine.autre@outlook.fr', [TARIF_YASSINE])]).id, 'sub_RETARD1234')
+  // Le meme email passe d'abord quand deux abonnements vivants sont sur le tarif.
+  assert.equal(abonnementDeLaReserve(r, [autreAdresse, sien]), sien)
+  // Un abonnement TERMINE sur le tarif ne compte qu'au meme email.
+  const fini = sub('sub_FINI123456', 'canceled', EMAIL_YASSINE, [TARIF_YASSINE])
+  assert.equal(abonnementDeLaReserve(r, [fini]), fini)
+  assert.equal(abonnementDeLaReserve(r, [sub('sub_FINIAUTRE12', 'canceled', 'autre@exemple.fr', [TARIF_YASSINE])]), null)
+  // Un vivant passe avant un termine.
+  assert.equal(abonnementDeLaReserve(r, [fini, sien]), sien)
+  assert.equal(abonnementDeLaReserve(r, [fini, autreAdresse]), autreAdresse)
+  // Son email sur un autre tarif (le prix public) : ce n'est pas cette reservation.
+  assert.equal(abonnementDeLaReserve(r, [sub('sub_PUBLIC1234', 'active', EMAIL_YASSINE, ['price_PUBLIC123456'])]), null)
+  // Premier paiement pas passe : rien, quelle que soit l'adresse.
+  assert.equal(abonnementDeLaReserve(r, [sub('sub_INCOMPL123', 'incomplete', EMAIL_YASSINE, [TARIF_YASSINE])]), null)
+  assert.equal(abonnementDeLaReserve(r, [sub('sub_ESSAI12345', 'trialing', 'autre@exemple.fr', [TARIF_YASSINE])]), null)
+  assert.ok(!abonnementAPaye('incomplete_expired') && !abonnementAPaye('trialing') && !abonnementAPaye(''))
+  assert.ok(abonnementAPaye('active') && abonnementAPaye('past_due') && abonnementAPaye('canceled'))
+  // Reprendre un tarif deja paye par un abonnement vivant : rien a reserver (Yassine est deja abonne).
+  assert.match(refusTarifDejaPaye(TARIF_YASSINE, [autreAdresse]), /déjà payé par un abonnement actif \(sub_YASSINE_AUTRE\).*rien à réserver/)
+  assert.equal(refusTarifDejaPaye(TARIF_YASSINE, [fini]), null)
+  assert.equal(refusTarifDejaPaye(TARIF_YASSINE, [sub('sub_PUBLIC1234', 'active', EMAIL_YASSINE, ['price_PUBLIC123456'])]), null)
+  // Lecture d'un abonnement Stripe (customer expand) et d'une session de la page de bienvenue.
+  const lu = lireAbonnementPourReserve({ id: 'sub_YASSINE123', status: 'active', customer: { id: 'cus_X', email: 'ZouariYassine01@gmail.com' },
+    items: { data: [{ price: { id: TARIF_YASSINE } }] } })
+  assert.deepEqual(lu, { id: 'sub_YASSINE123', statut: 'active', email: EMAIL_YASSINE, prix: [TARIF_YASSINE] })
+  assert.equal(lireAbonnementPourReserve({ id: 'pas_un_abonnement' }), null)
+  assert.equal(abonnementDeLaReserve(r, [lu]).id, 'sub_YASSINE123')
+})
+
+test('tarif reserve : tarif repris personnel, jamais celui d un autre, ni un prix public (Brice 13/10)', () => {
+  const mensuel = lireTarifStripe({ id: TARIF_YASSINE, product: PRODUIT_YASSINE, active: true, unit_amount: 100, currency: 'eur',
+    recurring: { interval: 'month', interval_count: 1 } })
+  const base = { email: EMAIL_YASSINE, tarif: mensuel, reservePour: null, produitDeBase: false, produitActif: true, autresReserves: [] }
+  assert.equal(refusTarifRepris(base), null)
+  assert.equal(refusTarifRepris({ ...base, reservePour: EMAIL_YASSINE, autresReserves: [{ email: EMAIL_YASSINE }] }), null)
+  // Le tarif d'une autre personne : refuse, par la metadonnee comme par une reservation (meme retiree).
+  assert.match(refusTarifRepris({ ...base, reservePour: 'autre.eleve@gmail.com' }), /réservé à une autre personne/)
+  assert.match(refusTarifRepris({ ...base, autresReserves: [{ email: 'autre.eleve@gmail.com' }] }), /réservé à une autre personne/)
+  // Le prix public du Live Club n'est pas un tarif reserve.
+  assert.match(refusTarifRepris({ ...base, produitDeBase: true }), /prix public/)
+  assert.match(refusTarifRepris({ ...base, tarif: { ...mensuel, actif: false } }), /archivé/)
+  assert.match(refusTarifRepris({ ...base, produitActif: false }), /archivé/)
+  assert.match(refusTarifRepris({ ...base, tarif: { ...mensuel, nbIntervalles: 3 } }), /par mois ou par an/)
+  assert.match(refusTarifRepris({ ...base, tarif: { ...mensuel, recurrence: null } }), /par mois ou par an/)
+  // Le montant ou la recurrence demandes doivent etre ceux du tarif repris.
+  assert.equal(ecartTarifDemande({ montant: 1, recurrence: 'month' }, mensuel), null)
+  assert.equal(ecartTarifDemande({ montant: null, recurrence: null }, mensuel), null)
+  assert.match(ecartTarifDemande({ montant: 2, recurrence: null }, mensuel), /coûte 1 €, pas 2 €/)
+  assert.match(ecartTarifDemande({ montant: null, recurrence: 'year' }, mensuel), /mensuel/)
+  // Un tarif cree pour une personne : son nom en nickname, son email en metadonnee.
+  const corps = corpsTarifReserve({ produitId: 'prod_COMMUN1234', montantCentimes: 100, devise: 'eur', recurrence: 'month',
+    qui: 'Yassine', email: EMAIL_YASSINE })
+  assert.equal(corps.product, 'prod_COMMUN1234')
+  assert.equal(corps.unit_amount, '100')
+  assert.equal(corps['recurring[interval]'], 'month')
+  assert.equal(corps.nickname, 'Yassine (tarif réservé)')
+  assert.equal(corps[`metadata[${META_RESERVE_POUR}]`], EMAIL_YASSINE)
+  // Le resultat : l'URL seule sur sa ligne, puis l'etape suivante de Brice.
+  const lignes = phraseAbonnementReserveCree({ qui: 'Yassine', email: EMAIL_YASSINE, tarif: '1 € par mois',
+    url: 'https://buy.stripe.com/abc?prefilled_email=x', bot: 'aok_liveclub_bot', avecTelegram: false, priceRepris: TARIF_YASSINE,
+    produitInscrit: true }).split('\n')
+  assert.equal(lignes.length, 3)
+  assert.match(lignes[0], /Yassine.*1 € par mois.*repris.*un seul paiement.*ouvre maintenant le Live Club/)
+  assert.equal(lignes[1], 'https://buy.stripe.com/abc?prefilled_email=x')
+  assert.equal(lignes[2], "Envoie ce lien à Yassine, ou dis-lui d'écrire à @aok_liveclub_bot : après vérification de son email, "
+    + 'le bot lui donne ce même lien. Il entre dans le groupe une fois payé.')
+  assert.match(etapeApresAbonnementReserve('Yassine', 'aok_liveclub_bot', true), /reconnaît son compte Telegram/)
 })
 
 console.log(`\n${n} blocs verifies, tout est bon.`)
