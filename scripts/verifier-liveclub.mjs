@@ -56,6 +56,17 @@ import {
   ARGUMENT_TARIF_PAUSE, TEXTE_PAUSE_AVANT_ARRET, sortiesActives, sortiesImpayesActives, PLAFOND_RESILIATIONS_PASSAGE,
   texteRaisonSortie, PRODUITS_LIVECLUB, URL_BIENVENUE_LIVECLUB, estProduitLiveClub,
 } from '../src/lib/liveclub/config.ts'
+import {
+  planRattachement, resultatDuPlan, detailsDuPlan, abonnementsHorsPreuve, adresseDePaiementAutre, preuveTelegram,
+  preuveSymetrique, phraseAdresse,
+} from '../src/lib/liveclub/adresses-pur.ts'
+import {
+  RUBRIQUES_RESUME, TITRE_RESUME, MAX_MESSAGE_TELEGRAM, MARQUEUR_RESUME_HISTORIQUE,
+  dateFr, dateHeureParis, texteSur, identite, cleGeste, evenementDeGeste, codeAbonnement, instantaneAbonnements,
+  changementsAbonnements, changementsHorsDuBot, evenementDeChangement, estNouvelAbonnement, detailNouvelAbonnement,
+  detailAccesBroker, detailExemption, detailTarifReserve, detailAttenteHumain, detailDemande,
+  ilYAMouvement, titreResume, composerResume, decouperResume, entreesHistoriqueResume,
+} from '../src/lib/liveclub/resume-pur.ts'
 
 const PRODUITS = ['prod_UcOraPncQlbrW4', 'prod_UynMpOvBtGTsIw']
 let n = 0
@@ -2078,6 +2089,397 @@ test('Agent AOK : l image arrive comme un message de l utilisateur, l historique
   assert.deepEqual(historiquePourTour('pas un tableau', 'u1'), [])
   // L'identifiant n'entre jamais dans ce que voit le modele.
   assert.ok(historiquePourTour(stockes, 'u12').every(m => Object.keys(m).join() === 'role,content'))
+})
+
+// ---------------------------------------------------------------------------
+// (A) Adresses d'une meme personne, rattachees sur preuve (Brice, 15/10)
+// ---------------------------------------------------------------------------
+
+const PRINCIPALE = 'yassine@exemple.fr'
+const PAIEMENT = 'yassine.paiement@exemple.fr'
+const COUVERT_TARIF = { abonnements: ['sub_TARIF12345'], clients: [] }
+const yassine = (o = {}) => ({
+  preuve: 'tarif_reserve',
+  connue: { email: PRINCIPALE, compte: { profileId: 'p-e5ef19c4', verifie: true }, fiche: { membreId: 'm-0a289e31' } },
+  nouvelle: { email: PAIEMENT, compte: null, fiche: { membreId: 'm-607f5d5b' } },
+  abonnementsParFiche: { 'm-607f5d5b': [{ id: 'stripe:sub_TARIF12345', statut: 'active', client: 'cus_PAIEMENT' }] },
+  couverts: COUVERT_TARIF,
+  ...o,
+})
+
+test('adresses : preuves acceptees et refusees (jamais par le nom)', () => {
+  // Tarif reserve : seulement une AUTRE adresse, lisible.
+  assert.equal(adresseDePaiementAutre(PRINCIPALE, PAIEMENT), PAIEMENT)
+  assert.equal(adresseDePaiementAutre(PRINCIPALE, '  Yassine@Exemple.FR '), null)
+  assert.equal(adresseDePaiementAutre(PRINCIPALE, null), null)
+  assert.equal(adresseDePaiementAutre(PRINCIPALE, 'pas une adresse'), null)
+  // Telegram : les DEUX liens par preuve de possession (source 'bot' : lien personnel ou code).
+  assert.deepEqual(preuveTelegram({ email: 'A@x.fr', source: 'bot' }, { email: 'b@x.fr', source: 'bot' }), { ancienne: 'a@x.fr', nouvelle: 'b@x.fr' })
+  assert.equal(preuveTelegram({ email: 'a@x.fr', source: 'metricgram' }, { email: 'b@x.fr', source: 'bot' }), null)
+  assert.equal(preuveTelegram({ email: 'a@x.fr', source: 'manuel' }, { email: 'b@x.fr', source: 'bot' }), null)
+  assert.equal(preuveTelegram({ email: 'a@x.fr', source: 'bot' }, { email: 'b@x.fr', source: 'manuel' }), null)
+  assert.equal(preuveTelegram({ email: 'a@x.fr', source: 'bot' }, { email: 'A@X.fr', source: 'bot' }), null)
+  assert.equal(preuveTelegram({ email: null, source: 'bot' }, { email: 'b@x.fr', source: 'bot' }), null)
+  assert.equal(preuveTelegram(null, { email: 'b@x.fr', source: 'bot' }), null)
+  assert.ok(preuveSymetrique('telegram') && !preuveSymetrique('tarif_reserve'))
+})
+
+test('adresses : cas Yassine (tarif reserve paye avec une autre adresse)', () => {
+  // Avant le geste a la main de Brice : l'adresse du paiement va au compte AOK ;
+  // deux fiches, que la collecte du matin fusionnera (meme compte AOK).
+  const avant = planRattachement(yassine())
+  assert.deepEqual(avant, {
+    conflit: null,
+    compte: { action: 'ajouter', profileId: 'p-e5ef19c4', email: PAIEMENT },
+    fiche: { action: 'rien', raison: 'doublon_fusion_collecte' },
+  })
+  assert.equal(resultatDuPlan(avant), 'fait')
+  assert.deepEqual(detailsDuPlan(avant), { compte: 'ajoute', fiche: 'doublon_fusion_collecte' })
+  // Aujourd'hui (adresse deja ajoutee a la main) : rien a faire, rien a dire.
+  const apres = planRattachement(yassine({ nouvelle: { email: PAIEMENT, compte: { profileId: 'p-e5ef19c4', verifie: true }, fiche: { membreId: 'm-607f5d5b' } } }))
+  assert.deepEqual(apres.compte, { action: 'rien', raison: 'deja' })
+  assert.equal(apres.fiche.raison, 'doublon_fusion_collecte')
+  assert.equal(resultatDuPlan(apres), null)
+  // Sans fiche a l'adresse du paiement (paye avant la collecte) : rattachee a sa fiche.
+  const sansFiche = planRattachement(yassine({ nouvelle: { email: PAIEMENT, compte: null, fiche: null } }))
+  assert.deepEqual(sansFiche.fiche, { action: 'ajouter', membreId: 'm-0a289e31', email: PAIEMENT })
+  assert.deepEqual(detailsDuPlan(sansFiche), { compte: 'ajoute', fiche: 'ajoute' })
+  // Meme adresse : rien.
+  assert.equal(resultatDuPlan(planRattachement(yassine({ nouvelle: { email: PRINCIPALE, compte: null, fiche: null } }))), null)
+  // Une ligne non verifiee du MEME compte (ajoutee depuis Mon espace) : verifiee par la preuve.
+  const nonVerifiee = planRattachement(yassine({ nouvelle: { email: PAIEMENT, compte: { profileId: 'p-e5ef19c4', verifie: false }, fiche: null } }))
+  assert.deepEqual(nonVerifiee.compte, { action: 'verifier', profileId: 'p-e5ef19c4', email: PAIEMENT })
+})
+
+test('adresses : conflits, rien n est ecrase', () => {
+  // L'adresse est sur un AUTRE compte AOK (verifie ou non) : conflit, rien d'ecrit nulle part.
+  for (const verifie of [true, false]) {
+    const p = planRattachement(yassine({ nouvelle: { email: PAIEMENT, compte: { profileId: 'p-autre', verifie }, fiche: null } }))
+    assert.equal(p.conflit, 'autre_compte_aok')
+    assert.equal(p.compte.action, 'rien')
+    assert.equal(p.fiche.action, 'rien')
+    assert.equal(resultatDuPlan(p), 'refuse')
+    assert.deepEqual(detailsDuPlan(p), { raison: 'autre_compte_aok' })
+  }
+  // Tarif reserve : la reservation n'a pas de compte, le paiement si. Pas forcement elle : signale.
+  const sansCompte = planRattachement(yassine({
+    connue: { email: PRINCIPALE, compte: null, fiche: null },
+    nouvelle: { email: PAIEMENT, compte: { profileId: 'p-payeur', verifie: true }, fiche: null },
+  }))
+  assert.equal(sansCompte.conflit, 'autre_compte_aok')
+  // Une autre fiche avec un abonnement VIVANT que la preuve ne couvre pas : conflit.
+  const abonnee = planRattachement(yassine({ abonnementsParFiche: { 'm-607f5d5b': [
+    { id: 'stripe:sub_TARIF12345', statut: 'active', client: 'cus_PAIEMENT' },
+    { id: 'stripe:sub_PUBLIC1234', statut: 'past_due', client: 'cus_AUTRE' },
+  ] } }))
+  assert.equal(abonnee.conflit, 'autre_fiche_abonnee')
+  assert.equal(abonnee.compte.action, 'rien')
+  // Le meme abonnement termine, ou un abonnement Skool fini : pas de conflit.
+  const fini = planRattachement(yassine({ abonnementsParFiche: { 'm-607f5d5b': [
+    { id: 'stripe:sub_TARIF12345', statut: 'active', client: 'cus_PAIEMENT' },
+    { id: 'stripe:sub_PUBLIC1234', statut: 'canceled', client: 'cus_AUTRE' },
+  ] } }))
+  assert.equal(fini.conflit, null)
+  // Deux fiches que rien ne relie (aucun compte AOK) : a fusionner a la main, signale.
+  const doublon = planRattachement(yassine({ connue: { email: PRINCIPALE, compte: null, fiche: { membreId: 'm-0a289e31' } } }))
+  assert.deepEqual(doublon, { conflit: null, compte: { action: 'rien', raison: 'sans_compte' }, fiche: { action: 'rien', raison: 'doublon_a_fusionner' } })
+  assert.equal(resultatDuPlan(doublon), 'refuse')
+  assert.equal(detailsDuPlan(doublon).raison, 'doublon_a_fusionner')
+  // Le compte connu n'a qu'une adresse NON verifiee : il ne designe personne.
+  const nonVerifie = planRattachement(yassine({ connue: { email: PRINCIPALE, compte: { profileId: 'p-x', verifie: false }, fiche: null }, nouvelle: { email: PAIEMENT, compte: null, fiche: null } }))
+  assert.deepEqual(nonVerifie.compte, { action: 'rien', raison: 'compte_non_verifie' })
+  assert.equal(resultatDuPlan(nonVerifie), null)
+  // Personne de connu : rien.
+  assert.equal(resultatDuPlan(planRattachement(yassine({ connue: { email: PRINCIPALE, compte: null, fiche: null }, nouvelle: { email: PAIEMENT, compte: null, fiche: null } }))), null)
+  // Hors preuve : prefixe de source retire, client couvert, statuts finis ecartes.
+  assert.deepEqual(abonnementsHorsPreuve([
+    { id: 'stripe:sub_A1', statut: 'active', client: 'cus_1' },
+    { id: 'sub_A2', statut: 'active', client: 'cus_2' },
+    { id: 'stripe:sub_A3', statut: 'incomplete_expired', client: null },
+    { id: 'skool:x', statut: 'active', client: null },
+  ], { abonnements: ['sub_A1'], clients: ['cus_2'] }).map(a => a.id), ['skool:x'])
+})
+
+test('adresses : meme compte Telegram, les deux sens', () => {
+  const tg = (o = {}) => ({
+    preuve: 'telegram',
+    connue: { email: 'ancienne@x.fr', compte: null, fiche: { membreId: 'm-1' } },
+    nouvelle: { email: 'nouvelle@x.fr', compte: { profileId: 'p-1', verifie: true }, fiche: null },
+    abonnementsParFiche: {},
+    couverts: { abonnements: [], clients: ['cus_ANCIEN', 'cus_NOUVEAU'] },
+    ...o,
+  })
+  // L'ancienne adresse va au compte de la nouvelle ; la nouvelle a la fiche de l'ancienne.
+  assert.deepEqual(planRattachement(tg()), {
+    conflit: null,
+    compte: { action: 'ajouter', profileId: 'p-1', email: 'ancienne@x.fr' },
+    fiche: { action: 'ajouter', membreId: 'm-1', email: 'nouvelle@x.fr' },
+  })
+  // Deux fiches, chacune avec SON abonnement (clients des deux rattachements) : meme personne, fusion par la collecte.
+  const deux = planRattachement(tg({
+    nouvelle: { email: 'nouvelle@x.fr', compte: { profileId: 'p-1', verifie: true }, fiche: { membreId: 'm-2' } },
+    abonnementsParFiche: {
+      'm-1': [{ id: 'stripe:sub_V1', statut: 'active', client: 'cus_ANCIEN' }],
+      'm-2': [{ id: 'stripe:sub_V2', statut: 'active', client: 'cus_NOUVEAU' }],
+    },
+  }))
+  assert.equal(deux.conflit, null)
+  assert.deepEqual(deux.fiche, { action: 'rien', raison: 'doublon_fusion_collecte' })
+  // L'une des fiches porte l'abonnement d'un autre client : conflit.
+  const autre = planRattachement(tg({
+    nouvelle: { email: 'nouvelle@x.fr', compte: null, fiche: { membreId: 'm-2' } },
+    abonnementsParFiche: { 'm-1': [{ id: 'stripe:sub_V3', statut: 'active', client: 'cus_TIERS' }] },
+  }))
+  assert.equal(autre.conflit, 'autre_fiche_abonnee')
+  // Deux comptes AOK differents : conflit.
+  assert.equal(planRattachement(tg({ connue: { email: 'ancienne@x.fr', compte: { profileId: 'p-2', verifie: true }, fiche: null } })).conflit, 'autre_compte_aok')
+})
+
+test('adresses : phrases du resume et du fil Support', () => {
+  const fait = phraseAdresse({ resultat: 'fait', regle: 'tarif_reserve', details: { compte: 'ajoute', fiche: 'doublon_fusion_collecte' } }, PAIEMENT)
+  assert.equal(fait, `adresse ${PAIEMENT} ajoutée à son compte AOK, ses deux fiches seront fusionnées par la collecte du matin (tarif réservé payé avec cette adresse)`)
+  assert.match(phraseAdresse({ resultat: 'refuse', regle: 'telegram', details: { raison: 'autre_compte_aok' } }, 'b@x.fr'),
+    /^adresse b@x\.fr non rattachée : elle est déjà sur un autre compte AOK, rien n'a été changé, à vérifier$/)
+  assert.match(phraseAdresse({ resultat: 'refuse', regle: 'tarif_reserve', details: { raison: 'doublon_a_fusionner' } }, null), /^autre adresse a sa propre fiche.*à la main/)
+  assert.match(phraseAdresse({ resultat: 'echec', regle: 'telegram', details: {} }, null), /panne, à faire à la main$/)
+  assert.equal(phraseGeste({ geste: 'adresse', resultat: 'fait', regle: 'telegram', details: {} }), 'Une autre adresse email lui est rattachée (même compte Telegram vérifié).')
+  assert.match(phraseGeste({ geste: 'adresse', resultat: 'refuse', regle: 'tarif_reserve', details: {} }), /à vérifier/)
+  assert.equal(phraseGeste({ geste: 'adresse', resultat: 'simule', regle: 'telegram', details: {} }), null)
+})
+
+// ---------------------------------------------------------------------------
+// (B) Le resume du matin (Brice, 15/10)
+// ---------------------------------------------------------------------------
+
+const DEPUIS = '2026-10-14T07:02:00.000Z'
+const JUSQUA = '2026-10-15T07:01:00.000Z'
+let idGeste = 0
+const geste = (geste, regle, o = {}) => ({
+  id: String(++idGeste), geste, resultat: 'fait', regle, details: {}, fait_le: '2026-10-14T09:00:00.000Z',
+  telegram_id: null, membre_id: null, abonnement_id: null, ...o,
+})
+
+test('resume : gestes du journal -> rubriques et phrases', () => {
+  const ev = (g, o) => evenementDeGeste(g, o)
+  assert.deepEqual(ev(geste('entree_acceptee', 'abonnement')), { rubrique: 'entrees', detail: 'entré dans le groupe' })
+  assert.equal(ev(geste('entree_acceptee', 'acces_broker')).detail, 'entré dans le groupe (accès broker)')
+  assert.deepEqual(ev(geste('retrait', 'desabonne')), { rubrique: 'sorties', detail: 'sorti du groupe : abonnement terminé, fin de la période payée' })
+  assert.equal(ev(geste('retrait', 'impaye_5j')).rubrique, 'impayes')
+  assert.equal(ev(geste('retrait', 'manuel')).detail, "sorti du groupe par l'équipe")
+  assert.equal(ev(geste('fin_acces', 'fin_exemption')).detail, "sorti du groupe : fin de l'accès offert")
+  assert.equal(ev(geste('fin_acces', 'broker_fin')).detail, "sorti du groupe : fin de l'accès broker")
+  assert.equal(ev(geste('pause', 'demande_membre', { details: { reprise_le: '2027-01-15', paye_jusquau: '2026-11-02' } })).detail, 'pause demandée, reprise le 15 janvier 2027')
+  assert.equal(ev(geste('pause', 'pause_effective')).detail, 'début de la pause : sorti du groupe')
+  assert.equal(ev(geste('pause', 'pause_adoptee')).detail, 'pause posée hors du bot (Stripe), prise en compte')
+  assert.equal(ev(geste('reprise', 'pause_retour')).detail, 'fin de la pause : lien de retour envoyé')
+  assert.deepEqual(ev(geste('arret', 'demande_membre', { details: { fin: '2026-11-12' } })), { rubrique: 'arrets', detail: "arrêt demandé, accès jusqu'au 12 novembre 2026" })
+  assert.equal(ev(geste('arret', 'fenetre_30j')).rubrique, 'impayes')
+  assert.equal(ev(geste('arret_annule', 'demande_membre')).detail, "arrêt annulé, l'abonnement continue")
+  assert.equal(ev(geste('invitation', 'reouverture_impaye', { details: { canal: 'email' } })).detail, 'paiement passé : accès rouvert, lien envoyé par email')
+  // Ce qui n'a pas sa place : rappels, liens, simulations, echecs, refus.
+  assert.equal(ev(geste('rappel', 'prelevement_j3')), null)
+  assert.equal(ev(geste('invitation', 'retour_groupe')), null)
+  assert.equal(ev(geste('retrait', 'desabonne', { resultat: 'simule' })), null)
+  assert.equal(ev(geste('retrait', 'impaye_5j', { resultat: 'echec' })), null)
+  assert.equal(ev(geste('refus', 'sortie_abusive_metricgram')), null)
+  // Une adresse : la phrase calculee par l'appelant, conflits et pannes compris.
+  assert.deepEqual(ev(geste('adresse', 'telegram', { resultat: 'refuse' }), { phraseAdresse: 'adresse x non rattachée' }), { rubrique: 'adresses', detail: 'adresse x non rattachée' })
+  assert.equal(ev(geste('adresse', 'telegram', { resultat: 'simule' })), null)
+  // La personne : compte Telegram, sinon fiche, sinon abonnement.
+  assert.equal(cleGeste(geste('pause', 'x', { telegram_id: 42, membre_id: 'm', abonnement_id: 'sub_1' })), 't42')
+  assert.equal(cleGeste(geste('pause', 'x', { membre_id: 'm', abonnement_id: 'sub_1' })), 'mm')
+  assert.equal(cleGeste(geste('pause', 'x', { abonnement_id: 'sub_1' })), 'ssub_1')
+})
+
+test('resume : Stripe, nouveaux abonnes et changements hors du bot (comparaison d etat)', () => {
+  const abo = (id, o = {}) => ({ id, statut: 'active', arretPrevu: false, pauseActive: false, pauseJusquau: null, finPeriode: '2026-11-12T10:00:00Z', creeLe: '2026-09-01T10:00:00Z', termineLe: null, ...o })
+  assert.equal(codeAbonnement(abo('sub_A')), 'active|0|')
+  assert.equal(codeAbonnement(abo('sub_A', { arretPrevu: true, pauseActive: true, pauseJusquau: '2027-01-15T00:00:00Z' })), 'active|1|2027-01-15')
+  assert.equal(codeAbonnement(abo('sub_A', { pauseActive: true })), 'active|0|sans')
+  // Instantane : vivants, et finis depuis moins de 60 jours.
+  const inst = instantaneAbonnements([
+    abo('sub_A'), abo('sub_FINI_RECENT', { statut: 'canceled', termineLe: '2026-10-01T00:00:00Z' }),
+    abo('sub_FINI_VIEUX', { statut: 'canceled', termineLe: '2026-01-01T00:00:00Z' }),
+  ], JUSQUA)
+  assert.deepEqual(Object.keys(inst), ['sub_A', 'sub_FINI_RECENT'])
+
+  const avant = { sub_A: 'active|0|', sub_B: 'active|0|', sub_C: 'active|1|', sub_D: 'active|0|2026-12-01', sub_E: 'active|0|', sub_F: 'active|1|', sub_H: 'past_due|0|' }
+  const apres = { sub_A: 'active|1|', sub_B: 'active|0|2027-01-15', sub_C: 'active|0|', sub_D: 'active|0|', sub_E: 'canceled|0|', sub_F: 'canceled|1|', sub_G: 'active|0|', sub_H: 'active|0|' }
+  const ch = changementsAbonnements(avant, apres)
+  assert.deepEqual(ch, [
+    { abonnementId: 'sub_A', genre: 'arret_demande' },
+    { abonnementId: 'sub_B', genre: 'pause' },
+    { abonnementId: 'sub_C', genre: 'arret_annule' },
+    { abonnementId: 'sub_D', genre: 'reprise' },
+    { abonnementId: 'sub_E', genre: 'resilie' },
+  ])
+  // Premier resume : pas d'instantane avant, aucun changement.
+  assert.deepEqual(changementsAbonnements(null, apres), [])
+  // Ce que le bot a deja fait (et journalise) n'est pas redit.
+  const gestes = [
+    geste('arret', 'demande_membre', { abonnement_id: 'sub_A' }),
+    geste('pause', 'pause_adoptee', { abonnement_id: 'sub_B' }),
+    geste('arret', 'fenetre_30j', { abonnement_id: 'sub_E' }),
+    geste('arret_annule', 'demande_membre', { abonnement_id: 'sub_C', resultat: 'echec' }),
+  ]
+  assert.deepEqual(changementsHorsDuBot(ch, gestes).map(c => c.abonnementId), ['sub_C', 'sub_D'])
+  assert.deepEqual(evenementDeChangement({ abonnementId: 'sub_A', genre: 'arret_demande' }, abo('sub_A', { arretPrevu: true })),
+    { rubrique: 'arrets', detail: "arrêt demandé via Stripe, accès jusqu'au 12 novembre 2026" })
+  assert.equal(evenementDeChangement({ abonnementId: 'sub_B', genre: 'pause' }, abo('sub_B', { pauseActive: true, pauseJusquau: '2027-01-15T00:00:00Z' })).detail,
+    'pause posée via Stripe, reprise le 15 janvier 2027')
+  assert.equal(evenementDeChangement({ abonnementId: 'sub_D', genre: 'reprise' }, undefined).rubrique, 'pauses')
+  // Nouveaux : crees dans la fenetre, premier paiement pas en echec.
+  assert.ok(estNouvelAbonnement(abo('sub_N', { creeLe: '2026-10-14T20:07:00Z' }), DEPUIS, JUSQUA))
+  assert.ok(!estNouvelAbonnement(abo('sub_N', { creeLe: '2026-10-14T20:07:00Z', statut: 'incomplete' }), DEPUIS, JUSQUA))
+  assert.ok(!estNouvelAbonnement(abo('sub_N', { creeLe: '2026-10-13T20:07:00Z' }), DEPUIS, JUSQUA))
+  assert.ok(!estNouvelAbonnement(abo('sub_N', { creeLe: null }), DEPUIS, JUSQUA))
+  assert.equal(detailNouvelAbonnement({ montant: '1 € par mois', remise: false, tarifReserve: true, statut: 'active' }), 'nouvel abonnement, 1 € par mois (tarif réservé)')
+  assert.equal(detailNouvelAbonnement({ montant: '139 € par mois', remise: true, tarifReserve: false, statut: 'active' }), 'nouvel abonnement, 139 € par mois, avec remise')
+})
+
+/** Le jeu du resume : une matinee fictive, noms inventes. */
+function matineeFictive() {
+  const evenements = [
+    { rubrique: 'nouveaux', qui: 'ssub_YASSINE', quand: '2026-10-14T20:07:00Z', detail: detailNouvelAbonnement({ montant: '1 € par mois', remise: false, tarifReserve: true, statut: 'active' }) },
+    { rubrique: 'nouveaux', qui: 'ssub_CLAIRE', quand: '2026-10-14T10:15:00Z', detail: detailNouvelAbonnement({ montant: '139 € par mois', remise: false, tarifReserve: false, statut: 'active' }) },
+    { rubrique: 'arrets', qui: 't501', quand: '2026-10-14T11:00:00Z', ...evenementDeGeste(geste('arret', 'demande_membre', { details: { fin: '2026-11-12' } })) },
+    { rubrique: 'arrets', qui: 'ssub_PORTAIL', quand: JUSQUA, ...evenementDeChangement({ abonnementId: 'sub_PORTAIL', genre: 'arret_annule' }, undefined) },
+    { rubrique: 'pauses', qui: 't502', quand: '2026-10-14T12:00:00Z', ...evenementDeGeste(geste('pause', 'demande_membre', { details: { reprise_le: '2027-01-15' } })) },
+    { rubrique: 'pauses', qui: 't503', quand: '2026-10-15T07:00:20Z', ...evenementDeGeste(geste('pause', 'pause_effective')) },
+    { rubrique: 'pauses', qui: 't503', quand: '2026-10-15T07:00:21Z', ...evenementDeGeste(geste('reprise', 'pause_retour')) },
+    { rubrique: 'impayes', qui: 't504', quand: '2026-10-15T07:00:10Z', ...evenementDeGeste(geste('retrait', 'impaye_5j')) },
+    { rubrique: 'impayes', qui: 't505', quand: '2026-10-14T16:00:00Z', ...evenementDeGeste(geste('invitation', 'reouverture_impaye')) },
+    { rubrique: 'sorties', qui: 't506', quand: '2026-10-15T07:00:30Z', ...evenementDeGeste(geste('retrait', 'desabonne')) },
+    { rubrique: 'entrees', qui: 't507', quand: '2026-10-14T20:09:00Z', ...evenementDeGeste(geste('entree_acceptee', 'abonnement')) },
+    { rubrique: 'acces', qui: 'esouad@exemple.fr', quand: '2026-10-14T14:00:00Z', detail: detailAccesBroker('2027-04-14') },
+    { rubrique: 'acces', qui: 't508', quand: '2026-10-14T15:00:00Z', detail: detailExemption('favorise', null) },
+    { rubrique: 'acces', qui: 'epaul@exemple.fr', quand: '2026-10-14T15:30:00Z', detail: detailTarifReserve({ tarif: '49 € par mois', paye: false }) },
+    { rubrique: 'adresses', qui: 't507', quand: '2026-10-14T20:09:30Z', detail: phraseAdresse({ resultat: 'fait', regle: 'tarif_reserve', details: { compte: 'ajoute', fiche: 'doublon_fusion_collecte' } }, 'yassine.paiement@exemple.fr') },
+    { rubrique: 'humains', qui: 't509', quand: '2026-10-13T08:00:00Z', ancien: true, detail: detailAttenteHumain('2026-10-13T08:00:00Z', 'telegram') },
+    { rubrique: 'demandes', qui: 'd1', quand: '2026-10-14T18:00:00Z', detail: detailDemande('Prévoir un accès broker pour le frère de Souad', 'nouvelle') },
+  ]
+  const personnes = new Map([
+    ['ssub_YASSINE', { nom: 'Yassine Z.', email: 'yassine.paiement@exemple.fr', pseudo: null, telegramId: 507 }],
+    ['ssub_CLAIRE', { nom: 'Claire Martin', email: 'claire@exemple.fr', pseudo: 'clairem', telegramId: null }],
+    ['t501', { nom: 'Julien R.', email: 'julien@exemple.fr', pseudo: '@julien_rb', telegramId: 501 }],
+    ['ssub_PORTAIL', { nom: 'Antoine B.', email: 'antoine@exemple.fr', pseudo: null, telegramId: null }],
+    ['t502', { nom: 'Laura M.', email: null, pseudo: 'lauram', telegramId: 502 }],
+    ['t503', { nom: null, email: 'filiz@exemple.fr', pseudo: null, telegramId: 503 }],
+    ['t504', { nom: 'Fouad B.', email: 'fouad@exemple.fr', pseudo: 'fouadb', telegramId: 504 }],
+    ['t505', { nom: 'Boris K.', email: 'boris@exemple.fr', pseudo: null, telegramId: 505 }],
+    ['t506', { nom: 'Andrea P.', email: 'andrea@exemple.fr', pseudo: 'andreap', telegramId: 506 }],
+    ['t507', { nom: 'Yassine Z.', email: 'yassine@exemple.fr', pseudo: 'yassinez', telegramId: 507 }],
+    ['esouad@exemple.fr', { nom: 'Souad', email: 'souad@exemple.fr', pseudo: null, telegramId: null }],
+    ['t508', { nom: null, email: null, pseudo: null, telegramId: 508 }],
+    ['epaul@exemple.fr', { nom: 'Paul D.', email: 'paul@exemple.fr', pseudo: null, telegramId: null }],
+    ['t509', { nom: 'Nelly', email: null, pseudo: 'nelly34', telegramId: 509 }],
+    ['d1', { nom: 'melanie', email: null, pseudo: null, telegramId: null }],
+  ])
+  return { evenements, personnes }
+}
+
+test('resume : composition (une ligne par personne, rubriques vides omises, rien a dire)', () => {
+  const { evenements, personnes } = matineeFictive()
+  const texte = composerResume(evenements, personnes, { depuis: DEPUIS, jusqua: JUSQUA })
+  const lignes = texte.split('\n')
+  assert.equal(lignes[0], TITRE_RESUME)
+  assert.equal(TITRE_RESUME, 'Live Club, ce qui a bougé depuis hier')
+  // Les rubriques dans l'ordre, toutes presentes ici.
+  const titres = RUBRIQUES_RESUME.map(r => r.titre)
+  const vus = lignes.filter(l => titres.includes(l))
+  assert.deepEqual(vus, titres)
+  // Les nouveaux abonnes dans l'ordre d'arrivee, nom, email et pseudo.
+  const i = lignes.indexOf('Nouveaux abonnés')
+  assert.equal(lignes[i + 1], '- Claire Martin, claire@exemple.fr, @clairem : nouvel abonnement, 139 € par mois')
+  assert.equal(lignes[i + 2], '- Yassine Z., yassine.paiement@exemple.fr : nouvel abonnement, 1 € par mois (tarif réservé)')
+  // Une personne, une ligne par rubrique : ses evenements separes par « ; ».
+  assert.ok(lignes.includes('- filiz@exemple.fr : début de la pause : sorti du groupe ; fin de la pause : lien de retour envoyé'))
+  assert.ok(lignes.includes("- Julien R., julien@exemple.fr, @julien_rb : arrêt demandé, accès jusqu'au 12 novembre 2026"))
+  // Inconnu : son compte Telegram.
+  assert.ok(lignes.includes('- compte Telegram u508 : accès offert (favorisé), sans date de fin'))
+  assert.ok(lignes.includes("- melanie : « Prévoir un accès broker pour le frère de Souad »"))
+  // Sobre : ni tiret long, ni emoji, ni puce typographique.
+  assert.ok(!new RegExp(`[${[0x2014, 0x2013, 0x2022, 0x2026].map(c => String.fromCharCode(c)).join('')}]`).test(texte), 'caractere interdit')
+  assert.ok(!/\p{Extended_Pictographic}/u.test(texte), 'emoji')
+  // Rubriques vides omises.
+  const peu = composerResume(evenements.filter(e => e.rubrique === 'pauses'), personnes, { depuis: DEPUIS, jusqua: JUSQUA })
+  assert.deepEqual(peu.split('\n\n').map(b => b.split('\n')[0]), [TITRE_RESUME, 'Pauses et reprises'])
+  // Rien a dire = rien a envoyer : aucun evenement, ou seulement une demande d'humain deja connue.
+  assert.equal(composerResume([], personnes, { depuis: DEPUIS, jusqua: JUSQUA }), null)
+  const ancienne = evenements.filter(e => e.ancien)
+  assert.equal(ancienne.length, 1)
+  assert.ok(!ilYAMouvement(ancienne))
+  assert.equal(composerResume(ancienne, personnes, { depuis: DEPUIS, jusqua: JUSQUA }), null)
+  // Mais elle figure dans un resume qui part.
+  assert.ok(texte.includes("- Nelly, @nelly34 : attend une réponse de l'équipe depuis le 13 octobre à 10 h 00"))
+  // Un detail en double pour la meme personne n'est dit qu'une fois.
+  const double = composerResume([evenements[2], { ...evenements[2], quand: JUSQUA }], personnes, { depuis: DEPUIS, jusqua: JUSQUA })
+  assert.equal(double.split('\n').filter(l => l.startsWith('- ')).length, 1)
+  // Fenetre plus longue qu'un jour et demi (apres une coupure) : la date de depart.
+  assert.equal(titreResume('2026-10-11T07:00:00Z', JUSQUA), 'Live Club, ce qui a bougé depuis le 11 octobre 2026')
+  assert.equal(titreResume(DEPUIS, JUSQUA), TITRE_RESUME)
+  if (process.env.MONTRER_RESUME === '1') console.log(`\n----- exemple de resume -----\n${texte}\n----- fin -----\n`)
+})
+
+test('resume : decoupage en messages Telegram de 4096 caracteres', () => {
+  assert.equal(MAX_MESSAGE_TELEGRAM, 4096)
+  const { evenements, personnes } = matineeFictive()
+  const court = composerResume(evenements, personnes, { depuis: DEPUIS, jusqua: JUSQUA })
+  assert.deepEqual(decouperResume(court), [court])
+  // 400 nouveaux abonnes : la rubrique est coupee entre deux lignes, la suite reprend son titre.
+  const beaucoup = Array.from({ length: 400 }, (_, k) => ({
+    rubrique: 'nouveaux', qui: `s${k}`, quand: new Date(Date.parse(DEPUIS) + (k + 1) * 60_000).toISOString(),
+    detail: detailNouvelAbonnement({ montant: '139 € par mois', remise: false, tarifReserve: false, statut: 'active' }),
+  }))
+  const noms = new Map(beaucoup.map((e, k) => [e.qui, { nom: `Membre numéro ${k}`, email: `membre${k}@exemple.fr`, pseudo: `pseudo${k}`, telegramId: null }]))
+  const long = composerResume([...beaucoup, ...evenements], new Map([...noms, ...personnes]), { depuis: DEPUIS, jusqua: JUSQUA })
+  assert.ok(long.length > 3 * 4096)
+  const messages = decouperResume(long)
+  assert.ok(messages.length >= 4)
+  for (const m of messages) assert.ok(m.length <= 4096, `message de ${m.length} caracteres`)
+  assert.ok(messages[0].startsWith(`${TITRE_RESUME}\n\nNouveaux abonnés\n- `))
+  assert.ok(messages[1].startsWith('Nouveaux abonnés (suite)\n- '))
+  // Aucune ligne perdue ni coupee.
+  const lignesAvant = long.split('\n').filter(l => l.startsWith('- '))
+  const lignesApres = messages.flatMap(m => m.split('\n')).filter(l => l.startsWith('- '))
+  assert.deepEqual(lignesApres, lignesAvant)
+  // Une rubrique qui tient dans un message n'est jamais coupee : « Arrêts » est entiere dans un seul.
+  assert.equal(messages.filter(m => m.includes('Arrêts demandés ou annulés')).length, 1)
+  // Garde-fou : une ligne demesuree est coupee net, jamais au-dela de la limite.
+  const enorme = decouperResume(`${TITRE_RESUME}\n\nImpayés\n- ${'x'.repeat(9000)}`, 4096)
+  for (const m of enorme) assert.ok(m.length <= 4096)
+  assert.equal(enorme.join('').replace(/Impayés \(suite\)\n/g, '').includes('x'.repeat(100)), true)
+})
+
+test('resume : formats, et l historique de l agent apres normalisation', () => {
+  assert.equal(dateFr('2026-11-01'), '1er novembre 2026')
+  assert.equal(dateFr(null), null)
+  // 07:05 UTC le 14/10 = 9 h 05 a Paris (heure d'ete) ; 08:05 UTC le 30/10 = 9 h 05 (heure d'hiver).
+  assert.equal(dateHeureParis('2026-10-14T07:05:00Z'), '14 octobre à 9 h 05')
+  assert.equal(dateHeureParis('2026-10-30T08:05:00Z'), '30 octobre à 9 h 05')
+  assert.equal(texteSur(`  Jean${String.fromCharCode(0x202e)}  Dupont ${String.fromCharCode(10)}`), 'Jean Dupont')
+  assert.equal(texteSur('x'.repeat(100), 10), 'xxxxxxx...')
+  assert.equal(identite({ nom: null, email: null, pseudo: '@@abc', telegramId: 1 }, 't1'), '@abc')
+  assert.equal(identite(undefined, 't77'), 'compte Telegram u77')
+  assert.equal(identite(undefined, 'ssub_1'), 'personne non identifiée')
+
+  // L'historique : la ligne [système] puis le resume ; une question posee dessous s'y rapporte.
+  const texte = composerResume(matineeFictive().evenements, matineeFictive().personnes, { depuis: DEPUIS, jusqua: JUSQUA })
+  const entrees = entreesHistoriqueResume(texte, '2026-10-15')
+  assert.deepEqual(entrees.map(e => [e.role, e.id]), [['user', 'resume-2026-10-15'], ['assistant', 'resume-2026-10-15-texte']])
+  assert.equal(entrees[0].content, MARQUEUR_RESUME_HISTORIQUE)
+  // Conversation vide : sans la ligne [système], le resume (reponse d'ouverture) serait ecarte.
+  const vide = normaliserHistorique([...entrees, { role: 'user', content: 'et pour Julien ?' }])
+  assert.deepEqual(vide.map(m => m.role), ['user', 'assistant', 'user'])
+  assert.equal(vide[1].content, texte)
+  assert.deepEqual(normaliserHistorique([entrees[1]]), [])
+  // Apres une reponse de l'agent : roles toujours alternes, le resume reste a part.
+  const suite = normaliserHistorique([{ role: 'user', content: 'q' }, { role: 'assistant', content: 'r' }, ...entrees, { role: 'user', content: 'et pour Julien ?' }])
+  assert.deepEqual(suite.map(m => m.role), ['user', 'assistant', 'user', 'assistant', 'user'])
+  assert.equal(suite[3].content, texte)
+  // Ce que voit le tour de la question : tout ce qui precede, resume compris.
+  const tour = historiquePourTour([...entrees, { role: 'user', content: 'et pour Julien ?', id: 'u900' }], 'u900')
+  assert.equal(tour[tour.length - 1].content, texte)
 })
 
 console.log(`\n${n} blocs verifies, tout est bon.`)

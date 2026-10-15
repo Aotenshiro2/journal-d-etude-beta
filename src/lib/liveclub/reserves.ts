@@ -22,6 +22,10 @@
 //   second (cas reel du 13/10 : Yassine a paye son tarif avec une autre
 //   adresse). Un abonnement vivant sur le tarif = reservation payee.
 //   L'acces vient de l'abonnement, comme pour tout abonne : aucun droit avant.
+// - Payee avec une AUTRE adresse (Brice, 15/10) : le tarif etant personnel,
+//   c'est une preuve, et l'adresse du paiement est rattachee a la personne de
+//   la reservation (compte AOK et fiche du cockpit), sauf conflit
+//   (rattacherAdresseDuPaiement, puis adresses.ts).
 //
 // Les regles sont PURES (pur.ts, testees par scripts/verifier-liveclub.mjs) ;
 // ici, la base et Stripe. Jamais d'email ni de lien dans un log.
@@ -37,6 +41,8 @@ import {
   inscrireProduitLiveClub, inscrireProduitTarifsReserves, lireProduitsLiveClub, produitTarifsReservesInscrit,
 } from './produits'
 import { abonnementsLiveClubParEmail } from './stripe'
+import { adresseDePaiementAutre } from './adresses-pur'
+import { rattacherAdresseSurPreuve } from './adresses'
 import {
   abonnementDeLaReserve, abonnementOuvreLeGroupe, corpsLienPaiement, corpsTarifReserve, dateIso, decisionLienReserve,
   ecartTarifDemande, estRefusDePermission, formaterDateFr, libelleTarif, libelleTarifReserve, lireAbonnementPourReserve,
@@ -169,6 +175,41 @@ async function marquerPayee(reserveId: string, abonnementId: string): Promise<bo
   return n > 0
 }
 
+/** Un abonnement du rapprochement, avec son client Stripe (cus_...) quand on le connait. */
+type AbonnementPaye = AbonnementPourReserve & { client?: string | null }
+
+/**
+ * Juste apres marquerPayee (Brice, 15/10) : la reservation est payee par un
+ * abonnement d'une AUTRE adresse que la sienne. Le tarif etant personnel,
+ * c'est une preuve : l'adresse du paiement est rattachee a la personne de la
+ * reservation (compte AOK et fiche du cockpit), sauf conflit
+ * (rattacherAdresseSurPreuve, adresses.ts). Ne jette pas.
+ */
+async function rattacherAdresseDuPaiement(
+  r: { reserve_id: string; email: string; telegram_id: number | bigint | null },
+  abo: AbonnementPaye,
+): Promise<void> {
+  const autre = adresseDePaiementAutre(r.email, abo.email)
+  if (!autre) return
+  const tid = r.telegram_id === null ? null : Number(r.telegram_id)
+  await rattacherAdresseSurPreuve({
+    preuve: 'tarif_reserve',
+    emailReserve: r.email,
+    emailPaiement: autre,
+    reserveId: r.reserve_id,
+    abonnementId: abo.id,
+    clientPaiement: abo.client ?? null,
+    telegramId: tid !== null && Number.isSafeInteger(tid) ? tid : null,
+  })
+}
+
+/** Le client Stripe d'un objet subscription (customer en chaine ou deplie). */
+function clientDe(sub: unknown): string | null {
+  const c = (sub && typeof sub === 'object' ? sub as { customer?: unknown } : {}).customer
+  const id = typeof c === 'string' ? c : c && typeof c === 'object' ? (c as { id?: unknown }).id : null
+  return typeof id === 'string' && /^cus_[A-Za-z0-9]+$/.test(id) ? id : null
+}
+
 // ---------------------------------------------------------------------------
 // Stripe : liens, abonnements d'un tarif, produit commun
 // ---------------------------------------------------------------------------
@@ -181,9 +222,9 @@ async function lireLien(cle: string, lienId: string): Promise<LienStripeLu> {
   }
 }
 
-/** Les abonnements d'un tarif (tous statuts), avec l'email du client. Jette sur une panne. */
-async function abonnementsDuTarif(cle: string, priceId: string): Promise<AbonnementPourReserve[]> {
-  const tous: AbonnementPourReserve[] = []
+/** Les abonnements d'un tarif (tous statuts), avec l'email et le client Stripe. Jette sur une panne. */
+async function abonnementsDuTarif(cle: string, priceId: string): Promise<AbonnementPaye[]> {
+  const tous: AbonnementPaye[] = []
   let apres: string | null = null
   for (let page = 0; page < 5; page++) {
     const q = new URLSearchParams({ price: priceId, status: 'all', limit: '100' })
@@ -193,7 +234,7 @@ async function abonnementsDuTarif(cle: string, priceId: string): Promise<Abonnem
     const data = (liste.data as unknown[] | undefined) ?? []
     for (const s of data) {
       const a = lireAbonnementPourReserve(s)
-      if (a) tous.push(a)
+      if (a) tous.push({ ...a, client: clientDe(s) })
     }
     if (liste.has_more !== true || data.length === 0) return tous
     apres = String((data[data.length - 1] as { id?: unknown }).id ?? '')
@@ -358,15 +399,16 @@ export async function lienDeLaReserve(r: ReserveLue): Promise<IssueLienReserve> 
       console.warn('[liveclub/reserves] aucune cle Stripe du compte melanie : lien de reservation non verifie')
       return r.lien_url ? { etat: 'lien', url: r.lien_url, tarif } : { etat: 'panne' }
     }
-    let abonnements: AbonnementPourReserve[] | null = null
+    let abonnements: AbonnementPaye[] | null = null
     try {
       abonnements = await abonnementsDuTarif(lecture, r.price_id)
     } catch (err) {
       console.warn(`[liveclub/reserves] abonnements du tarif illisibles : ${masquerCleStripe(messageErreur(err))}`)
     }
-    const abo = abonnements ? abonnementDeLaReserve(r, abonnements) : null
+    // abonnementDeLaReserve rend l'un des abonnements donnes : son client suit.
+    const abo = abonnements ? abonnementDeLaReserve(r, abonnements) as AbonnementPaye | null : null
     if (abo) {
-      await marquerPayee(r.reserve_id, abo.id)
+      if (await marquerPayee(r.reserve_id, abo.id)) await rattacherAdresseDuPaiement(r, abo)
       return { etat: 'payee' }
     }
 
@@ -408,10 +450,13 @@ export async function lienDeLaReserve(r: ReserveLue): Promise<IssueLienReserve> 
  * dont le tarif est dans la session sont marquees payees, D'ABORD par le
  * tarif (personnel), l'email en second (abonnementDeLaReserve) : une
  * personne peut payer avec une autre adresse. Renvoie le nombre marque. Ne
- * jette pas.
+ * jette pas. Payee avec une autre adresse : celle-ci est rattachee a la
+ * personne de la reservation (rattacherAdresseDuPaiement, 15/10).
  */
 export async function marquerReservesPayeesParSession(s: {
   email: string | null; prix: readonly string[]; abonnementId: string; statut: string | null
+  /** Le client Stripe de la session (cus_...), facultatif. */
+  client?: string | null
 }): Promise<number> {
   const prix = s.prix.filter(p => /^price_[A-Za-z0-9]+$/.test(p))
   if (prix.length === 0) return 0
@@ -421,9 +466,13 @@ export async function marquerReservesPayeesParSession(s: {
       select ${COLONNES} from public.cockpit_liveclub_tarifs_reserves
       where retire_le is null and paye_le is null and price_id = any(${prix}::text[])`
     let n = 0
+    const session: AbonnementPaye = { id: s.abonnementId, statut: s.statut ?? 'active', email, prix, client: s.client ?? null }
     for (const r of lignes) {
-      const abo = abonnementDeLaReserve(r, [{ id: s.abonnementId, statut: s.statut ?? 'active', email, prix }])
-      if (abo && await marquerPayee(r.reserve_id, abo.id)) n++
+      const abo = abonnementDeLaReserve(r, [session]) as AbonnementPaye | null
+      if (abo && await marquerPayee(r.reserve_id, abo.id)) {
+        n++
+        await rattacherAdresseDuPaiement(r, abo)
+      }
     }
     return n
   } catch (err) {
@@ -461,7 +510,7 @@ export async function rapprocherTarifsReserves(): Promise<BilanReserves> {
   const parTarif = new Map<string, LigneReserve[]>()
   for (const r of lignes) parTarif.set(r.price_id, [...(parTarif.get(r.price_id) ?? []), r])
   for (const [priceId, reserves] of parTarif) {
-    let abonnements: AbonnementPourReserve[]
+    let abonnements: AbonnementPaye[]
     try {
       abonnements = await abonnementsDuTarif(cle, priceId)
     } catch (err) {
@@ -470,9 +519,11 @@ export async function rapprocherTarifsReserves(): Promise<BilanReserves> {
       continue
     }
     for (const r of reserves) {
-      const abo = abonnementDeLaReserve(r, abonnements)
-      if (abo && await marquerPayee(r.reserve_id, abo.id)) bilan.payees++
-      else if (!abo) bilan.en_attente++
+      const abo = abonnementDeLaReserve(r, abonnements) as AbonnementPaye | null
+      if (abo && await marquerPayee(r.reserve_id, abo.id)) {
+        bilan.payees++
+        await rattacherAdresseDuPaiement(r, abo)
+      } else if (!abo) bilan.en_attente++
     }
   }
   return bilan

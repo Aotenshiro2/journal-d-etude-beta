@@ -5,6 +5,8 @@
 
 import { prisma } from '@/lib/db'
 import { memePayeur, normaliserEmail } from './pur'
+import { preuveTelegram } from './adresses-pur'
+import { rattacherAdresseSurPreuve } from './adresses'
 
 export { memePayeur }
 
@@ -57,8 +59,37 @@ export type IssueRattachement = {
  * complete ses champs vides. S'il pointe ailleurs, il recoit retire_le et un
  * nouveau lien est insere, dans la meme transaction. Le membre est retrouve
  * par l'email s'il n'est pas donne. Jette si rien ne designe le payeur.
+ *
+ * MEME PERSONNE, DEUX ADRESSES (Brice, 15/10) : quand le compte passe d'une
+ * adresse a une autre et que les DEUX liens viennent d'une preuve de
+ * possession (source 'bot' : lien personnel ou code email), les deux
+ * adresses sont a la meme personne. L'adresse qui manque est alors ajoutee a
+ * son compte AOK et a sa fiche du cockpit (rattacherAdresseSurPreuve,
+ * adresses.ts), sauf conflit. Ne change rien a la reponse : une panne y est
+ * loggue, jamais renvoyee.
  */
 export async function rattacherTelegram(telegramId: number, payeur: PayeurRattache): Promise<IssueRattachement> {
+  const issue = await poserRattachement(telegramId, payeur)
+  const preuve = issue.ancien ? preuveTelegram(issue.ancien, { email: issue.email, source: payeur.source }) : null
+  if (preuve && issue.ancien) {
+    await rattacherAdresseSurPreuve({
+      preuve: 'telegram',
+      telegramId,
+      ancien: { rattachementId: issue.ancien.rattachement_id, email: preuve.ancienne, clientStripe: issue.ancien.client_stripe },
+      nouveau: { rattachementId: issue.rattachementId, email: preuve.nouvelle, clientStripe: issue.clientStripe },
+    })
+  }
+  return { rattachementId: issue.rattachementId, changement: issue.changement }
+}
+
+type IssuePose = IssueRattachement & {
+  /** Le lien retire par ce changement de payeur ('remplace' seulement). */
+  ancien: Rattachement | null
+  email: string | null
+  clientStripe: string | null
+}
+
+async function poserRattachement(telegramId: number, payeur: PayeurRattache): Promise<IssuePose> {
   const clientStripe = payeur.clientStripe?.trim() || null
   const email = payeur.email ? normaliserEmail(payeur.email) : null
   let membreId = payeur.membreId ?? null
@@ -82,7 +113,7 @@ export async function rattacherTelegram(telegramId: number, payeur: PayeurRattac
           email = coalesce(email, ${email}),
           membre_id = coalesce(membre_id, ${membreId}::uuid)
         where rattachement_id = ${ancien.rattachement_id}::uuid`
-      return { rattachementId: ancien.rattachement_id, changement: 'identique' as const }
+      return { rattachementId: ancien.rattachement_id, changement: 'identique' as const, ancien: null, email, clientStripe }
     }
     if (ancien) {
       await tx.$executeRaw`
@@ -94,7 +125,12 @@ export async function rattacherTelegram(telegramId: number, payeur: PayeurRattac
         (telegram_id, membre_id, client_stripe, compte, email, source)
       values (${telegramId}, ${membreId}::uuid, ${clientStripe}, ${compte}, ${email}, ${payeur.source})
       returning rattachement_id`
-    return { rattachementId: inseres[0].rattachement_id, changement: ancien ? 'remplace' as const : 'nouveau' as const }
+    return {
+      rattachementId: inseres[0].rattachement_id,
+      changement: ancien ? 'remplace' as const : 'nouveau' as const,
+      ancien: ancien ?? null,
+      email, clientStripe,
+    }
   })
 
   try {

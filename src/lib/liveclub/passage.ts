@@ -36,7 +36,11 @@
 //       Absent du groupe, ou autre droit : on clot simplement. Une fois par
 //       exemption. SIMULEE sans la bascule. Une exemption permanente (sans
 //       date) n'est jamais concernee ;
-//   (d) purge des conversations privees de plus de 7 jours.
+//   (d) purge des conversations privees de plus de 7 jours ;
+//   (m) RESUME DU MATIN (Brice, 15/10, resume.ts) : en dernier, Agent AOK
+//       envoie en prive a l'equipe (cockpit_telegram_comptes) ce qui a bouge
+//       depuis le dernier resume, avec les noms ; rien s'il ne s'est rien
+//       passe ; une fois par jour ; LIVECLUB_DIGEST=0 le coupe.
 //
 // A CHAQUE SORTIE REELLE (pause, fin d'acces broker, desabonne quand les
 // sorties sont actives, fin d'exemption), le membre recoit un message :
@@ -83,6 +87,7 @@ import { droitLiveClub, type Droit } from './droits'
 import { annulerReservationEmail, creerJeton, jetonExistant } from './jetons'
 import { preparerBienvenue } from './bienvenue'
 import { rapprocherTarifsReserves } from './reserves'
+import { resumeDuMatin } from './resume'
 import { appelTelegram, envoyer, lienDemandeAdhesion } from './telegram'
 import { tracerGeste, tracerMessageBot } from './support-pont'
 import {
@@ -115,6 +120,8 @@ const ACTEUR = 'cron:liveclub'
 const BUDGET_MS = 240_000
 /** Garde-fou sur les rattachements sans client Stripe a resoudre par leur email. */
 const MAX_RESOLUTIONS_EMAIL = 300
+/** Le resume du matin ne part plus apres 4 min 25 (il lui faut quelques secondes, la route en a 300). */
+const BUDGET_RESUME_MS = 265_000
 
 export type SynthesePassage = {
   ok: boolean
@@ -179,6 +186,12 @@ export type SynthesePassage = {
    * passage ; en_attente : rien de paye ; illisibles : tarif pas lu chez Stripe.
    */
   tarifs_reserves: { payees: number; en_attente: number; illisibles: number }
+  /**
+   * (m) Resume du matin a l'equipe (15/10, resume.ts) : son etat (envoye,
+   * rien, deja_fait, coupe, table_absente...), ses lignes et le nombre de
+   * destinataires qui l'ont recu. Jamais un nom.
+   */
+  resume: { etat: string; lignes: number; livres: number }
   /** Lignes de journal perdues (table ou contrainte pas encore migree). */
   journal_echecs: number
   /** Messages qui n'ont pu partir ni en prive ni par email. */
@@ -2710,6 +2723,7 @@ export async function passageQuotidien(maintenant: Date = new Date()): Promise<S
       exemptions: { rappels_j7: 0, sorties: 0, simulees: 0, messages_fin: 0, closes_absent: 0, gardees_autre_droit: 0, sans_moyen: 0, inconnus: 0, echecs: 0 },
       purge: { conversations: 0 },
       tarifs_reserves: { payees: 0, en_attente: 0, illisibles: 0 },
+      resume: { etat: 'pas_lance', lignes: 0, livres: 0 },
       journal_echecs: 0,
       messages_perdus: 0,
       erreurs: [],
@@ -2778,6 +2792,22 @@ export async function passageQuotidien(maintenant: Date = new Date()): Promise<S
     if (ctx.s.tarifs_reserves.illisibles > 0) erreur(ctx, 'tarifs_reserves_illisibles')
   })
   await etape('purge', () => tachePurge(ctx))
+
+  // (m) Le resume du matin (15/10), APRES tout le reste : il dit ce que ce
+  // passage vient de faire. Une fois par jour (resume.ts), LIVECLUB_DIGEST=0
+  // le coupe. Il relit Stripe lui-meme (le passage a pu resilier entre-temps).
+  // Trop tard dans le budget de la route (300 s) : reporte, le prochain
+  // couvrira la periode.
+  await etape('resume', async () => {
+    if (Date.now() - ctx.debut > BUDGET_RESUME_MS) {
+      ctx.s.resume.etat = 'reporte'
+      erreur(ctx, 'resume_reporte')
+      return
+    }
+    const b = await resumeDuMatin()
+    ctx.s.resume = { etat: b.etat, lignes: b.lignes, livres: b.livres }
+    if (b.etat === 'panne' || b.etat === 'echec' || b.etat === 'table_absente') erreur(ctx, `resume_${b.etat}`)
+  })
 
   ctx.s.sorties_reelles = ctx.plafond.faites
   ctx.s.plafond_atteint = ctx.s.plafond_atteint || ctx.plafond.atteint

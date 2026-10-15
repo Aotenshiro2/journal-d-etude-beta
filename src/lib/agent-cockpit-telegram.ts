@@ -196,6 +196,32 @@ function historiqueAvecAjout(actuel: Prisma.Sql, ajout: Prisma.Sql): Prisma.Sql 
 // nomment la table « c » (insert into ... as c).
 const HISTORIQUE_UPSERT = historiqueAvecAjout(Prisma.raw('c.messages'), Prisma.raw('excluded.messages'))
 
+/**
+ * Ajoute des lignes a l'historique d'une conversation Agent AOK sans rien
+ * reecrire (HISTORIQUE_UPSERT, meme borne), en creant la conversation s'il
+ * le faut. Sert au resume du matin du Live Club (liveclub/resume.ts, 15/10),
+ * pour qu'une question posee juste en dessous (« et pour Untel ? ») le voie.
+ * Une ligne portant deja l'identifiant de la premiere ligne ajoutee : rien
+ * (un resume rejoue n'entre pas deux fois). false = rien d'ajoute. Jette si
+ * la base ne repond pas.
+ */
+export async function ajouterAHistoriqueAgent(chatId: number, telegramId: number, lignes: MessageStocke[]): Promise<boolean> {
+  if (lignes.length === 0) return false
+  const id = lignes[0].id ?? null
+  const ajout = JSON.stringify(lignes)
+  const ecrites = await prisma.$queryRaw<{ ok: number }[]>`
+    insert into public.cockpit_agent_conversations as c (chat_id, telegram_id, messages)
+    values (${chatId}, ${telegramId}, ${ajout}::jsonb)
+    on conflict (chat_id) do update
+    set messages = ${HISTORIQUE_UPSERT}, maj_le = now()
+    where ${id}::text is null or not exists (
+      select 1
+      from jsonb_array_elements(case when jsonb_typeof(c.messages) = 'array' then c.messages else '[]'::jsonb end) as d(e)
+      where d.e->>'id' = ${id}::text)
+    returning 1 as ok`
+  return ecrites.length > 0
+}
+
 export type CompteCockpitTelegram = { user_id: string; libelle: string | null }
 
 /**

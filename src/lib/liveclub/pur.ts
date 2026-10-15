@@ -1310,6 +1310,12 @@ export function phraseGeste(g: GesteLu): string | null {
       const jusqua = date('jusquau')
       return fait ? `Accès broker ouvert${jusqua ? ` jusqu'au ${jusqua}` : ''}.` : 'Accès broker non ouvert.'
     }
+    // Une adresse email rattachee sur preuve (15/10, adresses.ts). Le detail
+    // (quelle adresse, quel compte) est dans le resume du matin, pas ici.
+    case 'adresse':
+      return fait
+        ? `Une autre adresse email lui est rattachée (${regle === 'telegram' ? 'même compte Telegram vérifié' : 'tarif réservé payé avec elle'}).`
+        : "Une autre adresse email n'a pas été rattachée automatiquement : à vérifier."
     default:
       return fait ? 'Geste du bot fait.' : 'Geste du bot refusé.'
   }

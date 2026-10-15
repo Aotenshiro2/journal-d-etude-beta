@@ -121,6 +121,7 @@ export async function POST(req: NextRequest) {
   // tout abonne. Ne jette pas : le passage quotidien rattrape un oubli.
   await marquerReservesPayeesParSession({
     email: session.email, prix: session.prix, abonnementId, statut: session.abonnementStatut,
+    client: session.clientStripe,
   })
 
   // 2. Le jeton d'entree de cet abonnement (le meme a chaque rechargement)
