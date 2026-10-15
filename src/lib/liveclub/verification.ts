@@ -16,14 +16,16 @@
 //    exactement pareil, reponse comprise ;
 // 4. le membre tape le code : verifierCode compte l'essai (5 par code, 10 codes
 //    faux par adresse et par heure tous comptes confondus) et le consomme ;
-// 5. rattacherParEmail relie le compte aux clients Stripe de l'adresse.
+// 5. rattacherParEmail relie le compte aux clients Stripe de l'adresse ; si
+//    un autre compte Telegram tient deja l'abonnement (15/10), le bot
+//    propose le choix (comptes-telegram.ts).
 //
 // Jamais de code, d'adresse ni de texte de message dans un log. Avant la
 // migration, chaque fonction de base jette une ErreurTableLiveClub.
 
 import { prisma } from '@/lib/db'
 import { ErreurTableLiveClub } from './jetons'
-import { membreParEmail, rattacherTelegram } from './rattacher'
+import { autresComptesDuPayeur, membreParEmail, rattacherTelegram } from './rattacher'
 import { abonnementsLiveClubParEmail, clientsStripeParEmail } from './stripe'
 import { adresseReservee } from './reserves'
 import { meilleurAbonnement, messageErreur, normaliserEmail, relationAbsente } from './pur'
@@ -292,39 +294,58 @@ export async function verifierCode(telegramId: number, code: string): Promise<Is
 
 export type IssueRattachementEmail =
   | { etat: 'rattache' }
-  | { etat: 'deja_pris' }
+  | {
+    etat: 'deja_pris'
+    /** L'adresse verifiee, normalisee. */
+    email: string
+    /** Ses clients Stripe (compte melanie). */
+    clients: string[]
+    /** Les comptes Telegram qui tiennent deja l'abonnement (liens actifs). */
+    autres: { rattachementId: string; telegramId: number }[]
+  }
   | { etat: 'panne' }
 
 /**
+ * Les clients Stripe d'une adresse, et celui a garder sur un rattachement :
+ * celui de l'abonnement Live Club qui ouvre le groupe, sinon le premier
+ * abonnement, sinon le premier client, sinon aucun (acces broker ou membre :
+ * l'email suffit a droitLiveClub). Jette sur une panne Stripe.
+ */
+export async function payeurDeLAdresse(email: string): Promise<{ clients: string[]; clientStripe: string | null }> {
+  const clients = await clientsStripeParEmail(email)
+  let clientStripe: string | null = null
+  if (clients.length > 0) {
+    const abonnements = await abonnementsLiveClubParEmail(email)
+    clientStripe = meilleurAbonnement(abonnements)?.clientStripe
+      ?? abonnements[0]?.clientStripe
+      ?? clients[0]
+  }
+  return { clients, clientStripe }
+}
+
+/**
  * Relie ce compte Telegram au payeur de cette adresse VERIFIEE (source
- * 'bot'). Le client Stripe garde est celui de l'abonnement Live Club qui
- * ouvre le groupe, sinon le premier client de l'adresse, sinon aucun (acces
- * broker ou membre : l'email suffit a droitLiveClub).
+ * 'bot'), avec le client Stripe de payeurDeLAdresse.
  *
- * Refus 'deja_pris' si un AUTRE compte Telegram est deja rattache a cette
- * adresse ou a l'un de ses clients : un abonnement, un compte. Le changement
- * de compte passe par l'equipe. Ne jette pas.
+ * 'deja_pris' si un AUTRE compte Telegram est deja rattache a cette adresse
+ * ou a l'un de ses clients : un abonnement, un compte dans le Live Club.
+ * Rien n'est change ici. (15/10, Brice) Le bot propose alors le choix au
+ * compte qui vient de prouver l'adresse (comptes-telegram.ts) : les comptes
+ * qui tiennent l'abonnement sont rendus pour ca. Ne jette pas.
  */
 export async function rattacherParEmail(telegramId: number, emailBrut: string): Promise<IssueRattachementEmail> {
   const email = normaliserEmail(emailBrut)
   if (!email) return { etat: 'panne' }
   try {
     const clients = await clientsStripeParEmail(email)
-    const pris = await prisma.$queryRaw<{ n: number }[]>`
-      select 1 as n from public.cockpit_liveclub_rattachements
-      where retire_le is null and telegram_id <> ${telegramId}
-        and (lower(email) = ${email}
-          or (client_stripe is not null and client_stripe = any(${clients}::text[])))
-      limit 1`
-    if (pris.length > 0) return { etat: 'deja_pris' }
-
-    let clientStripe: string | null = null
-    if (clients.length > 0) {
-      const abonnements = await abonnementsLiveClubParEmail(email)
-      clientStripe = meilleurAbonnement(abonnements)?.clientStripe
-        ?? abonnements[0]?.clientStripe
-        ?? clients[0]
+    const autres = await autresComptesDuPayeur(telegramId, email, clients)
+    if (autres.length > 0) {
+      return {
+        etat: 'deja_pris', email, clients,
+        autres: autres.map(a => ({ rattachementId: a.rattachement_id, telegramId: Number(a.telegram_id) })),
+      }
     }
+    const { clientStripe } = await payeurDeLAdresse(email)
     await rattacherTelegram(telegramId, { clientStripe, email, source: 'bot' })
     return { etat: 'rattache' }
   } catch (err) {

@@ -54,10 +54,22 @@
 //   une ecriture par compte et par jour au plus, en best effort (noms.ts).
 //   Ecriture seule : ni ce module ni l'agent des membres ne lisent cette
 //   table, ni celle des messages des groupes.
+// - (15/10, Brice) PLUSIEURS COMPTES TELEGRAM, UN SEUL DANS LE LIVE CLUB : un
+//   compte qui prouve par code une adresse dont l'abonnement est tenu par un
+//   autre compte n'est plus refuse. Il choisit « Utiliser ce compte-ci »
+//   (le lien passe a lui, l'autre sort du groupe sans ban, alerte a Brice et
+//   Mel) ou « Ce n'est pas moi » (rien ne change, fil en attente d'un humain,
+//   alerte). Plus d'un changement en 30 jours : transmis a l'equipe, alerte.
+//   (comptes-telegram.ts, comptes-telegram-pur.ts.)
+// - (15/10, Brice) plus AUCUN renvoi vers support@ ici : ce que l'equipe peut
+//   traiter lui est transmis (fil en attente d'un humain : ban qui ne se leve
+//   pas, changement de compte) ou propose par le bouton « Contacter
+//   l'equipe » (pannes passageres). support@ ne vient plus que du repondeur,
+//   quand le pont vers l'equipe est lui-meme en panne.
 
 import { journaliserGesteLiveClub } from '@/lib/stripe-actions'
 import { prisma } from '@/lib/db'
-import { SUPPORT, TEXTE_PAUSE_AVANT_ARRET, chatId, texteAbonnement, texteRaisonSortie } from './config'
+import { TEXTE_PAUSE_AVANT_ARRET, chatId, texteAbonnement, texteRaisonSortie } from './config'
 import { droitLiveClub, type Droit } from './droits'
 import { consommerJeton, ErreurTableLiveClub } from './jetons'
 import { rattacherTelegram, type Rattachement } from './rattacher'
@@ -75,13 +87,20 @@ import {
 } from './actions-membre'
 import {
   premierPassage, reserverMessageIA, lireHistorique, ajouterEchange,
-  poserActionEnAttente, consommerNonce,
+  poserActionEnAttente, consommerNonce, poserChoixCompte, consommerChoixCompte, choixCompteOuvert,
 } from './conversations'
+import { executerChangementCompte, lireComptesTelegram, signalerCompte, situationChangementCompte } from './comptes-telegram'
+import {
+  DEBUT_PAS_MOI, TEXTE_CHANGEMENT_FAIT, TEXTE_CHOIX_PERIME, TEXTE_PAS_MOI, boutonsChoixCompte, libellePourMembre,
+  lireBoutonChoixCompte, texteChoixCompte, texteGardeCompte, textePanneCompte, texteRappelChoix,
+  type ChoixCompte, type CompteTelegramLu,
+} from './comptes-telegram-pur'
 import { repondreAuMembre } from './agent-membre'
 import { contexteAccesOffert } from './prompt-membre'
 import { enregistrerEchangeSupport, estEnAttenteHumain, texteAvecBoutons, tracerEtape, tracerMessageBot } from './support-pont'
 import {
   envoyerCodeSiConnu, rattacherParEmail, reserverCode, verifierCode, type CodeReserve, type IssueCode,
+  type IssueRattachementEmail,
 } from './verification'
 import { lienDeLaReserve, poserTelegramSurReserve, reserveOuvertePourCompte, type ReserveLue } from './reserves'
 import { CODE_ENVOIS_HEURE, CODE_VALIDITE_MINUTES, intentionNonRattache, masquerCodes } from './verification-pur'
@@ -100,7 +119,19 @@ import {
 } from '@/lib/agent-cockpit-telegram-pur'
 
 // Formes minimales des updates Telegram utilises ici.
-type Utilisateur = { id: number; is_bot?: boolean; first_name?: string }
+type Utilisateur = { id: number; is_bot?: boolean; first_name?: string; last_name?: string; username?: string }
+
+/**
+ * Ce qui identifie le compte dans son fil Support : le rattachement, ou
+ * (15/10) l'adresse qu'il vient de prouver par code sans etre encore relie.
+ */
+type IdentiteFil = Pick<Rattachement, 'membre_id' | 'email'>
+
+/** Les boutons, avec « Contacter l'equipe » s'il n'y est pas deja (plus de renvoi vers support@). */
+function avecEquipe(boutons?: Bouton[][]): Bouton[][] {
+  const deja = (boutons ?? []).flat().some(b => b.data === 'm:equipe')
+  return deja ? (boutons ?? []) : [...(boutons ?? []), ...clavierEquipe()]
+}
 type Chat = { id: number; type: string }
 export type MessageTg = MessageTgLu & { message_id: number; chat: Chat; from?: Utilisateur; text?: string }
 export type DemandeAdhesionTg = {
@@ -158,7 +189,7 @@ function texteAccueil(prenom?: string): string {
  */
 async function versSupport(
   telegramId: number,
-  r: Rattachement | null,
+  r: IdentiteFil | null,
   role: 'membre' | 'ia',
   texte: string,
   veutHumain = false,
@@ -185,7 +216,7 @@ async function envoyer(
   chat: number,
   texte: string,
   boutons?: Bouton[][],
-  identite?: Rattachement | null,
+  identite?: IdentiteFil | null,
 ): Promise<Awaited<ReturnType<typeof envoyerTelegram>>> {
   const r = await envoyerTelegram(chat, texte, boutons)
   await tracerMessageBot(chat, texte, {
@@ -201,9 +232,10 @@ async function envoyer(
  * le pont ne jette jamais et ne dit pas s'il a ecrit. Sans confirmation
  * (panne, migration du support pas appliquee), on ne promet pas une reponse
  * que personne ne verra : `secours` remplace le texte, ou a defaut l'adresse
- * de l'equipe lui est ajoutee.
+ * de l'equipe lui est ajoutee. (15/10) C'est le SEUL endroit du bot ou
+ * support@ apparait : le pont vers l'equipe est alors lui-meme en panne.
  */
-function repondeur(chat: number, telegramId: number, r: Rattachement | null) {
+function repondeur(chat: number, telegramId: number, r: IdentiteFil | null) {
   return async (texte: string, boutons?: Bouton[][], veutHumain = false, secours?: string): Promise<void> => {
     if (!veutHumain) {
       await envoyer(chat, texte, boutons, r)
@@ -303,7 +335,7 @@ async function envoyerMenu(
     return
   }
   if (p.parcours === 'panne') {
-    await envoyer(chat, avecEntete(TEXTE_PANNE))
+    await envoyer(chat, avecEntete(TEXTE_PANNE), clavierEquipe())
     return
   }
   // Non rattache et sorti du groupe il y a peu : la raison d'abord, a la
@@ -348,7 +380,8 @@ export async function traiterDemandeAdhesion(demande: DemandeAdhesionTg, updateI
 
   if (droit.statut === 'inconnu') {
     await envoyer(ecrireA, `Salut ! J'ai bien reçu ta demande pour rejoindre le Live Club, mais j'ai un souci technique pour vérifier ton accès.\n\n`
-      + `Ta demande reste en attente. Si rien ne bouge d'ici quelques minutes, renvoie /start ici ou écris à ${SUPPORT}.`)
+      + `Ta demande reste en attente. Si rien ne bouge d'ici quelques minutes, renvoie /start ici, ou appuie sur « Contacter l'équipe » : elle te répond ici.`,
+    clavierEquipe())
     await journaliserGesteLiveClub(
       { geste: 'entree_acceptee', resultat: 'echec', regle: 'droit_inconnu', details: { sources: droit.erreurs?.length ?? 0 } },
       contexte,
@@ -410,6 +443,13 @@ async function demandeLaisseeEnAttente(telegramId: number): Promise<boolean> {
 
 const TEXTE_DEMANDE_ACCEPTEE = `C'est bon, ta demande pour rejoindre le Live Club est acceptée : le groupe s'ouvre à l'instant.\n\n`
   + `Je reste là pour ton abonnement : écris-moi ici quand tu veux (le voir, une pause, un arrêt).`
+
+/** (15/10) Un ban qui ne se leve pas : transmis a l'equipe, qui sait le lever (plus de renvoi vers support@). */
+const TEXTE_BAN_TRANSMIS = `Ton accès est bon, mais un ancien blocage t'empêche de revenir dans le groupe, et je n'arrive pas à le lever.\n\n`
+  + `Je préviens l'équipe : elle s'en occupe et te répond ici, dans cette conversation.`
+
+/** (15/10) Une panne passagere : reessayer, ou le bouton « Contacter l'equipe » (joint au message). */
+const SINON_EQUIPE = `ou appuie sur « Contacter l'équipe » : elle te répond ici.`
 
 /**
  * Approuve la demande laissee en attente si le droit est maintenant 'oui'.
@@ -545,7 +585,7 @@ async function proposerRetourAuGroupe(chat: number, u: Utilisateur, updateId: nu
 
   if (droit.statut === 'inconnu' || presence === 'inconnu') {
     await envoyer(chat, `${avant}Je n'arrive pas à vérifier ton accès au groupe en ce moment, donc je ne t'envoie pas de lien. `
-      + `Si tu n'es pas dans le groupe, réessaie dans quelques minutes avec /menu, ou écris à ${SUPPORT}.`, o.boutons)
+      + `Si tu n'es pas dans le groupe, réessaie dans quelques minutes avec /menu, ou appuie sur « Contacter l'équipe » : elle te répond ici.`, avecEquipe(o.boutons))
     await journaliserGesteLiveClub(
       { geste: 'invitation', resultat: 'echec', regle: droit.statut === 'inconnu' ? 'droit_inconnu' : 'presence_inconnue', details },
       { ...contexte, updateId: null },
@@ -561,8 +601,8 @@ async function proposerRetourAuGroupe(chat: number, u: Utilisateur, updateId: nu
   }
 
   if (await leverBanSiBanni(u, droit) === 'echec') {
-    await envoyer(chat, `${avant}Ton accès est bon, mais un ancien blocage t'empêche de revenir dans le groupe, et je n'arrive pas à le lever.\n\n`
-      + `Écris à ${SUPPORT}, l'équipe s'en occupe.`, o.boutons)
+    // (15/10) L'equipe sait le lever : on le lui transmet (fil en attente d'un humain).
+    await repondeur(chat, u.id, null)(`${avant}${TEXTE_BAN_TRANSMIS}`, o.boutons, true)
     await journaliserGesteLiveClub(
       { geste: 'invitation', resultat: 'echec', regle: 'ban_non_leve', details },
       { ...contexte, updateId: null },
@@ -575,7 +615,7 @@ async function proposerRetourAuGroupe(chat: number, u: Utilisateur, updateId: nu
     lien = await lienDemandeAdhesion(`bot u${u.id}`)
   } catch (err) {
     await envoyer(chat, `${avant}Ton accès est ouvert, mais je n'arrive pas à créer ton lien vers le groupe là, tout de suite. `
-      + `Réessaie dans quelques minutes avec /menu, ou écris à ${SUPPORT}.`, o.boutons)
+      + `Réessaie dans quelques minutes avec /menu, ou appuie sur « Contacter l'équipe » : elle te répond ici.`, avecEquipe(o.boutons))
     await journaliserGesteLiveClub(
       { geste: 'invitation', resultat: 'echec', regle: 'telegram', details: { ...details, etape: 'createChatInviteLink', erreur: messageErreur(err) } },
       { ...contexte, updateId: null },
@@ -639,7 +679,7 @@ async function proposerTarifReserve(chat: number, u: Utilisateur, o: OptionsTari
   const avant = o.entete ? `${o.entete}\n\n` : ''
   if (issue.etat === 'panne') {
     await envoyer(chat, `${avant}Ton abonnement Live Club est prêt, mais je n'arrive pas à préparer ton lien de paiement là, tout de suite. `
-      + `Réessaie dans quelques minutes avec /menu, ou écris à ${SUPPORT}.`, clavierEquipe())
+      + `Réessaie dans quelques minutes avec /menu, ${SINON_EQUIPE}`, clavierEquipe())
     return true
   }
   // Le bouton porte l'adresse : au fil Support, seul son libelle entre.
@@ -661,7 +701,7 @@ async function traiterStartJeton(chat: number, u: Utilisateur, jeton: string, up
       ligne = await consommerJeton(jeton, u.id)
     } catch (err) {
       console.warn(`[liveclub/bot] jeton illisible pour u${u.id} : ${messageErreur(err)}`)
-      await envoyer(chat, `J'ai un souci technique pour lire ton lien. Réessaie dans quelques minutes, ou écris à ${SUPPORT}.`)
+      await envoyer(chat, `J'ai un souci technique pour lire ton lien. Réessaie dans quelques minutes, ${SINON_EQUIPE}`, clavierEquipe())
       await journal({ geste: 'invitation', resultat: 'echec', regle: 'jetons_illisibles', details: {} })
       return
     }
@@ -715,7 +755,7 @@ async function traiterStartJeton(chat: number, u: Utilisateur, jeton: string, up
 
   const droit = await droitLiveClub(u.id)
   if (droit.statut === 'inconnu') {
-    await envoyer(chat, `J'ai un souci technique pour vérifier ton accès. Réessaie dans quelques minutes en rouvrant ton lien, ou écris à ${SUPPORT}.`)
+    await envoyer(chat, `J'ai un souci technique pour vérifier ton accès. Réessaie dans quelques minutes en rouvrant ton lien, ${SINON_EQUIPE}`, clavierEquipe())
     await journal({ geste: 'invitation', resultat: 'echec', regle: 'droit_inconnu', details: { usage: ligne.usage } }, extra)
     return
   }
@@ -741,8 +781,8 @@ async function traiterStartJeton(chat: number, u: Utilisateur, jeton: string, up
   }
 
   if (await leverBanSiBanni(u, droit) === 'echec') {
-    await envoyer(chat, `Ton accès est bon, mais un ancien blocage t'empêche de revenir dans le groupe, et je n'arrive pas à le lever.\n\n`
-      + `Écris à ${SUPPORT}, l'équipe s'en occupe.`)
+    // (15/10) L'equipe sait le lever : on le lui transmet (fil en attente d'un humain).
+    await repondeur(chat, u.id, null)(TEXTE_BAN_TRANSMIS, undefined, true)
     await journal({ geste: 'invitation', resultat: 'echec', regle: 'ban_non_leve', details: { usage: ligne.usage } }, extra)
     return
   }
@@ -751,7 +791,7 @@ async function traiterStartJeton(chat: number, u: Utilisateur, jeton: string, up
   try {
     lien = await lienDemandeAdhesion(`bot u${u.id}`)
   } catch (err) {
-    await envoyer(chat, `Je n'arrive pas à créer ton lien vers le groupe là, tout de suite. Réessaie dans quelques minutes, ou écris à ${SUPPORT}.`)
+    await envoyer(chat, `Je n'arrive pas à créer ton lien vers le groupe là, tout de suite. Réessaie dans quelques minutes, ${SINON_EQUIPE}`, clavierEquipe())
     await journal({ geste: 'invitation', resultat: 'echec', regle: 'telegram', details: { etape: 'createChatInviteLink', erreur: messageErreur(err) } }, extra)
     return
   }
@@ -787,14 +827,19 @@ function texteIssueCode(issue: Exclude<IssueCode, { etat: 'ok' }>): string {
   }
   if (issue.etat === 'bloque') {
     return `Trop de codes faux pour cette adresse dans l'heure, je n'en accepte plus pour le moment. Réessaie dans une heure.\n\n`
-      + `Si ça bloque encore, écris à ${SUPPORT} avec l'email de ton paiement, l'équipe s'en occupe.`
+      + `Si ça bloque encore, appuie sur « Contacter l'équipe » : elle s'en occupe et te répond ici.`
   }
   if (issue.etat === 'epuise') {
     return `Trop d'essais avec ce code, il ne marche plus. Renvoie-moi l'email de ton paiement pour en recevoir un nouveau.\n\n`
-      + `Si ça bloque encore, écris à ${SUPPORT} avec l'email de ton paiement, l'équipe s'en occupe.`
+      + `Si ça bloque encore, appuie sur « Contacter l'équipe » : elle s'en occupe et te répond ici.`
   }
   return `Ce n'est pas le bon code. Vérifie le dernier email reçu : un nouveau code remplace l'ancien. `
     + `Il te reste ${issue.restants} ${issue.restants > 1 ? 'essais' : 'essai'}.`
+}
+
+/** (15/10) Les boutons sous texteIssueCode : « Contacter l'equipe » quand le texte en parle. */
+function boutonsIssueCode(issue: Exclude<IssueCode, { etat: 'ok' }>): Bouton[][] | undefined {
+  return issue.etat === 'bloque' || issue.etat === 'epuise' ? clavierEquipe() : undefined
 }
 
 /** Le code est juste : on relie le compte, puis le lien du groupe si le droit est ouvert. */
@@ -802,19 +847,27 @@ async function apresCodeValide(chat: number, u: Utilisateur, email: string, upda
   const repondre = repondeur(chat, u.id, null)
   const rattachement = await rattacherParEmail(u.id, email)
   if (rattachement.etat === 'deja_pris') {
-    await repondre(`Ton email est bien vérifié, mais ton abonnement est déjà relié à un autre compte Telegram.\n\n`
-      + `Si tu as changé de compte, écris à ${SUPPORT} avec l'email de ton paiement : l'équipe fait le changement.`)
+    // (15/10, Brice) Plus de refus : le choix, ou l'equipe (garde-fou, panne).
+    await proposerChangementDeCompte(chat, u, rattachement, updateId)
     return
   }
   if (rattachement.etat === 'panne') {
     await repondre(`Ton email est bien vérifié, mais je n'arrive pas à te relier à ton abonnement là, tout de suite. `
-      + `Renvoie-moi ton email dans quelques minutes pour un nouveau code, ou écris à ${SUPPORT}.`)
+      + `Renvoie-moi ton email dans quelques minutes pour un nouveau code, ${SINON_EQUIPE}`, clavierEquipe())
     return
   }
+  await suiteApresRattachement(chat, u, email, updateId,
+    `C'est bon, ton email est vérifié : ton compte Telegram est maintenant relié à ton abonnement.`)
+}
 
+/**
+ * Le compte vient d'etre relie a l'adresse prouvee (code, ou changement de
+ * compte du 15/10) : le lien du groupe si le droit est ouvert et qu'il n'y
+ * est pas, la dette d'abord, le tarif reserve, sinon sa situation.
+ */
+async function suiteApresRattachement(chat: number, u: Utilisateur, email: string, updateId: number, entete: string): Promise<void> {
   const lu = await rattachementOuNull(u.id)
   const r = lu && lu !== 'illisible' ? lu : null
-  const entete = `C'est bon, ton email est vérifié : ton compte Telegram est maintenant relié à ton abonnement.`
   // Droit ouvert et hors du groupe : le lien de retour (ban leve s'il le
   // faut). Le message part par envoyer, donc au fil Support aussi.
   if (await proposerRetourAuGroupe(chat, u, updateId, { declencheur: 'verification', entete, boutons: clavierMenu(), reprendre: true })) return
@@ -837,6 +890,123 @@ async function apresCodeValide(chat: number, u: Utilisateur, email: string, upda
       ? texteDette(droit.dette)
       : `Mais je ne vois pas d'abonnement Live Club actif en ce moment, donc je ne peux pas t'ouvrir le groupe.\n\n${texteAbonnement()}`
   await repondeur(chat, u.id, r)(`${entete}\n\n${suite}`, clavierMenu())
+}
+
+// ---------------------------------------------------------------------------
+// (15/10, Brice) Plusieurs comptes Telegram, un seul dans le Live Club
+// ---------------------------------------------------------------------------
+
+/** Le nom des autres comptes pour le compte qui ecrit (« @pseudo » ou nom), et s'ils sont plusieurs. */
+function autresPourMembre(anciens: readonly CompteTelegramLu[]): [string | null, boolean] {
+  return [libellePourMembre(anciens), anciens.length > 1]
+}
+
+/**
+ * Le compte qui ecrit vient de prouver une adresse dont l'abonnement est
+ * tenu par d'autres comptes Telegram (rattacherParEmail 'deja_pris'). Rien
+ * n'a change. Libre-service : le choix, avec ses deux boutons (nonce pose en
+ * base, 30 minutes). Garde-fou atteint ou panne : transmis a l'equipe (fil en
+ * attente d'un humain), puis le journal et l'alerte a Brice et Mel. Le fil
+ * Support de ce compte porte desormais l'adresse prouvee.
+ */
+async function proposerChangementDeCompte(
+  chat: number,
+  u: Utilisateur,
+  pris: Extract<IssueRattachementEmail, { etat: 'deja_pris' }>,
+  updateId: number,
+): Promise<void> {
+  const ident: IdentiteFil = { membre_id: null, email: pris.email }
+  const situation = await situationChangementCompte(pris)
+  const [libelle, plusieurs] = autresPourMembre(situation.anciens)
+  const ids = pris.autres.map(a => a.telegramId)
+  let decision = situation.decision
+  if (decision === 'libre_service') {
+    let nonce: string | null = null
+    try {
+      nonce = await poserChoixCompte(u.id, pris.email, ids)
+    } catch (err) {
+      if (!(err instanceof ErreurTableLiveClub)) console.warn(`[liveclub/bot] choix de compte non pose : ${messageErreur(err)}`)
+    }
+    if (nonce) {
+      await envoyer(chat, texteChoixCompte(libelle, plusieurs), boutonsChoixCompte(nonce), ident)
+      return
+    }
+    decision = 'panne'
+  }
+  if (decision === 'garde') {
+    await repondeur(chat, u.id, ident)(texteGardeCompte(libelle, plusieurs), undefined, true)
+    await signalerCompte({ u, email: pris.email, issue: 'garde_30j', updateId, anciensConnus: ids, anciens: situation.anciens, clients: pris.clients })
+    return
+  }
+  // Panne (garde-fou illisible, migration 20261015230000 pas appliquee, choix non pose).
+  await repondeur(chat, u.id, ident)(textePanneCompte(libelle, plusieurs), undefined, true)
+  await signalerCompte({ u, email: pris.email, issue: 'panne', updateId, anciensConnus: ids, anciens: situation.anciens, clients: pris.clients })
+}
+
+/**
+ * Un bouton du choix (« Utiliser ce compte-ci » ou « Ce n'est pas moi »),
+ * deja repondu (repondreBouton). Le nonce est CONSOMME d'abord (un double
+ * clic ne passe qu'une fois), puis les boutons sont retires du message.
+ */
+async function traiterChoixCompte(
+  chat: number,
+  u: Utilisateur,
+  messageId: number,
+  bouton: { choix: ChoixCompte; nonce: string },
+  updateId: number,
+): Promise<void> {
+  let issue: Awaited<ReturnType<typeof consommerChoixCompte>>
+  try {
+    issue = await consommerChoixCompte(u.id, bouton.nonce)
+  } catch (err) {
+    console.warn(`[liveclub/bot] choix de compte illisible : ${messageErreur(err)}`)
+    await envoyer(chat, `J'ai un souci technique, et rien n'a changé. Réessaie dans quelques minutes, ${SINON_EQUIPE}`, clavierEquipe())
+    return
+  }
+  await retirerBoutons(chat, messageId)
+  if (issue.etat !== 'ok') {
+    await envoyer(chat, TEXTE_CHOIX_PERIME)
+    return
+  }
+  const { email, anciens } = issue.choix
+  const ident: IdentiteFil = { membre_id: null, email }
+
+  if (bouton.choix === 'pas_moi') {
+    // Rien ne change : l'equipe verifie avec les deux comptes, ALERTE.
+    await repondeur(chat, u.id, ident)(TEXTE_PAS_MOI, undefined, true, `${DEBUT_PAS_MOI}\n\n${TEXTE_EQUIPE_INDISPONIBLE}`)
+    await signalerCompte({ u, email, issue: 'pas_moi', updateId, anciensConnus: anciens })
+    return
+  }
+
+  const fait = await executerChangementCompte({ u, email, anciensConnus: anciens, updateId })
+  if (fait.etat === 'fait') {
+    await suiteApresRattachement(chat, u, email, updateId, TEXTE_CHANGEMENT_FAIT)
+    return
+  }
+  if (fait.etat === 'sans_autre') {
+    await suiteApresRattachement(chat, u, email, updateId,
+      `C'est bon : ton compte Telegram est maintenant relié à ton abonnement.`)
+    return
+  }
+  const [libelle, plusieurs] = autresPourMembre(fait.anciens)
+  // Garde-fou atteint entre-temps, ou panne : rien n'a change, l'equipe est
+  // prevenue (journal et alerte deja faits par executerChangementCompte).
+  const texte = fait.etat === 'garde' ? texteGardeCompte(libelle, plusieurs) : textePanneCompte(libelle, plusieurs)
+  await repondeur(chat, u.id, ident)(texte, undefined, true)
+}
+
+/**
+ * Le compte ecrit au lieu d'appuyer sur un bouton du choix encore ouvert :
+ * le choix lui est redonne, avec les memes boutons. false = aucun choix
+ * ouvert. Ne jette pas.
+ */
+async function redonnerChoixCompte(chat: number, u: Utilisateur): Promise<boolean> {
+  const ouvert = await choixCompteOuvert(u.id)
+  if (!ouvert) return false
+  const anciens = await lireComptesTelegram(ouvert.choix.anciens)
+  const [libelle, plusieurs] = autresPourMembre(anciens)
+  await envoyer(chat, texteRappelChoix(libelle, plusieurs), boutonsChoixCompte(ouvert.nonce), { membre_id: null, email: ouvert.choix.email })
+  return true
 }
 
 /**
@@ -871,11 +1041,12 @@ async function traiterNonRattache(
       code = await reserverCode(u.id, email)
     } catch (err) {
       if (!(err instanceof ErreurTableLiveClub)) console.warn(`[liveclub/bot] code non reserve : ${messageErreur(err)}`)
-      await repondre(`J'ai un souci technique pour t'envoyer un code. Réessaie dans quelques minutes, ou écris à ${SUPPORT} avec l'email de ton paiement.`)
+      await repondre(`J'ai un souci technique pour t'envoyer un code. Réessaie dans quelques minutes, ${SINON_EQUIPE}`, clavierEquipe())
       return
     }
     if (!code) {
-      await repondre(`Tu as déjà demandé ${CODE_ENVOIS_HEURE} codes dans l'heure. Attends un peu avant d'en redemander un, ou écris à ${SUPPORT} avec l'email de ton paiement.`)
+      await repondre(`Tu as déjà demandé ${CODE_ENVOIS_HEURE} codes dans l'heure. Attends un peu avant d'en redemander un. `
+        + `Si ça bloque, appuie sur « Contacter l'équipe » : elle te répond ici.`, clavierEquipe())
       return
     }
     // La reponse part AVANT de regarder si l'adresse est connue : ni le texte
@@ -893,14 +1064,14 @@ async function traiterNonRattache(
       issue = await verifierCode(u.id, intention.code)
     } catch (err) {
       if (!(err instanceof ErreurTableLiveClub)) console.warn(`[liveclub/bot] code illisible : ${messageErreur(err)}`)
-      await repondre(`J'ai un souci technique pour vérifier ton code. Réessaie dans quelques minutes, ou écris à ${SUPPORT} avec l'email de ton paiement.`)
+      await repondre(`J'ai un souci technique pour vérifier ton code. Réessaie dans quelques minutes, ${SINON_EQUIPE}`, clavierEquipe())
       return
     }
     if (issue.etat === 'ok') {
       await apresCodeValide(chat, u, issue.email, updateId)
       return
     }
-    await repondre(texteIssueCode(issue))
+    await repondre(texteIssueCode(issue), boutonsIssueCode(issue))
     return
   }
 
@@ -908,8 +1079,11 @@ async function traiterNonRattache(
     await repondre(TEXTE_ATTENTE_HUMAIN, clavierSansRattachement())
     return
   }
+  // (15/10) Un choix de compte encore ouvert (« Utiliser ce compte-ci » ou
+  // « Ce n'est pas moi ») : il lui est redonne, plutot que la demande d'email.
+  if (await redonnerChoixCompte(chat, u)) return
   if (droitIllisible) {
-    await repondre(TEXTE_PANNE)
+    await repondre(TEXTE_PANNE, clavierEquipe())
     return
   }
   // (13/10) Son compte Telegram est sur un tarif reserve : SON lien, pas les
@@ -960,7 +1134,7 @@ async function traiterTexteLibre(chat: number, u: Utilisateur, texte: string, up
   }
   if (r === 'illisible') {
     await versSupport(u.id, null, 'membre', masquerCodes(texte))
-    await repondeur(chat, u.id, null)(TEXTE_PANNE)
+    await repondeur(chat, u.id, null)(TEXTE_PANNE, clavierEquipe())
     return
   }
   await traiterNonRattache(chat, u, texte, updateId, profil.parcours === 'panne', profil.droit)
@@ -1021,7 +1195,7 @@ async function converserAvecAgent(
       nonce = await poserActionEnAttente(u.id, reponse.action)
     } catch (err) {
       console.warn(`[liveclub/bot] action non posee : ${messageErreur(err)}`)
-      await repondre(TEXTE_PANNE)
+      await repondre(TEXTE_PANNE, clavierEquipe())
       return
     }
     await repondre(reponse.texte, clavierConfirmation(nonce), reponse.veutHumain === true)
@@ -1213,9 +1387,10 @@ async function noterPropositionPause(telegramId: number): Promise<void> {
 async function proposer(chat: number, telegramId: number, prep: Awaited<ReturnType<typeof preparerAction>>): Promise<void> {
   if (!prep.ok) {
     // Seule l'equipe peut le faire (Brice, 30/09) : le bouton qui la
-    // previent, au lieu d'une adresse email.
+    // previent, au lieu d'une adresse email. (15/10) Une panne de lecture
+    // aussi : son texte parle du bouton.
     await envoyer(chat, prep.equipe ? `${prep.raison}\n\nAppuie sur « Contacter l'équipe » : elle te répond ici, dans cette conversation.` : prep.raison,
-      prep.equipe ? clavierEquipe() : undefined)
+      prep.equipe || prep.panne ? clavierEquipe() : undefined)
     return
   }
   let nonce: string
@@ -1223,7 +1398,7 @@ async function proposer(chat: number, telegramId: number, prep: Awaited<ReturnTy
     nonce = await poserActionEnAttente(telegramId, prep.action)
   } catch (err) {
     console.warn(`[liveclub/bot] action non posee : ${messageErreur(err)}`)
-    await envoyer(chat, TEXTE_PANNE)
+    await envoyer(chat, TEXTE_PANNE, clavierEquipe())
     return
   }
   await envoyer(chat, prep.resume, clavierConfirmation(nonce))
@@ -1303,6 +1478,15 @@ export async function traiterBouton(bouton: BoutonTg, updateId: number): Promise
     return
   }
 
+  // (15/10) « Utiliser ce compte-ci » / « Ce n'est pas moi » : le compte n'est
+  // pas encore relie, le nonce de SON choix decide (consommerChoixCompte).
+  const choixCompte = lireBoutonChoixCompte(data)
+  if (choixCompte) {
+    await repondreBouton(bouton.id)
+    await traiterChoixCompte(chat, u, message.message_id, choixCompte, updateId)
+    return
+  }
+
   // Tout le reste demande un compte rattache, ou (06/10) un acces offert.
   if (r === 'illisible' || !r) {
     await repondreBouton(bouton.id)
@@ -1312,7 +1496,7 @@ export async function traiterBouton(bouton: BoutonTg, updateId: number): Promise
       return
     }
     if (p.parcours === 'panne') {
-      await envoyer(chat, TEXTE_PANNE)
+      await envoyer(chat, TEXTE_PANNE, clavierEquipe())
       return
     }
     // (13/10) Son compte Telegram est sur un tarif reserve : SON lien.
@@ -1401,7 +1585,8 @@ export async function traiterBouton(bouton: BoutonTg, updateId: number): Promise
       return
     }
     await repondreBouton(bouton.id, "Je m'en occupe.")
-    await envoyer(chat, await executerActionMembre(u.id, issue.action, updateId))
+    const fin = await executerActionMembre(u.id, issue.action, updateId)
+    await envoyer(chat, fin.texte, fin.equipe ? clavierEquipe() : undefined)
     return
   }
 

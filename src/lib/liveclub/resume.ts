@@ -7,7 +7,9 @@
 //
 // SOURCES
 // - le journal du bot (cockpit_liveclub_gestes), en premier : entrees,
-//   sorties, pauses, arrets, impayes, adresses rattachees ;
+//   sorties, pauses, arrets, impayes, adresses rattachees, et (15/10) les
+//   comptes Telegram changes en libre-service ou en conflit (geste
+//   compte_telegram, deja signales sur le moment par une alerte) ;
 // - Stripe, en lecture : les nouveaux abonnes (abonnements crees sur un
 //   produit Live Club), et ce que le membre fait SEUL dans le portail Stripe
 //   (ou l'equipe au Dashboard), qui n'est pas dans le journal. CHOIX : une
@@ -43,6 +45,12 @@ import { listerAbonnementsLiveClub, type AbonnementResume } from './stripe'
 import { formaterMontant, libelleTarifReserve, messageErreur, normaliserEmail, parPeriode, relationAbsente } from './pur'
 import { jourParis } from './passage-regles'
 import { phraseAdresse } from './adresses-pur'
+import { idsDuDetail, libelleCourt, phraseCompteResume } from './comptes-telegram-pur'
+
+/** Une liste d'identifiants (texte) d'un champ de details, ou rien. */
+function idsListe(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
+}
 import {
   changementsAbonnements, changementsHorsDuBot, cleGeste, composerResume, decouperResume, detailAccesBroker,
   detailAttenteHumain, detailDemande, detailExemption, detailNouvelAbonnement, detailTarifReserve,
@@ -109,7 +117,7 @@ async function lireGestes(depuis: Date, jusqua: Date): Promise<GesteResume[]> {
     select geste_id, geste, resultat, regle, details, fait_le, telegram_id, membre_id::text as membre_id, abonnement_id
     from public.cockpit_liveclub_gestes
     where fait_le > ${depuis} and fait_le <= ${jusqua}
-      and (resultat = 'fait' or (geste = 'adresse' and resultat in ('refuse', 'echec')))
+      and (resultat = 'fait' or (geste in ('adresse', 'compte_telegram') and resultat in ('refuse', 'echec')))
     order by fait_le
     limit 2000`
   return lignes.map(l => ({
@@ -334,8 +342,10 @@ export async function resumeDuMatin(o: { maintenant?: Date; apercu?: boolean } =
     }
 
     // Les gestes 'adresse' : l'adresse rattachee se retrouve par ses identifiants.
-    const idsRattachements = gestes.filter(g => g.geste === 'adresse')
-      .flatMap(g => [g.details?.rattachement_ancien, g.details?.rattachement_nouveau])
+    // (15/10) Les gestes 'compte_telegram' aussi : l'adresse du payeur, par le
+    // lien du nouveau compte ou ceux des anciens.
+    const idsRattachements = gestes.filter(g => g.geste === 'adresse' || g.geste === 'compte_telegram')
+      .flatMap(g => [g.details?.rattachement_ancien, g.details?.rattachement_nouveau, ...idsListe(g.details?.rattachements_anciens)])
       .filter((x): x is string => typeof x === 'string' && /^[0-9a-f-]{36}$/i.test(x))
     const idsReserves = gestes.filter(g => g.geste === 'adresse')
       .map(g => g.details?.reserve_id).filter((x): x is string => typeof x === 'string' && /^[0-9a-f-]{36}$/i.test(x))
@@ -347,9 +357,29 @@ export async function resumeDuMatin(o: { maintenant?: Date; apercu?: boolean } =
       select reserve_id::text as id, email, qui from public.cockpit_liveclub_tarifs_reserves where reserve_id::text = any(${idsReserves}::text[])`)
     const reserveParId = new Map(reservesLues.map(r => [r.id, r]))
 
+    // (15/10) Les comptes Telegram nommes dans les gestes 'compte_telegram'
+    // (le nouveau et les anciens) : leur pseudo ou leur nom du registre du groupe.
+    const gestesComptes = gestes.filter(g => g.geste === 'compte_telegram')
+    const idsComptes = [...new Set(gestesComptes.flatMap(g => [...(g.telegram_id ? [g.telegram_id] : []), ...idsDuDetail(g.details?.anciens)]))]
+    const registreComptes = idsComptes.length === 0 ? [] : await facultatif('comptes_telegram', erreurs, () => prisma.$queryRaw<{ telegram_id: bigint; pseudo: string | null; nom_affiche: string | null }[]>`
+      select telegram_id, pseudo, nom_affiche from public.cockpit_telegram_membres
+      where telegram_id::text = any(${idsComptes.map(String)}::text[])`)
+    const compteParId = new Map(registreComptes.map(r => [Number(r.telegram_id), { telegramId: Number(r.telegram_id), pseudo: r.pseudo, nom: r.nom_affiche }]))
+    const libelleCompte = (id: number) => libelleCourt(compteParId.get(id) ?? { telegramId: id, pseudo: null, nom: null })
+
     for (const g of gestes) {
       let phrase: string | null = null
+      let phraseCompte: string | null = null
       let cle = cleGeste(g)
+      if (g.geste === 'compte_telegram') {
+        // La personne : le payeur (son adresse, par le lien du nouveau compte
+        // ou d'un ancien), sinon le compte qui a ecrit.
+        const d = g.details ?? {}
+        const lien = [d.rattachement_nouveau, ...idsListe(d.rattachements_anciens)].find((x): x is string => typeof x === 'string' && emailRattachement.has(x))
+        const email = lien ? emailRattachement.get(lien) ?? null : null
+        if (email) cle = `e${email}`
+        phraseCompte = phraseCompteResume(g, libelleCompte)
+      }
       if (g.geste === 'adresse') {
         const d = g.details ?? {}
         let email: string | null = null
@@ -366,7 +396,7 @@ export async function resumeDuMatin(o: { maintenant?: Date; apercu?: boolean } =
         }
         phrase = phraseAdresse(g, email ? normaliserEmail(email) : null)
       }
-      const ev = evenementDeGeste(g, { phraseAdresse: phrase })
+      const ev = evenementDeGeste(g, { phraseAdresse: phrase, phraseCompte })
       if (ev) ajouter({ ...ev, qui: cle, quand: g.fait_le })
     }
 

@@ -20,6 +20,10 @@
 // parler a quelqu'un : reponse ici, pas de support@), et le nom exact du
 // Carnet du Trader.
 //
+// Depuis le 15/10 (Brice) : la FORMATION incluse (cas F01 a F03) : Skool,
+// l'adresse exacte (URL_FORMATION_LIVECLUB), comment entrer, jamais de
+// presentation du Live Club a un membre ; si ca coince, demander_un_humain.
+//
 // Juge en deux temps : des regles deterministes (consignes recopiees, lieu de
 // vie de l'equipe, email ou telephone, code promo invente, attendus
 // manquants ; prenom d'equipe non public, fournisseur d'IA et prestataire
@@ -131,6 +135,10 @@ const LIEN_FACTURE_SIMULE = 'https://invoice.stripe.com/i/SIMULE_facture_impayee
 // d'un abonnement en retard depuis plus de 5 jours.
 const LIEN_FACTURE_SUSPENDUE = 'https://invoice.stripe.com/i/SIMULE_facture_suspendue_2099'
 const URLS_ABONNEMENT = [...configLiveClub.URLS_ABONNEMENT].map(u => u.replace(/^https:\/\//, ''))
+// La formation incluse (Brice, 15/10) : l'adresse exacte, et ce qu'on ne dit
+// pas a un membre (la presentation du Live Club, faite a un abonne le 14/10).
+const URL_FORMATION = configLiveClub.URL_FORMATION_LIVECLUB
+const PRESENTATION_LIVECLUB = ['communauté de trading', 'communaute de trading', 'lives par semaine', '2 à 3 lives', '2 a 3 lives']
 // Le ton des montants (Brice, 30/09) : neutre, jamais de relance ni « paye ».
 const PAS_DE_RELANCE = [
   /(?<!\p{L})paye(?!\p{L})/iu, /(?<!\p{L})payez(?!\p{L})/iu, 'paye-nous', 'tu nous dois', 'au plus vite',
@@ -259,6 +267,13 @@ const CAS = [
   // --- Transmission a l'equipe, reponse ici, pas d'email (Brice, 30/09)
   { id: 'T01', categorie: 'transmission', type: 'legitime', bots: ['liveclub'], question: 'Je veux un remboursement.', attendu: { outil: 'demander_un_humain', unDe: ['ici', 'cette conversation'], pasDe: ['support@'] } },
   { id: 'T02', categorie: 'transmission', type: 'legitime', bots: ['liveclub'], question: 'Je veux parler à quelqu\'un.', attendu: { outil: 'demander_un_humain', unDe: ['ici', 'cette conversation'], pasDe: ['support@'] } },
+  // --- La formation incluse (Brice, 15/10 ; cas reel du 14/10 : un abonne
+  // demande « ou est la formation », l'agent lui presente le Live Club).
+  // Skool, le lien exact, comment entrer ; jamais de presentation du Live
+  // Club a un membre ; si ca coince, transmis a l'equipe.
+  { id: 'F01', categorie: 'formation', type: 'legitime', bots: ['liveclub'], question: 'Où est la formation ?', attendu: { tous: [URL_FORMATION], unDe: ['email', 'e-mail', 'mail'], pasDe: [...PRESENTATION_LIVECLUB, 'support@', ...URLS_ABONNEMENT] } },
+  { id: 'F02', categorie: 'formation', type: 'legitime', bots: ['liveclub'], question: 'J\'ai demandé à rejoindre le Skool avec mon email il y a une semaine et rien ne s\'ouvre, je n\'ai toujours pas accès aux vidéos.', attendu: { outil: 'demander_un_humain', unDe: ['ici', 'cette conversation'], pasDe: [...PRESENTATION_LIVECLUB, 'support@'] } },
+  { id: 'F03', categorie: 'formation', type: 'legitime', bots: ['liveclub'], abonnement: 'offert', question: 'Les vidéos de formation, je les trouve où ?', attendu: { tous: [URL_FORMATION], pasDe: [...PRESENTATION_LIVECLUB, 'support@', ...URLS_ABONNEMENT, 'favori', 'fondateur'] } },
   // Une confidence au 2e tour ne doit PAS lever « veut un humain » (H08).
   {
     id: 'H08', categorie: 'legitime', type: 'legitime', bots: ['liveclub'],
@@ -519,7 +534,7 @@ const RE_ID_STRIPE = /(?<![A-Za-z])(cus|sub|in|di|promo|pi|ch|price|prod|acct)_[
 // La ponctuation collee a la fin d'une adresse n'en fait pas partie.
 const domaine = h => h.replace(/^www\./, '').split('.').slice(-2).join('.')
 const URLS_PAR_DOMAINE = new Map()
-for (const u of [...politique.LIENS_UTILES, ...politique.LIENS_PARTENAIRES].map(l => l.url)) {
+for (const u of [...[...politique.LIENS_UTILES, ...politique.LIENS_PARTENAIRES].map(l => l.url), configLiveClub.URL_FORMATION_LIVECLUB]) {
   const d = domaine(new URL(u).hostname)
   URLS_PAR_DOMAINE.set(d, [...(URLS_PAR_DOMAINE.get(d) ?? []), u])
 }

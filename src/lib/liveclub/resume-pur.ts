@@ -17,7 +17,7 @@
 export type Personne = { nom: string | null; email: string | null; pseudo: string | null; telegramId: number | null }
 
 export type RubriqueResume =
-  | 'nouveaux' | 'arrets' | 'pauses' | 'impayes' | 'sorties' | 'entrees' | 'acces' | 'adresses' | 'humains' | 'demandes'
+  | 'nouveaux' | 'arrets' | 'pauses' | 'impayes' | 'sorties' | 'entrees' | 'acces' | 'adresses' | 'comptes' | 'humains' | 'demandes'
 
 /** Les rubriques, dans l'ordre du message. */
 export const RUBRIQUES_RESUME: readonly { cle: RubriqueResume; titre: string }[] = [
@@ -29,6 +29,7 @@ export const RUBRIQUES_RESUME: readonly { cle: RubriqueResume; titre: string }[]
   { cle: 'entrees', titre: 'Entrées dans le groupe' },
   { cle: 'acces', titre: 'Accès broker, exemptions et tarifs réservés' },
   { cle: 'adresses', titre: 'Adresses rattachées automatiquement' },
+  { cle: 'comptes', titre: 'Comptes Telegram changés ou en conflit' },
   { cle: 'humains', titre: "Demandes d'humain en attente" },
   { cle: 'demandes', titre: "Nouvelles demandes de l'équipe" },
 ]
@@ -144,19 +145,25 @@ function date(d: Record<string, unknown>, champ: string): string | null {
 /**
  * La rubrique et la phrase d'un geste du journal, ou null s'il n'a pas sa
  * place dans le resume (rappels, refus, simulations, echecs). Seuls les gestes
- * 'fait' comptent, sauf 'adresse' (un conflit ou une panne se signalent).
- * `phraseAdresse` : la phrase d'un geste 'adresse', calculee par l'appelant
- * (elle demande l'adresse, que le journal ne garde pas).
+ * 'fait' comptent, sauf 'adresse' et 'compte_telegram' (un conflit ou une
+ * panne se signalent). `phraseAdresse` : la phrase d'un geste 'adresse',
+ * calculee par l'appelant (elle demande l'adresse, que le journal ne garde
+ * pas). `phraseCompte` (15/10) : celle d'un geste 'compte_telegram'
+ * (phraseCompteResume, comptes-telegram-pur.ts : les comptes nommes).
  */
 export function evenementDeGeste(
   g: GesteResume,
-  o: { phraseAdresse?: string | null } = {},
+  o: { phraseAdresse?: string | null; phraseCompte?: string | null } = {},
 ): { rubrique: RubriqueResume; detail: string } | null {
   const d = g.details ?? {}
   const regle = g.regle ?? ''
   if (g.geste === 'adresse') {
     if (!['fait', 'refuse', 'echec'].includes(g.resultat)) return null
     return { rubrique: 'adresses', detail: o.phraseAdresse || 'autre adresse traitée, voir le journal du bot' }
+  }
+  if (g.geste === 'compte_telegram') {
+    if (!['fait', 'refuse', 'echec'].includes(g.resultat)) return null
+    return { rubrique: 'comptes', detail: o.phraseCompte || 'compte Telegram changé ou en conflit, voir le journal du bot' }
   }
   if (g.resultat !== 'fait') return null
   switch (g.geste) {
@@ -165,6 +172,7 @@ export function evenementDeGeste(
     case 'retrait':
       if (regle === 'desabonne') return { rubrique: 'sorties', detail: 'sorti du groupe : abonnement terminé, fin de la période payée' }
       if (regle === 'impaye_5j') return { rubrique: 'impayes', detail: 'sorti du groupe : paiement en retard depuis plus de 5 jours' }
+      if (regle === 'changement_compte') return { rubrique: 'sorties', detail: 'sorti du groupe : son abonnement est passé sur un autre compte Telegram' }
       return { rubrique: 'sorties', detail: "sorti du groupe par l'équipe" }
     case 'fin_acces':
       return regle === 'fin_exemption' || d.motif === 'fin_exemption'

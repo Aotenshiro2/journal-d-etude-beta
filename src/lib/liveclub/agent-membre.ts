@@ -235,7 +235,12 @@ export async function repondreAuMembre(
         // changer, paiement en retard) : l'agent transmet lui-meme (Brice,
         // 30/09), au lieu de donner une adresse email.
         if (prep.equipe) humain = true
-        const contenu = prep.equipe ? { refus: prep.raison, equipe_prevenue: true, consigne: CONSIGNE_EQUIPE_TRANSMISE } : { refus: prep.raison }
+        // (15/10) Lecture en panne : la meme consigne que les outils de
+        // lecture (reessayer, ou demander_un_humain), pas la phrase du menu
+        // qui parle d'un bouton que la reponse de l'agent n'a pas.
+        const contenu = prep.equipe
+          ? { refus: prep.raison, equipe_prevenue: true, consigne: CONSIGNE_EQUIPE_TRANSMISE }
+          : prep.panne ? { erreur: ILLISIBLE } : { refus: prep.raison }
         resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify(contenu) })
         continue
       }

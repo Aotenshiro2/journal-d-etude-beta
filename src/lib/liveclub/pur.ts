@@ -1244,6 +1244,7 @@ export function phraseGeste(g: GesteLu): string | null {
       if (!fait) return `Sortie du groupe non faite${motif ? ` (${motif})` : ''}.`
       if (regle === 'desabonne') return 'Sortie du groupe (abonnement terminé).'
       if (regle === 'impaye_5j') return 'Sortie du groupe (paiement en retard depuis plus de 5 jours).'
+      if (regle === 'changement_compte') return "Sortie du groupe, sans blocage : l'abonnement est passé sur un autre compte Telegram de son titulaire."
       return "Sorti du groupe par l'équipe."
     case 'fin_acces':
       // Fin d'une exemption datee (06/10). Un refus de retirerDuLiveClub
@@ -1316,6 +1317,16 @@ export function phraseGeste(g: GesteLu): string | null {
       return fait
         ? `Une autre adresse email lui est rattachée (${regle === 'telegram' ? 'même compte Telegram vérifié' : 'tarif réservé payé avec elle'}).`
         : "Une autre adresse email n'a pas été rattachée automatiquement : à vérifier."
+    // (15/10) Un abonnement qui passe d'un compte Telegram a un autre, ou un
+    // conflit (comptes-telegram.ts). Ligne du fil du NOUVEAU compte ; les
+    // anciens sont nommes par leur numero (ids dans details.anciens).
+    case 'compte_telegram': {
+      const anciens = Array.isArray(d.anciens) ? d.anciens.map(x => `u${String(x).replace(/[^0-9]/g, '')}`).filter(x => x.length > 1) : []
+      const de = anciens.length ? anciens.join(' et ') : 'un autre compte'
+      if (fait) return `Compte Telegram changé en libre-service : l'abonnement passe sur ce compte, ${de} n'y a plus accès.`
+      if (regle === 'garde_30j') return `Changement de compte Telegram pas fait en libre-service : l'abonnement (tenu par ${de}) a déjà changé de compte il y a moins de 30 jours. Équipe prévenue.`
+      return `Conflit de compte Telegram : ce compte dit être le titulaire de l'abonnement tenu par ${de}. Rien n'a changé, équipe prévenue.`
+    }
     default:
       return fait ? 'Geste du bot fait.' : 'Geste du bot refusé.'
   }
@@ -1483,6 +1494,9 @@ export function libelleBouton(data: string): string {
   if (pause) return `Pause de ${pause[1]} mois`
   if (/^c:/.test(data)) return 'Oui, je confirme'
   if (/^x:/.test(data)) return 'Non, laisse tomber'
+  // (15/10) Le choix d'un compte Telegram (comptes-telegram-pur.ts), jamais le nonce.
+  if (/^k:/.test(data)) return 'Utiliser ce compte-ci'
+  if (/^n:/.test(data)) return "Ce n'est pas moi"
   return 'bouton inconnu'
 }
 

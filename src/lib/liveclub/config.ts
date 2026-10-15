@@ -34,6 +34,31 @@ export const URL_PORTAIL_CARTE = 'https://billing.stripe.com/p/login/bJecN48kK4V
 export const SUPPORT = 'support@aoknowledge.com'
 
 /**
+ * L'ENDROIT DE LA FORMATION INCLUSE dans le Live Club (Brice, 15/10 : « il
+ * devrait etre dirige vers Skool pour l'instant ; une fois notre plateforme
+ * en place, vers notre site »). Les videos de formation incluses sont sur le
+ * Skool d'AOKnowledge : l'abonne demande a rejoindre avec l'email de son
+ * abonnement, l'equipe valide son entree et lui ouvre les modules du Live
+ * Club.
+ *
+ * A REMPLACER par l'espace formation d'aoknowledge.com quand il sera en ligne.
+ *
+ * Une seule constante, lue par le bot des membres (politique-information.ts,
+ * prompt-membre.ts) et par l'email de bienvenue (emails.ts).
+ */
+export const URL_FORMATION_LIVECLUB = lienFormation('https://www.skool.com/aoknowledge-trading', null)
+
+/**
+ * Le lien de la formation, avec le parametre d'affiliation de Melanie quand
+ * on le connaitra. 15/10 : son ?ref= est INCONNU. Le poser a la place du null
+ * ci-dessus, tel qu'elle le donne, jamais celui de quelqu'un d'autre. Sans
+ * ref, le lien nu.
+ */
+function lienFormation(base: string, ref: string | null): string {
+  return ref ? `${base}?ref=${encodeURIComponent(ref)}` : base
+}
+
+/**
  * La phrase « abonne-toi », avec les deux adresses, reprise partout (bot,
  * agent, emails). Pas de ponctuation apres la derniere adresse : Telegram et
  * les clients mail l'avaleraient dans le lien.

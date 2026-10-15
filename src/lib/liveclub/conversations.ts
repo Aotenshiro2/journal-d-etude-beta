@@ -7,7 +7,8 @@
 // - plafond de messages IA par membre et par jour ;
 // - l'action proposee (pause, arret, annulation d'arret) et son nonce, que le
 //   bouton de confirmation CONSOMME par un UPDATE ... WHERE nonce = $1
-//   RETURNING, jamais lire-puis-effacer.
+//   RETURNING, jamais lire-puis-effacer. (15/10) Meme colonne pour le choix
+//   d'un compte Telegram (poserChoixCompte, plus bas).
 //
 // Jamais de texte de message dans un log. Avant la migration, chaque fonction
 // jette une ErreurTableLiveClub : le bot bascule alors sur le menu sans IA.
@@ -17,6 +18,7 @@ import { prisma } from '@/lib/db'
 import { PLAFOND_MESSAGES_IA_JOUR } from './config'
 import { relationAbsente } from './pur'
 import { ErreurTableLiveClub } from './jetons'
+import { choixExpire, estChoixCompteEnAttente, nouveauChoixCompte, type ChoixCompteEnAttente } from './comptes-telegram-pur'
 
 /** Historique garde par compte (messages, pas echanges). */
 export const MAX_MESSAGES_HISTORIQUE = 20
@@ -192,4 +194,69 @@ export async function consommerNonce(telegramId: number, nonce: string): Promise
   if (!estAction(action)) return { etat: 'inconnu' }
   if (Date.parse(action.expire) < Date.now()) return { etat: 'expire' }
   return { etat: 'ok', action }
+}
+
+// ---------------------------------------------------------------------------
+// (15/10, Brice) Le choix d'un compte Telegram : « Utiliser ce compte-ci » ou
+// « Ce n'est pas moi » (comptes-telegram-pur.ts). Meme colonne et meme nonce
+// que les confirmations : un nouveau choix (ou une proposition de pause...)
+// remplace le precedent, et le bouton CONSOMME le nonce en un seul UPDATE.
+// Le type est verifie dans la requete : un bouton « c: » ne peut pas
+// consommer un choix de compte, ni l'inverse (estAction plus haut).
+// ---------------------------------------------------------------------------
+
+/** Pose le choix en attente (adresse prouvee, comptes qui tiennent l'abonnement). Renvoie le nonce. */
+export async function poserChoixCompte(telegramId: number, email: string, anciens: readonly number[]): Promise<string> {
+  const nonce = randomBytes(9).toString('base64url')
+  const choix = nouveauChoixCompte(email, anciens, Date.now())
+  try {
+    await prisma.$executeRaw`
+      insert into public.cockpit_liveclub_conversations (telegram_id, action_en_attente, nonce, maj_le)
+      values (${telegramId}, ${JSON.stringify(choix)}::jsonb, ${nonce}, now())
+      on conflict (telegram_id) do update set
+        action_en_attente = excluded.action_en_attente, nonce = excluded.nonce, maj_le = now()`
+  } catch (err) {
+    tableConversations(err)
+  }
+  return nonce
+}
+
+export type IssueChoixCompte =
+  | { etat: 'ok'; choix: ChoixCompteEnAttente }
+  | { etat: 'inconnu' }
+  | { etat: 'expire' }
+
+/** Consomme le nonce d'un choix de compte de CE compte (un seul passage). Jette si la base ne repond pas. */
+export async function consommerChoixCompte(telegramId: number, nonce: string): Promise<IssueChoixCompte> {
+  if (!/^[A-Za-z0-9_-]{8,32}$/.test(nonce)) return { etat: 'inconnu' }
+  let lignes: { action_en_attente: unknown }[]
+  try {
+    lignes = await prisma.$queryRaw<{ action_en_attente: unknown }[]>`
+      update public.cockpit_liveclub_conversations set nonce = null, maj_le = now()
+      where telegram_id = ${telegramId} and nonce = ${nonce}
+        and action_en_attente ->> 'type' = 'changer_compte'
+      returning action_en_attente`
+  } catch (err) {
+    return tableConversations(err)
+  }
+  const choix = lignes[0]?.action_en_attente
+  if (!estChoixCompteEnAttente(choix)) return { etat: 'inconnu' }
+  if (choixExpire(choix, Date.now())) return { etat: 'expire' }
+  return { etat: 'ok', choix }
+}
+
+/** Le choix de compte encore ouvert de ce compte (sans le consommer), ou null. Ne jette pas. */
+export async function choixCompteOuvert(telegramId: number): Promise<{ choix: ChoixCompteEnAttente; nonce: string } | null> {
+  try {
+    const lignes = await prisma.$queryRaw<{ action_en_attente: unknown; nonce: string | null }[]>`
+      select action_en_attente, nonce from public.cockpit_liveclub_conversations
+      where telegram_id = ${telegramId} and nonce is not null
+        and action_en_attente ->> 'type' = 'changer_compte'
+      limit 1`
+    const l = lignes[0]
+    if (!l?.nonce || !estChoixCompteEnAttente(l.action_en_attente) || choixExpire(l.action_en_attente, Date.now())) return null
+    return { choix: l.action_en_attente, nonce: l.nonce }
+  } catch {
+    return null
+  }
 }

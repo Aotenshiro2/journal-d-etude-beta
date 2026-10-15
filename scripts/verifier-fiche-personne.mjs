@@ -436,4 +436,37 @@ test('lecture seule : la fiche et requete_sql tournent en transaction READ ONLY'
   assert.match(agent, /- cockpit_telegram_noms : /)
 })
 
+test('comptes Telegram successifs (15/10) : l\'ancien compte et le nouveau sont a la meme personne', () => {
+  // Cas reel du 14/10 : A relie par la page de bienvenue (lien sans membre_id,
+  // retrouve par l'email de la fiche), puis remplace par B (changement de
+  // compte fait par le titulaire). Les liens tels que lireLiens les rend.
+  const touches = [{ noeud: 'tg:8367915893', champ: 'numéro Telegram demandé', valeur: 'u8367915893', exact: true }]
+  const liens = [
+    { a: 'tg:8367915893', b: 'membre:m-zap', nature: 'ancien rattachement bot (retiré le 2026-10-15, changement de compte Telegram par le titulaire)', certain: true },
+    { a: 'tg:8817429863', b: 'membre:m-zap', nature: 'rattachement bot', certain: true },
+    { a: 'tg:8367915893', b: 'tg:8817429863', nature: 'compte Telegram remplacé par le titulaire (changement de compte du 2026-10-15)', certain: true },
+    // Un ancien rattachement Metricgram (peut-etre une erreur corrigee) : dit, jamais suivi.
+    { a: 'tg:111111', b: 'membre:m-zap', nature: 'ancien rattachement metricgram (retiré le 2026-09-30)', certain: false },
+  ]
+  const g = grouper(touches, liens)
+  assert.equal(g.length, 1)
+  assert.deepEqual(idsDuGroupe(g[0]).telegram.sort(), [8367915893, 8817429863])
+  assert.equal(g[0].probables.length, 1)
+  // Par le nouveau compte aussi : la meme personne.
+  const parB = grouper([{ noeud: 'tg:8817429863', champ: 'x', valeur: 'u8817429863', exact: true }], liens)
+  assert.deepEqual(parB.map((x) => x.noeuds), g.map((x) => x.noeuds))
+  // Le SQL des liens suit les rattachements retires (certains s'ils sont prouves),
+  // ceux sans membre_id par l'email de la fiche, et le compte qui a pris la place.
+  const sql = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'lib', 'fiche-personne.ts'), 'utf8')
+  const liensSql = sql.slice(sql.indexOf('async function lireLiens'), sql.indexOf('async function lireStats'))
+  assert.match(liensSql, /where r\.retire_le is not null and coalesce\(r\.membre_id, e\.membre_id\) is not null/)
+  assert.match(liensSql, /\(r\.source = 'bot' or \$\{raison\} = 'changement_compte'\)/)
+  assert.match(liensSql, /join public\.cockpit_membre_emails e on e\.email = lower\(r\.email\)\s+where r\.retire_le is null and r\.membre_id is null/)
+  assert.match(liensSql, /'tg:' \|\| \$\{remplacant\}/)
+  // Avant la migration 20261015230000, aucune colonne nouvelle n'est nommee en direct.
+  assert.ok(!/r\.retire_raison|r\.remplace_par/.test(sql))
+  // La recherche par email trouve aussi les anciens comptes.
+  assert.match(sql, /email d''un ancien rattachement/)
+})
+
 console.log(`\n${n} blocs verifies, tout est bon.`)

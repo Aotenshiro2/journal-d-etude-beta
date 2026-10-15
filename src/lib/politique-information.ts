@@ -43,8 +43,12 @@
 //   renvoyer vers support@. consignesPolitique(porte, 'liveclub') prend les
 //   variantes texteLiveClub et PHRASES_BOT ; le bot support garde son texte.
 // - l'extension s'appelle « Le Carnet du Trader » (plus « Carnet de Note »).
+//
+// Brice, 15/10 : la formation incluse est sur Skool (URL_FORMATION_LIVECLUB,
+// config.ts), en attendant l'espace formation du site. Le bot des membres le
+// sait (info marquee seulement: 'liveclub') ; le bot support ne change pas.
 
-import { ARGUMENT_TARIF_PAUSE, SUPPORT, URLS_ABONNEMENT, URL_PORTAIL_CARTE, lienBotAccueil } from './liveclub/config'
+import { ARGUMENT_TARIF_PAUSE, SUPPORT, URLS_ABONNEMENT, URL_FORMATION_LIVECLUB, URL_PORTAIL_CARTE, lienBotAccueil } from './liveclub/config'
 
 /** Une information publique que les bots peuvent donner. */
 export type InfoPublique = {
@@ -60,6 +64,11 @@ export type InfoPublique = {
   texteLiveClub?: string
   /** D'ou vient l'info (fichier du depot, page publique). */
   source: string
+  /**
+   * (15/10) Une info qu'un seul bot donne : absente du prompt de l'autre
+   * (la formation incluse, pour les membres deja abonnes du bot Live Club).
+   */
+  seulement?: BotPolitique
 }
 
 /** Le bot a qui s'adressent les consignes : le support du site (par defaut) ou le bot membre Live Club. */
@@ -103,6 +112,19 @@ export const INFOS_PUBLIQUES: readonly InfoPublique[] = [
     sujet: "S'abonner au Live Club",
     texte: `Deux portes pour la même offre : ${URLS_ABONNEMENT[0]} ou ${URLS_ABONNEMENT[1]}`,
     source: 'apps/journal-d-etude/src/lib/liveclub/config.ts (URLS_ABONNEMENT, décision de Brice du 29/09)',
+  },
+  {
+    // Brice, 15/10 : un abonne qui demande « ou est la formation » va sur
+    // Skool pour l'instant, sur notre site quand la plateforme sera en place
+    // (URL_FORMATION_LIVECLUB, config.ts, la seule a changer). Bot des membres
+    // seulement : le bot support du site ne change pas. L'adresse finit la
+    // phrase (Telegram avalerait une ponctuation collee au lien).
+    sujet: 'La formation incluse dans le Live Club',
+    texte: "Les membres du Live Club (abonnés, ou accès offert) ont accès aux vidéos de formation incluses, sur Skool, pour l'instant. "
+      + "Pour y entrer : sur la page Skool, demander à rejoindre avec l'email de son abonnement (pour un accès offert, l'email sous lequel l'équipe le connaît) ; "
+      + `l'équipe valide l'entrée et ouvre les modules du Live Club. L'adresse : ${URL_FORMATION_LIVECLUB}`,
+    seulement: 'liveclub',
+    source: 'apps/journal-d-etude/src/lib/liveclub/config.ts (URL_FORMATION_LIVECLUB) ; décision de Brice du 2026-10-15 (Skool en attendant l\'espace formation du site)',
   },
   {
     sujet: 'MelTrade',
@@ -302,7 +324,9 @@ const PHRASES_BOT: Record<BotPolitique, { remises: string; versEquipe: string; s
  */
 export function consignesPolitique(porteHumain: string, bot: BotPolitique = 'support'): string {
   const p = PHRASES_BOT[bot]
-  const infos = INFOS_PUBLIQUES.map(i => `- ${i.sujet} : ${bot === 'liveclub' && i.texteLiveClub ? i.texteLiveClub : i.texte}`).join('\n')
+  const infos = INFOS_PUBLIQUES
+    .filter(i => !i.seulement || i.seulement === bot)
+    .map(i => `- ${i.sujet} : ${bot === 'liveclub' && i.texteLiveClub ? i.texteLiveClub : i.texte}`).join('\n')
   const liens = LIENS_PARTENAIRES.length
     ? LIENS_PARTENAIRES.map(l => `- ${l.partenaire} : ${l.offre} Lien : ${l.url}${l.code ? ` Code : ${l.code}` : ''}`).join('\n')
     : "- Aucun lien partenaire ni code de réduction n'est renseigné pour le moment : il n'y en a pas à donner."

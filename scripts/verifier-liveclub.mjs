@@ -54,7 +54,7 @@ import {
 import {
   GRACE_JOURS, URLS_ABONNEMENT, URL_ABONNEMENT, URL_PORTAIL_CARTE, texteAbonnement,
   ARGUMENT_TARIF_PAUSE, TEXTE_PAUSE_AVANT_ARRET, sortiesActives, sortiesImpayesActives, PLAFOND_RESILIATIONS_PASSAGE,
-  texteRaisonSortie, PRODUITS_LIVECLUB, URL_BIENVENUE_LIVECLUB, estProduitLiveClub,
+  texteRaisonSortie, PRODUITS_LIVECLUB, URL_BIENVENUE_LIVECLUB, estProduitLiveClub, URL_FORMATION_LIVECLUB,
 } from '../src/lib/liveclub/config.ts'
 import {
   planRattachement, resultatDuPlan, detailsDuPlan, abonnementsHorsPreuve, adresseDePaiementAutre, preuveTelegram,
@@ -70,6 +70,16 @@ import {
 import {
   textePropre, identiteTelegram, ligneNom, cleNomDuJour, nomANoter, MAX_PSEUDO, MAX_NOM, MAX_MEMOIRE_NOMS,
 } from '../src/lib/liveclub/noms-pur.ts'
+import {
+  JOURS_GARDE_CHANGEMENT, MAX_CHANGEMENTS_LIBRE_SERVICE, VALIDITE_CHOIX_MINUTES, RAISON_CHANGEMENT_COMPTE,
+  LIBELLE_UTILISER, LIBELLE_PAS_MOI, MARQUEUR_ALERTE_HISTORIQUE,
+  decisionChangementCompte, decisionApresChoix, boutonsChoixCompte, lireBoutonChoixCompte,
+  estChoixCompteEnAttente, nouveauChoixCompte, choixExpire,
+  nomSur, libellePourMembre, libellePourEquipe, libelleCourt, libellePayeur,
+  texteChoixCompte, texteRappelChoix, texteGardeCompte, textePanneCompte, TEXTE_PAS_MOI, DEBUT_PAS_MOI,
+  TEXTE_CHANGEMENT_FAIT, TEXTE_CHOIX_PERIME, texteAncienCompte,
+  texteAlerteCompte, entreesHistoriqueAlerte, idsDuDetail, phraseCompteResume,
+} from '../src/lib/liveclub/comptes-telegram-pur.ts'
 
 const PRODUITS =['prod_UcOraPncQlbrW4', 'prod_UynMpOvBtGTsIw']
 let n = 0
@@ -2358,6 +2368,7 @@ function matineeFictive() {
     { rubrique: 'acces', qui: 't508', quand: '2026-10-14T15:00:00Z', detail: detailExemption('favorise', null) },
     { rubrique: 'acces', qui: 'epaul@exemple.fr', quand: '2026-10-14T15:30:00Z', detail: detailTarifReserve({ tarif: '49 € par mois', paye: false }) },
     { rubrique: 'adresses', qui: 't507', quand: '2026-10-14T20:09:30Z', detail: phraseAdresse({ resultat: 'fait', regle: 'tarif_reserve', details: { compte: 'ajoute', fiche: 'doublon_fusion_collecte' } }, 'yassine.paiement@exemple.fr') },
+    { rubrique: 'comptes', qui: 'ezap@exemple.fr', quand: '2026-10-14T16:53:00Z', detail: phraseCompteResume({ resultat: 'refuse', regle: 'pas_moi', telegram_id: 8817429863, details: { anciens: ['8367915893'] } }, id => (id === 8367915893 ? '@wrdxr2d2 (u8367915893)' : `u${id}`)) },
     { rubrique: 'humains', qui: 't509', quand: '2026-10-13T08:00:00Z', ancien: true, detail: detailAttenteHumain('2026-10-13T08:00:00Z', 'telegram') },
     { rubrique: 'demandes', qui: 'd1', quand: '2026-10-14T18:00:00Z', detail: detailDemande('Prévoir un accès broker pour le frère de Souad', 'nouvelle') },
   ]
@@ -2375,6 +2386,7 @@ function matineeFictive() {
     ['esouad@exemple.fr', { nom: 'Souad', email: 'souad@exemple.fr', pseudo: null, telegramId: null }],
     ['t508', { nom: null, email: null, pseudo: null, telegramId: 508 }],
     ['epaul@exemple.fr', { nom: 'Paul D.', email: 'paul@exemple.fr', pseudo: null, telegramId: null }],
+    ['ezap@exemple.fr', { nom: 'Zoé A.', email: 'zap@exemple.fr', pseudo: null, telegramId: null }],
     ['t509', { nom: 'Nelly', email: null, pseudo: 'nelly34', telegramId: 509 }],
     ['d1', { nom: 'melanie', email: null, pseudo: null, telegramId: null }],
   ])
@@ -2535,6 +2547,234 @@ test('historique des noms : une ecriture par compte et par jour en prive (noms-p
   for (let k = 1; k <= MAX_MEMOIRE_NOMS; k++) pleine.set(k, 'x')
   assert.equal(nomANoter(pleine, identiteTelegram({ id: MAX_MEMOIRE_NOMS + 1, first_name: 'z' }), '2026-10-15'), true)
   assert.equal(pleine.size, 1)
+})
+
+// ---------------------------------------------------------------------------
+// (C) Plusieurs comptes Telegram pour une meme personne (Brice, 15/10)
+// Cas reel du 14/10 : A (u8367915893, @wrdxr2d2) relie par la page de
+// bienvenue, puis B (u8817429863) verifie la meme adresse par code.
+// ---------------------------------------------------------------------------
+
+const A_REEL = { telegramId: 8367915893, pseudo: 'wrdxr2d2', nom: 'Zapapaye' }
+const B_REEL = { telegramId: 8817429863, pseudo: null, nom: 'Zap B' }
+const CARACTERES_INTERDITS = new RegExp(`[${[0x2014, 0x2013, 0x2022, 0x2026, 0x201c, 0x201d, 0x2018, 0x2019, 0x00a0].map(c => String.fromCharCode(c)).join('')}]`)
+
+test('comptes Telegram : decision du parcours (libre-service, conflit, garde-fou des 30 jours)', () => {
+  assert.equal(JOURS_GARDE_CHANGEMENT, 30)
+  assert.equal(MAX_CHANGEMENTS_LIBRE_SERVICE, 1)
+  assert.equal(RAISON_CHANGEMENT_COMPTE, 'changement_compte')
+  // Le cas reel : aucun changement avant, un autre compte actif -> le choix.
+  assert.equal(decisionChangementCompte({ autres: 1, changementsRecents: 0 }), 'libre_service')
+  assert.equal(decisionChangementCompte({ autres: 2, changementsRecents: 0 }), 'libre_service')
+  // Deja un changement dans les 30 jours : plus de libre-service.
+  assert.equal(decisionChangementCompte({ autres: 1, changementsRecents: 1 }), 'garde')
+  assert.equal(decisionChangementCompte({ autres: 1, changementsRecents: 4 }), 'garde')
+  // Garde-fou illisible (panne, migration pas appliquee) : jamais de libre-service a l'aveugle.
+  assert.equal(decisionChangementCompte({ autres: 1, changementsRecents: null }), 'panne')
+  assert.equal(decisionChangementCompte({ autres: 1, changementsRecents: Number.NaN }), 'panne')
+  // Personne d'autre : rien a decider.
+  assert.equal(decisionChangementCompte({ autres: 0, changementsRecents: 0 }), 'aucun')
+  // Apres le bouton : « Ce n'est pas moi » = conflit, toujours, garde-fou lu ou pas.
+  for (const n of [0, 1, 5, null]) assert.equal(decisionApresChoix({ choix: 'pas_moi', changementsRecents: n }), 'conflit')
+  // « Utiliser ce compte-ci » : le garde-fou est relu au moment du geste.
+  assert.equal(decisionApresChoix({ choix: 'utiliser', changementsRecents: 0 }), 'changer')
+  assert.equal(decisionApresChoix({ choix: 'utiliser', changementsRecents: 1 }), 'garde')
+  assert.equal(decisionApresChoix({ choix: 'utiliser', changementsRecents: null }), 'panne')
+})
+
+test('comptes Telegram : boutons et choix en attente (un nonce, 30 minutes, jamais un autre type)', () => {
+  const b = boutonsChoixCompte('AbCdEf123456')
+  assert.deepEqual(b, [[{ texte: LIBELLE_UTILISER, data: 'k:AbCdEf123456' }], [{ texte: LIBELLE_PAS_MOI, data: 'n:AbCdEf123456' }]])
+  assert.equal(LIBELLE_UTILISER, 'Utiliser ce compte-ci')
+  assert.equal(LIBELLE_PAS_MOI, "Ce n'est pas moi")
+  for (const ligne of b) for (const x of ligne) assert.ok(callbackDataValide(x.data))
+  assert.deepEqual(lireBoutonChoixCompte('k:AbCdEf123456'), { choix: 'utiliser', nonce: 'AbCdEf123456' })
+  assert.deepEqual(lireBoutonChoixCompte('n:AbCdEf123456'), { choix: 'pas_moi', nonce: 'AbCdEf123456' })
+  // Ni les autres boutons, ni un nonce mal forme.
+  for (const d of ['c:AbCdEf123456', 'x:AbCdEf123456', 'm:equipe', 'k:', 'k:court', 'k:AbC def123456', 'n:AbCdEf123456;drop', 'K:AbCdEf123456']) {
+    assert.equal(lireBoutonChoixCompte(d), null, d)
+  }
+  // Au fil Support : le libelle, jamais le nonce.
+  assert.equal(libelleBouton('k:AbCdEf123456'), 'Utiliser ce compte-ci')
+  assert.equal(libelleBouton('n:AbCdEf123456'), "Ce n'est pas moi")
+  // Le choix stocke : adresse, comptes (sans doublon, ids valides), expiration a 30 minutes.
+  const t0 = Date.parse('2026-10-14T16:52:30Z')
+  const c = nouveauChoixCompte('zap@exemple.fr', [8367915893, 8367915893, -4, 1.5], t0)
+  assert.deepEqual(c, { type: 'changer_compte', email: 'zap@exemple.fr', anciens: [8367915893], expire: '2026-10-14T17:22:30.000Z' })
+  assert.equal(VALIDITE_CHOIX_MINUTES, 30)
+  assert.ok(estChoixCompteEnAttente(c))
+  assert.ok(!choixExpire(c, t0 + 29 * 60_000))
+  assert.ok(choixExpire(c, t0 + 31 * 60_000))
+  assert.ok(choixExpire({ ...c, expire: 'pas une date' }, t0))
+  // Une action de pause n'est jamais lue comme un choix de compte, ni l'inverse.
+  assert.ok(!estChoixCompteEnAttente({ type: 'pause', abonnementId: 'sub_1', nbMois: 2, expire: c.expire }))
+  assert.ok(!estChoixCompteEnAttente({ ...c, email: 'pas-un-email' }))
+  assert.ok(!estChoixCompteEnAttente({ ...c, anciens: ['8367915893'] }))
+  assert.ok(!estChoixCompteEnAttente(null))
+})
+
+test('comptes Telegram : textes du bot des membres (pseudo ou nom de l autre compte, jamais support@)', () => {
+  // Ce que B lit de A : son @pseudo, sinon son nom, jamais son numero ni un email.
+  assert.equal(libellePourMembre([A_REEL]), '@wrdxr2d2')
+  assert.equal(libellePourMembre([{ ...A_REEL, pseudo: null }]), 'Zapapaye')
+  assert.equal(libellePourMembre([{ ...A_REEL, pseudo: 'pas un pseudo!' }]), 'Zapapaye')
+  assert.equal(libellePourMembre([{ telegramId: 1, pseudo: null, nom: null }]), null)
+  assert.equal(libellePourMembre([A_REEL, { telegramId: 2, pseudo: 'autre_cpt', nom: null }]), '@wrdxr2d2, @autre_cpt')
+  assert.equal(nomSur(`Za${String.fromCharCode(0x200b)}pa\nye`), 'Za pa ye')
+  // Le choix (cas reel).
+  const choix = texteChoixCompte('@wrdxr2d2')
+  assert.match(choix, /^C'est bon, ton email est vérifié\./)
+  assert.ok(choix.includes('Ton abonnement est déjà utilisé par un autre compte Telegram (@wrdxr2d2). Un seul compte peut être dans le Live Club.'))
+  assert.ok(choix.includes(`« ${LIBELLE_UTILISER} »`) && choix.includes(`« ${LIBELLE_PAS_MOI} »`))
+  assert.ok(texteChoixCompte(null).includes('par un autre compte Telegram. Un seul'))
+  assert.ok(texteChoixCompte('@a, @b', true).includes("d'autres comptes Telegram (@a, @b)"))
+  assert.ok(texteRappelChoix('@wrdxr2d2').endsWith(choix))
+  assert.match(texteGardeCompte('@wrdxr2d2'), /moins de 30 jours.*passe par l'équipe : je la préviens, elle te répond ici/s)
+  assert.match(textePanneCompte('@wrdxr2d2'), /je préviens l'équipe, elle s'en occupe et te répond ici/)
+  assert.ok(TEXTE_PAS_MOI.startsWith(DEBUT_PAS_MOI))
+  assert.match(texteAncienCompte(true), /celui-ci sort donc du groupe, sans blocage/)
+  assert.ok(!texteAncienCompte(false).includes('sort'))
+  const textes = [
+    choix, texteRappelChoix(null), texteChoixCompte('@a, @b', true), texteGardeCompte(null), textePanneCompte('Zapapaye'),
+    TEXTE_PAS_MOI, TEXTE_CHANGEMENT_FAIT, TEXTE_CHOIX_PERIME, texteAncienCompte(true), texteAncienCompte(false),
+  ]
+  for (const t of textes) {
+    assert.ok(!/@aoknowledge|support@|\b[\w.-]+@[\w-]+\.[a-z]{2,}/i.test(t), `adresse email dans : ${t.slice(0, 60)}`)
+    assert.ok(!CARACTERES_INTERDITS.test(t), `caractere interdit dans : ${t.slice(0, 60)}`)
+    assert.ok(!/u\d{6,}/.test(t), `numero Telegram dans : ${t.slice(0, 60)}`)
+  }
+  // Le bot des membres ne renvoie plus vers support@ : SUPPORT n'apparait que
+  // dans les deux textes du pont en panne (actions-membre.ts), nulle part dans
+  // bot-membre.ts ni dans le parcours des comptes.
+  const lire = (f) => readFileSync(new URL(`../src/lib/liveclub/${f}`, import.meta.url), 'utf8')
+  const bot = lire('bot-membre.ts')
+  assert.ok(!/\$\{SUPPORT\}|support@aoknowledge|\bSUPPORT\b/.test(bot.replace(/^\s*(\/\/|\*|\/\*\*).*$/gm, '')), 'support@ dans bot-membre.ts')
+  for (const f of ['comptes-telegram.ts', 'comptes-telegram-pur.ts']) {
+    assert.ok(!/\$\{SUPPORT\}|support@aoknowledge|\bSUPPORT\b/.test(lire(f).replace(/^\s*(\/\/|\*|\/\*\*).*$/gm, '')), `support@ dans ${f}`)
+  }
+  const actions = lire('actions-membre.ts')
+  const usages = actions.split('\n').filter(l => l.includes('${SUPPORT}'))
+  assert.equal(usages.length, 2, usages.join('\n'))
+  assert.ok(usages.every(l => /Écris-lui à \$\{SUPPORT\}|Si personne ne te répond ici, écris à \$\{SUPPORT\}/.test(l)))
+  // Le texte d'une panne de lecture donne le bouton de l'equipe, plus l'adresse.
+  assert.match(actions, /const PANNE = `Je n'arrive pas à lire ton abonnement en ce moment\. Réessaie dans un moment, ou appuie sur « Contacter l'équipe »/)
+})
+
+test('comptes Telegram : composition des alertes a Brice et Mel', () => {
+  const payeur = { nom: 'Zoé A.', email: 'zap@exemple.fr' }
+  // (a) libre-service : qui, ancien compte, nouveau compte, adresse.
+  const a = texteAlerteCompte({ genre: 'libre_service', payeur, anciens: [A_REEL], nouveau: B_REEL, sorties: { 8367915893: 'sorti' } })
+  assert.deepEqual(a.split('\n'), [
+    'Changement de compte Telegram fait en libre-service (bot des membres du Live Club).',
+    '',
+    'Abonnement de : Zoé A., zap@exemple.fr',
+    'Ancien compte : @wrdxr2d2 (Zapapaye), u8367915893, sorti du groupe, sans blocage',
+    'Nouveau compte : Zap B, u8817429863',
+    '',
+    `Preuve : le nouveau compte a tapé le code envoyé à l'adresse du paiement, puis choisi « Utiliser ce compte-ci ».`,
+  ])
+  // Un ancien compte qui n'a pas pu sortir se voit.
+  assert.match(texteAlerteCompte({ genre: 'libre_service', payeur, anciens: [A_REEL], nouveau: B_REEL, sorties: { 8367915893: 'inconnu' } }), /PAS sorti du groupe : son droit n'a pas pu être lu, à vérifier/)
+  assert.match(texteAlerteCompte({ genre: 'libre_service', payeur, anciens: [A_REEL], nouveau: B_REEL, sorties: {} }), /PAS sorti/)
+  // (b) conflit, « Ce n'est pas moi » : la phrase de Brice, mot pour mot.
+  const b = texteAlerteCompte({ genre: 'conflit', raison: 'pas_moi', payeur, anciens: [A_REEL], nouveau: B_REEL })
+  assert.equal(b.split('\n')[0], "Conflit de compte Telegram à vérifier : l'abonnement de Zoé A., zap@exemple.fr est utilisé par @wrdxr2d2 (Zapapaye), u8367915893 ; Zap B, u8817429863 dit être le titulaire. Contactez les deux comptes.")
+  assert.match(b, /répondu « Ce n'est pas moi »/)
+  assert.match(b, /Rien n'a été changé/)
+  // (b) conflit, garde-fou atteint : meme phrase, autre raison.
+  const g = texteAlerteCompte({ genre: 'conflit', raison: 'garde_30j', payeur, anciens: [A_REEL], nouveau: B_REEL })
+  assert.equal(g.split('\n')[0], b.split('\n')[0])
+  assert.match(g, /moins de 30 jours : pas de libre-service/)
+  // Panne : a faire a la main.
+  assert.match(texteAlerteCompte({ genre: 'panne', payeur, anciens: [A_REEL], nouveau: B_REEL }), /^Changement de compte Telegram à faire à la main/)
+  // Ce qu'on n'a pas : on le dit sobrement.
+  assert.equal(libellePayeur({ nom: null, email: null }), 'payeur non identifié')
+  assert.equal(libellePourEquipe({ telegramId: 5, pseudo: null, nom: null }), 'u5')
+  assert.equal(libelleCourt(A_REEL), '@wrdxr2d2 (u8367915893)')
+  assert.equal(libelleCourt({ ...A_REEL, pseudo: null }), 'Zapapaye (u8367915893)')
+  assert.match(texteAlerteCompte({ genre: 'conflit', raison: 'pas_moi', payeur, anciens: [], nouveau: B_REEL }), /utilisé par un autre compte Telegram ;/)
+  // Sobre : ni tiret long, ni guillemets courbes, ni emoji.
+  for (const t of [a, b, g]) {
+    assert.ok(!CARACTERES_INTERDITS.test(t))
+    assert.ok(!/\p{Extended_Pictographic}/u.test(t))
+  }
+  // L'historique de la conversation avec Agent AOK : une ligne systeme puis l'alerte, un identifiant.
+  assert.deepEqual(entreesHistoriqueAlerte('x', 'compte-pas_moi-u1-9'), [
+    { role: 'user', content: MARQUEUR_ALERTE_HISTORIQUE, id: 'compte-pas_moi-u1-9' },
+    { role: 'assistant', content: 'x', id: 'compte-pas_moi-u1-9-texte' },
+  ])
+})
+
+test('comptes Telegram : journal, fil Support et resume du matin', () => {
+  const g = (resultat, regle, details, telegram_id = 8817429863) => ({ geste: 'compte_telegram', resultat, regle, details, telegram_id })
+  const lib = id => (id === 8367915893 ? '@wrdxr2d2 (u8367915893)' : `u${id}`)
+  // Le fil Support du NOUVEAU compte.
+  assert.equal(phraseGeste(g('fait', 'libre_service', { anciens: ['8367915893'] })),
+    "Compte Telegram changé en libre-service : l'abonnement passe sur ce compte, u8367915893 n'y a plus accès.")
+  assert.match(phraseGeste(g('refuse', 'pas_moi', { anciens: ['8367915893'] })), /^Conflit de compte Telegram : ce compte dit être le titulaire de l'abonnement tenu par u8367915893/)
+  assert.match(phraseGeste(g('refuse', 'garde_30j', { anciens: ['8367915893'] })), /moins de 30 jours\. Équipe prévenue\.$/)
+  assert.equal(phraseGeste(g('echec', 'panne', {})), null)
+  // Un identifiant pas propre ne passe pas tel quel.
+  assert.ok(!phraseGeste(g('fait', 'libre_service', { anciens: ['12<b>34'] })).includes('<'))
+  // L'ancien compte, dans son fil et le resume.
+  assert.equal(phraseGeste({ geste: 'retrait', resultat: 'fait', regle: 'changement_compte', details: {} }),
+    "Sortie du groupe, sans blocage : l'abonnement est passé sur un autre compte Telegram de son titulaire.")
+  assert.deepEqual(evenementDeGeste(geste('retrait', 'changement_compte')), { rubrique: 'sorties', detail: 'sorti du groupe : son abonnement est passé sur un autre compte Telegram' })
+  // Le resume : la rubrique, faits, conflits et pannes compris, la phrase calculee par l'appelant.
+  assert.ok(RUBRIQUES_RESUME.some(r => r.cle === 'comptes' && r.titre === 'Comptes Telegram changés ou en conflit'))
+  for (const resultat of ['fait', 'refuse', 'echec']) {
+    assert.deepEqual(evenementDeGeste(geste('compte_telegram', 'x', { resultat }), { phraseCompte: 'p' }), { rubrique: 'comptes', detail: 'p' })
+  }
+  assert.equal(evenementDeGeste(geste('compte_telegram', 'x', { resultat: 'simule' })), null)
+  assert.equal(phraseCompteResume(g('fait', 'libre_service', { anciens: ['8367915893'], sorties: { 8367915893: 'sorti' } }), lib),
+    'compte Telegram changé en libre-service, de @wrdxr2d2 (u8367915893) à u8817429863')
+  assert.equal(phraseCompteResume(g('fait', 'libre_service', { anciens: ['8367915893'], sorties: { 8367915893: 'echec' } }), lib),
+    'compte Telegram changé en libre-service, de @wrdxr2d2 (u8367915893) à u8817429863 (@wrdxr2d2 (u8367915893) pas sorti du groupe, à vérifier)')
+  assert.equal(phraseCompteResume(g('refuse', 'pas_moi', { anciens: ['8367915893'] }), lib),
+    "conflit à vérifier : u8817429863 dit être le titulaire, l'abonnement est utilisé par @wrdxr2d2 (u8367915893)")
+  assert.match(phraseCompteResume(g('refuse', 'garde_30j', { anciens: ['8367915893'] }), lib), /deuxième changement de compte en moins de 30 jours : transmis à l'équipe/)
+  assert.match(phraseCompteResume(g('echec', 'panne', { anciens: [] }), lib), /de un autre compte à u8817429863 en panne : à faire à la main$/)
+  assert.deepEqual(idsDuDetail(['8367915893', 'x', -1, 42]), [8367915893, 42])
+  assert.deepEqual(idsDuDetail('8367915893'), [])
+  // Dans le resume compose : sa ligne, sous sa rubrique.
+  const { evenements, personnes } = matineeFictive()
+  const texte = composerResume(evenements, personnes, { depuis: DEPUIS, jusqua: JUSQUA })
+  const lignes = texte.split('\n')
+  const i = lignes.indexOf('Comptes Telegram changés ou en conflit')
+  assert.ok(i > 0)
+  assert.equal(lignes[i + 1], "- Zoé A., zap@exemple.fr : conflit à vérifier : u8817429863 dit être le titulaire, l'abonnement est utilisé par @wrdxr2d2 (u8367915893)")
+})
+
+test('formation incluse : une seule adresse (Skool pour l instant), dans le bot des membres et l email de bienvenue (Brice 15/10)', () => {
+  // Skool en attendant l'espace formation du site ; aucun ref tant que celui de Melanie est inconnu.
+  assert.equal(URL_FORMATION_LIVECLUB, 'https://www.skool.com/aoknowledge-trading')
+  assert.ok(!/[?&]ref=/.test(URL_FORMATION_LIVECLUB))
+  const lire = (f) => readFileSync(new URL(`../src/lib/${f}`, import.meta.url), 'utf8')
+  const config = lire('liveclub/config.ts')
+  assert.match(config, /A REMPLACER par l'espace formation d'aoknowledge\.com quand il sera en ligne/)
+  assert.equal((config.match(/skool\.com\/aoknowledge-trading/g) ?? []).length, 1, 'une seule adresse en dur')
+  // Personne d'autre n'ecrit l'adresse en dur : tous lisent la constante.
+  for (const f of ['liveclub/prompt-membre.ts', 'politique-information.ts', 'liveclub/emails.ts', 'liveclub/bot-membre.ts', 'support-prompt.ts']) {
+    assert.ok(!lire(f).includes('skool.com/aoknowledge-trading'), f)
+  }
+  // Le prompt des membres : la constante, jamais de presentation du Live Club a un membre, transmission si ca coince.
+  const prompt = lire('liveclub/prompt-membre.ts')
+  assert.ok(prompt.includes('${URL_FORMATION_LIVECLUB}'))
+  assert.match(prompt, /tu ne lui présentes jamais le Live Club comme à quelqu'un qui le découvre/)
+  assert.match(prompt, /demande à rejoindre avec l'email de son abonnement/)
+  assert.match(prompt, /ça coince, tu transmets à l'équipe \(demander_un_humain\)/)
+  // L'adresse finit la ligne du prompt (pas de ponctuation collee au lien).
+  assert.match(prompt, /\$\{URL_FORMATION_LIVECLUB\}\n/)
+  // Les faits publics : l'info est au bot des membres seulement (le bot support ne change pas).
+  const politique = lire('politique-information.ts')
+  const info = politique.slice(politique.indexOf("sujet: 'La formation incluse dans le Live Club'"))
+  assert.match(info.slice(0, 900), /seulement: 'liveclub'/)
+  assert.match(politique, /\.filter\(i => !i\.seulement \|\| i\.seulement === bot\)/)
+  // L'email de bienvenue : le bot pour la communaute, Skool pour les videos.
+  const emails = lire('liveclub/emails.ts')
+  const bienvenue = emails.slice(emails.indexOf('export function modeleBienvenue('), emails.indexOf('\n}\n', emails.indexOf('export function modeleBienvenue(')))
+  assert.ok(bienvenue.includes('${URL_FORMATION_LIVECLUB}'))
+  assert.match(bienvenue, /c'est pour la communauté ; les vidéos de formation incluses sont sur Skool/)
 })
 
 console.log(`\n${n} blocs verifies, tout est bon.`)

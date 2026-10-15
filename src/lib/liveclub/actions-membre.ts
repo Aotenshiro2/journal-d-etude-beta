@@ -14,9 +14,12 @@
 // mes_montants de l'agent. Lecture seule (apercu de facture, factures
 // ouvertes), pour le payeur rattache a CE compte Telegram et lui seul.
 //
-// support@ ne reste que pour une panne (PANNE : base ou Stripe illisible,
-// ou le pont vers l'equipe lui-meme en panne) : ce que le bot ou l'equipe par
-// le fil Support savent faire ne renvoie plus vers un email (Brice, 30/09).
+// support@ ne reste que pour une panne du pont vers l'equipe lui-meme
+// (TEXTE_EQUIPE_INDISPONIBLE, TEXTE_SECOURS_EQUIPE) : ce que le bot ou
+// l'equipe par le fil Support savent faire ne renvoie plus vers un email
+// (Brice, 30/09). (15/10, Brice) Une panne de lecture (PANNE : base ou Stripe
+// illisible) donne aussi le bouton « Contacter l'equipe », plus l'adresse :
+// si le pont lui-meme est en panne, c'est ce bouton qui donne support@.
 //
 // (06/10) Un compte NON rattache a un payeur peut avoir un acces offert
 // (exemption, acces broker, acces manuel) : profilSansRattachement le
@@ -326,9 +329,14 @@ export type Preparation =
      * (veutHumain) ; le menu a boutons joint « Contacter l'equipe ».
      */
     equipe?: true
+    /**
+     * (15/10) Lecture en panne (raison = PANNE) : le menu joint « Contacter
+     * l'equipe », l'agent recoit la consigne d'un abonnement illisible.
+     */
+    panne?: true
   }
 
-const PANNE = `Je n'arrive pas à lire ton abonnement en ce moment. Réessaie dans un moment, ou écris à ${SUPPORT}.`
+const PANNE = `Je n'arrive pas à lire ton abonnement en ce moment. Réessaie dans un moment, ou appuie sur « Contacter l'équipe » : elle te répond ici.`
 const NON_RATTACHE = `Je ne sais pas encore à quel abonnement ton compte Telegram est lié. Envoie-moi ici l'email de ton paiement : je t'envoie un code pour vérifier, et je te relie à ton abonnement.`
 
 /**
@@ -349,7 +357,7 @@ export async function preparerAction(
   if (r === 'illisible' || !r) {
     const p = await profilSansRattachement(telegramId, r)
     if (p.parcours === 'acces_offert') return { ok: false, raison: p.acces.rienAGerer }
-    return { ok: false, raison: p.parcours === 'panne' ? PANNE : NON_RATTACHE }
+    return p.parcours === 'panne' ? { ok: false, raison: PANNE, panne: true } : { ok: false, raison: NON_RATTACHE }
   }
   if (type === 'pause' && !nbMoisPauseValide(nbMois)) {
     return { ok: false, raison: 'Une pause dure de 1 à 6 mois : dis-moi combien.' }
@@ -359,7 +367,7 @@ export async function preparerAction(
   try {
     abonnements = await abonnementsDuPayeur(r)
   } catch {
-    return { ok: false, raison: PANNE }
+    return { ok: false, raison: PANNE, panne: true }
   }
   const vivants = abonnements.filter(a => statutDonneDroit(a.statut))
   if (vivants.length === 0) {
@@ -387,7 +395,7 @@ export async function preparerAction(
     if (a.statut === 'past_due') {
       return { ok: false, equipe: true, raison: `Ton dernier paiement n'est pas passé, donc je ne peux pas poser de pause : c'est l'équipe qui va regarder.` }
     }
-    if (!a.finPeriode) return { ok: false, raison: PANNE }
+    if (!a.finPeriode) return { ok: false, raison: PANNE, panne: true }
     const reprise = formaterDateFr(calculerReprisePause(Math.floor(Date.parse(a.finPeriode) / 1000), n).toISOString())
     return {
       ok: true,
@@ -442,13 +450,15 @@ const GESTE_PAR_ACTION: Record<ActionMembre['type'], GesteJournal> = {
  * tout que l'abonnement vise appartient TOUJOURS au payeur rattache a ce
  * compte Telegram (le rattachement a pu changer depuis la proposition).
  * Journalise le geste (pause, arret, arret_annule) et renvoie la phrase pour
- * le membre. Ne jette pas.
+ * le membre, et (15/10) `equipe` : joindre le bouton « Contacter l'equipe »
+ * (un echec que l'equipe peut regler, plus de renvoi vers support@). Ne
+ * jette pas.
  */
 export async function executerActionMembre(
   telegramId: number,
   action: ActionMembre,
   updateId: number | null,
-): Promise<string> {
+): Promise<{ texte: string; equipe: boolean }> {
   const geste = GESTE_PAR_ACTION[action.type]
   const contexte = {
     telegramId, acteur: ACTEUR_BOT_MEMBRE, abonnementId: action.abonnementId, updateId,
@@ -460,7 +470,7 @@ export async function executerActionMembre(
       { geste, resultat: r ? 'echec' : 'refuse', regle: r ? 'rattachement_illisible' : 'non_rattache', details: {} },
       contexte,
     )
-    return r ? PANNE : NON_RATTACHE
+    return r ? { texte: PANNE, equipe: true } : { texte: NON_RATTACHE, equipe: false }
   }
   const membreId = r.membre_id
 
@@ -472,14 +482,17 @@ export async function executerActionMembre(
         { geste, resultat: 'refuse', regle: 'abonnement_pas_au_payeur', details: {} },
         { ...contexte, membreId },
       )
-      return `Cet abonnement n'est plus lié à ton compte Telegram, donc je n'ai rien changé. Écris à ${SUPPORT} si besoin.`
+      return {
+        texte: `Cet abonnement n'est plus lié à ton compte Telegram, donc je n'ai rien changé. Si besoin, appuie sur « Contacter l'équipe » : elle te répond ici.`,
+        equipe: true,
+      }
     }
   } catch (err) {
     await journaliserGesteLiveClub(
       { geste, resultat: 'echec', regle: 'stripe', details: { etape: 'verification', erreur: messageErreur(err) } },
       { ...contexte, membreId },
     )
-    return PANNE
+    return { texte: PANNE, equipe: true }
   }
 
   try {
@@ -492,9 +505,12 @@ export async function executerActionMembre(
         },
         { ...contexte, membreId },
       )
-      return `C'est fait. Ta pause de ${action.nbMois} mois est programmée.\n\n`
-        + `Tu gardes le groupe jusqu'au ${formaterDateFr(issue.payeJusquau)}. `
-        + `Ton abonnement reprend tout seul le ${formaterDateFr(issue.repriseLe)}, et on te prévient une semaine avant.`
+      return {
+        texte: `C'est fait. Ta pause de ${action.nbMois} mois est programmée.\n\n`
+          + `Tu gardes le groupe jusqu'au ${formaterDateFr(issue.payeJusquau)}. `
+          + `Ton abonnement reprend tout seul le ${formaterDateFr(issue.repriseLe)}, et on te prévient une semaine avant.`,
+        equipe: false,
+      }
     }
     if (action.type === 'arret') {
       const apres = await programmerArret(action.abonnementId)
@@ -502,21 +518,30 @@ export async function executerActionMembre(
         { geste, resultat: 'fait', regle: 'demande_membre', details: { fin: apres.finPeriode?.slice(0, 10) ?? null } },
         { ...contexte, membreId },
       )
-      return `C'est fait. Ton abonnement s'arrête${apres.finPeriode ? ` le ${formaterDateFr(apres.finPeriode)}` : ' à la fin de la période payée'}, et plus rien ne sera prélevé.\n\n`
-        + `Tu gardes le groupe jusque-là. Si tu changes d'avis avant, écris-moi, je peux annuler l'arrêt.`
+      return {
+        texte: `C'est fait. Ton abonnement s'arrête${apres.finPeriode ? ` le ${formaterDateFr(apres.finPeriode)}` : ' à la fin de la période payée'}, et plus rien ne sera prélevé.\n\n`
+          + `Tu gardes le groupe jusque-là. Si tu changes d'avis avant, écris-moi, je peux annuler l'arrêt.`,
+        equipe: false,
+      }
     }
     const apres = await annulerArret(action.abonnementId)
     await journaliserGesteLiveClub(
       { geste, resultat: 'fait', regle: 'demande_membre', details: { fin_periode: apres.finPeriode?.slice(0, 10) ?? null } },
       { ...contexte, membreId },
     )
-    return `C'est fait, l'arrêt est annulé. Ton abonnement continue normalement${apres.finPeriode ? `, prochain renouvellement le ${formaterDateFr(apres.finPeriode)}` : ''}.`
+    return {
+      texte: `C'est fait, l'arrêt est annulé. Ton abonnement continue normalement${apres.finPeriode ? `, prochain renouvellement le ${formaterDateFr(apres.finPeriode)}` : ''}.`,
+      equipe: false,
+    }
   } catch (err) {
     await journaliserGesteLiveClub(
       { geste, resultat: 'echec', regle: 'stripe', details: { etape: action.type, erreur: messageErreur(err) } },
       { ...contexte, membreId },
     )
-    return `Ça n'a pas marché de notre côté, et rien n'a changé sur ton abonnement. Réessaie dans un moment, ou écris à ${SUPPORT}.`
+    return {
+      texte: `Ça n'a pas marché de notre côté, et rien n'a changé sur ton abonnement. Réessaie dans un moment, ou appuie sur « Contacter l'équipe » : elle te répond ici.`,
+      equipe: true,
+    }
   }
 }
 

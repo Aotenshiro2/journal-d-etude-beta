@@ -111,6 +111,9 @@ async function chercherEmail(tx: Tx, email: string): Promise<{ touches: Touche[]
       select 'membre', r.membre_id::text, 'email du rattachement (' || r.source || ')', r.email
         from public.cockpit_liveclub_rattachements r where lower(r.email) = $1 and r.retire_le is null and r.membre_id is not null
       union all
+      select 'tg', r.telegram_id::text, 'email d''un ancien rattachement (' || r.source || ', retiré)', r.email
+        from public.cockpit_liveclub_rattachements r where lower(r.email) = $1 and r.retire_le is not null
+      union all
       select 'tg', a.telegram_id::text, 'email de l''accès broker', a.email
         from public.cockpit_liveclub_acces a where lower(a.email) = $1 and a.telegram_id is not null
       union all
@@ -134,15 +137,52 @@ async function chercherEmail(tx: Tx, email: string): Promise<{ touches: Touche[]
   return { touches, indices }
 }
 
-/** Les liens qui touchent ces noeuds. certain = il reunit deux noeuds en une personne. */
+/**
+ * Les liens qui touchent ces noeuds. certain = il reunit deux noeuds en une personne.
+ *
+ * (15/10, Brice) LES COMPTES TELEGRAM SUCCESSIFS d'une meme personne sont
+ * les siens : un rattachement RETIRE reste un lien (« ancien rattachement »),
+ * certain s'il venait d'une preuve de possession (source 'bot' : lien
+ * personnel ou code email) ou d'un changement de compte fait par le
+ * titulaire (retire_raison 'changement_compte'), probable sinon (Metricgram,
+ * geste manuel : peut-etre une erreur corrigee). Un rattachement sans
+ * membre_id (le cas des liens poses par le bot avant que la fiche existe) se
+ * relie a la fiche par son email. Un changement de compte relie aussi les
+ * deux comptes entre eux (remplace_par), fiche ou pas. retire_raison et
+ * remplace_par (migration 20261015230000) sont lus par to_jsonb : la requete
+ * marche avant la migration.
+ */
 async function lireLiens(tx: Tx, ids: { telegram: number[]; membres: string[]; archives: string[] }): Promise<LienLu[]> {
   const u = ids.telegram.map((x) => `u${x}`)
+  const raison = `(to_jsonb(r) ->> 'retire_raison')`
+  const remplacant = `(to_jsonb(r) ->> 'remplace_par')`
   const lignes = await tx.$queryRawUnsafe<LienLu[]>(`
     select a, b, nature, certain from (
       select 'tg:' || r.telegram_id as a, 'membre:' || r.membre_id as b, 'rattachement ' || r.source as nature, true as certain
         from public.cockpit_liveclub_rattachements r
         where r.retire_le is null and r.membre_id is not null
           and (r.telegram_id = any($1::bigint[]) or r.membre_id = any($2::uuid[]))
+      union all
+      select 'tg:' || r.telegram_id, 'membre:' || e.membre_id, 'rattachement ' || r.source || ' (par l''email de la fiche)', true
+        from public.cockpit_liveclub_rattachements r
+        join public.cockpit_membre_emails e on e.email = lower(r.email)
+        where r.retire_le is null and r.membre_id is null
+          and (r.telegram_id = any($1::bigint[]) or e.membre_id = any($2::uuid[]))
+      union all
+      select 'tg:' || r.telegram_id, 'membre:' || coalesce(r.membre_id, e.membre_id),
+             'ancien rattachement ' || r.source || ' (retiré le ' || ${J("r.retire_le at time zone 'Europe/Paris'")}
+               || case when ${raison} = 'changement_compte' then ', changement de compte Telegram par le titulaire' else '' end || ')',
+             (r.source = 'bot' or ${raison} = 'changement_compte')
+        from public.cockpit_liveclub_rattachements r
+        left join public.cockpit_membre_emails e on r.membre_id is null and e.email = lower(r.email)
+        where r.retire_le is not null and coalesce(r.membre_id, e.membre_id) is not null
+          and (r.telegram_id = any($1::bigint[]) or coalesce(r.membre_id, e.membre_id) = any($2::uuid[]))
+      union all
+      select 'tg:' || r.telegram_id, 'tg:' || ${remplacant},
+             'compte Telegram remplacé par le titulaire (changement de compte du ' || ${J("r.retire_le at time zone 'Europe/Paris'")} || ')', true
+        from public.cockpit_liveclub_rattachements r
+        where ${raison} = 'changement_compte' and ${remplacant} ~ '^[0-9]{5,15}$'
+          and (r.telegram_id = any($1::bigint[]) or ${remplacant}::bigint = any($1::bigint[]))
       union all
       select 'tg:' || ltrim(lower(c.telegram_num), 'u'), 'membre:' || c.membre_id, 'numéro Telegram posé à la main', true
         from public.cockpit_contact_manuel c
@@ -313,9 +353,12 @@ async function lireFiche(tx: Tx, g: Groupe): Promise<DonneesFiche> {
         `'pose_le', ${H('s.pose_le')}, 'retire_le', ${H('s.retire_le')}, 'note', left(s.note, 150)`,
         's.pose_le desc')},
       'rattachements', ${liste(
-        `(select * from public.cockpit_liveclub_rattachements where telegram_id = any($1::bigint[]) or membre_id = any($2::uuid[]) order by lie_le desc limit 6) r`,
+        `(select * from public.cockpit_liveclub_rattachements where telegram_id = any($1::bigint[]) or membre_id = any($2::uuid[])
+            or lower(email) in (select email from em) order by lie_le desc limit 8) r`,
         `'compte', 'u' || r.telegram_id, 'membre_id', r.membre_id, 'source', r.source, 'stripe', r.compte,
-         'lie_le', ${H('r.lie_le')}, 'retire_le', ${H('r.retire_le')}`,
+         'lie_le', ${H('r.lie_le')}, 'retire_le', ${H('r.retire_le')},
+         'retire_raison', to_jsonb(r) ->> 'retire_raison',
+         'remplace_par', case when (to_jsonb(r) ->> 'remplace_par') is not null then 'u' || (to_jsonb(r) ->> 'remplace_par') end`,
         'r.lie_le desc')},
       'gestes_total', (select count(*)::int from public.cockpit_liveclub_gestes
         where telegram_id = any($1::bigint[]) or membre_id = any($2::uuid[])),

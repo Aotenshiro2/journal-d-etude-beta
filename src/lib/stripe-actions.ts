@@ -505,13 +505,15 @@ export async function reintegrerAuLiveClub(telegramId: number): Promise<IssueGes
  * 20260929200300 : avant elle, l'insert bute sur le check et la ligne est
  * perdue (loggue), jamais le geste. 'adresse' (15/10 : une adresse email
  * rattachee sur preuve, liveclub/adresses.ts) demande la migration
- * 20261015120000, meme regle.
+ * 20261015120000, meme regle. 'compte_telegram' (15/10 : un abonnement qui
+ * passe d'un compte Telegram a un autre, ou un conflit, liveclub/comptes-telegram.ts)
+ * demande la migration 20261015230000, meme regle.
  */
 export type GesteJournal =
   | 'retrait' | 'reintegration' | 'entree_acceptee' | 'entree_refusee'
   | 'pause' | 'arret' | 'reprise' | 'rappel' | 'refus'
   | 'acces_broker' | 'arret_annule' | 'invitation' | 'fin_acces'
-  | 'adresse'
+  | 'adresse' | 'compte_telegram'
 
 export type ResultatGeste = 'fait' | 'refuse' | 'echec' | 'simule'
 
