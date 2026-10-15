@@ -15,7 +15,8 @@
 import { prisma } from '@/lib/db'
 import { ressourcesPropres, type Ressource, type TypeLecon } from './pur'
 import {
-  SQL_LECON_PAR_ID, SQL_LECONS_PAR_VIDEO, SQL_LECONS_VISIBLES, SQL_MODULES_VISIBLES, SQL_SECTIONS_VISIBLES,
+  SQL_LECON_PAR_ID, SQL_LECONS_PAR_VIDEO, SQL_LECONS_VISIBLES, SQL_MODULES_VISIBLES, SQL_OFFRES_DES_MODULES,
+  SQL_SECTIONS_VISIBLES,
 } from './requetes'
 
 export type StatutContenu = 'brouillon' | 'publie' | 'archive' | 'a_venir'
@@ -30,6 +31,18 @@ export type ModuleCatalogue = {
   statut: StatutContenu
   auteur: string | null
   image: string | null
+  /** Prix du module vendu seul (vide = pas vendu seul). */
+  prixEur: number | null
+}
+
+/** Une offre qui ouvre quelque chose d'un module (cadenas des ecrans). */
+export type OffreDuModule = {
+  slug: string
+  titre: string
+  type: string
+  prixEur: number | null
+  /** module : le module entier ; sections : une partie ; tout : l'offre ouvre tout le catalogue (ETM). */
+  portee: 'module' | 'sections' | 'tout'
 }
 
 export type SectionCatalogue = { id: string; moduleId: string; ordre: number; titre: string }
@@ -53,6 +66,8 @@ export type Catalogue = {
   modules: ModuleCatalogue[]
   sections: SectionCatalogue[]
   lecons: LeconCatalogue[]
+  /** Par module : les offres qui ouvrent le module ou une de ses sections, puis celles qui ouvrent tout. */
+  offresParModule: Map<string, OffreDuModule[]>
 }
 
 export type LeconComplete = LeconCatalogue & {
@@ -73,7 +88,11 @@ let lectureEnCours: Promise<Catalogue> | null = null
 
 type LigneModule = {
   id: string; slug: string; titre: string; resume: string | null; ordre: number; parcours: string | null
-  statut: StatutContenu; auteur: string | null; image: string | null
+  statut: StatutContenu; auteur: string | null; image: string | null; prix_eur: number | null
+}
+type LigneOffre = {
+  module_id: string | null; slug: string; titre: string; type: string; prix_eur: number | null
+  portee: 'module' | 'sections' | 'tout'
 }
 type LigneSection = { id: string; module_id: string; ordre: number; titre: string }
 type LigneLecon = {
@@ -107,10 +126,24 @@ async function lireCatalogueEnBase(): Promise<Catalogue> {
   const modules = await prisma.$queryRawUnsafe<LigneModule[]>(SQL_MODULES_VISIBLES)
   const sections = await prisma.$queryRawUnsafe<LigneSection[]>(SQL_SECTIONS_VISIBLES)
   const lecons = await prisma.$queryRawUnsafe<LigneLecon[]>(SQL_LECONS_VISIBLES)
+  const offres = await prisma.$queryRawUnsafe<LigneOffre[]>(SQL_OFFRES_DES_MODULES)
+
+  const offreDeLigne = (o: LigneOffre): OffreDuModule =>
+    ({ slug: o.slug, titre: o.titre, type: o.type, prixEur: o.prix_eur, portee: o.portee })
+  const offresTout = offres.filter(o => o.module_id === null).map(offreDeLigne)
+  const offresParModule = new Map<string, OffreDuModule[]>()
+  for (const m of modules) {
+    offresParModule.set(m.id, [
+      ...offres.filter(o => o.module_id === m.id).map(offreDeLigne),
+      ...offresTout,
+    ])
+  }
+
   return {
-    modules: modules.map(m => ({ ...m })),
+    modules: modules.map(({ prix_eur, ...m }) => ({ ...m, prixEur: prix_eur })),
     sections: sections.map(s => ({ id: s.id, moduleId: s.module_id, ordre: s.ordre, titre: s.titre })),
     lecons: lecons.map(leconDeLigne),
+    offresParModule,
   }
 }
 

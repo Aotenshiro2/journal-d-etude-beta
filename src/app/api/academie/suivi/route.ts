@@ -16,25 +16,32 @@ import { messageErreur, relationAbsente } from '@/lib/liveclub/pur'
  *     REELLEMENT joue depuis le dernier signal accepte (sauts exclus, mesure
  *     par la page avec les evenements timeupdate et seeked de player.js).
  *   - evenement 'texte' : texte ou pdf ; secondes = temps ou la page etait
- *     visible depuis le dernier signal accepte.
- *   - evenement 'vu' : le bouton « marquer comme vu » (vu: false retire la
- *     marque).
+ *     visible depuis le dernier signal accepte. 'texte_fin' : le texte a ete
+ *     lu jusqu'en bas (memes champs).
+ *   - evenement 'vu' : le bouton « marquer comme vu » ; vu: false, ou
+ *     evenement 'non_vu', le decoche.
  *   La page remet son compteur de secondes a zero seulement sur un 200 : un
  *   signal refuse (429) garde ses secondes pour le suivant.
  *
  * Le temps credite est borne par le temps ecoule cote serveur (2x pour une
  * video, 1x pour un texte, plus 5 s) : une avance rapide ne compte pas
- * (pur.ts, appliquerSignal). Une lecon est terminee a 90 % de sa duree
- * reellement regardee.
+ * (pur.ts, appliquerSignal).
+ *
+ * Etat de la lecon (Brice, 15/10) : ouvert (rien de consomme), en_cours (du
+ * temps reellement regarde ou lu), vu. « vu » se pose tout seul a 60 % de
+ * temps reellement regarde (video), sur 'fin', sur 'texte_fin', et par le
+ * clic ; le decochage ramene a en_cours ou ouvert, le journal de preuve
+ * garde tout.
  *
  * Reponses :
- *   200 { ok: true, credit_s, progression: { ... } }
+ *   200 { ok: true, credit_s, progression: { derniere_position_s, position_max_s, secondes_vues,
+ *         pourcentage, terminee_le, marquee_vue_le, vu_le, vu_par, etat } }
  *   400 { ok: false, erreur: 'signal' }     corps illisible, ou evenement d'un autre type de lecon
  *   401 { ok: false, erreur: 'jeton' }
  *   409 { ok: false, erreur: 'lien' }       aucun lien delivre pour cette lecon (ou depuis plus de 24 h) :
  *                                           la page redemande /api/academie/lecture
  *   429 { ok: false, erreur: 'debit', reessayer_dans_s }  un signal par lecon toutes les 20 s
- *                                           (3 s pour 'fin' et 'vu'), ou un signal concurrent
+ *                                           (3 s pour 'fin', 'texte_fin' et 'vu'), ou un signal concurrent
  *   503 { ok: false, erreur: 'indisponible' }
  *
  * Le droit n'est pas recalcule a chaque signal : un signal n'est accepte que
@@ -95,6 +102,9 @@ export async function POST(req: NextRequest) {
         pourcentage: p.pourcentage,
         terminee_le: p.termineeLe?.toISOString() ?? null,
         marquee_vue_le: p.marqueeVueLe?.toISOString() ?? null,
+        vu_le: p.vuLe?.toISOString() ?? null,
+        vu_par: p.vuPar,
+        etat: p.etat,
       },
     },
     { headers },

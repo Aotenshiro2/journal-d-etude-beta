@@ -563,13 +563,44 @@ sections 4.3, 5 et 8). GO de Brice pour le code, PAS pour commit, push ni Vercel
   `bash /mnt/d/6_Societe/Pilotage/Academie/outils/poser-env-bunny-journal.sh`,
   puis commit et push du journal, puis le site (sites/Aoknowledgecom/ETAT.md).
 
-## Academie, base V1 : tables, droits, lecture, suivi (15/10/2026, NON commite, migration NON appliquee)
+## Academie, base V1 : tables, droits, lecture, suivi (15/10/2026, EN PRODUCTION : journal fa38f90, migration 20261015210000 appliquee)
 
 Plan : D:\6_Societe\Pilotage\Academie\PLAN-ACADEMIE.md (4.2, 4.3, 5, 7, 12).
-GO de Brice pour la V1 ; commit, push et migration attendent la session
-principale.
+
+**Quatre etats par lecon et « vu » a 60 % (16/10/2026, NON commite, migration
+20261016110000 ECRITE, PAS APPLIQUEE).** Brice, 15/10. Contrat partage avec
+les ecrans du site :
+- etat (pur.ts, etatLecon) : non_vu (aucune ligne de progression), ouvert
+  (ligne creee par /lecture, video, texte ou PDF, secondes_vues = 0),
+  en_cours (secondes_vues > 0), vu (vu_le pose). Dans /moi (chaque lecon,
+  Continuer), /lecture et /suivi (progression.etat).
+- vu se pose tout seul : video a 60 % de temps REELLEMENT regarde (au
+  franchissement du seuil, une seule fois), evenement 'fin', nouvel
+  evenement 'texte_fin' (texte ou PDF lu jusqu'en bas), ou clic 'vu'. La
+  premiere voie est gardee dans vu_par (mesure, fin, texte_fin, eleve).
+  'non_vu' (ou vu: false) retire vu_le, vu_par et le clic ; terminee_le
+  (preuve du seuil mesure) et le journal restent. Apres un decochage,
+  continuer a regarder ne recoche pas ; une nouvelle 'fin' ou 'texte_fin',
+  si.
+- Migration `20261016110000_academie_etats_vu.sql` : colonnes vu_le et
+  vu_par (contraintes), reprise des lignes existantes (clic -> eleve, fin
+  mesuree -> mesure, videos deja a 60 % -> mesure), 'texte_fin' dans les
+  evenements du journal. A APPLIQUER AVANT de deployer ce code (les
+  requetes lisent vu_le : sans la colonne, /moi et /suivi repondent 503).
+- /moi : par module prix_eur, offres [{ slug, titre, type, prix_eur,
+  portee: module | sections | tout }], progression { lecons, vues,
+  en_cours, ouvertes, commencees, pourcentage (part des lecons 'vu') } ;
+  par lecon etat, progression.vu_le et vu_par.
+- Verifie : verifier-academie.mjs 29 blocs hors ligne (59 % et 60 %
+  regardes, saut au-dela de 60 % sans visionnage, fin, texte_fin, vu puis
+  non_vu, ouverture sans consommation) et Bunny en ligne ;
+  essayer-migration-academie.mjs (migration des etats, reprise, contraintes,
+  requetes des routes, transaction ANNULEE, vu_le absente apres coup) ; tsc,
+  eslint, build.
+
+Base du 15/10 :
 - Base : `sites/Aoknowledgecom/supabase/migrations/20261015210000_academie_tables.sql`
-  (ECRITE, PAS APPLIQUEE). academie_modules, _sections, _lecons (format,
+  (appliquee le 15/10). academie_modules, _sections, _lecons (format,
   usage, hebergeur bunny ou wistia, bibliotheque Bunny NOMMEE), _offres +
   _offre_contenus (module entier ou section), _acces, _progression,
   _lectures (journal de preuve). RLS forcee, aucune policy, rien pour anon
@@ -611,8 +642,8 @@ principale.
   eslint des fichiers, build ok ; next start : preflight et 401 sur les 3
   routes. verifier-academie-bunny.mjs envoie maintenant le Referer (sans
   lui, 403 depuis les domaines autorises du 15/10).
-- NON teste : 200, 403 et suivi avec une vraie session (apres migration).
-- A FAIRE : appliquer la migration, `npm run verifier:rls`, commit et push,
+- NON teste : 200, 403 et suivi avec une vraie session.
+- A FAIRE : appliquer 20261016110000 puis deployer les quatre etats,
   test de Brice sur /academie/essai (doit marcher pareil) ; cote site :
   ecrans /academie (moi, lecture { lecon }, suivi toutes les 30 s avec
   secondes jouees mesurees par player.js) ; politique de confidentialite et

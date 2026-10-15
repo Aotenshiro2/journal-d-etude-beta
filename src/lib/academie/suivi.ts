@@ -5,11 +5,17 @@
 // regarde (signaux du lecteur), le temps passe sur un texte ; le clic « vu »
 // reste possible, a part.
 //
+// Etats d'une lecon (Brice, 15/10 ; migration 20261016110000) : non_vu,
+// ouvert, en_cours, vu (etatLecon, pur.ts), deduits de la progression ;
+// chaque Progression rendue ici porte deja son etat.
+//
 // Les calculs sont dans pur.ts (appliquerSignal) ; ici, la base seulement.
 // Jamais d'email ni de jeton : l'uuid du compte, l'IP et un appareil court.
 
 import { prisma } from '@/lib/db'
-import { appliquerSignal, type EtatSuivi, type IssueSignal, type Signal, type TypeLecon } from './pur'
+import {
+  appliquerSignal, etatLecon, type EtatLecon, type EtatSuivi, type IssueSignal, type Signal, type TypeLecon, type VuPar,
+} from './pur'
 import {
   SQL_APPLIQUER_SIGNAL, SQL_ETAT_SIGNAL, SQL_NOTER_CONNEXION, SQL_NOTER_LIEN, SQL_PROGRESSION_COMPTE,
 } from './requetes'
@@ -21,13 +27,17 @@ export type Progression = {
   pourcentage: number | null
   termineeLe: Date | null
   marqueeVueLe: Date | null
+  vuLe: Date | null
+  vuPar: VuPar | null
+  /** Une ligne existe, donc jamais non_vu ici : ouvert, en_cours ou vu. */
+  etat: EtatLecon
 }
 
 export type ProgressionLecon = Progression & { leconId: string; derniereVueLe: Date }
 
 type LigneProgression = {
   derniere_position_s: number; position_max_s: number; secondes_vues: number; pourcentage: number | null
-  terminee_le: Date | null; marquee_vue_le: Date | null
+  terminee_le: Date | null; marquee_vue_le: Date | null; vu_le: Date | null; vu_par: VuPar | null
 }
 
 function progressionDeLigne(l: LigneProgression): Progression {
@@ -38,6 +48,9 @@ function progressionDeLigne(l: LigneProgression): Progression {
     pourcentage: l.pourcentage,
     termineeLe: l.terminee_le,
     marqueeVueLe: l.marquee_vue_le,
+    vuLe: l.vu_le,
+    vuPar: l.vu_par,
+    etat: etatLecon({ secondesVues: l.secondes_vues, vuLe: l.vu_le }),
   }
 }
 
@@ -70,7 +83,7 @@ export type IssueEnregistrement =
 
 type LigneEtat = {
   position_max_s: number; derniere_position_s: number; secondes_vues: number; pourcentage: number | null
-  terminee_le: Date | null; marquee_vue_le: Date | null; derniere_vue_le: Date; dernier_signal_le: Date | null
+  terminee_le: Date | null; marquee_vue_le: Date | null; vu_le: Date | null; derniere_vue_le: Date; dernier_signal_le: Date | null
   nb_signaux: number; type: TypeLecon; duree_s: number | null; statut: string; maintenant: Date
 }
 
@@ -95,6 +108,7 @@ export async function enregistrerSignal(
     secondesVues: e.secondes_vues,
     pourcentage: e.pourcentage,
     termineeLe: e.terminee_le,
+    vuLe: e.vu_le,
     derniereVueLe: e.derniere_vue_le,
     dernierSignalLe: e.dernier_signal_le,
     nbSignaux: e.nb_signaux,
@@ -110,6 +124,7 @@ export async function enregistrerSignal(
     m.positionMaxS, m.dernierePositionS, m.secondesVues, m.pourcentage, m.terminer, m.marque,
     m.journal.evenement, m.journal.secondes, m.journal.positionS,
     o.ip, o.appareil,
+    m.vu, m.vuPar,
   )
   if (!ecrites[0]) return { issue: 'course' }
   return { issue: 'ok', credit: issue.credit, progression: progressionDeLigne(ecrites[0]) }

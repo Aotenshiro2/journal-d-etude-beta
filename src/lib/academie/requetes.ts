@@ -8,7 +8,9 @@
 // apres la migration 20261015210000. Ce que le test valide est donc ce que
 // les routes executent.
 //
-// Tables : sites/Aoknowledgecom/supabase/migrations/20261015210000_academie_tables.sql.
+// Tables : sites/Aoknowledgecom/supabase/migrations/20261015210000_academie_tables.sql,
+// etats et « vu » a 60 % : 20261016110000_academie_etats_vu.sql (vu_le, vu_par,
+// evenement texte_fin). Ces requetes demandent les deux migrations.
 // Toutes les colonnes uuid sortent en ::text, les compteurs en ::int.
 
 // ---------------------------------------------------------------------------
@@ -111,12 +113,32 @@ select 'essai'::text, null::text, m.slug, false, m.id::text, null::text
 // Catalogue (catalogue.ts)
 // ---------------------------------------------------------------------------
 
-/** Les modules visibles (publies ou a venir), dans l'ordre. */
+/** Les modules visibles (publies ou a venir), dans l'ordre. prix_eur vide = pas vendu seul. */
 export const SQL_MODULES_VISIBLES = `
-select m.id::text as id, m.slug, m.titre, m.resume, m.ordre, m.parcours, m.statut, m.auteur, m.image
+select m.id::text as id, m.slug, m.titre, m.resume, m.ordre, m.parcours, m.statut, m.auteur, m.image,
+       m.prix_eur::float8 as prix_eur
   from public.academie_modules m
  where m.statut in ('publie', 'a_venir')
  order by m.ordre, m.titre
+`
+
+/**
+ * Les offres qui ouvrent quelque chose de chaque module (pour le cadenas des
+ * ecrans : « ce module s'obtient avec... ») : portee 'module' (le module
+ * entier), 'sections' (une partie seulement) ; et, module_id vide, les offres
+ * qui ouvrent tout (portee 'tout', ETM).
+ */
+export const SQL_OFFRES_DES_MODULES = `
+select c.module_id::text as module_id, o.slug, o.titre, o.type, o.prix_eur::float8 as prix_eur,
+       case when bool_or(c.section_id is null) then 'module' else 'sections' end as portee
+  from public.academie_offre_contenus c
+  join public.academie_offres o on o.id = c.offre_id
+ group by c.module_id, o.id
+union all
+select null::text, o.slug, o.titre, o.type, o.prix_eur::float8, 'tout'
+  from public.academie_offres o
+ where o.ouvre_tout
+ order by 1, 2
 `
 
 /** Les sections des modules visibles. */
@@ -180,7 +202,7 @@ with prog as (
       + case when p.derniere_vue_le < now() - interval '30 minutes' then 1 else 0 end,
     derniere_vue_le = now()
   returning p.derniere_position_s, p.position_max_s, p.secondes_vues, p.pourcentage,
-            p.terminee_le, p.marquee_vue_le
+            p.terminee_le, p.marquee_vue_le, p.vu_le, p.vu_par
 ), journal as (
   insert into public.academie_lectures (user_id, lecon_id, evenement, ip, appareil)
   values ($1::uuid, $2::uuid, 'lien', $3::inet, $4::text)
@@ -192,7 +214,7 @@ select prog.*, (select count(*)::int from journal) as journalise from prog
 /** $1 = compte, $2 = lecon. L'etat d'une progression pour appliquer un signal, avec l'heure de la base. */
 export const SQL_ETAT_SIGNAL = `
 select p.position_max_s, p.derniere_position_s, p.secondes_vues, p.pourcentage, p.terminee_le,
-       p.marquee_vue_le, p.derniere_vue_le, p.dernier_signal_le, p.nb_signaux,
+       p.marquee_vue_le, p.vu_le, p.derniere_vue_le, p.dernier_signal_le, p.nb_signaux,
        l.type, l.duree_s, l.statut, now() as maintenant
   from public.academie_progression p
   join public.academie_lecons l on l.id = p.lecon_id
@@ -206,7 +228,9 @@ select p.position_max_s, p.derniere_position_s, p.secondes_vues, p.pourcentage, 
  * $6 secondes_vues, $7 pourcentage (ou null), $8 terminer (bool),
  * $9 marque ('poser', 'retirer' ou null), $10 evenement du journal,
  * $11 secondes creditees (ou null), $12 position (ou null), $13 ip,
- * $14 appareil. Aucune ligne rendue = le signal a perdu la course.
+ * $14 appareil, $15 vu ('poser', 'retirer' ou null), $16 vu_par (la voie,
+ * gardee seulement si la lecon n'etait pas deja vue). Aucune ligne rendue =
+ * le signal a perdu la course.
  */
 export const SQL_APPLIQUER_SIGNAL = `
 with maj as (
@@ -220,11 +244,19 @@ with maj as (
       when 'poser' then coalesce(p.marquee_vue_le, now())
       when 'retirer' then null
       else p.marquee_vue_le end,
+    vu_le = case $15::text
+      when 'poser' then coalesce(p.vu_le, now())
+      when 'retirer' then null
+      else p.vu_le end,
+    vu_par = case $15::text
+      when 'poser' then case when p.vu_le is null then $16::text else p.vu_par end
+      when 'retirer' then null
+      else p.vu_par end,
     dernier_signal_le = now(),
     nb_signaux = p.nb_signaux + 1
   where p.user_id = $1::uuid and p.lecon_id = $2::uuid and p.nb_signaux = $3::int
   returning p.position_max_s, p.derniere_position_s, p.secondes_vues, p.pourcentage,
-            p.terminee_le, p.marquee_vue_le
+            p.terminee_le, p.marquee_vue_le, p.vu_le, p.vu_par
 ), journal as (
   insert into public.academie_lectures (user_id, lecon_id, evenement, secondes, position_s, ip, appareil)
   select $1::uuid, $2::uuid, $10::text, $11::int, $12::int, $13::inet, $14::text from maj
@@ -250,7 +282,7 @@ select $1::uuid, 'connexion', $2::inet, $3::text
 /** $1 = compte. Toute la progression du compte. */
 export const SQL_PROGRESSION_COMPTE = `
 select p.lecon_id::text as lecon_id, p.position_max_s, p.derniere_position_s, p.secondes_vues,
-       p.pourcentage, p.terminee_le, p.marquee_vue_le, p.derniere_vue_le
+       p.pourcentage, p.terminee_le, p.marquee_vue_le, p.vu_le, p.vu_par, p.derniere_vue_le
   from public.academie_progression p
  where p.user_id = $1::uuid
 `

@@ -329,8 +329,14 @@ export function lireDemandeLecture(corps: unknown): { lecon: string } | { video:
   return video ? { video } : null
 }
 
-export type EvenementSignal = 'lecture' | 'pause' | 'fin' | 'texte' | 'vu'
-const EVENEMENTS: readonly EvenementSignal[] = ['lecture', 'pause', 'fin', 'texte', 'vu']
+/**
+ * Les signaux de la page. Videos : lecture (toutes les 30 s), pause, fin (la
+ * video est arrivee au bout). Textes et PDF : texte (temps visible), texte_fin
+ * (lu jusqu'en bas). Toutes : vu (le clic de l'eleve ; vu: false, ou
+ * l'evenement 'non_vu' du corps, le retire).
+ */
+export type EvenementSignal = 'lecture' | 'pause' | 'fin' | 'texte' | 'texte_fin' | 'vu'
+const EVENEMENTS: readonly EvenementSignal[] = ['lecture', 'pause', 'fin', 'texte', 'texte_fin', 'vu']
 
 export type Signal = {
   evenement: EvenementSignal
@@ -341,7 +347,7 @@ export type Signal = {
    * signal accepte, mesurees par la page (sauts exclus). Le serveur les borne.
    */
   secondes: number | null
-  /** 'vu' : true pose la marque, false la retire. */
+  /** 'vu' : true pose la marque, false la retire (decochage). */
   vu: boolean
 }
 
@@ -350,11 +356,15 @@ function entierBorne(v: unknown, max: number): number | null {
   return Math.min(Math.floor(v), max)
 }
 
-/** POST /api/academie/suivi : { lecon, evenement, position_s?, secondes?, vu? }. */
+/**
+ * POST /api/academie/suivi : { lecon, evenement, position_s?, secondes?, vu? }.
+ * evenement 'non_vu' = { evenement: 'vu', vu: false } (le decochage).
+ */
 export function lireSignal(corps: unknown): { lecon: string; signal: Signal } | null {
   const c = (corps && typeof corps === 'object' ? corps : {}) as Record<string, unknown>
   const lecon = lireUuid(c.lecon)
-  const evenement = EVENEMENTS.find(e => e === c.evenement)
+  const decoche = c.evenement === 'non_vu'
+  const evenement = decoche ? 'vu' : EVENEMENTS.find(e => e === c.evenement)
   if (!lecon || !evenement) return null
   return {
     lecon,
@@ -362,7 +372,7 @@ export function lireSignal(corps: unknown): { lecon: string; signal: Signal } | 
       evenement,
       positionS: entierBorne(c.position_s, 86400),
       secondes: entierBorne(c.secondes, 86400),
-      vu: c.vu !== false,
+      vu: !decoche && c.vu !== false,
     },
   }
 }
@@ -371,9 +381,9 @@ export function lireSignal(corps: unknown): { lecon: string; signal: Signal } | 
 // Le suivi (plan section 7)
 // ---------------------------------------------------------------------------
 
-/** Ecart minimal entre deux signaux d'un compte sur une lecon (debit). fin et vu sont ponctuels. */
+/** Ecart minimal entre deux signaux d'un compte sur une lecon (debit). fin, texte_fin et vu sont ponctuels. */
 export const ECART_MIN_S: Readonly<Record<EvenementSignal, number>> = {
-  lecture: 20, pause: 20, texte: 20, fin: 3, vu: 3,
+  lecture: 20, pause: 20, texte: 20, fin: 3, texte_fin: 3, vu: 3,
 }
 /** Vitesse de lecture la plus haute du lecteur : 2x. */
 export const VITESSE_MAX = 2
@@ -383,8 +393,30 @@ export const MARGE_S = 5
 export const INTERVALLE_MAX_S = 120
 /** Un signal n'est accepte que si un lien a ete delivre pour cette lecon depuis moins de 24 h. */
 export const FRAICHEUR_LIEN_H = 24
-/** Une lecon est terminee quand 90 % de sa duree a ete reellement regardee (ou lue). */
-export const SEUIL_TERMINEE = 0.9
+/**
+ * Une video passe « vue » quand 60 % de sa duree a ete REELLEMENT regardee
+ * (Brice, 15/10 ; 90 % avant). C'est aussi le seuil de la preuve terminee_le.
+ */
+export const SEUIL_VU = 0.6
+
+/**
+ * Les quatre etats d'une lecon pour un eleve (Brice, 15/10) :
+ * - non_vu : jamais ouverte (aucune ligne de progression) ;
+ * - ouvert : ouverte (lien ou contenu delivre), rien de consomme ;
+ * - en_cours : du temps reellement regarde ou lu, pas encore vue ;
+ * - vu : posee par 60 % regardes, la fin de la video, un texte lu jusqu'en
+ *   bas, ou le clic de l'eleve ; le decochage la ramene a en_cours ou ouvert.
+ */
+export type EtatLecon = 'non_vu' | 'ouvert' | 'en_cours' | 'vu'
+
+/** La voie qui a pose « vu » (colonne vu_par). */
+export type VuPar = 'mesure' | 'fin' | 'texte_fin' | 'eleve'
+
+export function etatLecon(p: { secondesVues: number; vuLe: Date | null } | null | undefined): EtatLecon {
+  if (!p) return 'non_vu'
+  if (p.vuLe) return 'vu'
+  return p.secondesVues > 0 ? 'en_cours' : 'ouvert'
+}
 
 export type EtatSuivi = {
   type: TypeLecon
@@ -394,6 +426,8 @@ export type EtatSuivi = {
   secondesVues: number
   pourcentage: number | null
   termineeLe: Date | null
+  /** Etat « vu » actuel (vide = pas vue). */
+  vuLe: Date | null
   derniereVueLe: Date
   dernierSignalLe: Date | null
   nbSignaux: number
@@ -406,9 +440,13 @@ export type MiseAJourSuivi = {
   dernierePositionS: number
   secondesVues: number
   pourcentage: number | null
-  /** Passe terminee avec ce signal. */
+  /** Le seuil mesure (60 % reellement regardes) est atteint pour la premiere fois : terminee_le (preuve). */
   terminer: boolean
+  /** Le clic de l'eleve (marquee_vue_le). */
   marque: 'poser' | 'retirer' | null
+  /** L'etat « vu » (vu_le, vu_par). null = inchange. */
+  vu: 'poser' | 'retirer' | null
+  vuPar: VuPar | null
   /** Ce qui part dans academie_lectures. */
   journal: { evenement: string; secondes: number | null; positionS: number | null }
 }
@@ -425,12 +463,17 @@ export type IssueSignal =
  * position, BORNE par le temps ecoule depuis le signal precedent (ou depuis
  * le lien) : au plus 2x ce temps pour une video, 1x pour un texte, plus 5 s.
  * Une avance rapide ne compte donc pas comme du visionnage.
+ *
+ * « vu » se pose tout seul quand une video franchit 60 % de temps reellement
+ * regarde (un franchissement : apres un decochage, plus de visionnage ne la
+ * recoche pas), sur 'fin' et sur 'texte_fin' ; et par le clic. Le decochage
+ * retire vu et le clic ; terminee_le (preuve) et le journal restent.
  */
 export function appliquerSignal(etat: EtatSuivi, signal: Signal): IssueSignal {
   const ev = signal.evenement
   const estVideo = etat.type === 'video'
   if ((ev === 'lecture' || ev === 'pause' || ev === 'fin') && !estVideo) return { refus: 'type' }
-  if (ev === 'texte' && estVideo) return { refus: 'type' }
+  if ((ev === 'texte' || ev === 'texte_fin') && estVideo) return { refus: 'type' }
 
   const maintenant = etat.maintenant.getTime()
   if (ev !== 'vu' && maintenant - etat.derniereVueLe.getTime() > FRAICHEUR_LIEN_H * 3600_000) {
@@ -456,6 +499,8 @@ export function appliquerSignal(etat: EtatSuivi, signal: Signal): IssueSignal {
         pourcentage: etat.pourcentage,
         terminer: false,
         marque: signal.vu ? 'poser' : 'retirer',
+        vu: signal.vu ? (etat.vuLe ? null : 'poser') : 'retirer',
+        vuPar: signal.vu && !etat.vuLe ? 'eleve' : null,
         journal: { evenement: signal.vu ? 'vu' : 'non_vu', secondes: null, positionS: null },
       },
     }
@@ -477,7 +522,16 @@ export function appliquerSignal(etat: EtatSuivi, signal: Signal): IssueSignal {
 
   const secondesVues = etat.secondesVues + credit
   const pourcentage = duree ? Math.min(100, Math.floor((secondesVues * 100) / duree)) : etat.pourcentage
-  const terminer = !etat.termineeLe && duree !== null && secondesVues >= SEUIL_TERMINEE * duree
+  // Le seuil mesure, videos seulement : un texte passe vu par texte_fin ou le clic.
+  const seuil = estVideo && duree !== null ? SEUIL_VU * duree : null
+  const franchit = seuil !== null && etat.secondesVues < seuil && secondesVues >= seuil
+  const terminer = !etat.termineeLe && seuil !== null && secondesVues >= seuil
+
+  let vuPar: VuPar | null = null
+  if (ev === 'fin') vuPar = 'fin'
+  else if (ev === 'texte_fin') vuPar = 'texte_fin'
+  else if (franchit) vuPar = 'mesure'
+  const poserVu = vuPar !== null && !etat.vuLe
 
   return {
     credit,
@@ -488,14 +542,16 @@ export function appliquerSignal(etat: EtatSuivi, signal: Signal): IssueSignal {
       pourcentage,
       terminer,
       marque: null,
+      vu: poserVu ? 'poser' : null,
+      vuPar: poserVu ? vuPar : null,
       journal: { evenement: ev, secondes: credit, positionS: position },
     },
   }
 }
 
-/** Une lecon comptee comme vue : terminee (mesure) ou marquee par l'eleve. */
-export function leconVue(p: { termineeLe: Date | null; marqueeVueLe: Date | null } | null | undefined): boolean {
-  return Boolean(p && (p.termineeLe || p.marqueeVueLe))
+/** Une lecon comptee comme vue (etat 'vu'). */
+export function leconVue(p: { secondesVues: number; vuLe: Date | null } | null | undefined): boolean {
+  return etatLecon(p) === 'vu'
 }
 
 // ---------------------------------------------------------------------------

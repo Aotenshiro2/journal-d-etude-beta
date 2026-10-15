@@ -7,7 +7,9 @@
 // 1. Hors ligne : cas construits (admin, compte gratuit, acheteur, Live Club
 //    actif, Live Club arrete avec paquet d'entree, Live Club illisible, ETM,
 //    secours de l'essai, acces non transmis faute d'email verifie...), suivi
-//    (avance rapide, debit, fin, texte, marque « vu »), signature.
+//    (avance rapide, debit, texte) et les quatre etats d'une lecon (vu a 59 %
+//    et 60 % reellement regardes, saut sans visionnage, fin, texte_fin, vu
+//    puis non_vu, ouverture sans consommation), signature.
 // 2. En ligne (sauf --hors-ligne) : signe les videos du module « essai »
 //    (memes guid que la migration 20261015210000) avec la bibliotheque
 //    « formation » du coffre et demande le lecteur Bunny avec le Referer du
@@ -25,9 +27,9 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import {
-  CacheCourt, appareilCourt, appliquerSignal, conclureLiveClub, ipDuClient, leconVue, lireDemandeLecture,
+  CacheCourt, appareilCourt, appliquerSignal, conclureLiveClub, etatLecon, ipDuClient, leconVue, lireDemandeLecture,
   lireSignal, lireUuid, liveClubUtile, ouvertureLecon, ouvertureModule, ouvertureSection, preparerDroits,
-  ressourcesPropres, trierRaisons, ECART_MIN_S,
+  ressourcesPropres, trierRaisons, ECART_MIN_S, SEUIL_VU,
 } from '../src/lib/academie/pur.ts'
 import { configBibliotheque, configBunny, jetonLecture, lienLecture, signerLecture, DUREE_LIEN_S } from '../src/lib/academie/bunny.ts'
 
@@ -233,7 +235,7 @@ const plus = (s) => new Date(T0.getTime() + s * 1000)
 function etat(o = {}) {
   return {
     type: 'video', dureeS: 1000, positionMaxS: 100, dernierePositionS: 100, secondesVues: 100,
-    pourcentage: 10, termineeLe: null, derniereVueLe: T0, dernierSignalLe: plus(60), nbSignaux: 3,
+    pourcentage: 10, termineeLe: null, vuLe: null, derniereVueLe: T0, dernierSignalLe: plus(60), nbSignaux: 3,
     maintenant: plus(90), ...o,
   }
 }
@@ -294,23 +296,113 @@ bloc('type : texte sur une video, lecture sur un texte = refus', () => {
   assert.deepEqual(appliquerSignal(etat({ type: 'pdf' }), signal({ evenement: 'fin' })), { refus: 'type' })
 })
 
-bloc('terminee a 90 % du temps reellement regarde, une seule fois', () => {
-  const r = appliquerSignal(etat({ secondesVues: 880 }), signal({ positionS: 950, secondes: 30 }))
-  assert.equal(r.maj.secondesVues, 910)
-  assert.equal(r.maj.pourcentage, 91)
-  assert.equal(r.maj.terminer, true)
-  const deja = appliquerSignal(etat({ secondesVues: 880, termineeLe: T0 }), signal({ positionS: 950, secondes: 30 }))
-  assert.equal(deja.maj.terminer, false)
-  // La fin atteinte par un saut ne termine pas la lecon.
-  const sautFin = appliquerSignal(etat({ maintenant: plus(65) }), signal({ evenement: 'fin', positionS: 1000 }))
-  assert.equal(sautFin.maj.terminer, false)
-  assert.equal(sautFin.credit, 15)
-  // Duree inconnue : pas de pourcentage, pas de fin mesuree.
+bloc('vu a 60 % de temps reellement regarde : 59 % non, 60 % oui (voie mesure)', () => {
+  assert.equal(SEUIL_VU, 0.6)
+  const a59 = appliquerSignal(etat({ secondesVues: 560 }), signal({ positionS: 590, secondes: 30 }))
+  assert.equal(a59.maj.secondesVues, 590)
+  assert.equal(a59.maj.pourcentage, 59)
+  assert.equal(a59.maj.vu, null)
+  assert.equal(a59.maj.terminer, false)
+  assert.equal(etatLecon({ secondesVues: 590, vuLe: null }), 'en_cours')
+  const a60 = appliquerSignal(etat({ secondesVues: 570 }), signal({ positionS: 600, secondes: 30 }))
+  assert.equal(a60.maj.secondesVues, 600)
+  assert.equal(a60.maj.pourcentage, 60)
+  assert.equal(a60.maj.vu, 'poser')
+  assert.equal(a60.maj.vuPar, 'mesure')
+  assert.equal(a60.maj.terminer, true) // preuve terminee_le, au meme seuil
+  // Deja vue (par le clic) : la mesure ne repose rien, mais la preuve est notee.
+  const dejaVue = appliquerSignal(etat({ secondesVues: 570, vuLe: T0 }), signal({ positionS: 600, secondes: 30 }))
+  assert.equal(dejaVue.maj.vu, null)
+  assert.equal(dejaVue.maj.terminer, true)
+  // Duree inconnue : pas de pourcentage, pas de vu mesure.
   const sansDuree = appliquerSignal(etat({ dureeS: null, pourcentage: null }), signal({ positionS: 130, secondes: 30 }))
   assert.equal(sansDuree.maj.pourcentage, null)
+  assert.equal(sansDuree.maj.vu, null)
   assert.equal(sansDuree.maj.terminer, false)
   // Plafond de 100 % quand on revoit.
-  assert.equal(appliquerSignal(etat({ secondesVues: 1990, termineeLe: T0 }), signal({ secondes: 30 })).maj.pourcentage, 100)
+  assert.equal(appliquerSignal(etat({ secondesVues: 1990, termineeLe: T0, vuLe: T0 }), signal({ secondes: 30 })).maj.pourcentage, 100)
+})
+
+bloc('saut au-dela de 60 % sans visionnage : pas vu', () => {
+  // La page dit 0 s jouees (saut) : rien n'est credite, la position est gardee.
+  const saut = appliquerSignal(etat(), signal({ positionS: 900, secondes: 0 }))
+  assert.equal(saut.credit, 0)
+  assert.equal(saut.maj.positionMaxS, 900)
+  assert.equal(saut.maj.vu, null)
+  assert.equal(saut.maj.terminer, false)
+  // Sans « secondes », l'avance est bornee (30 s x 2 + 5) : 165 s, loin des 600.
+  const sansSecondes = appliquerSignal(etat(), signal({ positionS: 900 }))
+  assert.equal(sansSecondes.maj.secondesVues, 165)
+  assert.equal(sansSecondes.maj.vu, null)
+})
+
+bloc('fin : la video arrivee au bout passe vue (voie fin)', () => {
+  const fin = appliquerSignal(etat({ maintenant: plus(65) }), signal({ evenement: 'fin', positionS: 1000 }))
+  assert.equal(fin.maj.vu, 'poser')
+  assert.equal(fin.maj.vuPar, 'fin')
+  assert.equal(fin.credit, 15) // le temps credite reste borne : la preuve ne dit pas « 60 % regardes »
+  assert.equal(fin.maj.terminer, false)
+  assert.deepEqual(fin.maj.journal, { evenement: 'fin', secondes: 15, positionS: 1000 })
+  assert.equal(appliquerSignal(etat({ maintenant: plus(65), vuLe: T0 }), signal({ evenement: 'fin', positionS: 1000 })).maj.vu, null)
+})
+
+bloc('texte_fin : un texte lu jusqu en bas passe vu (voie texte_fin), texte et pdf seulement', () => {
+  const t = etat({ type: 'texte', dureeS: 300, secondesVues: 0, pourcentage: 0, positionMaxS: 0, dernierePositionS: 0 })
+  const r = appliquerSignal(t, signal({ evenement: 'texte_fin', secondes: 20 }))
+  assert.equal(r.credit, 20)
+  assert.equal(r.maj.vu, 'poser')
+  assert.equal(r.maj.vuPar, 'texte_fin')
+  assert.equal(r.maj.journal.evenement, 'texte_fin')
+  assert.equal(appliquerSignal({ ...t, type: 'pdf' }, signal({ evenement: 'texte_fin' })).maj.vuPar, 'texte_fin')
+  assert.deepEqual(appliquerSignal(etat(), signal({ evenement: 'texte_fin' })), { refus: 'type' })
+  // Le temps passe sur un texte ne le rend pas vu tout seul, meme au-dela de sa duree.
+  const long = appliquerSignal({ ...t, secondesVues: 280 }, signal({ evenement: 'texte', secondes: 30 }))
+  assert.equal(long.maj.vu, null)
+  assert.equal(ECART_MIN_S.texte_fin, 3)
+})
+
+bloc('vu puis non_vu : retour a en_cours ou ouvert, journal garde', () => {
+  const pose = appliquerSignal(etat(), signal({ evenement: 'vu', vu: true }))
+  assert.equal(pose.credit, 0)
+  assert.equal(pose.maj.marque, 'poser')
+  assert.equal(pose.maj.vu, 'poser')
+  assert.equal(pose.maj.vuPar, 'eleve')
+  assert.deepEqual(pose.maj.journal, { evenement: 'vu', secondes: null, positionS: null })
+  assert.equal(pose.maj.secondesVues, 100)
+  // Deja vue par la mesure : le clic garde la voie d'origine.
+  const surMesure = appliquerSignal(etat({ vuLe: T0 }), signal({ evenement: 'vu' }))
+  assert.equal(surMesure.maj.vu, null)
+  assert.equal(surMesure.maj.marque, 'poser')
+  // Decochage : vu et clic retires, rien d'autre ; le journal recoit 'non_vu'.
+  const retrait = appliquerSignal(etat({ vuLe: T0, termineeLe: T0, secondesVues: 700 }), signal({ evenement: 'vu', vu: false }))
+  assert.equal(retrait.maj.vu, 'retirer')
+  assert.equal(retrait.maj.vuPar, null)
+  assert.equal(retrait.maj.marque, 'retirer')
+  assert.equal(retrait.maj.secondesVues, 700)
+  assert.equal(retrait.maj.journal.evenement, 'non_vu')
+  assert.equal(etatLecon({ secondesVues: 700, vuLe: null }), 'en_cours')
+  assert.equal(etatLecon({ secondesVues: 0, vuLe: null }), 'ouvert')
+  // Apres le decochage, continuer a regarder ne recoche pas (le seuil est deja franchi)...
+  const ensuite = appliquerSignal(etat({ secondesVues: 700, termineeLe: T0 }), signal({ positionS: 730, secondes: 30 }))
+  assert.equal(ensuite.maj.vu, null)
+  // ... mais la fin de la video, si.
+  assert.equal(appliquerSignal(etat({ secondesVues: 700, termineeLe: T0, maintenant: plus(65) }), signal({ evenement: 'fin', positionS: 1000 })).maj.vu, 'poser')
+})
+
+bloc('quatre etats : non_vu, ouvert (ouverture sans consommation), en_cours, vu', () => {
+  assert.equal(etatLecon(undefined), 'non_vu')
+  assert.equal(etatLecon(null), 'non_vu')
+  // La route de lecture cree la ligne (secondes_vues = 0) : ouvert.
+  assert.equal(etatLecon({ secondesVues: 0, vuLe: null }), 'ouvert')
+  assert.equal(etatLecon({ secondesVues: 1, vuLe: null }), 'en_cours')
+  assert.equal(etatLecon({ secondesVues: 0, vuLe: T0 }), 'vu')
+  assert.equal(leconVue({ secondesVues: 0, vuLe: T0 }), true)
+  assert.equal(leconVue({ secondesVues: 900, vuLe: null }), false)
+  assert.equal(leconVue(undefined), false)
+  // Une pause sans temps joue laisse la lecon ouverte.
+  const pause = appliquerSignal(etat({ secondesVues: 0, dernierePositionS: 0, positionMaxS: 0 }), signal({ evenement: 'pause', positionS: 0, secondes: 0 }))
+  assert.equal(pause.maj.secondesVues, 0)
+  assert.equal(etatLecon({ secondesVues: pause.maj.secondesVues, vuLe: null }), 'ouvert')
 })
 
 bloc('texte : le temps visible, borne au temps ecoule (1x + 5 s)', () => {
@@ -320,21 +412,6 @@ bloc('texte : le temps visible, borne au temps ecoule (1x + 5 s)', () => {
   assert.equal(r.maj.pourcentage, 10)
   assert.equal(appliquerSignal(t, signal({ evenement: 'texte', secondes: 500 })).credit, 35)
   assert.equal(r.maj.journal.positionS, null)
-})
-
-bloc('marquer comme vu, et retirer la marque', () => {
-  const pose = appliquerSignal(etat(), signal({ evenement: 'vu', vu: true }))
-  assert.equal(pose.credit, 0)
-  assert.equal(pose.maj.marque, 'poser')
-  assert.deepEqual(pose.maj.journal, { evenement: 'vu', secondes: null, positionS: null })
-  assert.equal(pose.maj.secondesVues, 100)
-  const retrait = appliquerSignal(etat(), signal({ evenement: 'vu', vu: false }))
-  assert.equal(retrait.maj.marque, 'retirer')
-  assert.equal(retrait.maj.journal.evenement, 'non_vu')
-  assert.equal(leconVue({ termineeLe: null, marqueeVueLe: T0 }), true)
-  assert.equal(leconVue({ termineeLe: T0, marqueeVueLe: null }), true)
-  assert.equal(leconVue({ termineeLe: null, marqueeVueLe: null }), false)
-  assert.equal(leconVue(undefined), false)
 })
 
 // ---------------------------------------------------------------------------
@@ -357,6 +434,9 @@ bloc('corps de requete : lecon, video, signal', () => {
   assert.equal(lireSignal({ lecon: id, evenement: 'lecture', secondes: 'beaucoup' }).signal.secondes, null)
   assert.equal(lireSignal({ lecon: id, evenement: 'lecture', position_s: 1e9 }).signal.positionS, 86400)
   assert.equal(lireSignal({ lecon: id, evenement: 'vu', vu: false }).signal.vu, false)
+  // 'non_vu' (decochage) = vu: false ; 'texte_fin' accepte.
+  assert.deepEqual(lireSignal({ lecon: id, evenement: 'non_vu' }).signal, { evenement: 'vu', positionS: null, secondes: null, vu: false })
+  assert.equal(lireSignal({ lecon: id, evenement: 'texte_fin', secondes: 12 }).signal.evenement, 'texte_fin')
 })
 
 bloc('ressources, IP, appareil', () => {

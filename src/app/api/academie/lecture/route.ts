@@ -16,7 +16,9 @@ import { messageErreur, relationAbsente } from '@/lib/liveclub/pur'
  *   { lecon: '<id de lecon>' }   (ecrans de l'academie)
  *   { video: '<guid Bunny>' }    (page d'essai du 15/10, compatibilite)
  * Reponses :
- *   200 { ok: true, raison, raisons, lecon: {...}, reprise_s, progression, ... } avec, selon la lecon :
+ *   200 { ok: true, raison, raisons, lecon: {...}, reprise_s, progression, ... } avec, selon la lecon
+ *       (progression.etat : 'ouvert' des la premiere ouverture, puis en_cours ou vu ; l'ouverture
+ *       cree ou rafraichit la ligne de progression pour une video, un texte ou un PDF) :
  *         video Bunny  : hebergeur 'bunny', url (lecteur signe 4 h), expire_le
  *         video Wistia : hebergeur 'wistia', wistia_id (le lecteur Wistia est branche cote site)
  *         texte        : contenu, ressources
@@ -68,6 +70,10 @@ function progressionPublique(p: Progression | null) {
     pourcentage: p.pourcentage,
     terminee_le: p.termineeLe?.toISOString() ?? null,
     marquee_vue_le: p.marqueeVueLe?.toISOString() ?? null,
+    vu_le: p.vuLe?.toISOString() ?? null,
+    vu_par: p.vuPar,
+    // ouvert des l'ouverture (la ligne vient d'etre creee ou rafraichie), en_cours ou vu ensuite.
+    etat: p.etat,
   }
 }
 
