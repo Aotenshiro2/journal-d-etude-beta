@@ -64,6 +64,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: action }, { status: 400, headers: cors })
   }
 
+  // Effacement (15/10) : la carte consommee ne garde ni le nom tape ni les
+  // identifiants de la personne, quelle que soit l'issue (le niveau reste).
+  if (action.type === 'effacement') {
+    await prisma.$executeRaw`
+      update public.cockpit_agent_cartes
+      set action = jsonb_build_object('type', 'effacement', 'compte', 'cockpit',
+                                      'params', jsonb_build_object('niveau', ${Number(action.params.niveau)}::int))
+      where carte_id = ${carteId}::uuid`
+      .catch((err: unknown) => console.warn(`[cockpit/agent/action] carte d'effacement non vidée : ${err instanceof Error ? err.message.split('\n')[0] : '?'}`))
+  }
+
   try {
     const resultat = await executerAction(action, `agent:${userId}`)
     // Trace en clair dans les logs Vercel : qui a confirme quoi, quand.

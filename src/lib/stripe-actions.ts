@@ -36,6 +36,7 @@ import { tracerGeste } from '@/lib/liveclub/support-pont'
 import {
   estTypeRepartition, lireParamsRepartition, resumeRepartition, jourParis, moisParis, type TypeRepartition,
 } from '@/lib/repartition/pur'
+import { lireParamsEffacement, NOMS_NIVEAUX } from '@/lib/effacement-pur'
 
 // La regle de la pause vit dans liveclub/pur.ts (testable sans base) ; elle
 // est reexportee ici pour les appelants de stripe-actions (29/09).
@@ -150,6 +151,10 @@ export type ActionAgent = {
     // La repartition Brice / Melanie (08/10) : depots, commissions, taux,
     // intervenants, depenses, reglements (repartition/pur.ts et serveur.ts).
     | TypeRepartition
+    // L'effacement des donnees d'une personne, niveau 1, 2 ou 3 (15/10) :
+    // effacement.ts et effacement-pur.ts. Compte 'cockpit' (la base, plus
+    // Stripe et Telegram au niveau 3, cote serveur).
+    | 'effacement'
   // 'telegram' pour les actions du groupe Live Club (retrait, reintegration,
   // acces broker, exemption) : pas un compte Stripe, mais la carte de
   // confirmation affiche d'ou vient le pouvoir. 'cockpit' pour la
@@ -183,6 +188,8 @@ export function paramsPourLog(a: ActionAgent): Record<string, unknown> {
     }
   }
   if (a.type === 'retirer_tarif_reserve') return { reserve_id: a.params.reserve_id ?? null }
+  // Effacement (15/10) : le niveau seul, jamais qui ni ses identifiants.
+  if (a.type === 'effacement') return { niveau: a.params.niveau }
   if (estTypeRepartition(a.type)) {
     return Object.fromEntries(Object.entries(a.params).filter(([k]) => k !== 'note' && k !== 'qui'))
   }
@@ -600,6 +607,15 @@ export function validerAction(brut: unknown): ActionAgent | string {
     return { type: a.type, compte: 'cockpit', params: lu }
   }
 
+  // Effacement (15/10) : le niveau (1, 2, 3, jamais choisi par le modele) et
+  // qui. La cible (identifiants resolus) n'est posee que par le controle avant
+  // la carte, qui l'ecrase toujours ; elle est revalidee a l'execution.
+  if (a.type === 'effacement') {
+    const lu = lireParamsEffacement(p)
+    if (typeof lu === 'string') return lu
+    return { type: 'effacement', compte: 'cockpit', params: lu.cible ? { ...lu } : { niveau: lu.niveau, qui: lu.qui } }
+  }
+
   // Les actions du groupe Telegram n'ont pas de compte Stripe.
   if (a.type === 'retirer_telegram' || a.type === 'reintegrer_telegram') {
     const telegramId = lireTelegramId(p.telegram_id)
@@ -783,6 +799,12 @@ export function validerAction(brut: unknown): ActionAgent | string {
 export function resumeAction(a: ActionAgent): string {
   const p = a.params
   if (estTypeRepartition(a.type)) return resumeRepartition(a.type, p)
+  // Effacement (15/10) : la carte detaillee vient du controle (composerCarte) ;
+  // ceci n'en est que l'entete.
+  if (a.type === 'effacement') {
+    const n = p.niveau === 1 || p.niveau === 2 || p.niveau === 3 ? p.niveau : null
+    return `Effacer les données de ${String(p.qui ?? '?')}, niveau ${n ?? '?'}${n ? ` (${NOMS_NIVEAUX[n]})` : ''}.`
+  }
   if (a.type === 'code_promo') {
     const reduc = p.pourcentage != null
       ? `${p.pourcentage} %`
@@ -1075,6 +1097,14 @@ export async function executerAction(a: ActionAgent, acteur = 'agent'): Promise<
   if (estTypeRepartition(a.type)) {
     const { executerActionRepartition } = await import('@/lib/repartition/serveur')
     return executerActionRepartition(a, acteur)
+  }
+
+  // ── Effacement des donnees d'une personne (15/10) ─────────────────────────
+  // Import dynamique : effacement.ts importe ce fichier (RefusAction,
+  // retirerDuLiveClub).
+  if (a.type === 'effacement') {
+    const { executerActionEffacement } = await import('@/lib/effacement')
+    return executerActionEffacement(a, acteur)
   }
 
   // ── Groupe Telegram ───────────────────────────────────────────────────────

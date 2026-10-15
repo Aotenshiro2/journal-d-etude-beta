@@ -654,3 +654,89 @@ passe 2 (fiche de l'agent, conversations des bots) lira les deux tables.
 - A FAIRE : appliquer la migration, puis premier lancement a la main,
   creer la tache, deployer le journal (l'ordre n'importe pas pour le
   journal : sans la migration il avertit et continue).
+
+## Noms et paroles des membres Telegram, passe 2 : la fiche d'une personne (15/10/2026, NON commite, NON deploye)
+
+Brice, 15/10 : « si je demande a notre agent des informations sur Fred, il
+doit me donner son ressenti, ses messages, ou m'en faire un resume », et
+connaitre ses anciens noms s'il se renomme.
+- Outil de LECTURE fiche_personne(qui) de l'agent du Cockpit, sans carte
+  (agent-cockpit.ts). Serveur src/lib/fiche-personne.ts, une transaction
+  READ ONLY ; regles pures src/lib/fiche-personne-pur.ts. qui = nom, ancien
+  nom, @pseudo, u<id>, email, ou l'identifiant rendu (u..., membre:<uuid>,
+  p-...). Recherche sans accents ni casse dans tous les noms passes
+  (cockpit_telegram_noms), le registre du groupe, les auteurs des messages,
+  l'archive (nom, alias, pseudo), les fiches membres (nom, pseudo declare),
+  les contacts manuels et les emails. Une personne = noeuds reunis par des
+  liens CERTAINS seulement (meme compte, rattachement, numero pose a la main,
+  exemption, archive rapprochee 'certain') ; un lien par le nom ou le pseudo
+  declare au paiement est dit PROBABLE, jamais suivi. Plusieurs personnes =
+  statut 'plusieurs' (10 candidats au plus, le plus vivant d'abord), l'agent
+  demande.
+- Fiche bornee a 12 000 caracteres de JSON (5 paliers puis retraits
+  section par section, jamais coupee) : identite et noms successifs dates,
+  liens, Live Club (abonnements, pause, exemptions, acces broker, tarif
+  reserve, acces manuel, ETM, rattachements, gestes), archive (vies, themes,
+  paroles), notes de l'equipe, messages depuis le 30/08 (par groupe, par
+  sujet, 6 recents, 10 marquants), fils Support. Marquants sans IA : 2
+  premiers, longs (300 car.), mots-cles depart, arrivee, pause, abonnement,
+  remerciement, difficulte (poids, seuil 3) ; 255 messages eligibles sur
+  8 637 (calibre le 15/10).
+- Catalogue de requete_sql : cockpit_telegram_noms, cockpit_telegram_messages,
+  cockpit_telegram_oublis. Consigne « LES PERSONNES : LA FICHE ET LES
+  PAROLES ». requete_sql tourne maintenant en READ ONLY (une fonction qui
+  ecrit, appelee dans un SELECT, etait possible en postgres).
+- Perimetre : seul agent-cockpit.ts importe la fiche, seuls la fiche et
+  l'agent nomment cockpit_telegram_messages ; aucune route ni aucun bot
+  membre (verifie par le script de test, statiquement).
+- Effacement : migration `20261015200000_cockpit_telegram_oublier.sql`
+  (ECRITE, PAS APPLIQUEE) : cockpit_telegram_oublis, trigger BEFORE INSERT
+  qui ecarte les comptes oublies (sinon la collecte du matin les reecrit),
+  cockpit_oublier_telegram(bigint[], text) en postgres seulement :
+  `select public.cockpit_oublier_telegram(array[<id>]::bigint[], '<note>')`.
+- Cockpit : bloc « Noms successifs » et « Derniers messages » de la fiche
+  membre (components/ParolesTelegram.tsx, depot workspace).
+- Tests : scripts/verifier-fiche-personne.mjs (20 blocs) ; apercu en
+  lecture seule scripts/apercu-fiche-personne.mjs "<qui>" (structure et
+  comptes seulement). Aucun appel au modele, aucune eval.
+- A FAIRE : appliquer la migration 20261015200000 ; deployer le journal puis
+  le cockpit ; essai reel par Brice (« parle-moi de Fred »).
+
+## Effacement des donnees d'une personne, trois niveaux (15/10/2026, NON commite, migration NON appliquee)
+
+Brice, 15/10 : 1 ne plus etre suivi, 2 effacer ses echanges avec nos bots,
+3 partir et tout effacer. Jamais automatique, l'equipe qualifie le niveau.
+L'INVENTAIRE QUI FAIT FOI : docs/EFFACEMENT-DONNEES.md (table par table, ce
+qui est efface, garde ou anonymise et pourquoi, cascades du compte AOK,
+hors base, residus).
+- Base : migration `20261016090000_cockpit_effacement.sql` (ECRITE, PAS
+  APPLIQUEE) : cockpit_effacement_cibles, cockpit_effacement_apercu (STABLE),
+  cockpit_effacer (une transaction, journal cockpit_effacements sans nom),
+  postgres seulement. Payeur FIGE sur les paiements (payeur_nom,
+  payeur_email) avant toute disparition de fiche : dans cockpit_effacer, dans
+  cockpit_oublier_membre (corrigee, elle detachait les paiements sans nom) et
+  par trigger BEFORE DELETE sur cockpit_membres. Listes d'oubli et triggers :
+  cockpit_oublis_emails (haches, lue par le pipeline), cockpit_arch_oublis,
+  registre du groupe sans nom pour un compte oublie.
+- Agent du cockpit : outil proposer_effacement(qui, niveau) (agent-cockpit.ts,
+  effacement.ts, effacement-pur.ts). Personne resolue comme fiche_personne
+  (resoudrePersonnePourEffacement, fiche-personne.ts), apercu en READ ONLY,
+  carte app par app, texte a dire a la personne AVANT la carte (ajoute par le
+  serveur), refus (equipe, formateur, tarif reserve en attente, trop large).
+  Niveau 3 au clic : Stripe d'abord (programmerArret, relu en direct ; panne
+  = rien d'efface), puis la base, puis la sortie du groupe sans ban. Resultat
+  = ce qui reste a faire a la main (Kit, Skool, abonnement hors Live Club) et
+  le recapitulatif a transmettre. Carte web videe a la confirmation.
+- Bot des membres : une demande d'effacement est transmise
+  (demander_un_humain) avec TEXTE_DEMANDE_EFFACEMENT, sans menu ni niveaux.
+  Eval EF01, EF02 : 2/2 corrects (15/10).
+- Pipeline : push_membres_supabase.py ne recree aucune fiche d'un email
+  oublie ; ses paiements partent sans fiche avec le payeur ; liste illisible
+  = le passage s'arrete. tester_oublis_membres.py (4 blocs), dry-run du 15/10
+  (« liste absente », passage normal).
+- Tests : scripts/verifier-effacement.mjs (19 blocs) ; apercu en lecture
+  seule scripts/apercu-effacement.mjs "<qui>" (SQL de la migration en ligne,
+  EXPLAIN des 70 ordres d'ecriture, jamais executes).
+- A FAIRE : appliquer la migration (apres 20261015200000), deployer le
+  journal puis le cockpit (libelle de la carte), premier essai sur un compte
+  de test (u8600818154) au niveau 1 puis 2.

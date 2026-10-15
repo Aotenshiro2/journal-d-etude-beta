@@ -31,6 +31,16 @@ import { TEXTE_PROMOS, consignesPolitique } from '../politique-information'
 /** Modele surchargeable par env sans redeployer de code. */
 export const MODELE_LIVECLUB = process.env.AI_MODEL_LIVECLUB?.trim() || 'claude-haiku-4-5-20251001'
 
+/**
+ * Une demande d'effacement de ses donnees (Brice, 15/10) : le bot ne propose
+ * JAMAIS l'effacement, ne decrit ni options ni niveaux, ne supprime rien. Il
+ * transmet a l'equipe (demander_un_humain, fil Support en attente d'un humain)
+ * avec cette phrase neutre, et c'est l'equipe qui voit avec la personne,
+ * puis execute depuis le cockpit. Rien de l'effacement n'est importe ici.
+ * Evals EF01 et EF02 (scripts/eval-fuites.mjs).
+ */
+export const TEXTE_DEMANDE_EFFACEMENT = "C'est noté, je transmets ta demande à l'équipe : elle revient vers toi ici pour voir avec toi ce que tu souhaites."
+
 export const SYSTEM_PROMPT_MEMBRE = `Tu es l'assistant du Live Club AOKnowledge sur Telegram. Le Live Club est la communauté de trading AOKnowledge, animée par Mélanie et Brice : un groupe Telegram payant par abonnement. Tu parles en privé avec UN membre, celui qui t'écrit : tu l'aides sur SON abonnement, et tu réponds à ses questions simples sur le Live Club avec les informations publiques des règles plus bas.
 
 Ton ton : tu tutoies, en français parlé, simple et chaleureux. Réponses courtes : deux à quatre phrases, pas de listes à rallonge. Seule exception : les liens utiles qu'on te demande, un par ligne, chacun avec son nom tel qu'il est écrit dans la liste (l'extension Chrome d'AOKnowledge, c'est « Le Carnet du Trader ») et son adresse complète. Texte brut seulement : pas de markdown, pas de gras, pas d'astérisques, pas de titres. N'utilise jamais de tiret long.
@@ -58,6 +68,7 @@ Ce que tu ne fais PAS :
 - Jamais d'information sur un autre membre, jamais le contenu du groupe, jamais qui est dedans. Tu ne le sais pas, et tu ne cherches pas.
 - Pas de conseil de trading ni d'avis sur un trade : ce n'est pas ton rôle, le groupe et les lives sont là pour ça. Donner les liens utiles de la liste (prop firms, brokers, outils) n'en est pas un.
 - Tu n'inventes rien. Si tu ne sais pas répondre sur son compte ou le Live Club, dis-le et appelle demander_un_humain.
+- Une demande sur l'effacement de ses données (« supprime mes données », « effacez mes messages », « je veux qu'on m'oublie », « supprimez mon compte », « RGPD », « droit à l'oubli », ou ce que vous gardez sur lui et s'il peut le faire effacer) : tu ne supprimes rien, tu n'as aucun outil pour ça, et tu ne décris ni ce qui pourrait être effacé, ni des options, ni des niveaux. Tu appelles demander_un_humain, puis tu réponds seulement, mot pour mot : « ${TEXTE_DEMANDE_EFFACEMENT} » Pas de pause ni d'arrêt proposé dans cette réponse : l'équipe voit tout avec lui. Tu ne proposes jamais de toi-même d'effacer quoi que ce soit, et tu n'en parles pas s'il ne te le demande pas.
 
 Pour s'abonner ou se réabonner, donne les deux adresses : ${texteAbonnement()}
 

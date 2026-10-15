@@ -519,11 +519,20 @@ async function trouver(tx: Tx, qui: QuiLu): Promise<{ touches: Touche[]; indices
   }
 }
 
-/** Fiche, candidats ou rien : la reponse de l'outil, en JSON borne. */
-export async function construireFiche(tx: Tx, qui: QuiLu, budget = BUDGET_FICHE): Promise<string> {
-  const libelleQui = qui.genre === 'texte' ? qui.brut : qui.genre === 'email' ? qui.email : qui.genre === 'telegram' ? `u${qui.id}` : qui.id
+/**
+ * Qui est « qui » : UNE personne (ses noeuds, reunis par des liens certains),
+ * plusieurs (la reponse des candidats, a montrer), ou personne. Partage par
+ * la fiche et par l'effacement (proposer_effacement, effacement.ts, 15/10) :
+ * les deux designent la personne de la meme facon.
+ */
+export type ResolutionPersonne =
+  | { statut: 'un'; groupe: Groupe; libelle: string; indices: string[] }
+  | { statut: 'plusieurs' | 'aucun'; reponse: string; libelle: string }
+
+export async function resoudrePersonne(tx: Tx, qui: QuiLu): Promise<ResolutionPersonne> {
+  const libelle = qui.genre === 'texte' ? qui.brut : qui.genre === 'email' ? qui.email : qui.genre === 'telegram' ? `u${qui.id}` : qui.id
   const { touches, indices } = await trouver(tx, qui)
-  if (touches.length === 0) return reponseAucun(libelleQui, indices)
+  if (touches.length === 0) return { statut: 'aucun', reponse: reponseAucun(libelle, indices), libelle }
 
   // Elargir par les liens CERTAINS (un compte -> sa fiche -> son autre compte).
   const connus = new Set(touches.map((t) => t.noeud))
@@ -535,14 +544,53 @@ export async function construireFiche(tx: Tx, qui: QuiLu, budget = BUDGET_FICHE)
     if (connus.size === avant) break
   }
   const groupes = grouper(touches, liens)
-  if (groupes.length === 0) return reponseAucun(libelleQui, indices)
+  if (groupes.length === 0) return { statut: 'aucun', reponse: reponseAucun(libelle, indices), libelle }
   if (groupes.length > 1) {
     const tous = idsDuGroupe({ noeuds: groupes.flatMap((g) => g.noeuds) })
-    return reponseCandidats(libelleQui, groupes, await lireStats(tx, tous))
+    return { statut: 'plusieurs', reponse: reponseCandidats(libelle, groupes, await lireStats(tx, tous)), libelle }
   }
-  const donnees = await lireFiche(tx, groupes[0])
-  if (ficheVide(donnees)) return reponseAucun(libelleQui, indices)
+  return { statut: 'un', groupe: groupes[0], libelle, indices }
+}
+
+/** Fiche, candidats ou rien : la reponse de l'outil, en JSON borne. */
+export async function construireFiche(tx: Tx, qui: QuiLu, budget = BUDGET_FICHE): Promise<string> {
+  const r = await resoudrePersonne(tx, qui)
+  if (r.statut !== 'un') return r.reponse
+  const donnees = await lireFiche(tx, r.groupe)
+  if (ficheVide(donnees)) return reponseAucun(r.libelle, r.indices)
   return fichePourAgent(donnees, budget)
+}
+
+/**
+ * La personne designee par « qui », pour l'effacement (proposer_effacement,
+ * 15/10) : ses identifiants (comptes Telegram, fiches membres, fiches
+ * d'archive), ou la reponse a rendre au modele (plusieurs, aucun, erreur).
+ * Meme transaction READ ONLY que la fiche. Ne leve jamais.
+ */
+export async function resoudrePersonnePourEffacement(entree: unknown): Promise<
+  | { statut: 'un'; ids: { telegram: number[]; membres: string[]; archives: string[] }; email: string | null; libelle: string }
+  | { statut: 'plusieurs' | 'aucun' | 'erreur'; reponse: string; email: string | null }
+> {
+  const qui = lireQui(entree)
+  if ('erreur' in qui) return { statut: 'erreur', reponse: JSON.stringify({ statut: 'erreur', erreur: qui.erreur }), email: null }
+  const email = qui.genre === 'email' ? qui.email : null
+  try {
+    const r = await prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe('set transaction read only')
+      await tx.$executeRawUnsafe(`set local statement_timeout = '8000ms'`)
+      return resoudrePersonne(tx, qui)
+    }, { maxWait: 5000, timeout: 25000 })
+    if (r.statut === 'un') return { statut: 'un', ids: idsDuGroupe(r.groupe), email, libelle: r.libelle }
+    return { statut: r.statut, reponse: r.reponse, email }
+  } catch (err) {
+    const raison = err instanceof Error ? err.message.split('\n').filter(Boolean).pop() ?? '' : String(err)
+    console.error(`[cockpit/effacement] personne illisible : ${raison.slice(0, 200)}`)
+    return {
+      statut: 'erreur',
+      reponse: JSON.stringify({ statut: 'erreur', erreur: `Recherche de la personne impossible (${raison.slice(0, 160)}) : réessaie dans un instant.` }),
+      email,
+    }
+  }
 }
 
 /**
