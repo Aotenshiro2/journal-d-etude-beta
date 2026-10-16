@@ -141,6 +141,7 @@ export async function POST(req: NextRequest) {
   }
 
   // (16/10) Et un message Telegram d'Agent AOK a Brice et Mel, meme sans email.
+  // Il finit par la reference du fil : ils peuvent lui repondre depuis Agent AOK.
   try {
     const rows = await prisma.$queryRaw<{ email: string | null }[]>`
       select email from auth.users where id = ${userId}::uuid`
@@ -150,6 +151,7 @@ export async function POST(req: NextRequest) {
       qui: rows[0]?.email ?? contactEmail ?? 'visiteur anonyme',
       dernierMessage: dernierMessageMembre(messages),
       reponseDans: 'son chat',
+      fil: thread.id,
     })
     if (livres > 0) notified = true
   } catch (err) {

@@ -97,7 +97,13 @@ import {
 } from './comptes-telegram-pur'
 import { repondreAuMembre } from './agent-membre'
 import { contexteAccesOffert } from './prompt-membre'
-import { enregistrerEchangeSupport, estEnAttenteHumain, texteAvecBoutons, tracerEtape, tracerMessageBot } from './support-pont'
+import {
+  enregistrerEchangeSupport, estEnAttenteHumain, lireMessagesFil, texteAvecBoutons, tracerEtape, tracerMessageBot,
+} from './support-pont'
+import {
+  TEXTE_ACCUSE_EQUIPE, TEXTE_IMAGE_NON_TRANSMISE, TEXTE_IMAGE_TRANSMISE, accuseDejaDonne, lirePieceImageMembre,
+  lirePieceMessage, quiRepond, reponseAImage, texteFilImage, type PieceSupport,
+} from './support-pont-pur'
 import {
   envoyerCodeSiConnu, rattacherParEmail, reserverCode, verifierCode, type CodeReserve, type IssueCode,
   type IssueRattachementEmail,
@@ -1111,6 +1117,8 @@ async function traiterNonRattache(
  */
 async function traiterTexteLibre(chat: number, u: Utilisateur, texte: string, updateId: number): Promise<void> {
   const r = await rattachementOuNull(u.id)
+  // (16/10) L'equipe a la main dans ce fil : son message va a l'equipe, pas a l'IA.
+  if (await versEquipeSiElleALaMain(chat, u, r, texte)) return
   if (r && r !== 'illisible') {
     // (06/10) Droit ouvert mais hors du groupe : le lien d'abord, l'agent
     // n'a pas d'outil pour le donner. Le message du membre est trace avant.
@@ -1138,6 +1146,74 @@ async function traiterTexteLibre(chat: number, u: Utilisateur, texte: string, up
     return
   }
   await traiterNonRattache(chat, u, texte, updateId, profil.parcours === 'panne', profil.droit)
+}
+
+/**
+ * (16/10, Brice, cas de Lea) L'EQUIPE A LA MAIN dans ce fil : un membre de
+ * l'equipe lui a repondu (onglet Support ou Agent AOK) et ne l'a pas rendue
+ * au bot (support-pont-pur.ts, quiRepond : bouton « Rendre la main au bot »,
+ * ou 24 h sans message de l'equipe). Son message ecrit (ou son image) va
+ * alors a l'equipe : pas de reponse de l'IA, le fil repasse en attente,
+ * alerte « a repondu a l'equipe » (au plus une par 10 minutes, support-pont.ts),
+ * et un accuse court et neutre une seule fois tant que l'equipe a la main.
+ * Les boutons et les commandes ne passent pas par ici : ils restent ceux du bot.
+ *
+ * Un compte non rattache qui tape un email ou un code garde la verification
+ * (le bot l'attend), sauf pour une image. Fil illisible, ou enregistrement
+ * rate : false, le parcours habituel (personne ne verrait le message).
+ */
+async function versEquipeSiElleALaMain(
+  chat: number,
+  u: Utilisateur,
+  r: Rattachement | null | 'illisible',
+  texte: string,
+  piece: PieceSupport | null = null,
+): Promise<boolean> {
+  const fil = await lireMessagesFil(u.id)
+  if (!fil || quiRepond(fil, Date.now()) !== 'equipe') return false
+  const identite = r && r !== 'illisible' ? r : null
+  if (!identite && !piece && intentionNonRattache(texte).type !== 'autre') return false
+  const issue = await enregistrerEchangeSupport({
+    telegramId: u.id, membreId: identite?.membre_id ?? null, email: identite?.email ?? null,
+    role: 'membre', texte: identite ? texte : masquerCodes(texte), piece, veutHumain: true, alerte: 'reponse',
+  })
+  if (!issue) return false
+  if (!accuseDejaDonne(fil)) await envoyer(chat, TEXTE_ACCUSE_EQUIPE, undefined, identite)
+  return true
+}
+
+/**
+ * (16/10, Brice) L'IMAGE d'un membre (photo, ou capture en fichier JPEG, PNG,
+ * WEBP), au lieu de « Je ne lis que les messages écrits » : elle entre au fil
+ * Support avec sa legende (ou « [image] ») et sa reference Telegram (jamais le
+ * fichier), et le fil passe en attente d'un humain (email et alerte Agent
+ * AOK, image jointe). Seul le message qui fait passer le fil en attente recoit
+ * la reponse : un album de 3 photos ne fait qu'une reponse et qu'une alerte,
+ * et rien de plus tant que le fil attend. L'equipe a la main : comme un
+ * message ecrit (versEquipeSiElleALaMain). false = pas une image.
+ */
+async function recevoirImageMembre(chat: number, u: Utilisateur, message: MessageTg): Promise<boolean> {
+  const lu = lirePieceImageMembre(message)
+  if (!lu) return false
+  const r = await rattachementOuNull(u.id)
+  const texteFil = texteFilImage(lu.legende)
+  if (await versEquipeSiElleALaMain(chat, u, r, texteFil, lu.piece)) return true
+  const identite = r && r !== 'illisible' ? r : null
+  const issue = await enregistrerEchangeSupport({
+    telegramId: u.id, membreId: identite?.membre_id ?? null, email: identite?.email ?? null,
+    role: 'membre', texte: texteFil, piece: lu.piece, veutHumain: true, alerte: 'demande',
+  })
+  switch (reponseAImage(issue)) {
+    case 'transmise':
+      await envoyer(chat, TEXTE_IMAGE_TRANSMISE, undefined, identite)
+      break
+    case 'secours':
+      await envoyerTelegram(chat, `${TEXTE_IMAGE_NON_TRANSMISE}\n\n${TEXTE_SECOURS_EQUIPE}`)
+      break
+    case 'silence':
+      break
+  }
+  return true
 }
 
 /**
@@ -1231,6 +1307,8 @@ export async function traiterMessagePrive(message: MessageTg, updateId: number):
     // du Cockpit, avec son image. Un membre, ou ce que l'agent ne lit pas
     // (vocal, PDF...) : comme avant.
     if (await transmettreSiEquipe(chat, u, message)) return
+    // (16/10) L'image d'un membre va a l'equipe (fil Support, piece jointe).
+    if (await recevoirImageMembre(chat, u, message)) return
     await versSupport(u.id, null, 'membre', '[message sans texte]')
     await envoyer(chat, `Je ne lis que les messages écrits. Écris-moi, ou utilise les boutons :`, clavierMenu())
     return
@@ -1341,8 +1419,11 @@ async function transmettreSiEquipe(chat: number, u: Utilisateur, message: Messag
 
   let issue: IssueAgentTelegram
   try {
+    // (16/10) La reference de l'image (file_id de CE bot) : l'agent peut l'envoyer a un membre.
+    const piece = lecture.image ? lirePieceMessage(message) : null
     issue = await traiterTexteAgentTelegram({
       chatId: u.id, telegramId: u.id, texte: texteDuTour(lecture), image, compte, updateId: null, transmis: true,
+      piece: piece ? { ...piece, bot: 'liveclub' } : null,
       apresAccuse: async () => { await envoyerTelegram(chat, TEXTE_TRANSMIS_AU_COCKPIT) },
     })
   } catch (err) {

@@ -64,7 +64,7 @@ import {
   RUBRIQUES_RESUME, TITRE_RESUME, MAX_MESSAGE_TELEGRAM, MARQUEUR_RESUME_HISTORIQUE,
   dateFr, dateHeureParis, texteSur, identite, cleGeste, evenementDeGeste, codeAbonnement, instantaneAbonnements,
   changementsAbonnements, changementsHorsDuBot, evenementDeChangement, estNouvelAbonnement, detailNouvelAbonnement,
-  detailAccesBroker, detailExemption, detailTarifReserve, detailAttenteHumain, detailDemande,
+  detailAccesBroker, detailExemption, detailTarifReserve, detailAttenteHumain, detailDemande, detailRepriseBot,
   ilYAMouvement, titreResume, composerResume, decouperResume, entreesHistoriqueResume,
 } from '../src/lib/liveclub/resume-pur.ts'
 import {
@@ -2370,6 +2370,8 @@ function matineeFictive() {
     { rubrique: 'adresses', qui: 't507', quand: '2026-10-14T20:09:30Z', detail: phraseAdresse({ resultat: 'fait', regle: 'tarif_reserve', details: { compte: 'ajoute', fiche: 'doublon_fusion_collecte' } }, 'yassine.paiement@exemple.fr') },
     { rubrique: 'comptes', qui: 'ezap@exemple.fr', quand: '2026-10-14T16:53:00Z', detail: phraseCompteResume({ resultat: 'refuse', regle: 'pas_moi', telegram_id: 8817429863, details: { anciens: ['8367915893'] } }, id => (id === 8367915893 ? '@wrdxr2d2 (u8367915893)' : `u${id}`)) },
     { rubrique: 'humains', qui: 't509', quand: '2026-10-13T08:00:00Z', ancien: true, detail: detailAttenteHumain('2026-10-13T08:00:00Z', 'telegram') },
+    // (16/10) Le bot a repris seul la main d'un fil (24 h sans message de l'equipe).
+    { rubrique: 'reprises', qui: 't502', quand: '2026-10-15T04:00:00Z', detail: detailRepriseBot('2026-10-15T04:00:00Z') },
     { rubrique: 'demandes', qui: 'd1', quand: '2026-10-14T18:00:00Z', detail: detailDemande('Prévoir un accès broker pour le frère de Souad', 'nouvelle') },
   ]
   const personnes = new Map([

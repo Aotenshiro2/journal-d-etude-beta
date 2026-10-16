@@ -527,9 +527,15 @@ async function trouver(tx: Tx, qui: QuiLu): Promise<{ touches: Touche[]; indices
  */
 export type ResolutionPersonne =
   | { statut: 'un'; groupe: Groupe; libelle: string; indices: string[] }
-  | { statut: 'plusieurs' | 'aucun'; reponse: string; libelle: string }
+  | { statut: 'plusieurs'; reponse: string; libelle: string; groupes: Groupe[] }
+  | { statut: 'aucun'; reponse: string; libelle: string }
 
-export async function resoudrePersonne(tx: Tx, qui: QuiLu): Promise<ResolutionPersonne> {
+/**
+ * `candidats: false` (16/10, reponse a un membre) : plusieurs personnes sont
+ * rendues avec leurs groupes seulement, sans la reponse des candidats (ni
+ * ses statistiques) : l'appelant ne garde que celles qui ont un fil Support.
+ */
+export async function resoudrePersonne(tx: Tx, qui: QuiLu, o: { candidats?: boolean } = {}): Promise<ResolutionPersonne> {
   const libelle = qui.genre === 'texte' ? qui.brut : qui.genre === 'email' ? qui.email : qui.genre === 'telegram' ? `u${qui.id}` : qui.id
   const { touches, indices } = await trouver(tx, qui)
   if (touches.length === 0) return { statut: 'aucun', reponse: reponseAucun(libelle, indices), libelle }
@@ -546,8 +552,9 @@ export async function resoudrePersonne(tx: Tx, qui: QuiLu): Promise<ResolutionPe
   const groupes = grouper(touches, liens)
   if (groupes.length === 0) return { statut: 'aucun', reponse: reponseAucun(libelle, indices), libelle }
   if (groupes.length > 1) {
+    if (o.candidats === false) return { statut: 'plusieurs', reponse: '', libelle, groupes }
     const tous = idsDuGroupe({ noeuds: groupes.flatMap((g) => g.noeuds) })
-    return { statut: 'plusieurs', reponse: reponseCandidats(libelle, groupes, await lireStats(tx, tous)), libelle }
+    return { statut: 'plusieurs', reponse: reponseCandidats(libelle, groupes, await lireStats(tx, tous)), libelle, groupes }
   }
   return { statut: 'un', groupe: groupes[0], libelle, indices }
 }
@@ -585,6 +592,40 @@ export async function resoudrePersonnePourEffacement(entree: unknown): Promise<
   } catch (err) {
     const raison = err instanceof Error ? err.message.split('\n').filter(Boolean).pop() ?? '' : String(err)
     console.error(`[cockpit/effacement] personne illisible : ${raison.slice(0, 200)}`)
+    return {
+      statut: 'erreur',
+      reponse: JSON.stringify({ statut: 'erreur', erreur: `Recherche de la personne impossible (${raison.slice(0, 160)}) : réessaie dans un instant.` }),
+      email,
+    }
+  }
+}
+
+/**
+ * La ou les personnes designees par « qui », pour la reponse a un membre
+ * (proposer_reponse_membre, reponse-membre.ts, 16/10) : les identifiants de
+ * CHAQUE personne trouvee, une ou plusieurs (le serveur ne garde que celles
+ * qui ont un fil Support, et demande s'il en reste plusieurs). Meme
+ * transaction READ ONLY que la fiche. Ne leve jamais.
+ */
+export async function resoudrePersonnePourSupport(entree: unknown): Promise<
+  | { statut: 'personnes'; groupes: { telegram: number[]; membres: string[] }[]; email: string | null }
+  | { statut: 'aucun' | 'erreur'; reponse: string; email: string | null }
+> {
+  const qui = lireQui(entree)
+  if ('erreur' in qui) return { statut: 'erreur', reponse: JSON.stringify({ statut: 'erreur', erreur: qui.erreur }), email: null }
+  const email = qui.genre === 'email' ? qui.email : null
+  try {
+    const r = await prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe('set transaction read only')
+      await tx.$executeRawUnsafe(`set local statement_timeout = '8000ms'`)
+      return resoudrePersonne(tx, qui, { candidats: false })
+    }, { maxWait: 5000, timeout: 25000 })
+    if (r.statut === 'un') return { statut: 'personnes', groupes: [idsDuGroupe(r.groupe)], email }
+    if (r.statut === 'plusieurs') return { statut: 'personnes', groupes: r.groupes.map((g) => idsDuGroupe(g)), email }
+    return { statut: 'aucun', reponse: r.reponse, email }
+  } catch (err) {
+    const raison = err instanceof Error ? err.message.split('\n').filter(Boolean).pop() ?? '' : String(err)
+    console.error(`[cockpit/reponse-membre] personne illisible : ${raison.slice(0, 200)}`)
     return {
       statut: 'erreur',
       reponse: JSON.stringify({ statut: 'erreur', erreur: `Recherche de la personne impossible (${raison.slice(0, 160)}) : réessaie dans un instant.` }),

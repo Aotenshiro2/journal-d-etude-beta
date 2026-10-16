@@ -17,7 +17,8 @@
 export type Personne = { nom: string | null; email: string | null; pseudo: string | null; telegramId: number | null }
 
 export type RubriqueResume =
-  | 'nouveaux' | 'arrets' | 'pauses' | 'impayes' | 'sorties' | 'entrees' | 'acces' | 'adresses' | 'comptes' | 'humains' | 'demandes'
+  | 'nouveaux' | 'arrets' | 'pauses' | 'impayes' | 'sorties' | 'entrees' | 'acces' | 'adresses' | 'comptes' | 'humains'
+  | 'reprises' | 'demandes'
 
 /** Les rubriques, dans l'ordre du message. */
 export const RUBRIQUES_RESUME: readonly { cle: RubriqueResume; titre: string }[] = [
@@ -31,6 +32,7 @@ export const RUBRIQUES_RESUME: readonly { cle: RubriqueResume; titre: string }[]
   { cle: 'adresses', titre: 'Adresses rattachées automatiquement' },
   { cle: 'comptes', titre: 'Comptes Telegram changés ou en conflit' },
   { cle: 'humains', titre: "Demandes d'humain en attente" },
+  { cle: 'reprises', titre: "Fils rendus au bot seul (24 h sans message de l'équipe)" },
   { cle: 'demandes', titre: "Nouvelles demandes de l'équipe" },
 ]
 
@@ -362,6 +364,21 @@ export function detailTarifReserve(o: { tarif: string; paye: boolean }): string 
 
 export function detailAttenteHumain(escaladeIso: string, app: string | null): string {
   return `attend une réponse de l'équipe depuis le ${dateHeureParis(escaladeIso)}${app && app !== 'telegram' ? ` (support du site, ${app})` : ''}`
+}
+
+/**
+ * (16/10) Les demandes d'humain en attente, SANS les comptes de l'equipe
+ * (cockpit_telegram_comptes) : un fil de Melanie du 08/10, d'avant la
+ * transmission de l'equipe a l'agent, y figurait chaque matin.
+ */
+export function attentesHorsEquipe<T extends { telegram_id: bigint | number | null }>(attentes: readonly T[], equipe: Iterable<number>): T[] {
+  const ids = new Set([...equipe].map(Number))
+  return attentes.filter(a => a.telegram_id === null || !ids.has(Number(a.telegram_id)))
+}
+
+/** (16/10) Le bot a repris seul la main d'un fil : 24 h sans message de l'equipe (support-pont-pur.ts). */
+export function detailRepriseBot(repriseIso: string): string {
+  return `le bot a repris la main le ${dateHeureParis(repriseIso)}, sans message de l'équipe depuis 24 h`
 }
 
 const STATUTS_DEMANDE: Record<string, string> = { au_picker: ' (déjà au picker)', faite: ' (déjà faite)', refusee: ' (refusée)' }

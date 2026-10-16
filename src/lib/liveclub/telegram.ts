@@ -49,6 +49,140 @@ export async function appelTelegram(methode: string, corps: Record<string, unkno
   return { ok: false, erreur: `Telegram ${methode} : trop de requetes.`, code: 429 }
 }
 
+// ---------------------------------------------------------------------------
+// Fichiers (16/10) : lire un fichier recu par un bot (getFile), en envoyer un
+// (sendPhoto, sendDocument). Tout reste en memoire : aucune copie sur disque
+// ni dans Supabase. JAMAIS l'URL d'un fichier dans un log ou un message :
+// elle porte le jeton du bot.
+// ---------------------------------------------------------------------------
+
+/** Le bot dont on parle : celui des membres, ou Agent AOK (un file_id ne vaut que pour le bot qui l'a recu). */
+export type BotTelegram = 'liveclub' | 'cockpit'
+
+function jetonDe(bot: BotTelegram): string | null {
+  return (bot === 'cockpit' ? process.env.TELEGRAM_BOT_TOKEN_COCKPIT : process.env.TELEGRAM_LIVECLUB_BOT_TOKEN)?.trim() || null
+}
+
+/** Une panne reseau, en un mot : jamais l'URL. */
+function genreErreur(err: unknown): string {
+  if (!(err instanceof Error)) return typeof err
+  const cause = (err as { cause?: { code?: unknown } }).cause
+  return `${err.name}${cause && typeof cause.code === 'string' ? ` ${cause.code}` : ''}`
+}
+
+export type IssueFichierTelegram =
+  | { ok: true; octets: Uint8Array }
+  | { ok: false; raison: 'trop_gros'; taille: number }
+  | { ok: false; raison: 'illisible' }
+
+/**
+ * Recupere un fichier chez Telegram : getFile, puis le fichier, avec le jeton
+ * du bot qui l'a recu. Le poids est verifie trois fois (annonce de getFile,
+ * Content-Length, octets lus). Ne jette pas.
+ */
+export async function telechargerFichierTelegram(bot: BotTelegram, fileId: string, max: number, taille: number | null = null): Promise<IssueFichierTelegram> {
+  const jeton = jetonDe(bot)
+  if (!jeton) {
+    console.error(`[telegram] fichier : jeton du bot ${bot} absent du projet journal`)
+    return { ok: false, raison: 'illisible' }
+  }
+  try {
+    const reponse = await fetch(`${API_TG}/bot${jeton}/getFile`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file_id: fileId }),
+      signal: AbortSignal.timeout(15_000),
+    })
+    const json = await reponse.json().catch(() => null) as
+      { ok?: boolean; description?: string; result?: { file_path?: unknown; file_size?: unknown } } | null
+    if (!json?.ok) {
+      const description = String(json?.description ?? `HTTP ${reponse.status}`).slice(0, 200)
+      // Telegram ne sert pas aux bots un fichier de plus de 20 Mo.
+      if (/too big/i.test(description)) return { ok: false, raison: 'trop_gros', taille: taille ?? 0 }
+      console.error(`[telegram] fichier : getFile refuse (${description})`)
+      return { ok: false, raison: 'illisible' }
+    }
+    const annonce = typeof json.result?.file_size === 'number' ? json.result.file_size : null
+    if (annonce !== null && annonce > max) return { ok: false, raison: 'trop_gros', taille: annonce }
+    const chemin = json.result?.file_path
+    if (typeof chemin !== 'string' || !/^[\w\-./]+$/.test(chemin) || chemin.includes('..')) {
+      console.error('[telegram] fichier : chemin de fichier illisible')
+      return { ok: false, raison: 'illisible' }
+    }
+    const fichier = await fetch(`${API_TG}/file/bot${jeton}/${chemin}`, { signal: AbortSignal.timeout(30_000) })
+    if (!fichier.ok) {
+      console.error(`[telegram] fichier : telechargement refuse (HTTP ${fichier.status})`)
+      return { ok: false, raison: 'illisible' }
+    }
+    const longueur = Number(fichier.headers.get('content-length'))
+    if (Number.isFinite(longueur) && longueur > max) {
+      await fichier.body?.cancel().catch(() => {})
+      return { ok: false, raison: 'trop_gros', taille: longueur }
+    }
+    const octets = new Uint8Array(await fichier.arrayBuffer())
+    if (octets.byteLength > max) return { ok: false, raison: 'trop_gros', taille: octets.byteLength }
+    return { ok: true, octets }
+  } catch (err) {
+    console.error(`[telegram] fichier : recuperation impossible (${genreErreur(err)})`)
+    return { ok: false, raison: 'illisible' }
+  }
+}
+
+/** Un fichier a envoyer : ses octets (televerses), ou un file_id deja connu du bot qui envoie. */
+export type FichierAEnvoyer = { octets?: Uint8Array; fileId?: string; nom: string; mime: string }
+
+/**
+ * sendPhoto ou sendDocument, avec le jeton du bot `bot` (le bot des membres
+ * par defaut). Les octets partent en multipart, depuis la memoire ; un
+ * file_id du meme bot part tel quel. Un 429 est rejoue une fois. Ne jette
+ * pas ; jamais le contenu ni l'URL dans un log.
+ */
+export async function envoyerFichierTelegram(
+  methode: 'sendPhoto' | 'sendDocument',
+  champs: Record<string, string>,
+  fichier: FichierAEnvoyer,
+  bot: BotTelegram = 'liveclub',
+): Promise<ResultatTelegram> {
+  const jeton = jetonDe(bot)
+  if (!jeton) return { ok: false, erreur: `Jeton du bot ${bot} absent du projet journal.`, code: null }
+  const champ = methode === 'sendPhoto' ? 'photo' : 'document'
+  for (let essai = 0; essai < 2; essai++) {
+    let corps: BodyInit
+    const entetes: Record<string, string> = {}
+    if (fichier.fileId) {
+      corps = JSON.stringify({ ...champs, [champ]: fichier.fileId })
+      entetes['Content-Type'] = 'application/json'
+    } else if (fichier.octets) {
+      const form = new FormData()
+      for (const [k, v] of Object.entries(champs)) form.append(k, v)
+      // Copie dans un ArrayBuffer neuf : le type Blob attend un ArrayBuffer, pas un SharedArrayBuffer.
+      const tampon = new ArrayBuffer(fichier.octets.byteLength)
+      new Uint8Array(tampon).set(fichier.octets)
+      form.append(champ, new Blob([tampon], { type: fichier.mime }), fichier.nom)
+      corps = form
+    } else {
+      return { ok: false, erreur: 'Fichier sans contenu.', code: null }
+    }
+    let json: { ok?: boolean; description?: string; error_code?: number; result?: unknown; parameters?: { retry_after?: number } }
+    try {
+      const reponse = await fetch(`${API_TG}/bot${jeton}/${methode}`, {
+        method: 'POST', headers: entetes, body: corps, signal: AbortSignal.timeout(60_000),
+      })
+      json = await reponse.json()
+    } catch (err) {
+      return { ok: false, erreur: `Telegram ${methode} : ${genreErreur(err)}`, code: null }
+    }
+    if (json.ok) return { ok: true, result: json.result }
+    const attente = json.parameters?.retry_after
+    if (json.error_code === 429 && typeof attente === 'number' && essai === 0) {
+      await pause(Math.min(attente, ATTENTE_MAX_S) * 1000)
+      continue
+    }
+    return { ok: false, erreur: `Telegram ${methode} : ${String(json.description ?? '?').slice(0, 200)}`, code: json.error_code ?? null }
+  }
+  return { ok: false, erreur: `Telegram ${methode} : trop de requetes.`, code: 429 }
+}
+
 /** Un bouton : callback_data (<= 64 octets) OU url. */
 export type Bouton = { texte: string; data?: string; url?: string }
 

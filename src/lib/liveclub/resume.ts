@@ -52,12 +52,13 @@ function idsListe(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
 }
 import {
-  changementsAbonnements, changementsHorsDuBot, cleGeste, composerResume, decouperResume, detailAccesBroker,
-  detailAttenteHumain, detailDemande, detailExemption, detailNouvelAbonnement, detailTarifReserve,
+  attentesHorsEquipe, changementsAbonnements, changementsHorsDuBot, cleGeste, composerResume, decouperResume, detailAccesBroker,
+  detailAttenteHumain, detailDemande, detailExemption, detailNouvelAbonnement, detailRepriseBot, detailTarifReserve,
   entreesHistoriqueResume, estNouvelAbonnement, evenementDeChangement, evenementDeGeste, instantaneAbonnements,
   texteSur,
   type EvenementResume, type GesteResume, type Personne,
 } from './resume-pur'
+import { repriseAutomatique } from './support-pont-pur'
 
 /** La fenetre ne remonte jamais plus loin (apres une coupure, un long silence). */
 const FENETRE_MAX_MS = 7 * 86_400_000
@@ -452,10 +453,15 @@ export async function resumeDuMatin(o: { maintenant?: Date; apercu?: boolean } =
     }
 
     // Demandes d'humain en attente (toutes : les nouvelles comptent comme mouvement).
-    const attentes = await facultatif('support', erreurs, () => prisma.$queryRaw<{ id: string; app: string | null; telegram_id: bigint | null; user_id: string; email: string | null; escalade: Date }[]>`
+    // (16/10) Jamais un compte de l'equipe (cockpit_telegram_comptes).
+    const equipe = await facultatif('equipe', erreurs, () => prisma.$queryRaw<{ telegram_id: bigint }[]>`
+      select telegram_id from public.cockpit_telegram_comptes`)
+    const idsEquipe = equipe.map(e => Number(e.telegram_id))
+    const attentesBrutes = await facultatif('support', erreurs, () => prisma.$queryRaw<{ id: string; app: string | null; telegram_id: bigint | null; user_id: string; email: string | null; escalade: Date }[]>`
       select id, app, "telegramId" as telegram_id, "userId" as user_id, "contactEmail" as email, "escalatedAt" as escalade
       from public."SupportThread" where "escalatedAt" is not null
       order by "escalatedAt" limit 50`)
+    const attentes = attentesHorsEquipe(attentesBrutes, idsEquipe)
     for (const s of attentes) {
       const tid = s.telegram_id === null ? null : Number(s.telegram_id)
       const qui = tid ? `t${tid}` : /^[0-9a-f-]{36}$/i.test(s.user_id) ? `p${s.user_id}` : `h${s.id}`
@@ -463,6 +469,22 @@ export async function resumeDuMatin(o: { maintenant?: Date; apercu?: boolean } =
         rubrique: 'humains', qui, quand: s.escalade.toISOString(), ancien: s.escalade <= depuis,
         detail: detailAttenteHumain(s.escalade.toISOString(), s.app),
       }, { email: s.email, telegramId: tid })
+    }
+
+    // (16/10) Les fils ou le bot a repris SEUL la main (filet de securite : 24 h
+    // sans message de l'equipe, support-pont-pur.ts). Lus dans les messages des
+    // fils du bot qui ont bouge depuis 24 h avant la fenetre.
+    const filsRecents = await facultatif('reprises', erreurs, () => prisma.$queryRaw<{ telegram_id: bigint; email: string | null; messages: unknown }[]>`
+      select "telegramId" as telegram_id, "contactEmail" as email, messages from public."SupportThread"
+      where app = 'telegram' and "telegramId" is not null
+        and "updatedAt" > (${depuis}::timestamptz at time zone 'UTC') - interval '1 day'
+      limit 200`)
+    for (const s of attentesHorsEquipe(filsRecents, idsEquipe)) {
+      const reprise = repriseAutomatique(s.messages, depuis.getTime(), jusqua.getTime())
+      if (reprise === null) continue
+      const tid = Number(s.telegram_id)
+      const quand = new Date(reprise).toISOString()
+      ajouter({ rubrique: 'reprises', qui: `t${tid}`, quand, detail: detailRepriseBot(quand) }, { email: s.email, telegramId: tid })
     }
 
     // Demandes de l'equipe notees par l'agent depuis le dernier resume.

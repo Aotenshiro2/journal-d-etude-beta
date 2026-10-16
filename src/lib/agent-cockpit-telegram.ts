@@ -9,6 +9,9 @@ import {
   MAX_OCTETS_IMAGE, TEXTE_IMAGE_REFUSEE, erreurDImage, historiquePourTour, messagesPourModele, typeImageDepuisOctets,
   type ImageALire, type ImageDuTour,
 } from '@/lib/agent-cockpit-telegram-pur'
+import { telechargerFichierTelegram, type BotTelegram } from '@/lib/liveclub/telegram'
+import { dernierePieceHistorique, phraseMainRendue, type PieceAgent } from '@/lib/liveclub/support-pont-pur'
+import { lireDonneeRendreLaMain, referenceFil } from '@/lib/alerte-equipe-telegram-pur'
 
 // Le TRAITEMENT du canal Telegram de l'agent cockpit (« Agent AOK »), sorti de
 // la route /api/cockpit/agent/telegram le 08/10 pour servir a deux portes :
@@ -49,23 +52,12 @@ function jetonBot(): string | null {
 }
 
 /** Le bot qui a recu le message : Agent AOK, ou le bot des membres (@aok_liveclub_bot). */
-export type BotImage = 'cockpit' | 'liveclub'
-
-function jetonDuBot(bot: BotImage): string | null {
-  return (bot === 'cockpit' ? process.env.TELEGRAM_BOT_TOKEN_COCKPIT : process.env.TELEGRAM_LIVECLUB_BOT_TOKEN)?.trim() || null
-}
+export type BotImage = BotTelegram
 
 export type IssueImage =
   | { ok: true; image: ImageDuTour }
   | { ok: false; raison: 'trop_gros'; taille: number }
   | { ok: false; raison: 'pas_une_image' | 'illisible' }
-
-/** Une panne reseau, en un mot : jamais l'URL (elle porte le jeton du bot). */
-function genreErreur(err: unknown): string {
-  if (!(err instanceof Error)) return typeof err
-  const cause = (err as { cause?: { code?: unknown } }).cause
-  return `${err.name}${cause && typeof cause.code === 'string' ? ` ${cause.code}` : ''}`
-}
 
 /**
  * Recupere l'image chez Telegram : getFile, puis le fichier, avec le jeton du
@@ -75,54 +67,13 @@ function genreErreur(err: unknown): string {
  * type vient des octets, pas de ce qu'annonce Telegram.
  */
 export async function telechargerImageTelegram(bot: BotImage, image: ImageALire): Promise<IssueImage> {
-  const jeton = jetonDuBot(bot)
-  if (!jeton) {
-    console.error(`[cockpit/telegram] image : jeton du bot ${bot} absent du projet journal`)
-    return { ok: false, raison: 'illisible' }
-  }
-  try {
-    const reponse = await fetch(`${API_TG}/bot${jeton}/getFile`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ file_id: image.fileId }),
-      signal: AbortSignal.timeout(15_000),
-    })
-    const json = await reponse.json().catch(() => null) as
-      { ok?: boolean; description?: string; result?: { file_path?: unknown; file_size?: unknown } } | null
-    if (!json?.ok) {
-      const description = String(json?.description ?? `HTTP ${reponse.status}`).slice(0, 200)
-      // Telegram ne sert pas aux bots un fichier de plus de 20 Mo.
-      if (/too big/i.test(description)) return { ok: false, raison: 'trop_gros', taille: image.taille ?? 0 }
-      console.error(`[cockpit/telegram] image : getFile refuse (${description})`)
-      return { ok: false, raison: 'illisible' }
-    }
-    const annonce = typeof json.result?.file_size === 'number' ? json.result.file_size : null
-    if (annonce !== null && annonce > MAX_OCTETS_IMAGE) return { ok: false, raison: 'trop_gros', taille: annonce }
-    const chemin = json.result?.file_path
-    if (typeof chemin !== 'string' || !/^[\w\-./]+$/.test(chemin) || chemin.includes('..')) {
-      console.error('[cockpit/telegram] image : chemin de fichier illisible')
-      return { ok: false, raison: 'illisible' }
-    }
-
-    const fichier = await fetch(`${API_TG}/file/bot${jeton}/${chemin}`, { signal: AbortSignal.timeout(20_000) })
-    if (!fichier.ok) {
-      console.error(`[cockpit/telegram] image : telechargement refuse (HTTP ${fichier.status})`)
-      return { ok: false, raison: 'illisible' }
-    }
-    const longueur = Number(fichier.headers.get('content-length'))
-    if (Number.isFinite(longueur) && longueur > MAX_OCTETS_IMAGE) {
-      await fichier.body?.cancel().catch(() => {})
-      return { ok: false, raison: 'trop_gros', taille: longueur }
-    }
-    const octets = new Uint8Array(await fichier.arrayBuffer())
-    if (octets.byteLength > MAX_OCTETS_IMAGE) return { ok: false, raison: 'trop_gros', taille: octets.byteLength }
-    const mediaType = typeImageDepuisOctets(octets)
-    if (!mediaType) return { ok: false, raison: 'pas_une_image' }
-    return { ok: true, image: { base64: Buffer.from(octets).toString('base64'), mediaType } }
-  } catch (err) {
-    console.error(`[cockpit/telegram] image : recuperation impossible (${genreErreur(err)})`)
-    return { ok: false, raison: 'illisible' }
-  }
+  // (16/10) Le telechargement est commun a tous les fichiers (liveclub/telegram.ts) ;
+  // ici, le poids d'une image lue et son type, lu dans les octets.
+  const issue = await telechargerFichierTelegram(bot, image.fileId, MAX_OCTETS_IMAGE, image.taille)
+  if (!issue.ok) return issue
+  const mediaType = typeImageDepuisOctets(issue.octets)
+  if (!mediaType) return { ok: false, raison: 'pas_une_image' }
+  return { ok: true, image: { base64: Buffer.from(issue.octets).toString('base64'), mediaType } }
 }
 
 /**
@@ -158,7 +109,7 @@ export async function tgCockpit(methode: string, params: Record<string, unknown>
  * question d'un tour porte l'identifiant du tour (u<update_id> pour Agent
  * AOK, t<uuid> pour un message transmis par le bot des membres).
  */
-type MessageStocke = { role: 'user' | 'assistant'; content: string; id?: string }
+type MessageStocke = { role: 'user' | 'assistant'; content: string; id?: string; piece?: PieceAgent }
 
 type LigneConversation = {
   chat_id: bigint
@@ -240,7 +191,32 @@ export type ClicAgentTelegram = {
   id: string
   data?: string
   from?: { id?: number }
-  message?: { chat?: { id?: number } }
+  message?: { chat?: { id?: number }; message_id?: number }
+}
+
+/**
+ * (16/10) Le bouton « Rendre la main au bot » sous une alerte du support :
+ * le bot reprend les messages ecrits du membre (ligne au fil, fil sorti de
+ * l'attente), sans rien dire au membre. Memes verrous que les cartes (compte
+ * de l'equipe verifie par l'appelant). Le bouton est retire, une ligne le dit
+ * dans Agent AOK et entre a l'historique.
+ */
+async function rendreLaMainDepuisAlerte(cq: ClicAgentTelegram, chatId: number, fil: string): Promise<void> {
+  const { rendreLaMainAuBot } = await import('@/lib/liveclub/support-pont')
+  let texte: string
+  try {
+    texte = phraseMainRendue(await rendreLaMainAuBot(fil), referenceFil(fil))
+  } catch (err) {
+    console.error('[cockpit/telegram] main rendue au bot impossible', err instanceof Error ? err.message.split('\n')[0].slice(0, 160) : '?')
+    texte = 'Impossible de rendre la main au bot (base illisible) : réessaie dans un instant.'
+  }
+  await tgCockpit('answerCallbackQuery', { callback_query_id: cq.id })
+  const messageId = Number(cq.message?.message_id)
+  if (Number.isSafeInteger(messageId) && messageId > 0) {
+    await tgCockpit('editMessageReplyMarkup', { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [] } })
+  }
+  await tgCockpit('sendMessage', { chat_id: chatId, text: texte })
+  await ajouterReponseSeule(chatId, texte)
 }
 
 /** Un clic sur Confirmer / Annuler d'une carte d'Agent AOK. */
@@ -256,6 +232,13 @@ export async function traiterClicAgentTelegram(cq: ClicAgentTelegram): Promise<v
   const compte = Number.isSafeInteger(telegramId) ? await compteCockpitTelegram(telegramId) : null
   if (!compte || !chatId) {
     await acquitter('Accès réservé.')
+    return
+  }
+
+  // (16/10) « Rendre la main au bot », sous une alerte du support.
+  const filRendu = lireDonneeRendreLaMain(donnee)
+  if (filRendu) {
+    await rendreLaMainDepuisAlerte(cq, chatId, filRendu)
     return
   }
 
@@ -352,6 +335,12 @@ export type EntreeAgentTelegram = {
   texte: string
   /** (15/10) L'image du tour, deja telechargee : au modele seulement, jamais en base. */
   image?: ImageDuTour | null
+  /**
+   * (16/10) La piece jointe du tour (photo ou document), par sa reference
+   * Telegram seulement : gardee dans l'historique, pour que
+   * proposer_reponse_membre puisse l'envoyer a un membre. Jamais le fichier.
+   */
+  piece?: PieceAgent | null
   compte: CompteCockpitTelegram
   /**
    * update_id du bot Agent AOK, pour le dedoublonnage. null = message transmis
@@ -375,6 +364,20 @@ export type EntreeAgentTelegram = {
 export type IssueAgentTelegram = 'traite' | 'doublon' | 'non_livre'
 
 const TEXTE_ERREUR_AGENT = 'L’agent n’a pas pu répondre (erreur côté serveur). Réessaie dans un instant.'
+
+/**
+ * La reponse du modele suivie de la carte, dans UN message Telegram (4 096
+ * caracteres). S'il deborde, c'est la reponse du modele qui est raccourcie,
+ * jamais la carte (16/10 : celle d'une reponse a un membre porte le texte
+ * exact qui partira). Une carte qui deborde seule part entiere, comme avant :
+ * Telegram la refuse plutot que d'afficher une carte coupee avec ses boutons.
+ */
+function texteAvecCarte(reply: string, carte: string): string {
+  const tout = `${reply}\n\n${carte}`
+  if (tout.length <= 4096) return tout
+  const place = 4096 - carte.length - 5
+  return place > 0 ? `${reply.slice(0, place)}...\n\n${carte}` : tout
+}
 
 /**
  * Un message pour l'agent (texte, et image depuis le 15/10), d'ou qu'il
@@ -429,6 +432,7 @@ async function ajouterReponseSeule(chatId: number, contenu: string): Promise<voi
 async function tourAgent(e: EntreeAgentTelegram): Promise<IssueAgentTelegram> {
   const { chatId, telegramId, compte, updateId } = e
   const image = e.image ?? null
+  const piece = e.piece ?? null
   const texte = e.texte.slice(0, MAX_MESSAGE_LEN).trim()
   if (!texte && !image) return 'traite'
 
@@ -478,7 +482,9 @@ async function tourAgent(e: EntreeAgentTelegram): Promise<IssueAgentTelegram> {
   // les photos d'un album arrivent en parallele et dans le desordre, et un
   // update_id ecrit trop tot ferait ignorer les precedents.
   const idTour = updateId !== null ? `u${updateId}` : `t${randomUUID()}`
-  const question = JSON.stringify([{ role: 'user', content: texte, id: idTour }] satisfies MessageStocke[])
+  const question = JSON.stringify([
+    { role: 'user', content: texte, id: idTour, ...(piece ? { piece } : {}) },
+  ] satisfies MessageStocke[])
   const ecrite = await prisma.$queryRaw<{ messages: unknown }[]>`
     insert into public.cockpit_agent_conversations as c (chat_id, telegram_id, messages)
     values (${chatId}, ${telegramId}, ${question}::jsonb)
@@ -514,6 +520,8 @@ async function tourAgent(e: EntreeAgentTelegram): Promise<IssueAgentTelegram> {
     reponse = await boucleAgent(historique, compte.user_id, {
       source: 'agent_telegram',
       auteur: auteurDemande({ libelle: compte.libelle, userId: compte.user_id }),
+      // (16/10) La derniere piece recue ici, que proposer_reponse_membre peut joindre.
+      piece: dernierePieceHistorique(ecrite[0].messages),
     })
   } catch (err) {
     clearInterval(battement)
@@ -545,8 +553,8 @@ async function tourAgent(e: EntreeAgentTelegram): Promise<IssueAgentTelegram> {
         where ${garde}`
       await tgCockpit('sendMessage', {
         chat_id: chatId,
-        text: `${reponse.reply}\n\n⚠️ ${resume}\n\n${cle_manquante
-          ?? `La clé d'écriture du compte ${action.compte} n'est pas posée : rien ne peut être exécuté.`}`,
+        text: texteAvecCarte(reponse.reply, `⚠️ ${resume}\n\n${cle_manquante
+          ?? `La clé d'écriture du compte ${action.compte} n'est pas posée : rien ne peut être exécuté.`}`),
       })
       return 'traite'
     }
@@ -566,7 +574,7 @@ async function tourAgent(e: EntreeAgentTelegram): Promise<IssueAgentTelegram> {
       where ${garde}`
     await tgCockpit('sendMessage', {
       chat_id: chatId,
-      text: `${reponse.reply}\n\n⚠️ ${resume}`,
+      text: texteAvecCarte(reponse.reply, `⚠️ ${resume}`),
       reply_markup: {
         inline_keyboard: [[
           { text: '✅ Confirmer et exécuter', callback_data: `ok:${nonce}` },

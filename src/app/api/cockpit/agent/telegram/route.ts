@@ -5,6 +5,7 @@ import {
 import {
   lireMessageTelegram, texteDuTour, texteEchecImage, texteImageTropGrosse, texteNonLu, type ImageDuTour,
 } from '@/lib/agent-cockpit-telegram-pur'
+import { MAX_FICHIER_AGENT, lireFichierSortant, lirePieceMessage, tracePieceAgent } from '@/lib/liveclub/support-pont-pur'
 
 // Le canal TELEGRAM de l'agent cockpit (go Brice 04/09) : meme cerveau que la
 // fenetre ✦ du cockpit (src/lib/agent-cockpit.ts), autre porte d'entree.
@@ -71,6 +72,22 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true })
   }
 
+  // (16/10) La piece du message (photo ou document), par sa reference
+  // Telegram : l'agent ne la lit pas forcement, mais peut l'ENVOYER a un
+  // membre (proposer_reponse_membre). Un fichier qu'on sait envoyer (PDF,
+  // Word, image lourde...) part donc a l'agent avec sa trace au lieu d'etre
+  // refuse ; les autres (vocal, video...) : comme avant.
+  const pieceLue = lirePieceMessage(message)
+  const piece = pieceLue ? { ...pieceLue, bot: 'cockpit' as const } : null
+  if ((lecture.genre === 'trop_gros' || lecture.genre === 'non_lu')
+    && piece && typeof lireFichierSortant(piece, MAX_FICHIER_AGENT) !== 'string') {
+    const legende = typeof message.caption === 'string' ? message.caption.slice(0, 4000).trim() : ''
+    await traiterTexteAgentTelegram({
+      chatId, telegramId, texte: [tracePieceAgent(piece), legende].filter(Boolean).join('\n'), image: null, piece, compte, updateId,
+    })
+    return NextResponse.json({ ok: true })
+  }
+
   // Ce que l'agent ne lit pas, ou une image trop lourde : dit en clair, sans
   // appeler le modele.
   if (lecture.genre === 'trop_gros') {
@@ -93,6 +110,8 @@ export async function POST(req: NextRequest) {
     image = issue.image
   }
 
-  await traiterTexteAgentTelegram({ chatId, telegramId, texte: texteDuTour(lecture), image, compte, updateId })
+  await traiterTexteAgentTelegram({
+    chatId, telegramId, texte: texteDuTour(lecture), image, compte, updateId, piece: lecture.image ? piece : null,
+  })
   return NextResponse.json({ ok: true })
 }

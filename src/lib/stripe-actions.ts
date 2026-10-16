@@ -37,6 +37,7 @@ import {
   estTypeRepartition, lireParamsRepartition, resumeRepartition, jourParis, moisParis, type TypeRepartition,
 } from '@/lib/repartition/pur'
 import { lireParamsEffacement, NOMS_NIVEAUX } from '@/lib/effacement-pur'
+import { lireParamsReponseMembre } from '@/lib/reponse-membre-pur'
 
 // La regle de la pause vit dans liveclub/pur.ts (testable sans base) ; elle
 // est reexportee ici pour les appelants de stripe-actions (29/09).
@@ -155,6 +156,10 @@ export type ActionAgent = {
     // effacement.ts et effacement-pur.ts. Compte 'cockpit' (la base, plus
     // Stripe et Telegram au niveau 3, cote serveur).
     | 'effacement'
+    // La reponse de l'equipe a un membre, dans son fil Support (16/10) :
+    // reponse-membre.ts et reponse-membre-pur.ts, envoi par support-reponse.ts.
+    // Compte 'cockpit' (Telegram par le bot des membres, ou le chat du site).
+    | 'reponse_membre'
   // 'telegram' pour les actions du groupe Live Club (retrait, reintegration,
   // acces broker, exemption) : pas un compte Stripe, mais la carte de
   // confirmation affiche d'ou vient le pouvoir. 'cockpit' pour la
@@ -190,6 +195,14 @@ export function paramsPourLog(a: ActionAgent): Record<string, unknown> {
   if (a.type === 'retirer_tarif_reserve') return { reserve_id: a.params.reserve_id ?? null }
   // Effacement (15/10) : le niveau seul, jamais qui ni ses identifiants.
   if (a.type === 'effacement') return { niveau: a.params.niveau }
+  // Reponse a un membre (16/10) : la reference du fil et la longueur, jamais le texte ni qui.
+  if (a.type === 'reponse_membre') {
+    return {
+      fil: typeof a.params.reference === 'string' ? a.params.reference : null,
+      canal: a.params.canal ?? null,
+      longueur: typeof a.params.texte === 'string' ? a.params.texte.length : 0,
+    }
+  }
   if (estTypeRepartition(a.type)) {
     return Object.fromEntries(Object.entries(a.params).filter(([k]) => k !== 'note' && k !== 'qui'))
   }
@@ -616,6 +629,15 @@ export function validerAction(brut: unknown): ActionAgent | string {
     return { type: 'effacement', compte: 'cockpit', params: lu.cible ? { ...lu } : { niveau: lu.niveau, qui: lu.qui } }
   }
 
+  // Reponse a un membre (16/10) : fil et texte (mot pour mot). Le fil resolu
+  // et ce que dit la carte ne sont poses que par le controle avant la carte,
+  // qui les ecrase toujours ; fil_id est exige au clic.
+  if (a.type === 'reponse_membre') {
+    const lu = lireParamsReponseMembre(p)
+    if (typeof lu === 'string') return lu
+    return { type: 'reponse_membre', compte: 'cockpit', params: { ...lu } }
+  }
+
   // Les actions du groupe Telegram n'ont pas de compte Stripe.
   if (a.type === 'retirer_telegram' || a.type === 'reintegrer_telegram') {
     const telegramId = lireTelegramId(p.telegram_id)
@@ -804,6 +826,10 @@ export function resumeAction(a: ActionAgent): string {
   if (a.type === 'effacement') {
     const n = p.niveau === 1 || p.niveau === 2 || p.niveau === 3 ? p.niveau : null
     return `Effacer les données de ${String(p.qui ?? '?')}, niveau ${n ?? '?'}${n ? ` (${NOMS_NIVEAUX[n]})` : ''}.`
+  }
+  // Reponse a un membre (16/10) : la carte detaillee vient du controle (composerCarteReponse).
+  if (a.type === 'reponse_membre') {
+    return `Répondre à ${String(p.qui ?? p.fil ?? '?')} dans son fil Support.`
   }
   if (a.type === 'code_promo') {
     const reduc = p.pourcentage != null
@@ -1105,6 +1131,14 @@ export async function executerAction(a: ActionAgent, acteur = 'agent'): Promise<
   if (a.type === 'effacement') {
     const { executerActionEffacement } = await import('@/lib/effacement')
     return executerActionEffacement(a, acteur)
+  }
+
+  // ── Reponse de l'equipe a un membre (16/10) ───────────────────────────────
+  // L'envoi de l'onglet Support (support-reponse.ts), memes garde-fous. Import
+  // dynamique : reponse-membre.ts importe ce fichier (RefusAction).
+  if (a.type === 'reponse_membre') {
+    const { executerReponseMembre } = await import('@/lib/reponse-membre')
+    return executerReponseMembre(a)
   }
 
   // ── Groupe Telegram ───────────────────────────────────────────────────────

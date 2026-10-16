@@ -820,3 +820,67 @@ Lot D:\6_Societe\Pilotage\Academie\lots\LOT-RESSOURCES-PROTEGEES-ET-ALPHA.md (GO
 - A FAIRE : appliquer la migration, deployer le journal puis le site, envoyer
   les PDF (--ecrire), les declarer dans le fichier du module, importer, poser
   les acces de l'alpha.
+
+## Support : repondre d'Agent AOK, images et fichiers, l'equipe a la main (16/10/2026, NON commite, NON deploye ; aucune migration)
+
+Demandes de Brice du 16/10 (et cas reel de Lea, @leaafighter).
+- Repondre d'Agent AOK : outil proposer_reponse_membre(fil, texte,
+  piece_jointe) de l'agent du cockpit, avec carte (destinataire nom, @pseudo,
+  email, app ; ou part le message ; texte EXACT, ou legende + piece jointe).
+  fil = reference d'alerte « fil 1a2b3c4d » (8 premiers caracteres de l'id),
+  id complet, ou personne resolue comme fiche_personne (resoudrePersonnePourSupport) :
+  le fil qui attend un humain, sinon le plus recent ; plusieurs = l'agent
+  demande ; un nom a homonymes dont un seul a un fil = la carte le dit.
+  Envoi = celui de l'onglet Support, sorti dans src/lib/support-reponse.ts
+  (repondreAuFil) : la route /api/support/reply garde ses entrees et sorties
+  JSON. Serveur de l'outil : reponse-membre.ts, regles reponse-membre-pur.ts.
+- L'alerte « demande un humain » finit par « Pour lui répondre d'ici : dis-moi
+  « réponds-lui : ton message » (fil xxxxxxxx). » ; son dernier message saute
+  les lignes de bouton et les traces sans texte (« (a appuyé sur Contacter
+  l'équipe) » s'il n'y a rien d'ecrit). Bouton « Rendre la main au bot » sous
+  l'alerte d'un fil Telegram (callback rm:<id>, route d'Agent AOK).
+- Images des membres : photo ou capture en fichier -> message du fil avec
+  piece { file_id, file_unique_id, type, mime, nom, taille } (fichier jamais
+  copie), reponse « Bien reçu. Je ne lis pas les images... », fil en attente,
+  alerte avec l'image (getFile bot des membres -> sendPhoto Agent AOK, en
+  memoire). Passage en attente ATOMIQUE (horloge clock_timestamp dans l'upsert
+  du pont) : un album = une reponse, une alerte. Au plus une alerte par fil et
+  par 10 minutes (ligne « [système] Équipe prévenue. »).
+- Fichiers de l'equipe : depuis Agent AOK (photo ou fichier envoye a l'agent,
+  piece gardee par reference dans l'historique, telechargee avec le jeton
+  d'Agent AOK puis renvoyee par le bot des membres ; 20 Mo, types images, PDF,
+  Office, OpenDocument, texte, CSV, RTF ; legende 1 024 caracteres) et depuis
+  l'onglet Support (bouton joindre, multipart sur /api/support/reply, 4 Mo :
+  limite du corps d'une fonction Vercel). Image JPEG/PNG/WEBP de 10 Mo au plus
+  = sendPhoto, le reste sendDocument. Le fil garde le file_id rendu par le bot
+  des membres. Fil du site : refuse (son chat n'affiche que du texte).
+- Routes du cockpit (Bearer + allowlist) : POST /api/cockpit/support/piece
+  { fil, message } (image relue chez Telegram, 3,75 Mo, type lu dans les
+  octets, file_id lu en base) et POST /api/cockpit/support/main { threadId }.
+- L'EQUIPE A LA MAIN (support-pont-pur.ts, quiRepond) : des qu'un message
+  human entre dans un fil Telegram, le bot ne repond plus aux messages ecrits
+  du membre : ils vont a l'equipe (fil en attente, alerte « X a répondu à
+  l'équipe », accuse « Je transmets à l'équipe, elle te répond ici. » une fois
+  par periode). Boutons et commandes inchanges. Le bot reprend la main par le
+  bouton (onglet Support, alerte, ou « rends la main au bot » : outil
+  rendre_la_main_au_bot, sans carte), ce qui pose « [système] Main rendue au
+  bot par l'équipe. » et sort le fil de l'attente ; ou seul apres 24 h sans
+  message de l'equipe (glissant, DUREE_MAIN_EQUIPE_MS), ligne au resume du
+  matin. Etat LU dans les messages : aucune colonne.
+- Resume du matin : jamais un compte de cockpit_telegram_comptes dans
+  « Demandes d'humain en attente » ; rubrique « Fils rendus au bot seul ».
+- Cockpit (depot workspace, NON commite) : SupportView.tsx (vignette cliquable,
+  pastille « équipe », bouton « Rendre la main au bot », bouton joindre pour un
+  fil Telegram) et PieceJointeSupport.tsx. tsc -p tsconfig.app.json et npm run
+  build ok. AgentCockpit.tsx n'a pas encore de libelle pour la carte
+  reponse_membre (titre vide, resume affiche sans retours a la ligne).
+- Tests : verifier-reponse-membre.mjs (18 blocs), verifier-pieces-support.mjs
+  (16), verifier-alerte-equipe.mjs, verifier-liveclub.mjs (63, rubrique
+  ajoutee a la matinee fictive), fiche-personne et effacement inchanges ; tsc
+  et eslint des fichiers propres. SQL : EXPLAIN (sans ANALYZE) de l'upsert du
+  pont et de la main rendue en READ ONLY, apercu reel du controle de la carte
+  (references, id, u<id>, email, homonymes). Aucun envoi Telegram reel, aucun
+  appel au modele, next build non lance (serveur de dev d'une autre session).
+- A FAIRE : deployer le journal puis le cockpit ; essais reels (reponds-lui
+  sous une alerte, album de 3 photos, PDF envoye depuis Agent AOK, joindre
+  depuis l'onglet, rendre la main) ; libelle de la carte dans AgentCockpit.tsx.
