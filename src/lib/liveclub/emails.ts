@@ -196,8 +196,11 @@ export function modeleSortieDesabonne(): ModeleMessage {
  * l'heure de Paris (jourParis). montant null = on ne le connait pas (apercu
  * de facture illisible) : le message ne donne que la date. lienBot : donne
  * seulement quand le message part par email (en prive, le membre est deja
- * dans le bot). Pause et arret se font par le bot : le support ne reste que
- * pour le reste.
+ * dans le bot).
+ *
+ * (16/10, Brice) Un rappel PREVIENT, il ne propose rien : plus de « tu veux
+ * faire une pause ou arreter ? » (c'etait entrouvrir la porte), et plus de
+ * renvoi vers support@ (l'equipe repond dans le bot).
  */
 export function modeleRappelPrelevement(
   echeance: string,
@@ -205,7 +208,7 @@ export function modeleRappelPrelevement(
   lienBot?: string,
 ): ModeleMessage {
   const date = formaterDateFr(echeance)
-  const bot = "Tu veux faire une pause ou arrêter avant cette date ? Écris au bot du Live Club, il s'en occupe"
+  const question = lienBot ? `Une question ? Écris au bot du Live Club : ${lienBot}` : 'Une question ? Écris-moi ici.'
   return {
     sujet: `Ton prochain prélèvement Live Club, le ${date}`,
     paragraphes: [
@@ -214,8 +217,7 @@ export function modeleRappelPrelevement(
         ? `Petit rappel : ton abonnement au Live Club se renouvelle le ${date}. ${formaterMontant(montant.centimes, montant.devise)} seront prélevés sur ta carte habituelle.`
         : `Petit rappel : ton abonnement au Live Club se renouvelle le ${date}, avec un prélèvement sur ta carte habituelle.`,
       "Ta carte a changé ou arrive en fin de validité ? Mets-la à jour avant cette date avec le bouton ci-dessous. Tu te connectes avec l'email de ton paiement.",
-      lienBot ? `${bot} : ${lienBot}` : `${bot}.`,
-      `Pour le reste, écris à ${SUPPORT}.`,
+      question,
     ],
     bouton: { texte: 'Mettre à jour ma carte', url: URL_PORTAIL_CARTE },
   }
