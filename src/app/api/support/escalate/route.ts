@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { Resend } from 'resend'
 import { prisma } from '@/lib/db'
 import { getUserId } from '@/lib/api-auth'
+import { alerterEquipeTelegram, dernierMessageMembre } from '@/lib/alerte-equipe-telegram'
 import { corsHeaders, corsPreflight } from '@/lib/support-cors'
 
 /**
@@ -137,6 +138,22 @@ export async function POST(req: NextRequest) {
       // L'échec d'email ne doit jamais casser l'escalade elle-même.
       console.error('[support/escalate] envoi impossible:', err)
     }
+  }
+
+  // (16/10) Et un message Telegram d'Agent AOK a Brice et Mel, meme sans email.
+  try {
+    const rows = await prisma.$queryRaw<{ email: string | null }[]>`
+      select email from auth.users where id = ${userId}::uuid`
+    const messages = Array.isArray(thread?.messages) ? thread!.messages : []
+    const livres = await alerterEquipeTelegram({
+      origine: `support du site, app ${thread?.app ?? 'inconnue'}`,
+      qui: rows[0]?.email ?? contactEmail ?? 'visiteur anonyme',
+      dernierMessage: dernierMessageMembre(messages),
+      reponseDans: 'son chat',
+    })
+    if (livres > 0) notified = true
+  } catch (err) {
+    console.error('[support/escalate] alerte Telegram impossible:', err)
   }
 
   // `email` reste pour les clients v1 (mailto de secours quand notified=false).

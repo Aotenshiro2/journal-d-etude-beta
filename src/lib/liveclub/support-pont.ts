@@ -36,6 +36,7 @@
 import { Resend } from 'resend'
 import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db'
+import { alerterEquipeTelegram, dernierMessageMembre, nomTelegram } from '@/lib/alerte-equipe-telegram'
 import { expurgerLiensInvitation, phraseGeste, type GesteLu } from './pur'
 import { masquerCodes } from './verification-pur'
 import type { Bouton } from './telegram'
@@ -204,6 +205,14 @@ export async function enregistrerEchangeSupport(e: EchangeSupport, db: ClientSup
     if (veut && ligne && ligne.attendait !== true) {
       const messages = Array.isArray(ligne.messages) ? (ligne.messages as MessageFil[]) : [message]
       await alerterEquipe(ligne.email, messages)
+      // (16/10) Et un message Telegram d'Agent AOK a Brice et Mel.
+      const nom = await nomTelegram(e.telegramId)
+      await alerterEquipeTelegram({
+        origine: 'bot Live Club',
+        qui: [nom ?? `compte Telegram u${e.telegramId}`, ligne.email].filter(Boolean).join(', '),
+        dernierMessage: dernierMessageMembre(messages),
+        reponseDans: 'Telegram',
+      })
     }
   } catch (err) {
     journaliser('enregistrement', err)
