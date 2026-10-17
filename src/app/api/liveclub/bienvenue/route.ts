@@ -7,6 +7,7 @@ import { DUREE_JETON_JOURS, preparerBienvenue, type PreparationBienvenue } from 
 import { messageErreur, relationAbsente } from '@/lib/liveclub/pur'
 import { journaliserGesteLiveClub } from '@/lib/stripe-actions'
 import { marquerReservesPayeesParSession } from '@/lib/liveclub/reserves'
+import { capiActive, signalerAchatMeta } from '@/lib/meta-capi'
 
 /**
  * POST /api/liveclub/bienvenue : la page apres paiement du Live Club
@@ -22,7 +23,8 @@ import { marquerReservesPayeesParSession } from '@/lib/liveclub/reserves'
  * payee ; puis le jeton 'entree' de CET abonnement (reutilise s'il en existe
  * un valable, sinon cree : une page rechargee rend le meme lien) ; puis
  * l'email de bienvenue, UNE seule fois par abonnement. Rien d'autre de la
- * session ne repart que le prenom. Jamais le session_id, le jeton ni l'email
+ * session ne repart que le prenom et, depuis le 18/10, le montant paye (pour
+ * l'evenement Purchase du pixel de la page). Jamais le session_id, le jeton ni l'email
  * dans un log.
  *
  * Une session Checkout reste « complete + paid » pour toujours : son URL de
@@ -176,10 +178,34 @@ export async function POST(req: NextRequest) {
     )
   }
 
+  // 4. L'achat signale a Meta par le serveur (Conversions API, 18/10). Inactif
+  //    sans META_PIXEL_ID et META_CAPI_TOKEN. Seulement : au premier passage
+  //    (jeton neuf ou email parti), depuis aoknowledge.com (le site de Melanie a
+  //    son propre pixel), et si le visiteur a accepte la PUBLICITE dans le
+  //    bandeau (le site l'envoie dans `consentement_pub`). Une session de test
+  //    ne part que si un code de test Meta est pose.
+  const origine = req.headers.get('origin') ?? ''
+  const depuisAok = /^https:\/\/(www\.)?aoknowledge\.com$/.test(origine)
+  const test = sessionId.startsWith('cs_test_')
+  if ((nouveau || emailEnvoye) && depuisAok && body?.consentement_pub === true && capiActive()
+    && (!test || Boolean(process.env.META_CAPI_TEST_CODE))) {
+    await signalerAchatMeta({
+      sessionId, email: session.email, clientStripe: session.clientStripe,
+      valeur: session.montantTotal, devise: session.devise,
+      ip: (req.headers.get('x-forwarded-for') ?? '').split(',')[0].trim() || null,
+      userAgent: req.headers.get('user-agent'),
+      url: 'https://aoknowledge.com/live-club/bienvenue', contenu: 'Live Club',
+    })
+  }
+
   return NextResponse.json(
     {
       ok: true, lien_bot: lien,
       ...(session.prenom ? { prenom: session.prenom } : {}),
+      // Le montant paye (tarif reserve compris), pour l'evenement Purchase du
+      // pixel de la page : le site n'a pas a deviner le prix.
+      ...(session.montantTotal !== null && session.devise
+        ? { achat: { valeur: session.montantTotal, devise: session.devise } } : {}),
       // Le lien a deja servi a un compte Telegram : la page le dit (rouvre le
       // bot depuis ce compte, sinon support@).
       ...(dejaUtilise ? { deja_utilise: true } : {}),

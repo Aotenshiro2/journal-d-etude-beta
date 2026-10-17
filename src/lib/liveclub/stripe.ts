@@ -479,6 +479,10 @@ export type SessionCheckoutResume = {
   creeLe: string | null
   /** Les tarifs payes (price_..., line_items et items de l'abonnement) : rapprochement d'un tarif reserve (13/10). */
   prix: string[]
+  /** amount_total de la session en unites (centimes / 100), null s'il manque (18/10 : Conversions API Meta). */
+  montantTotal: number | null
+  /** currency de la session en majuscules (EUR, USD), null s'il manque. */
+  devise: string | null
 }
 
 function premierMot(s: unknown): string | null {
@@ -554,5 +558,7 @@ export async function lireSessionCheckout(sessionId: string): Promise<SessionChe
     prenom: premierMot(champPrenom) ?? premierMot(details?.name),
     creeLe: typeof s.created === 'number' ? new Date(s.created * 1000).toISOString() : null,
     prix,
+    montantTotal: typeof s.amount_total === 'number' ? s.amount_total / 100 : null,
+    devise: typeof s.currency === 'string' && s.currency ? s.currency.toUpperCase() : null,
   }
 }
