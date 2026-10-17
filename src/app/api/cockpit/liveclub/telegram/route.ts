@@ -4,6 +4,8 @@ import { traiterBouton, traiterDemandeAdhesion, traiterMessagePrive } from '@/li
 import { accueilAPublier, nomPourAccueil, texteAccueil, type AvantEntree } from '@/lib/liveclub/accueil-groupe'
 import { appelTelegram } from '@/lib/liveclub/telegram'
 import { noterNomTelegram } from '@/lib/liveclub/noms'
+import { chatDeLUpdate } from '@/lib/liveclub/mouvements-pur'
+import { chatsTracesDuServeur, enregistrerMouvement } from '@/lib/liveclub/mouvements'
 
 // Webhook du bot du groupe Telegram Live Club, @aok_liveclub_bot (chantier du
 // 10/09, etendu le 29/09).
@@ -53,6 +55,26 @@ export async function POST(req: NextRequest) {
 
   const updateId = Number(update.update_id)
   const idLisible = Number.isSafeInteger(updateId)
+
+  // (17/10) Les chats TRACES (TELEGRAM_CHATS_TRACES : le canal MELMOM et le
+  // groupe Les AS du NAS de Melanie, ou le bot est admin sans droits). On y
+  // ENREGISTRE chaque chat_member (cockpit_telegram_mouvements) et RIEN
+  // D'AUTRE : ni message, ni accueil, ni exclusion, ni logique du Live Club.
+  // Leurs messages sont deja ecartes par (1), leurs channel_post ne sont pas
+  // demandes a Telegram. Retour immediat, avant tout traitement du Live Club,
+  // qui ne voit jamais ces updates (lib/liveclub/mouvements.ts). Le chat du
+  // Live Club n'est jamais traite ici, meme mis par erreur dans la liste.
+  const chatUpdate = chatDeLUpdate(update)
+  if (chatUpdate && chatsTracesDuServeur().has(chatUpdate)) {
+    if (update.chat_member && idLisible) {
+      await enregistrerMouvement(updateId, update.chat_member)
+    } else if (update.my_chat_member) {
+      const chat = update.my_chat_member.chat
+      console.log(`[liveclub/telegram] bot ${update.my_chat_member.new_chat_member?.status} `
+        + `dans le chat trace « ${chat?.title} » (${chat?.id})`)
+    }
+    return NextResponse.json({ ok: true })
+  }
 
   // Bot des membres. Une panne ici ne doit jamais faire rejouer l'update en
   // boucle par Telegram : on loggue (sans texte ni identifiant de membre) et
