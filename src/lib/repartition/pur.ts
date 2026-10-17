@@ -36,6 +36,23 @@
 //    produit. Les reglements faits (« c'est regle ») se deduisent du solde : un
 //    reglement de Mel a Brice, c'est de l'argent que Brice a eu en main.
 //    Mois en heure de Paris.
+// 7. LITIGES (Brice, 17/10/2026). Un paiement conteste et PERDU a ete
+//    partage comme une vente alors que l'argent est reparti : il sort de la
+//    base de partage, avec ses frais de litige, du cote du compte qui l'avait
+//    encaisse (celui du paiement d'origine), dans le MOIS OU LE LITIGE EST
+//    PERDU. Stripe ne date pas la perte : clos_le s'il existe, sinon
+//    ouvert_le, et la ligne le dit. Une ligne « litige » : en main NEGATIF de
+//    l'encaisseur, parts negatives en 70/30 de ce cote. Un litige EN COURS ne
+//    bouge rien, il s'affiche en avertissement (montant en jeu). GAGNE :
+//    rien, sauf des frais non rendus (restitue couvre le montant, pas les
+//    frais) : seuls ces frais sortent, de la meme facon.
+// 8. DETTES, AVANCES, REGLEMENT (Brice, 17/10/2026). Brice et Mel se reglent
+//    en fin de mois : pendant le mois, des sommes s'accumulent. Une DETTE de
+//    X envers Y (X doit cette somme a Y, hors des ventes, avec sa raison)
+//    deplace la somme de la part de X vers celle de Y, sans argent qui bouge.
+//    Une AVANCE de X a Y (argent donne pendant le mois) : en main + pour Y, -
+//    pour X. Le REGLEMENT du mois (le solde paye par celui qui doit) se
+//    compte comme une avance, apres le solde du mois, et ferme le mois.
 //
 // Tous les montants sont en CENTIMES (entiers) : aucun arrondi flottant ne
 // s'accumule, et chaque ligne du grand livre se partage au centime pres (la
@@ -193,6 +210,18 @@ export function libelleMois(mois: string): string {
 export function deMois(mois: string): string {
   const libelle = libelleMois(mois)
   return /^[aeiouéèêh]/i.test(libelle) ? `d'${libelle}` : `de ${libelle}`
+}
+
+/** '2026-10' -> 'Octobre 2026' (en tete de phrase). */
+export function libelleMoisMaj(mois: string): string {
+  const l = libelleMois(mois)
+  return l.charAt(0).toUpperCase() + l.slice(1)
+}
+
+/** '2026-11-02' -> '02/11'. */
+export function jourCourt(jour: string): string {
+  const [, m, j] = jour.split('-')
+  return `${j}/${m}`
 }
 
 /** '2026-10-01' -> '1er octobre 2026'. */
@@ -557,14 +586,120 @@ export type Depense = {
   lives?: { intervenant: string; quantite: number; prixUnitaire: number } | null
 }
 
+/**
+ * La nature d'une saisie entre Brice et Mel (regle 8) : une dette (de doit a
+ * a), une avance (de a avance a a pendant le mois), ou le reglement du mois
+ * (de a paye le solde a a). Colonne absente ou vide : avance (l'ancien sens).
+ */
+export const NATURES_REGLEMENT = ['dette', 'avance', 'reglement'] as const
+export type NatureReglement = (typeof NATURES_REGLEMENT)[number]
+
+export function lireNature(v: unknown): NatureReglement | null {
+  const s = sansAccents(String(v ?? '')).trim().toLowerCase()
+  if (!s) return null
+  return (NATURES_REGLEMENT as readonly string[]).includes(s) ? (s as NatureReglement) : null
+}
+
 export type Reglement = {
   id: string
+  /** Absente = avance (lignes d'avant la colonne nature). */
+  nature?: NatureReglement
+  /** Dette : celui qui doit. Avance, reglement : celui qui verse. */
   de: Cote
   a: Cote
   /** Centimes, positif. */
   montant: number
+  /** Jour du geste (le jour du reglement pour un reglement). */
   regleLe: string
   mois: string
+  note?: string | null
+}
+
+/** « Brice doit 34,28 € à Mel : part Skool », « Mel a avancé 200 € à Brice le 12/10 », « Octobre 2026 réglé le 02/11 : ... ». */
+export function phraseReglement(r: Pick<Reglement, 'nature' | 'de' | 'a' | 'montant' | 'regleLe' | 'mois' | 'note'>): string {
+  const note = r.note ? ` : ${r.note}` : ''
+  const nature = r.nature ?? 'avance'
+  if (nature === 'dette') return `${NOM_COTE[r.de]} doit ${euros(r.montant)} à ${NOM_COTE[r.a]}${note}`
+  if (nature === 'avance') return `${NOM_COTE[r.de]} a avancé ${euros(r.montant)} à ${NOM_COTE[r.a]} le ${jourCourt(r.regleLe)}${note}`
+  return `${libelleMoisMaj(r.mois)} réglé le ${jourCourt(r.regleLe)} : ${NOM_COTE[r.de]} a payé ${euros(r.montant)} à ${NOM_COTE[r.a]}${note}`
+}
+
+// ---------------------------------------------------------------------------
+// Litiges Stripe (regle 7)
+// ---------------------------------------------------------------------------
+
+/** perdu, gagne, en cours ; clos = ferme sans argent en jeu (warning_closed, prevented, charge_refunded). */
+export type EtatLitige = 'perdu' | 'gagne' | 'en_cours' | 'clos'
+
+export function etatLitige(statut: unknown): EtatLitige {
+  const s = String(statut ?? '').trim().toLowerCase()
+  if (s === 'lost') return 'perdu'
+  if (s === 'won') return 'gagne'
+  if (s === 'warning_closed' || s === 'prevented' || s === 'charge_refunded') return 'clos'
+  return 'en_cours'
+}
+
+export type Litige = {
+  id: string
+  cote: Cote
+  paiementId: string | null
+  /** Statut Stripe brut. */
+  statut: string
+  motif: string | null
+  /** Centimes contestes (devise de la vente). */
+  montant: number
+  devise: string
+  /** Centimes de frais de litige ; null = inconnus. */
+  frais: number | null
+  /** Centimes rendus ; null = inconnu. */
+  restitue: number | null
+  /** Jour de Paris de l'ouverture. */
+  ouvertLe: string
+  /** Jour de Paris de la cloture, quand Stripe la donne (gagne seulement aujourd'hui). */
+  closLe: string | null
+}
+
+/** Une ligne de cockpit_litiges (euros) en litige (centimes), ou null si le compte est inconnu. */
+export function litigeDeLigne(l: {
+  litige_id: string; compte: string | null; paiement_id: string | null; montant: number | string
+  devise: string | null; statut: string; motif: string | null; ouvert_le: string | Date
+  clos_le: string | Date | null; frais: number | string | null; restitue: number | string | null
+}): Litige | null {
+  const cote = coteDuCompte(l.compte)
+  if (!cote) return null
+  return {
+    id: l.litige_id,
+    cote,
+    paiementId: l.paiement_id,
+    statut: l.statut,
+    motif: l.motif,
+    montant: Math.abs(centimes(l.montant) ?? 0),
+    devise: String(l.devise ?? 'EUR').toUpperCase(),
+    frais: l.frais === null || l.frais === undefined ? null : centimes(l.frais),
+    restitue: l.restitue === null || l.restitue === undefined ? null : centimes(l.restitue),
+    ouvertLe: jourDe(l.ouvert_le),
+    closLe: l.clos_le ? jourDe(l.clos_le) : null,
+  }
+}
+
+/** Le jour ou un litige compte : sa cloture si Stripe la donne, sinon son ouverture. */
+export function jourDuLitige(l: Pick<Litige, 'ouvertLe' | 'closLe'>): string {
+  return l.closLe ?? l.ouvertLe
+}
+
+/**
+ * Ce qu'un litige fait sortir de la base, en centimes (0 = rien). Perdu :
+ * montant + frais - ce qui a ete rendu. Gagne : seulement les frais non
+ * rendus, quand restitue couvre le montant (sinon rien : l'argent n'est pas
+ * encore revenu, ce n'est pas une perte). En cours, clos : rien.
+ */
+export function perteDuLitige(l: Pick<Litige, 'statut' | 'montant' | 'frais' | 'restitue'>): number {
+  const etat = etatLitige(l.statut)
+  const frais = l.frais ?? 0
+  const rendu = l.restitue ?? 0
+  if (etat === 'perdu') return Math.max(0, l.montant + frais - rendu)
+  if (etat === 'gagne' && l.restitue !== null && l.restitue >= l.montant) return Math.max(0, l.montant + frais - rendu)
+  return 0
 }
 
 // ---------------------------------------------------------------------------
@@ -572,8 +707,10 @@ export type Reglement = {
 // ---------------------------------------------------------------------------
 
 export type LigneGrandLivre = {
-  genre: 'ventes' | 'commission' | 'depense' | 'reglement'
+  genre: 'ventes' | 'commission' | 'depense' | 'litige' | 'dette' | 'avance' | 'reglement'
   libelle: string
+  /** La ligne en une phrase, sans jargon : ce qui s'est passe, puis qui doit quoi a qui. */
+  phrase: string
   /** Le cote dont le flux depend (null : commune, reglement). */
   cote: Cote | null
   /** Ce que chacun a eu en main (positif) ou a paye (negatif), en centimes. */
@@ -602,7 +739,9 @@ export type DetailCote = {
   depenses: number
   /** Dont les lives des intervenants (deja comptes dans depenses). */
   intervenants: number
-  /** Ce qui se partage en 70/30 : netVentes + commissions - depenses. */
+  /** Litiges perdus du mois (montant + frais), et frais non rendus des gagnes (regle 7). */
+  litiges: number
+  /** Ce qui se partage en 70/30 : netVentes + commissions - depenses - litiges. */
   base: number
   /** La base partagee : la part de chacun. */
   parts: Record<Cote, number>
@@ -618,6 +757,10 @@ export type EntreeRepartition = {
   commissions: readonly Commission[]
   depenses: readonly Depense[]
   reglements: readonly Reglement[]
+  /** Tous les litiges Stripe : le module garde ceux qui comptent ce mois (regle 7). */
+  litiges?: readonly Litige[]
+  /** La table des litiges n'a pas pu etre lue : rien n'est compte, et c'est dit. */
+  litigesNonLus?: boolean
   /** Les paiements hors Stripe du mois, non comptes (pas de compte connu). */
   horsStripe?: { nb: number; montant: number }
   /** offre_id -> nom, pour des libelles lisibles. */
@@ -630,16 +773,31 @@ export type Repartition = {
   /** Ce qui revient aux intervenants ce mois : leurs lives (depenses), et qui les paie. */
   intervenants: { intervenant: string; offreId: string; payePar: Cote; quantite: number; prixUnitaire: number; montant: number }[]
   communes: { total: number; parts: Record<Cote, number> }
-  /** Somme des parts de chacun (ventes, commissions, depenses). */
+  /** Somme des parts de chacun (ventes, commissions, depenses, litiges, dettes). */
   parts: Record<Cote, number>
-  /** Ce que chacun a eu en main, depenses payees deduites, AVANT les reglements. */
+  /** Ce que chacun a eu en main, depenses payees deduites, avances comprises, AVANT le reglement du mois. */
   enMain: Record<Cote, number>
-  /** Solde de Brice avant les reglements du mois. */
+  /** Solde de Brice du mois (dettes et avances comprises), avant le reglement du mois. */
   soldeAvantReglements: number
+  /** Le reglement du mois (nature reglement) : qui a paye combien a qui. */
   reglements: { melVersBrice: number; briceVersMel: number }
-  /** Solde de Brice apres les reglements : positif, Mel lui doit ce montant. */
+  avances: { melVersBrice: number; briceVersMel: number }
+  dettes: { melEnversBrice: number; briceEnversMel: number }
+  /** Le dernier reglement du mois, ou null : le mois n'est pas regle. */
+  regle: { le: string; de: Cote; a: Cote; montant: number } | null
+  /** Solde de Brice apres le reglement : positif, Mel lui doit ce montant. */
   solde: number
   phrase: string
+  /** La phrase de tete : « Ce mois-ci, Mel doit X € à Brice », « Octobre 2026 est réglé (02/11) »... */
+  phraseTete: string
+  /** Ce qui compose le solde, une phrase par flux. */
+  explication: string[]
+  litiges: {
+    /** Perdus (et frais non rendus des gagnes) comptes ce mois. */
+    perdus: { nb: number; montant: number }
+    /** En cours : rien n'est deduit, montant en jeu. */
+    enCours: { nb: number; montant: number }
+  }
   commissions: {
     recues: { nb: number; montant: number }
     /** Les attendues a ce jour (toutes glissent au plus tot vers le mois courant). */
@@ -661,8 +819,42 @@ const zero = (): Record<Cote, number> => ({ brice: 0, mel: 0 })
 function detailVide(): DetailCote {
   return {
     nbVentes: 0, encaisse: 0, rembourse: 0, frais: 0, fraisInconnus: 0,
-    netVentes: 0, commissions: 0, depenses: 0, intervenants: 0, base: 0, parts: zero(),
+    netVentes: 0, commissions: 0, depenses: 0, intervenants: 0, litiges: 0, base: 0, parts: zero(),
   }
+}
+
+/**
+ * « Mel doit 360 € à Brice (30 %) », « Brice doit 60 € à Mel (sa part) »,
+ * « Rien à reverser ». `effet` = l'effet d'une ligne sur le solde de Brice
+ * (sa part - ce qu'il a eu en main).
+ */
+function quiDoit(effet: number, precision?: number | string): string {
+  const p = precision === undefined ? '' : ` (${typeof precision === 'number' ? `${precision} %` : precision})`
+  if (effet > 0) return `Mel doit ${euros(effet)} à Brice${p}`
+  if (effet < 0) return `Brice doit ${euros(-effet)} à Mel${p}`
+  return 'Rien à reverser'
+}
+
+/**
+ * La phrase de tete du detail : « Ce mois-ci, Mel doit X € à Brice »,
+ * « Septembre 2026 n'est pas encore réglé : ... », « Octobre 2026 est réglé (02/11) ».
+ */
+export function phraseDeTete(o: {
+  mois: string; moisCourant: string; solde: number; regle: { le: string } | null
+}): string {
+  const mois = libelleMoisMaj(o.mois)
+  const solde = phraseSolde(o.solde)
+  if (o.regle) {
+    return o.solde === 0
+      ? `${mois} est réglé (${jourCourt(o.regle.le)})`
+      : `${mois} réglé le ${jourCourt(o.regle.le)}, mais il reste un écart : ${solde}`
+  }
+  if (o.mois >= o.moisCourant) {
+    return o.solde === 0 ? 'Ce mois-ci, personne ne doit rien à personne' : `Ce mois-ci, ${solde}`
+  }
+  return o.solde === 0
+    ? `${mois} : personne ne doit rien à personne`
+    : `${mois} n'est pas encore réglé : ${solde}`
 }
 
 /** Le solde de Brice d'un ensemble de lignes : ses parts - ce qu'il a eu en main. */
@@ -724,12 +916,16 @@ export function repartitionDuMois(e: EntreeRepartition): Repartition {
     const morceaux = [`${g.ventes.length} vente${g.ventes.length > 1 ? 's' : ''}`, `encaissé ${euros(encaisse)}`]
     if (rembourse) morceaux.push(`remboursé ${euros(rembourse)}`)
     morceaux.push(`frais Stripe ${euros(frais)}${inconnus ? ` (${inconnus} inconnus)` : ''}`)
+    const parts = partager(net, partBriceDuCote(g.cote))
     lignes.push({
       genre: 'ventes',
       libelle: `${nomOffre(g.offreId)} (Stripe de ${NOM_COTE[g.cote]})`,
+      phrase: `${nomOffre(g.offreId)} : ${NOM_COTE[g.cote]} a encaissé ${euros(net)} après frais Stripe`
+        + `${rembourse ? ' et remboursements' : ''}. ${quiDoit(parts.brice - enMain.brice,
+        100 - PART_APPORTEUR_PCT)}.`,
       cote: g.cote,
       enMain,
-      parts: partager(net, partBriceDuCote(g.cote)),
+      parts,
       detail: `${morceaux.join(', ')}, net ${euros(net)}`,
     })
   }
@@ -749,12 +945,16 @@ export function repartitionDuMois(e: EntreeRepartition): Repartition {
     cotes.mel.commissions += c.recue
     const enMain = zero()
     enMain[c.encaissePar] = c.recue
+    const parts = partsCommission(c.recue)
     lignes.push({
       genre: 'commission',
       libelle: `Commission ${c.partenaire}${c.client ? `, ${c.client}` : ''}`,
+      phrase: `Commission ${c.partenaire}${c.client ? ` (${c.client})` : ''} reçue par ${NOM_COTE[c.encaissePar]} : `
+        + `${euros(c.recue)}. ${quiDoit(parts.brice - enMain.brice,
+        c.encaissePar === 'mel' ? 100 - PART_APPORTEUR_PCT : PART_APPORTEUR_PCT)}.`,
       cote: 'mel',
       enMain,
-      parts: partsCommission(c.recue),
+      parts,
       detail: `reçue le ${libelleJour(c.recueLe ?? '')} par ${NOM_COTE[c.encaissePar]}, attendue ${euros(c.attendue)}`,
     })
   }
@@ -780,12 +980,16 @@ export function repartitionDuMois(e: EntreeRepartition): Repartition {
         deja.montant += d.montant
         parIntervenant.set(cle, deja)
       }
+      const parts = partager(-d.montant, partBriceDuCote(d.cote))
       lignes.push({
         genre: 'depense',
         libelle: d.libelle,
+        phrase: `${d.libelle}${lives ? ` (${libelleLives(lives.quantite, lives.prixUnitaire)})` : ''} : `
+          + `${NOM_COTE[d.payeePar]} a payé ${euros(d.montant)}`
+          + `${d.offreId ? ` pour ${nomOffre(d.offreId)}` : ''}. ${quiDoit(parts.brice - enMain.brice, 'sa part')}.`,
         cote: d.cote,
         enMain,
-        parts: partager(-d.montant, partBriceDuCote(d.cote)),
+        parts,
         detail: (lives ? `${libelleLives(lives.quantite, lives.prixUnitaire)}, ` : '')
           + `payée par ${NOM_COTE[d.payeePar]}, `
           + (d.offreId ? `produit ${nomOffre(d.offreId)} (côté ${NOM_COTE[d.cote]})` : `côté ${NOM_COTE[d.cote]}`),
@@ -801,6 +1005,8 @@ export function repartitionDuMois(e: EntreeRepartition): Repartition {
     lignes.push({
       genre: 'depense',
       libelle: d.libelle,
+      phrase: `${d.libelle} : ${NOM_COTE[d.payeePar]} a payé ${euros(d.montant)}, à partager `
+        + `${d.partBricePct === null ? 'en deux' : `(${pourcent(pct)} pour Brice)`}. ${quiDoit(parts.brice - enMain.brice, 'sa part')}.`,
       cote: null,
       enMain,
       parts,
@@ -808,13 +1014,114 @@ export function repartitionDuMois(e: EntreeRepartition): Repartition {
     })
   }
 
+  // Litiges (regle 7) : perdus ce mois (et frais non rendus des gagnes), en
+  // cours (avertissement seulement). La table pas lue : dit, rien de compte.
+  const litiges = { perdus: { nb: 0, montant: 0 }, enCours: { nb: 0, montant: 0 } }
+  const enCours: Litige[] = []
+  const devisesAutres = new Set<string>()
+  let fraisLitigeInconnus = 0
+  for (const l of [...(e.litiges ?? [])].sort((a, b) => a.ouvertLe.localeCompare(b.ouvertLe))) {
+    const etat = etatLitige(l.statut)
+    if (etat === 'en_cours') {
+      if (moisDe(l.ouvertLe) <= e.mois && e.mois <= e.moisCourant) enCours.push(l)
+      continue
+    }
+    const perte = perteDuLitige(l)
+    if (perte === 0 || moisDe(jourDuLitige(l)) !== e.mois) continue
+    if (l.devise !== 'EUR') devisesAutres.add(l.devise)
+    if (etat === 'perdu' && l.frais === null) fraisLitigeInconnus += 1
+    litiges.perdus.nb += 1
+    litiges.perdus.montant += perte
+    cotes[l.cote].litiges += perte
+    const enMain = zero()
+    enMain[l.cote] = -perte
+    const parts = partager(-perte, partBriceDuCote(l.cote))
+    const date = l.closLe
+      ? `clos le ${libelleJour(l.closLe)}`
+      : `daté de son ouverture le ${libelleJour(l.ouvertLe)}, Stripe ne datant pas la perte`
+    const frais = l.frais === null ? 'frais de litige inconnus' : `frais de litige ${euros(l.frais)}`
+    if (etat === 'perdu') {
+      lignes.push({
+        genre: 'litige',
+        libelle: `Litige perdu (Stripe de ${NOM_COTE[l.cote]}), ${date}`,
+        phrase: `Paiement contesté et perdu sur le Stripe de ${NOM_COTE[l.cote]} : ${euros(perte)} repartis `
+          + `(${euros(l.montant)} contestés${l.frais ? ` et ${euros(l.frais)} de frais` : ''}). `
+          + `${quiDoit(parts.brice - enMain.brice, 'sa part')}.`,
+        cote: l.cote,
+        enMain,
+        parts,
+        detail: `contesté ${euros(l.montant)}, ${frais}${l.restitue ? `, rendu ${euros(l.restitue)}` : ''}`
+          + `${l.motif ? `, motif ${l.motif}` : ''}${l.paiementId ? `, paiement ${l.paiementId}` : ''}`,
+      })
+    } else {
+      lignes.push({
+        genre: 'litige',
+        libelle: `Litige gagné, frais non rendus (Stripe de ${NOM_COTE[l.cote]}), ${date}`,
+        phrase: `Litige gagné sur le Stripe de ${NOM_COTE[l.cote]}, mais ${euros(perte)} de frais non rendus. `
+          + `${quiDoit(parts.brice - enMain.brice, 'sa part')}.`,
+        cote: l.cote,
+        enMain,
+        parts,
+        detail: `contesté ${euros(l.montant)}, rendu ${euros(l.restitue ?? 0)}, ${frais}`
+          + `${l.paiementId ? `, paiement ${l.paiementId}` : ''}`,
+      })
+    }
+  }
+
+  // Dettes du mois (regle 8) : la somme passe de la part de celui qui doit a
+  // celle de l'autre, sans argent qui bouge.
+  const dettes = { melEnversBrice: 0, briceEnversMel: 0 }
+  const valides = e.reglements.filter(r => r.mois === e.mois && r.de !== r.a)
+  for (const r of valides) {
+    if ((r.nature ?? 'avance') !== 'dette') continue
+    if (r.de === 'mel') dettes.melEnversBrice += r.montant
+    else dettes.briceEnversMel += r.montant
+    const p = zero()
+    p[r.de] = -r.montant
+    p[r.a] = r.montant
+    lignes.push({
+      genre: 'dette',
+      libelle: `${NOM_COTE[r.de]} doit ${euros(r.montant)} à ${NOM_COTE[r.a]}`,
+      phrase: `${phraseReglement(r)}.`,
+      cote: null,
+      enMain: zero(),
+      parts: p,
+      detail: r.note ? r.note : `noté le ${libelleJour(r.regleLe)}`,
+    })
+  }
+
   // Base et parts de chaque cote : la somme de SES lignes (ventes,
-  // commissions, depenses rattachees), arrondies ligne a ligne.
+  // commissions, depenses rattachees, litiges), arrondies ligne a ligne.
   for (const c of COTES) {
     const d = cotes[c]
-    d.base = d.netVentes + d.commissions - d.depenses
+    d.base = d.netVentes + d.commissions - d.depenses - d.litiges
     d.parts = lignes.filter(l => l.cote === c).reduce(
       (s, l) => ({ brice: s.brice + l.parts.brice, mel: s.mel + l.parts.mel }), zero())
+  }
+
+  // Avances du mois : en main + pour qui recoit, - pour qui verse, parts nulles.
+  const avances = { melVersBrice: 0, briceVersMel: 0 }
+  const versement = (r: Reglement, genre: 'avance' | 'reglement'): LigneGrandLivre => {
+    const em = zero()
+    em[r.a] = r.montant
+    em[r.de] = -r.montant
+    return {
+      genre,
+      libelle: genre === 'avance'
+        ? `${NOM_COTE[r.de]} a avancé ${euros(r.montant)} à ${NOM_COTE[r.a]}`
+        : `Règlement du mois : ${NOM_COTE[r.de]} a payé ${euros(r.montant)} à ${NOM_COTE[r.a]}`,
+      phrase: `${phraseReglement({ ...r, nature: genre })}.`,
+      cote: null,
+      enMain: em,
+      parts: zero(),
+      detail: `le ${libelleJour(r.regleLe)}${r.note ? `, ${r.note}` : ''}`,
+    }
+  }
+  for (const r of valides) {
+    if ((r.nature ?? 'avance') !== 'avance') continue
+    if (r.de === 'mel') avances.melVersBrice += r.montant
+    else avances.briceVersMel += r.montant
+    lignes.push(versement(r, 'avance'))
   }
 
   const parts = zero()
@@ -827,23 +1134,16 @@ export function repartitionDuMois(e: EntreeRepartition): Repartition {
   }
   const soldeAvantReglements = parts.brice - enMain.brice
 
-  // Reglements du mois : en main de celui qui recoit, parts nulles.
+  // Le reglement du mois : compte comme une avance, apres le solde du mois,
+  // et ferme le mois (le dernier fait foi pour la date).
   const reglements = { melVersBrice: 0, briceVersMel: 0 }
-  for (const r of e.reglements) {
-    if (r.mois !== e.mois || r.de === r.a) continue
+  let regle: Repartition['regle'] = null
+  for (const r of [...valides].sort((a, b) => a.regleLe.localeCompare(b.regleLe))) {
+    if (r.nature !== 'reglement') continue
     if (r.de === 'mel') reglements.melVersBrice += r.montant
     else reglements.briceVersMel += r.montant
-    const em = zero()
-    em[r.a] = r.montant
-    em[r.de] = -r.montant
-    lignes.push({
-      genre: 'reglement',
-      libelle: `Règlement de ${NOM_COTE[r.de]} à ${NOM_COTE[r.a]}`,
-      cote: null,
-      enMain: em,
-      parts: zero(),
-      detail: `le ${libelleJour(r.regleLe)}`,
-    })
+    lignes.push(versement(r, 'reglement'))
+    regle = { le: r.regleLe, de: r.de, a: r.a, montant: r.montant }
   }
   const solde = soldeDesLignes(lignes)
 
@@ -854,6 +1154,21 @@ export function repartitionDuMois(e: EntreeRepartition): Repartition {
   }
   if (e.horsStripe && e.horsStripe.nb > 0) {
     avertissements.push(`${e.horsStripe.nb} paiement${e.horsStripe.nb > 1 ? 's' : ''} hors Stripe (PayPal, virement...) pour ${euros(e.horsStripe.montant)} : non comptés, faute de savoir qui les a encaissés.`)
+  }
+  if (e.litigesNonLus) {
+    avertissements.push('Litiges non lus (table des litiges absente ou illisible) : aucun paiement contesté n\'est déduit ce mois-ci.')
+  }
+  for (const l of enCours) {
+    litiges.enCours.nb += 1
+    litiges.enCours.montant += l.montant
+    avertissements.push(`Litige en cours sur le Stripe de ${NOM_COTE[l.cote]} : ${euros(l.montant)} en jeu`
+      + ` (ouvert le ${libelleJour(l.ouvertLe)}${l.motif ? `, motif ${l.motif}` : ''}). Rien n'est déduit tant qu'il n'est pas perdu.`)
+  }
+  if (fraisLitigeInconnus) {
+    avertissements.push(`Frais de litige inconnus sur ${fraisLitigeInconnus} litige${fraisLitigeInconnus > 1 ? 's' : ''} perdu${fraisLitigeInconnus > 1 ? 's' : ''} : seul le montant contesté est déduit.`)
+  }
+  if (devisesAutres.size) {
+    avertissements.push(`Litige en ${[...devisesAutres].join(', ')} compté comme des euros : à vérifier.`)
   }
 
   return {
@@ -866,8 +1181,14 @@ export function repartitionDuMois(e: EntreeRepartition): Repartition {
     enMain,
     soldeAvantReglements,
     reglements,
+    avances,
+    dettes,
+    regle,
     solde,
     phrase: phraseSolde(solde),
+    phraseTete: phraseDeTete({ mois: e.mois, moisCourant: e.moisCourant, solde, regle }),
+    explication: lignes.map(l => l.phrase),
+    litiges,
     commissions: {
       recues: { nb: nbRecues, montant: recues },
       attendues: { nb: nbAttendues, montant: attendues, glissees },
@@ -1121,10 +1442,18 @@ export function lireParamsRepartition(
     return { libelle, montant, mois: mois[0], payee_par: payeePar, rattachement, cote: coteProduit, offre_id: offreId, part_brice_pct: null, note }
   }
 
-  // reglement
+  // reglement : une dette, une avance, ou le reglement du mois (regle 8).
+  // Sans nature (carte d'avant le 17/10) : le reglement du mois, le sens de
+  // « c'est réglé ».
+  const nature = p.nature === null || p.nature === undefined || p.nature === '' ? 'reglement' : lireNature(p.nature)
+  if (!nature) return "nature : dette (de doit la somme à a), avance (de a avancé de l'argent à a pendant le mois) ou reglement (de a payé le solde du mois à a)."
   const de = lireCote(p.de)
   const a = lireCote(p.a)
-  if (!de || !a) return 'de et a : brice ou mel (qui a versé, qui a reçu).'
+  if (!de || !a) {
+    return nature === 'dette'
+      ? 'de et a : brice ou mel (qui doit, à qui).'
+      : 'de et a : brice ou mel (qui a payé, qui a reçu).'
+  }
   if (de === a) return 'de et a doivent être deux personnes différentes.'
   const montant = lireEuros(p.montant, 'montant', { max: 1000000 })
   if (typeof montant === 'string') return montant
@@ -1132,7 +1461,7 @@ export function lireParamsRepartition(
   if (typeof jour === 'string') return jour
   const mois = lireMois(p.mois, ctx.moisCourant)
   if (typeof mois === 'string') return mois
-  return { de, a, montant, le: jour[0], mois: mois[0], note }
+  return { nature, de, a, montant, le: jour[0], mois: mois[0], note }
 }
 
 const eur = (v: unknown) => euros(centimes(v) ?? 0)
@@ -1190,9 +1519,19 @@ export function resumeRepartition(type: TypeRepartition, p: Record<string, unkno
       return `Ajouter une dépense à ${libelleMois(String(p.mois))} : ${p.libelle}, ${eur(p.montant)}, `
         + `payée par ${NOM_COTE[p.payee_par as Cote]}, ${rattache}.${note}`
     }
-    case 'reglement':
-      return `Noter un règlement : ${NOM_COTE[p.de as Cote]} a versé ${eur(p.montant)} à ${NOM_COTE[p.a as Cote]} `
-        + `le ${libelleJour(String(p.le))}, sur le solde ${deMois(String(p.mois))}.${note}`
+    case 'reglement': {
+      const de = NOM_COTE[p.de as Cote]
+      const a = NOM_COTE[p.a as Cote]
+      if (p.nature === 'dette') {
+        return `Noter une dette ${deMois(String(p.mois))} : ${de} doit ${eur(p.montant)} à ${a}.${note}`
+      }
+      if (p.nature === 'avance') {
+        return `Noter une avance ${deMois(String(p.mois))} : ${de} a avancé ${eur(p.montant)} à ${a} `
+          + `le ${libelleJour(String(p.le))}.${note}`
+      }
+      return `Régler ${libelleMois(String(p.mois))} : ${de} a payé ${eur(p.montant)} à ${a} `
+        + `le ${libelleJour(String(p.le))}. Le mois sera noté réglé.${note}`
+    }
   }
 }
 

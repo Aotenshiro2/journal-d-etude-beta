@@ -20,7 +20,8 @@ import { accorderAccesBroker, prerequisAccesBroker } from '@/lib/liveclub/acces'
 import { nomBot } from '@/lib/liveclub/config'
 import { relationAbsente, uuidDeActeur } from '@/lib/liveclub/pur'
 import {
-  type Commission, type Cote, type Depense, type DepenseLives, type Reglement, type Repartition,
+  type Commission, type Cote, type Depense, type DepenseLives, type Litige, type NatureReglement, type Reglement, type Repartition,
+  litigeDeLigne, phraseReglement,
   type TarifIntervenant, type TauxPartenaire, type TypeRepartition, type UniteIntervenant, type Vente,
   NOM_COTE, PART_APPORTEUR_PCT, PART_BRICE_COMMUNE_PCT, bornesMois, centimes, cleIntervenant, commissionDuTaux, coteDuCompte, deMois,
   depenseDesLives, etapeApresDepot, etapeApresMarquage,
@@ -31,6 +32,7 @@ import {
 
 const MIGRATION = '20261008170000_cockpit_repartition.sql'
 const MIGRATION_LIVES = '20261008190000_cockpit_intervenants_par_live.sql'
+const MIGRATION_NATURE = '20261018093000_cockpit_reglements_nature.sql'
 
 /** Une colonne manque (42703) : la migration du tarif par live n'est pas encore appliquee. */
 function colonneAbsente(err: unknown): boolean {
@@ -140,6 +142,8 @@ type LigneDepense = {
 
 type LigneReglement = {
   reglement_id: string
+  /** null : colonne pas encore en base (20261018093000), donc une avance. */
+  nature: NatureReglement | null
   de: Cote
   a: Cote
   montant: number
@@ -259,14 +263,53 @@ async function livesDejaDeclares(intervenant: string, offreId: string, mois: str
       and offre_id = ${offreId} and mois = ${mois} and retire_le is null`
 }
 
-function lireReglements(mois: string): Promise<LigneReglement[]> {
-  return prisma.$queryRaw<LigneReglement[]>`
-    select reglement_id::text as reglement_id, de, a, montant::float8 as montant, regle_le::text as regle_le,
-           mois, note, via, pose_le
-    from public.cockpit_reglements
-    where mois = ${mois} and retire_le is null
-    order by regle_le, pose_le`
+async function lireReglements(mois: string): Promise<LigneReglement[]> {
+  try {
+    return await prisma.$queryRaw<LigneReglement[]>`
+      select reglement_id::text as reglement_id, nature, de, a, montant::float8 as montant, regle_le::text as regle_le,
+             mois, note, via, pose_le
+      from public.cockpit_reglements
+      where mois = ${mois} and retire_le is null
+      order by regle_le, pose_le`
+  } catch (err) {
+    // Base d'avant la colonne nature (20261018093000) : tout est une avance.
+    if (!colonneAbsente(err)) throw err
+    return prisma.$queryRaw<LigneReglement[]>`
+      select reglement_id::text as reglement_id, null::text as nature, de, a, montant::float8 as montant,
+             regle_le::text as regle_le, mois, note, via, pose_le
+      from public.cockpit_reglements
+      where mois = ${mois} and retire_le is null
+      order by regle_le, pose_le`
+  }
 }
+
+type LigneLitige = {
+  litige_id: string
+  compte: string | null
+  paiement_id: string | null
+  montant: number
+  devise: string | null
+  statut: string
+  motif: string | null
+  ouvert_le: Date
+  clos_le: Date | null
+  frais: number | null
+  restitue: number | null
+}
+
+/** Tous les litiges Stripe (une poignee) : le module pur garde ceux qui comptent dans le mois (regle 7). */
+function lireLitiges(): Promise<LigneLitige[]> {
+  return prisma.$queryRaw<LigneLitige[]>`
+    select litige_id, compte, paiement_id, montant::float8 as montant, devise, statut, motif,
+           ouvert_le, clos_le, frais::float8 as frais, restitue::float8 as restitue
+    from public.cockpit_litiges
+    order by ouvert_le`
+}
+
+const versReglement = (r: LigneReglement): Reglement => ({
+  id: r.reglement_id, nature: r.nature ?? 'avance', de: r.de, a: r.a, montant: centimes(r.montant) ?? 0,
+  regleLe: r.regle_le, mois: r.mois, note: r.note,
+})
 
 async function lireNomsOffres(): Promise<Record<string, string>> {
   const lignes = await prisma.$queryRaw<{ offre_id: string; nom: string }[]>`
@@ -380,13 +423,22 @@ function tarifsDuMois(
 /** Tout ce qu'il faut pour un mois, et le calcul. */
 async function chargerMois(mois: string, moisCourant: string) {
   const absentes = new Set<string>()
-  const [paiements, commissions, intervenants, depenses, reglements, nomsOffres] = await Promise.all([
+  // Les litiges ne font jamais tomber la repartition : table absente ou
+  // illisible, aucun litige compte, et un avertissement le dit (regle 7).
+  let litigesNonLus = false
+  const [paiements, commissions, intervenants, depenses, reglements, nomsOffres, litiges] = await Promise.all([
     lirePaiements(mois),
     lireOuVide('cockpit_commissions', absentes, lireCommissions),
     lireOuVide('cockpit_intervenants', absentes, lireIntervenants),
     lireOuVide('cockpit_depenses', absentes, () => lireDepenses(mois)),
     lireOuVide('cockpit_reglements', absentes, () => lireReglements(mois)),
     lireNomsOffres().catch(() => ({} as Record<string, string>)),
+    lireLitiges().catch((err): LigneLitige[] => {
+      litigesNonLus = true
+      if (relationAbsente(err)) absentes.add('cockpit_litiges')
+      else console.error('[repartition] litiges illisibles', erreurLisible(err))
+      return []
+    }),
   ])
 
   const ventes: Vente[] = []
@@ -407,9 +459,9 @@ async function chargerMois(mois: string, moisCourant: string) {
     ventes,
     commissions: commissions.map(versCommission),
     depenses: depenses.map(versDepense),
-    reglements: reglements.map((r): Reglement => ({
-      id: r.reglement_id, de: r.de, a: r.a, montant: centimes(r.montant) ?? 0, regleLe: r.regle_le, mois: r.mois,
-    })),
+    reglements: reglements.map(versReglement),
+    litiges: litiges.map(litigeDeLigne).filter((l): l is Litige => l !== null),
+    litigesNonLus,
     horsStripe,
     nomsOffres,
   })
@@ -429,13 +481,25 @@ export function repartitionEnEuros(r: Repartition) {
       nb_ventes: d.nbVentes, encaisse: versEuros(d.encaisse), rembourse: versEuros(d.rembourse),
       frais: versEuros(d.frais), frais_inconnus: d.fraisInconnus,
       net_ventes: versEuros(d.netVentes), commissions: versEuros(d.commissions), depenses: versEuros(d.depenses),
-      intervenants: versEuros(d.intervenants), base: versEuros(d.base), parts: paire(d.parts),
+      intervenants: versEuros(d.intervenants), litiges: versEuros(d.litiges), base: versEuros(d.base), parts: paire(d.parts),
     }
   }
   return {
     mois: r.mois,
     libelle_mois: libelleMois(r.mois),
     phrase: r.phrase,
+    // La phrase de tete et ce qui compose le solde, en phrases (Brice, 17/10 :
+    // « on se doit de rendre ces ecrans plus limpides »).
+    phrase_tete: r.phraseTete,
+    explication: r.explication,
+    etat_du_mois: r.regle ? 'regle' : 'a_regler',
+    regle: r.regle ? { le: r.regle.le, de: r.regle.de, a: r.regle.a, montant: versEuros(r.regle.montant) } : null,
+    avances: { mel_vers_brice: versEuros(r.avances.melVersBrice), brice_vers_mel: versEuros(r.avances.briceVersMel) },
+    dettes: { mel_envers_brice: versEuros(r.dettes.melEnversBrice), brice_envers_mel: versEuros(r.dettes.briceEnversMel) },
+    litiges: {
+      perdus: { nb: r.litiges.perdus.nb, montant: versEuros(r.litiges.perdus.montant) },
+      en_cours: { nb: r.litiges.enCours.nb, montant: versEuros(r.litiges.enCours.montant) },
+    },
     solde_brice: versEuros(r.solde),
     solde_avant_reglements: versEuros(r.soldeAvantReglements),
     formule: "Solde de Brice = somme de ses parts - (ce qu'il a eu en main - ce qu'il a payé). Positif : Mel lui doit ce montant. Négatif : il doit à Mel. Les règlements du mois s'en déduisent.",
@@ -448,6 +512,8 @@ export function repartitionEnEuros(r: Repartition) {
         + 'Rattachée à un côté ou à un produit, elle est déduite de ce côté avant son partage.',
       commission: "Une commission compte dans le mois où elle est reçue. Tant qu'elle ne l'est pas, elle glisse de mois en mois.",
       intervenant: "Un intervenant touche une somme fixe par live, rien sur les ventes. Chaque mois, ses lives (nombre x tarif en vigueur ce mois-là) font une dépense rattachée à son produit, déduite de ce côté avant le partage.",
+      litige: "Un paiement contesté et perdu sort du partage, avec ses frais de litige, du côté du Stripe qui l'avait encaissé, le mois où il est perdu. Un litige en cours ne change rien tant qu'il n'est pas perdu.",
+      reglement: "Pendant le mois, les sommes s'accumulent : une dette (l'un doit une somme à l'autre, hors des ventes) ou une avance (l'un a donné de l'argent à l'autre). En fin de mois, celui qui doit paie le solde : le mois est réglé.",
     },
     part_apporteur_pct: PART_APPORTEUR_PCT,
     parts: paire(r.parts),
@@ -468,7 +534,7 @@ export function repartitionEnEuros(r: Repartition) {
       },
     },
     lignes: r.lignes.map(l => ({
-      genre: l.genre, libelle: l.libelle, cote: l.cote, detail: l.detail ?? null,
+      genre: l.genre, libelle: l.libelle, phrase: l.phrase, cote: l.cote, detail: l.detail ?? null,
       en_main: paire(l.enMain), parts: paire(l.parts),
       lives: l.lives
         ? { intervenant: l.lives.intervenant, quantite: l.lives.quantite, prix_unitaire: versEuros(l.lives.prixUnitaire) }
@@ -580,8 +646,9 @@ export async function repartitionPourCockpit(mois: string) {
       note: d.note, via: d.via,
     })),
     reglements: m.reglements.map(r => ({
-      reglement_id: r.reglement_id, de: r.de, a: r.a, montant: r.montant, regle_le: r.regle_le, mois: r.mois,
-      note: r.note, via: r.via,
+      reglement_id: r.reglement_id, nature: r.nature ?? 'avance', de: r.de, a: r.a, montant: r.montant,
+      regle_le: r.regle_le, mois: r.mois, note: r.note, via: r.via,
+      phrase: phraseReglement(versReglement(r)),
     })),
     offres: m.nomsOffres,
     tables_absentes: [...absentes],
@@ -1195,15 +1262,31 @@ async function executer(a: ActionAgent, posePar: string, acteur: string): Promis
       + `\nRien à faire : elle compte dans la répartition ${deMois(mois)}.`
   }
 
-  // reglement
+  // reglement : une dette, une avance ou le reglement du mois (regle 8).
   const mois = String(p.mois)
-  await prisma.$executeRaw`
-    insert into public.cockpit_reglements (de, a, montant, regle_le, mois, note, pose_par, via)
-    values (${String(p.de)}, ${String(p.a)}, ${Number(p.montant)}::numeric, ${String(p.le)}::date, ${mois},
-            ${note}, ${posePar}::uuid, 'agent')`
+  const nature = (p.nature as NatureReglement | undefined) ?? 'reglement'
+  try {
+    await prisma.$executeRaw`
+      insert into public.cockpit_reglements (nature, de, a, montant, regle_le, mois, note, pose_par, via)
+      values (${nature}, ${String(p.de)}, ${String(p.a)}, ${Number(p.montant)}::numeric, ${String(p.le)}::date, ${mois},
+              ${note}, ${posePar}::uuid, 'agent')`
+  } catch (err) {
+    if (!colonneAbsente(err)) throw err
+    // Base d'avant la colonne nature (20261018093000) : une ligne y vaut une
+    // avance. Le reste ne peut pas etre note sans fausser le solde.
+    if (nature !== 'avance') {
+      throw new RefusAction(`La nature des règlements n'est pas encore en base (migration ${MIGRATION_NATURE} à appliquer) : rien n'est noté.`)
+    }
+    await prisma.$executeRaw`
+      insert into public.cockpit_reglements (de, a, montant, regle_le, mois, note, pose_par, via)
+      values (${String(p.de)}, ${String(p.a)}, ${Number(p.montant)}::numeric, ${String(p.le)}::date, ${mois},
+              ${note}, ${posePar}::uuid, 'agent')`
+  }
   const solde = await phraseSoldeDuMois(mois)
-  return `Règlement noté : ${NOM_COTE[p.de as Cote]} a versé ${euros(centimes(p.montant) ?? 0)} à ${NOM_COTE[p.a as Cote]} `
-    + `le ${libelleJour(String(p.le))}, sur le solde ${deMois(mois)}.`
-    + (solde ? `\n${solde.replace(/\.$/, '')} après ce règlement.` : '')
+  const phrase = phraseReglement({
+    nature, de: p.de as Cote, a: p.a as Cote, montant: centimes(p.montant) ?? 0, regleLe: String(p.le), mois, note,
+  })
+  return `Noté : ${phrase}.`
+    + (solde ? `\n${solde}` : '')
     + '\nRien à faire.'
 }

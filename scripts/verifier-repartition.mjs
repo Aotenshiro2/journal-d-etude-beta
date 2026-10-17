@@ -14,6 +14,7 @@ import {
   repartitionDuMois, phraseSolde, soldeDesLignes, slugPartenaire,
   TYPES_REPARTITION, estTypeRepartition, lireParamsRepartition, resumeRepartition,
   etapeApresDepot, etapeApresMarquage,
+  etatLitige, litigeDeLigne, jourDuLitige, perteDuLitige, phraseReglement, phraseDeTete,
 } from '../src/lib/repartition/pur.ts'
 
 let n = 0
@@ -383,7 +384,7 @@ test('le mois complet, puis un reglement qui se deduit du solde', () => {
   // Brice regle 20 € a Mel : il reste 61,90 €.
   const avecReglement = repartitionDuMois({
     ...entree,
-    reglements: [{ id: 'r1', de: 'brice', a: 'mel', montant: 2000, regleLe: '2026-10-31', mois: MOIS }],
+    reglements: [{ id: 'r1', nature: 'reglement', de: 'brice', a: 'mel', montant: 2000, regleLe: '2026-10-31', mois: MOIS }],
   })
   assert.equal(avecReglement.soldeAvantReglements, -8190)
   assert.deepEqual(avecReglement.reglements, { melVersBrice: 0, briceVersMel: 2000 })
@@ -396,8 +397,8 @@ test('le mois complet, puis un reglement qui se deduit du solde', () => {
   const solde = repartitionDuMois({
     ...entree,
     reglements: [
-      { id: 'r1', de: 'brice', a: 'mel', montant: 8190, regleLe: '2026-11-02', mois: MOIS },
-      { id: 'r2', de: 'mel', a: 'brice', montant: 99999, regleLe: '2026-11-02', mois: '2026-09' },
+      { id: 'r1', nature: 'reglement', de: 'brice', a: 'mel', montant: 8190, regleLe: '2026-11-02', mois: MOIS },
+      { id: 'r2', nature: 'reglement', de: 'mel', a: 'brice', montant: 99999, regleLe: '2026-11-02', mois: '2026-09' },
     ],
   })
   assert.equal(solde.solde, 0)
@@ -439,6 +440,164 @@ test('ventes collectees : compte, remboursement, frais inconnus, hors Stripe', (
   })
   assert.equal(livesSeptembre.lignes.length, 0)
   assert.deepEqual(livesSeptembre.intervenants, [])
+})
+
+// Le cas reel de juin 2026 (regle 7) : une vente Live Club de 99 € sur le
+// Stripe de Mel (5,60 € de frais), contestee et perdue (12,91 € de frais de
+// litige), Stripe ne donnant pas de date de perte.
+const VENTE_JUIN = { id: 'stripe:ch_juin', cote: 'mel', offreId: 'live-club', jour: '2026-06-03', encaisse: 9900, rembourse: 0, frais: 560 }
+const LITIGE_PERDU = {
+  id: 'du_1', cote: 'mel', paiementId: 'stripe:ch_juin', statut: 'lost', motif: 'fraudulent', montant: 9900, devise: 'EUR',
+  frais: 1291, restitue: 0, ouvertLe: '2026-06-19', closLe: null,
+}
+const JUIN = { mois: '2026-06', moisCourant: '2026-10', ventes: [VENTE_JUIN], commissions: [], depenses: [], reglements: [], nomsOffres: { 'live-club': 'Live Club' } }
+
+test('litige perdu : il sort de la base du cote qui l a encaisse, le mois de la perte', () => {
+  const sans = repartitionDuMois(JUIN)
+  // Sans litige : 93,40 € net, 30 % a Brice = 28,02 €, que Mel lui doit.
+  assert.equal(sans.solde, 2802)
+  assert.equal(sans.cotes.mel.litiges, 0)
+  assert.equal(sans.lignes.filter(l => l.genre === 'litige').length, 0)
+
+  const r = repartitionDuMois({ ...JUIN, litiges: [LITIGE_PERDU] })
+  const l = r.lignes.find(x => x.genre === 'litige')
+  // 99 + 12,91 = 111,91 € repartis, en main negatif de Mel, parts 30/70 negatives.
+  assert.deepEqual(l.enMain, { brice: 0, mel: -11191 })
+  assert.deepEqual(l.parts, { brice: -3357, mel: -7834 })
+  assert.equal(l.cote, 'mel')
+  assert.ok(l.libelle.includes('ouverture') && l.libelle.includes('19 juin 2026'), l.libelle)
+  assert.ok(l.phrase.includes('Brice doit 33,57 € à Mel'), l.phrase)
+  assert.equal(r.cotes.mel.litiges, 11191)
+  assert.equal(r.cotes.mel.base, 9340 - 11191)
+  assert.deepEqual(r.litiges.perdus, { nb: 1, montant: 11191 })
+  // Solde : 28,02 - 33,57 = -5,55 : Brice doit 5,55 € a Mel.
+  assert.equal(r.solde, 2802 - 3357)
+  assert.equal(r.phrase, 'Brice doit 5,55 € à Mel')
+  assert.equal(soldeDesLignes(r.lignes), r.solde)
+  assert.equal(r.parts.brice + r.parts.mel, r.enMain.brice + r.enMain.mel)
+
+  // Perdu en juillet (clos_le donne) : juin ne bouge pas, juillet porte la ligne.
+  const tardif = { ...LITIGE_PERDU, closLe: '2026-07-04' }
+  assert.equal(repartitionDuMois({ ...JUIN, litiges: [tardif] }).solde, 2802)
+  const juillet = repartitionDuMois({ ...JUIN, mois: '2026-07', litiges: [tardif] })
+  assert.equal(juillet.solde, -3357)
+  assert.ok(juillet.lignes[0].libelle.includes('clos le 4 juillet 2026'), juillet.lignes[0].libelle)
+
+  // Frais inconnus : seul le montant conteste sort, et c'est dit.
+  const sansFrais = repartitionDuMois({ ...JUIN, litiges: [{ ...LITIGE_PERDU, frais: null }] })
+  assert.equal(sansFrais.cotes.mel.litiges, 9900)
+  assert.ok(sansFrais.avertissements.some(a => a.includes('Frais de litige inconnus')))
+
+  // Cote Brice : la perte est de son cote, 70 % pour lui.
+  const brice = repartitionDuMois({ ...JUIN, ventes: [], litiges: [{ ...LITIGE_PERDU, cote: 'brice', frais: 0 }] })
+  assert.deepEqual(brice.lignes[0].parts, { brice: -6930, mel: -2970 })
+  assert.equal(brice.solde, -6930 + 9900)
+  for (const x of r.lignes) assert.ok(!HORS_CLAVIER.test(`${x.libelle} ${x.detail ?? ''} ${x.phrase}`), x.libelle)
+})
+
+test('litige en cours : rien ne bouge, un avertissement dit le montant en jeu', () => {
+  const ouvert = { ...LITIGE_PERDU, statut: 'needs_response' }
+  const r = repartitionDuMois({ ...JUIN, moisCourant: '2026-06', litiges: [ouvert] })
+  assert.equal(r.solde, 2802)
+  assert.equal(r.lignes.filter(l => l.genre === 'litige').length, 0)
+  assert.deepEqual(r.litiges.enCours, { nb: 1, montant: 9900 })
+  const a = r.avertissements.find(x => x.startsWith('Litige en cours'))
+  assert.ok(a && a.includes('99 € en jeu') && a.includes('Stripe de Mel'), a)
+  assert.ok(!HORS_CLAVIER.test(a))
+  // Avant son ouverture, pas d'avertissement.
+  assert.equal(repartitionDuMois({ ...JUIN, mois: '2026-05', moisCourant: '2026-06', litiges: [ouvert] }).litiges.enCours.nb, 0)
+  // warning_under_review, under_review : en cours aussi ; warning_closed, prevented : clos, rien.
+  assert.equal(etatLitige('under_review'), 'en_cours')
+  assert.equal(etatLitige('warning_needs_response'), 'en_cours')
+  assert.equal(etatLitige('warning_closed'), 'clos')
+  assert.equal(etatLitige('prevented'), 'clos')
+  assert.equal(repartitionDuMois({ ...JUIN, litiges: [{ ...LITIGE_PERDU, statut: 'warning_closed' }] }).solde, 2802)
+})
+
+test('litige gagne : rien, sauf des frais non rendus', () => {
+  const gagne = { ...LITIGE_PERDU, statut: 'won', restitue: 9900, frais: 1500, closLe: '2026-07-10' }
+  assert.equal(perteDuLitige(gagne), 1500)
+  assert.equal(perteDuLitige({ ...gagne, frais: 0 }), 0)
+  // Rien de rendu encore : rien (ce n'est pas une perte).
+  assert.equal(perteDuLitige({ ...gagne, restitue: 0 }), 0)
+  assert.equal(perteDuLitige({ ...gagne, restitue: null }), 0)
+  // Frais rendus avec le montant : rien.
+  assert.equal(perteDuLitige({ ...gagne, restitue: 11400 }), 0)
+  // Juin ne bouge pas ; juillet (cloture) porte les frais non rendus.
+  assert.equal(repartitionDuMois({ ...JUIN, litiges: [gagne] }).solde, 2802)
+  const juillet = repartitionDuMois({ ...JUIN, mois: '2026-07', ventes: [], litiges: [gagne] })
+  assert.equal(juillet.lignes.length, 1)
+  assert.ok(juillet.lignes[0].libelle.startsWith('Litige gagné, frais non rendus'))
+  assert.deepEqual(juillet.lignes[0].enMain, { brice: 0, mel: -1500 })
+  assert.equal(juillet.solde, -450)
+})
+
+test('litiges non lus, et lecture d une ligne de la base', () => {
+  const r = repartitionDuMois({ ...JUIN, litigesNonLus: true })
+  assert.equal(r.solde, 2802)
+  assert.ok(r.avertissements.some(a => a.startsWith('Litiges non lus')))
+  // Sans le champ : aucun avertissement de plus, aucun effet.
+  assert.deepEqual(repartitionDuMois(JUIN).avertissements, [])
+
+  const l = litigeDeLigne({
+    litige_id: 'du_1', compte: 'melanie', paiement_id: 'stripe:ch_x', montant: 99, devise: 'eur', statut: 'lost',
+    motif: 'fraudulent', ouvert_le: new Date('2026-06-19T00:50:31Z'), clos_le: null, frais: '12.91', restitue: 0,
+  })
+  assert.deepEqual(
+    { cote: l.cote, montant: l.montant, frais: l.frais, restitue: l.restitue, ouvertLe: l.ouvertLe, closLe: l.closLe, devise: l.devise },
+    { cote: 'mel', montant: 9900, frais: 1291, restitue: 0, ouvertLe: '2026-06-19', closLe: null, devise: 'EUR' })
+  assert.equal(jourDuLitige(l), '2026-06-19')
+  assert.equal(litigeDeLigne({ ...l, litige_id: 'x', compte: 'paypal', paiement_id: null, statut: 'lost', ouvert_le: '2026-06-19', clos_le: null, montant: 1, devise: 'EUR', motif: null, frais: null, restitue: null }), null)
+})
+
+test('dettes, avances, puis le reglement du mois', () => {
+  const base = {
+    mois: MOIS, moisCourant: MOIS, ventes: [VENTE_MEL, VENTE_BRICE],
+    commissions: COMMISSIONS, depenses: [DEPENSE_COMMUNE, DEPENSE_LIVES], reglements: [],
+  }
+  assert.equal(repartitionDuMois(base).solde, -8190)
+  const dette = { id: 'r-d', nature: 'dette', de: 'brice', a: 'mel', montant: 3428, regleLe: '2026-10-15', mois: MOIS, note: 'part Skool depuis mai' }
+  const avance = { id: 'r-a', nature: 'avance', de: 'mel', a: 'brice', montant: 20000, regleLe: '2026-10-12', mois: MOIS, note: 'frais de déplacement' }
+  const r = repartitionDuMois({ ...base, reglements: [dette, avance] })
+  // La dette deplace 34,28 € de la part de Brice vers celle de Mel, sans argent qui bouge.
+  const ld = r.lignes.find(l => l.genre === 'dette')
+  assert.deepEqual(ld.parts, { brice: -3428, mel: 3428 })
+  assert.deepEqual(ld.enMain, { brice: 0, mel: 0 })
+  assert.equal(ld.phrase, 'Brice doit 34,28 € à Mel : part Skool depuis mai.')
+  // L'avance de Mel : Brice a eu 200 € en main, il doit d'autant plus.
+  const la = r.lignes.find(l => l.genre === 'avance')
+  assert.deepEqual(la.enMain, { brice: 20000, mel: -20000 })
+  assert.equal(la.phrase, 'Mel a avancé 200 € à Brice le 12/10 : frais de déplacement.')
+  assert.equal(r.solde, -8190 - 3428 - 20000)
+  assert.equal(r.soldeAvantReglements, r.solde)
+  assert.deepEqual(r.dettes, { melEnversBrice: 0, briceEnversMel: 3428 })
+  assert.deepEqual(r.avances, { melVersBrice: 20000, briceVersMel: 0 })
+  assert.equal(r.regle, null)
+  assert.equal(r.phraseTete, 'Ce mois-ci, Brice doit 316,18 € à Mel')
+  assert.equal(r.explication.length, r.lignes.length)
+  for (const p of r.explication) assert.ok(!HORS_CLAVIER.test(p) && !p.includes('undefined') && !p.includes('null'), p)
+  // Le mois passe sans reglement : il le dit.
+  assert.equal(repartitionDuMois({ ...base, moisCourant: '2026-11', reglements: [dette, avance] }).phraseTete,
+    "Octobre 2026 n'est pas encore réglé : Brice doit 316,18 € à Mel")
+
+  // Le reglement du mois : Brice paie le solde le 2 novembre, le mois est regle.
+  const reglement = { id: 'r-r', nature: 'reglement', de: 'brice', a: 'mel', montant: 31618, regleLe: '2026-11-02', mois: MOIS }
+  const regle = repartitionDuMois({ ...base, moisCourant: '2026-11', reglements: [dette, avance, reglement] })
+  assert.equal(regle.soldeAvantReglements, -31618)
+  assert.equal(regle.solde, 0)
+  assert.deepEqual(regle.regle, { le: '2026-11-02', de: 'brice', a: 'mel', montant: 31618 })
+  assert.equal(regle.phraseTete, 'Octobre 2026 est réglé (02/11)')
+  assert.equal(regle.lignes.at(-1).phrase, 'Octobre 2026 réglé le 02/11 : Brice a payé 316,18 € à Mel.')
+  // Paye un peu moins : regle, mais l'ecart reste dit.
+  const ecart = repartitionDuMois({ ...base, reglements: [dette, avance, { ...reglement, montant: 31600 }] })
+  assert.equal(ecart.phraseTete, 'Octobre 2026 réglé le 02/11, mais il reste un écart : Brice doit 0,18 € à Mel')
+  // Sans nature (ligne d'avant la colonne) : une avance.
+  const ancien = repartitionDuMois({ ...base, reglements: [{ id: 'r-o', de: 'brice', a: 'mel', montant: 2000, regleLe: '2026-10-31', mois: MOIS }] })
+  assert.equal(ancien.lignes.at(-1).genre, 'avance')
+  assert.equal(ancien.solde, -6190)
+  assert.equal(ancien.regle, null)
+  assert.equal(phraseReglement(dette), 'Brice doit 34,28 € à Mel : part Skool depuis mai')
+  assert.equal(phraseDeTete({ mois: MOIS, moisCourant: MOIS, solde: 0, regle: null }), 'Ce mois-ci, personne ne doit rien à personne')
 })
 
 test('phrase du solde', () => {
@@ -507,9 +666,13 @@ test('outils de l agent : parametres valides, refus clairs, validation idempoten
   assert.equal(typeof lireParamsRepartition('depense', { libelle: 'Pub', montant: 50, payee_par: 'mel', rattachement: 'produit' }, ctx), 'string')
   assert.equal(typeof lireParamsRepartition('depense', { libelle: 'Pub', montant: 50, payee_par: 'mel', mois: '2026-13' }, ctx), 'string')
 
-  // Reglement : deux personnes differentes, date pas dans le futur.
+  // Reglement : deux personnes differentes, date pas dans le futur. Sans
+  // nature (carte d'avant le 17/10) : le reglement du mois.
   assert.deepEqual(lireParamsRepartition('reglement', { de: 'mel', a: 'brice', montant: 500, le: '2026-10-08', mois: '2026-09' }, ctx),
-    { de: 'mel', a: 'brice', montant: 500, le: '2026-10-08', mois: '2026-09', note: null })
+    { nature: 'reglement', de: 'mel', a: 'brice', montant: 500, le: '2026-10-08', mois: '2026-09', note: null })
+  assert.equal(lireParamsRepartition('reglement', { nature: 'Dette', de: 'brice', a: 'mel', montant: 34.28, note: 'part Skool' }, ctx).nature, 'dette')
+  assert.equal(lireParamsRepartition('reglement', { nature: 'avance', de: 'mel', a: 'brice', montant: 200 }, ctx).nature, 'avance')
+  assert.equal(typeof lireParamsRepartition('reglement', { nature: 'virement', de: 'mel', a: 'brice', montant: 200 }, ctx), 'string')
   assert.equal(typeof lireParamsRepartition('reglement', { de: 'mel', a: 'mel', montant: 500 }, ctx), 'string')
   assert.equal(typeof lireParamsRepartition('reglement', { de: 'mel', a: 'brice', montant: 500, le: '2026-10-20' }, ctx), 'string')
 
@@ -526,16 +689,23 @@ test('outils de l agent : parametres valides, refus clairs, validation idempoten
     }, ctx),
     depense: lireParamsRepartition('depense', { libelle: 'Pub', montant: 50, payee_par: 'mel', rattachement: 'produit', offre_id: 'live-club', cote: 'mel' }, ctx),
     reglement: lireParamsRepartition('reglement', { de: 'brice', a: 'mel', montant: 24.3 }, ctx),
+    dette: lireParamsRepartition('reglement', { nature: 'dette', de: 'brice', a: 'mel', montant: 34.28, note: 'part Skool depuis mai' }, ctx),
+    avance: lireParamsRepartition('reglement', { nature: 'avance', de: 'mel', a: 'brice', montant: 200, le: '2026-10-05' }, ctx),
   }
-  for (const [type, params] of Object.entries(exemples)) {
-    assert.equal(typeof params, 'object', type)
+  for (const [cle, params] of Object.entries(exemples)) {
+    const type = cle === 'dette' || cle === 'avance' ? 'reglement' : cle
+    assert.equal(typeof params, 'object', cle)
     assert.deepEqual(lireParamsRepartition(type, params, ctx), params, `${type} idempotent`)
     const texte = resumeRepartition(type, params)
     assert.ok(texte.length > 20, type)
     assert.ok(!HORS_CLAVIER.test(texte), `${type} : caracteres clavier`)
     assert.ok(!texte.includes('undefined') && !texte.includes('null'), `${type} : ${texte}`)
   }
-  assert.ok(resumeRepartition('reglement', exemples.reglement).includes('Brice a versé 24,30 € à Mel'))
+  assert.ok(resumeRepartition('reglement', exemples.reglement).includes('Brice a payé 24,30 € à Mel'))
+  assert.ok(resumeRepartition('reglement', exemples.reglement).includes('réglé'))
+  assert.ok(resumeRepartition('reglement', exemples.dette).includes('Brice doit 34,28 € à Mel'))
+  assert.ok(resumeRepartition('reglement', exemples.dette).includes('part Skool depuis mai'))
+  assert.ok(resumeRepartition('reglement', exemples.avance).includes('Mel a avancé 200 € à Brice'))
   assert.ok(resumeRepartition('taux_partenaire', exemples.taux_partenaire).includes('30 € par client'))
   assert.ok(resumeRepartition('intervenant', exemples.intervenant).includes('50 € par live'))
   const carteLives = resumeRepartition('lives_du_mois', exemples.lives_du_mois)

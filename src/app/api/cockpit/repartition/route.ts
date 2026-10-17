@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db'
 import { getUserId } from '@/lib/api-auth'
 import { corsHeaders, corsPreflight } from '@/lib/support-cors'
 import { contexteParis, repartitionPourCockpit } from '@/lib/repartition/serveur'
-import { moisValide } from '@/lib/repartition/pur'
+import { lireCote, moisValide } from '@/lib/repartition/pur'
 
 /**
  * POST /api/cockpit/repartition : la repartition Brice / Melanie d'un mois,
@@ -42,9 +42,12 @@ export async function POST(req: NextRequest) {
   if (!userId) return refus('Unauthorized', 401)
 
   // Le garde réel : l'allowlist du cockpit, par UUID.
-  const allow = await prisma.$queryRaw<{ ok: number }[]>`
-    select 1 as ok from public.cockpit_allowlist where user_id = ${userId}::uuid`
+  const allow = await prisma.$queryRaw<{ label: string | null }[]>`
+    select label from public.cockpit_allowlist where user_id = ${userId}::uuid`
   if (allow.length === 0) return refus('Réservé au cockpit', 403)
+  // Qui regarde (Brice ou Mel, d'apres le libelle de l'allowlist) : l'ecran
+  // dit « je dois a Mel » plutot que « Brice doit a Mel ». null pour les autres.
+  const vous = lireCote(allow[0].label)
 
   const body = await req.json().catch(() => ({}))
   const brut = typeof body?.mois === 'string' ? body.mois.trim() : ''
@@ -53,7 +56,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const donnees = await repartitionPourCockpit(mois)
-    return NextResponse.json({ ok: true, ...donnees }, { headers })
+    return NextResponse.json({ ok: true, ...donnees, vous }, { headers })
   } catch (err) {
     console.error('[cockpit/repartition]', err instanceof Error ? err.message.split('\n').filter(Boolean).pop() : err)
     return refus('Répartition illisible pour l\'instant (erreur de la base).', 502)

@@ -71,7 +71,8 @@ LA RÉPARTITION BRICE / MÉLANIE (six tables, 08/10, voir plus bas) :
 - cockpit_commissions : commission_id, partenaire_id, nature (depot|affiliation), acces_id (l'accès broker : joins cockpit_liveclub_acces pour l'email), email (seulement quand il n'y a pas d'accès), client, le (jour du dépôt), montant_base (le dépôt), taux_pct ou montant_fixe (FIGÉS à l'inscription), commission_attendue, lots_faits_le, statut (attendue|recue|perdue), montant_recu, recue_le, encaisse_par (mel|brice), note. Une attendue GLISSE de mois en mois tant qu'elle n'est pas payée ; une reçue compte dans le mois de recue_le.
 - cockpit_intervenants : part_id, intervenant, offre_id (de cockpit_offres), montant_par_unite (euros par live), unite (live), a_partir_du, note. Le TARIF PAR LIVE d'un intervenant sur un produit, DATÉ comme les taux (une ligne par changement).
 - cockpit_depenses : depense_id, libelle, montant, mois (AAAA-MM), payee_par (brice|mel), cote (null = commune), offre_id (rattachée à un produit), part_brice_pct (commune seulement, null = 50/50), intervenant, quantite, prix_unitaire (remplis tous les trois = les lives d'un intervenant ce mois-là, montant = quantite x prix_unitaire), note, retire_le (non null = saisie retirée, à ignorer).
-- cockpit_reglements : reglement_id, de, a (brice|mel), montant, regle_le, mois (le mois dont le solde est réglé), note, retire_le (non null = à ignorer).
+- cockpit_reglements : reglement_id, nature (dette : de doit à a ; avance : de a avancé à a ; reglement : de a payé le solde du mois à a), de, a (brice|mel), montant, regle_le, mois, note (la raison), retire_le (non null = à ignorer).
+- cockpit_litiges : litige_id, compte, paiement_id, montant, statut (lost = perdu, won = gagné, sinon en cours), ouvert_le, clos_le, frais, restitue. Un litige perdu sort du partage dans repartition_du_mois : ne le recalcule pas.
 ⚠️ Ne confonds jamais retirer_live_club et fin_de_droits. Le second veut dire : la personne a résilié, mais sa période payée court encore, et la colonne fin_droits dit jusqu'à quand. On ne retire RIEN avant cette date — c'est de l'argent déjà encaissé. Le premier ne sort qu'une fois la date passée. Avant le 30/08/2026 la vue ne faisait pas la différence et visait 18 clients sur 76 qui avaient encore des jours payés.
 ⚠️ « retirer_live_club » est une SUGGESTION À VÉRIFIER, jamais un ordre. Un accès peut être ouvert par GESTE COMMERCIAL, décidé à la main et daté nulle part en base : un tier Skool premium ou vip sans abonnement actif en face n'est donc pas forcément une anomalie, et le tier de l'export peut être en retard sur ce qui a été accordé depuis. Avant de dire « à révoquer », regarde cockpit_actions_traitees — la personne a peut-être déjà été traitée, et « note » porte la raison. Présente toujours cette liste comme des gestes à confirmer par Brice ou Mélanie, jamais comme des révocations à exécuter : couper quelqu'un à qui un geste a été fait coûte plus cher que de laisser un accès ouvert une semaine de trop.
 - cockpit_kpis : snapshot_date, key, value_num, value_text (agrégats hebdo : audience_cumul, audience_indice, ns1_kit_cumul, ns2_skool_cumul…)
@@ -202,7 +203,7 @@ LA RÉPARTITION BRICE / MÉLANIE (règles de Brice, 08/10) :
   - « Adrien prend 50 EUR par live sur le Live Club à partir d'octobre » = proposer_intervenant (offre_id lu dans cockpit_offres, montant_par_live, « à partir d'octobre » = le 1er du mois). Un nouveau tarif = une nouvelle ligne datée : les mois déjà déclarés gardent le leur. N'invente jamais un tarif.
   - « Adrien a fait 6 lives en octobre » = proposer_lives_du_mois (intervenant, mois, nombre). Payée par le côté du produit par défaut (Mel pour le Live Club) : dis-le dans ta réponse, et passe payee_par si on te dit qui le paie. Si l'outil répond qu'aucun tarif n'est connu pour ce mois, demande combien il touche par live et depuis quand, propose d'abord proposer_intervenant, puis les lives. Déjà déclarés ce mois-là : l'outil le dit, la correction se fait dans le cockpit (retirer la dépense, puis redéclarer).
   - Une dépense = proposer_depense : libellé, montant, qui l'a payée (demande si ce n'est pas dit), mois en cours par défaut, commune 50/50 par défaut, rattachée à brice, mel ou un produit seulement si on te le dit. Jamais pour les lives d'un intervenant : c'est proposer_lives_du_mois.
-  - « C'est réglé » = proposer_reglement : de qui à qui, combien, quand, et le mois dont le solde est réglé (en début de mois, c'est souvent le mois précédent : demande si ce n'est pas clair).
+  - Entre Brice et Mel, tout passe par proposer_reglement, avec sa nature. « Je dois 34 € à Mel (sa part Skool) » = nature dette, de = celui qui doit, la raison en note. « Mel m'a avancé 200 € » = nature avance, de = celui qui a donné l'argent. « C'est réglé » = nature reglement : celui qui doit paie le solde du mois, montant = le solde de repartition_du_mois sauf autre montant dit, et le mois dont le solde est réglé (en début de mois, c'est souvent le mois précédent : demande si ce n'est pas clair). Brice et Mel se règlent en fin de mois : ne parle pas de « versement » pour une dette.
   - Corriger ou retirer une dépense, un règlement ou une commission déjà notés : dans le cockpit, onglet Revenus.
 
 L'EFFACEMENT DES DONNÉES D'UNE PERSONNE (règles de Brice, 15/10) :
@@ -593,18 +594,19 @@ const OUTILS: Anthropic.Tool[] = [
   {
     name: 'proposer_reglement',
     description:
-      "Propose de noter un règlement fait entre Brice et Mel (« c'est réglé ») : de qui à qui, combien, quand, et le mois dont le solde est réglé. N'exécute rien : carte de confirmation. Il se déduit du solde de ce mois.",
+      "Propose de noter une somme entre Brice et Mel, de trois natures. dette : « je dois 34 € à Mel, sa part Skool », de doit la somme à a, sans argent qui bouge, la raison dans note. avance : de a donné de l'argent à a pendant le mois. reglement : « c'est réglé », le solde du mois payé par celui qui doit, il ferme le mois. N'exécute rien : carte de confirmation.",
     input_schema: {
       type: 'object',
       properties: {
-        de: { type: 'string', enum: ['brice', 'mel'], description: 'Qui a versé.' },
-        a: { type: 'string', enum: ['brice', 'mel'], description: 'Qui a reçu.' },
+        nature: { type: 'string', enum: ['dette', 'avance', 'reglement'], description: "dette (de doit à a), avance (de a avancé à a pendant le mois) ou reglement (de a payé le solde du mois à a). Demande si ce n'est pas clair." },
+        de: { type: 'string', enum: ['brice', 'mel'], description: 'Dette : qui doit. Avance, reglement : qui a payé.' },
+        a: { type: 'string', enum: ['brice', 'mel'], description: 'Dette : à qui. Avance, reglement : qui a reçu.' },
         montant: { type: 'number', description: 'En euros.' },
         le: { type: 'string', description: "Facultatif : AAAA-MM-JJ, aujourd'hui ou avant. Vide = aujourd'hui." },
-        mois: { type: 'string', description: 'Le mois dont le solde est réglé, AAAA-MM (souvent le précédent en début de mois : demande si ce n\'est pas clair).' },
-        note: { type: 'string', description: 'Facultatif.' },
+        mois: { type: 'string', description: 'Le mois concerné, AAAA-MM (pour un reglement, souvent le précédent en début de mois : demande si ce n\'est pas clair).' },
+        note: { type: 'string', description: 'La raison (attendue pour une dette).' },
       },
-      required: ['de', 'a', 'montant', 'mois'],
+      required: ['nature', 'de', 'a', 'montant', 'mois'],
     },
   },
   {
