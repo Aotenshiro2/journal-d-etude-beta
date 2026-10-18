@@ -41,6 +41,7 @@ import type { ActionMembre, MessageConserve } from './conversations'
 import { messageErreur, pauseDejaProposee } from './pur'
 import {
   CONSIGNE_ACCES_OFFERT, CONSIGNE_EQUIPE_TRANSMISE, CONSIGNE_MONTANTS, MODELE_LIVECLUB, RESULTAT_DEMANDER_UN_HUMAIN, requeteAgentMembre,
+  resultatConnaissances,
 } from './prompt-membre'
 
 export { MODELE_LIVECLUB }
@@ -193,6 +194,13 @@ export async function repondreAuMembre(
           type: 'tool_result', tool_use_id: bloc.id,
           content: JSON.stringify(RESULTAT_DEMANDER_UN_HUMAIN),
         })
+        continue
+      }
+
+      // La base de connaissances produits (Brice, 18/10) : lecture pure,
+      // aucune donnee de membre, la meme reponse que dans l'eval.
+      if (bloc.name === 'connaissances_produits') {
+        resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify(resultatConnaissances(bloc.input)) })
         continue
       }
 
