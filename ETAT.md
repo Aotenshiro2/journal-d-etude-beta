@@ -3,6 +3,26 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
+## Generateur de posts du cockpit (19/10/2026, etapes 1 a 3 du GO de Brice du 18/10)
+
+- Base : migrations `20261019030000_cockpit_generation.sql` + `20261019030100_cockpit_inspirations_date_texte.sql`
+  APPLIQUEES : cockpit_inspirations (miroir des JSONL de
+  D:\2_Creation\Ressources\Inspiration\Posts-Live-Club, `npm run pousser:inspirations` cote cockpit, 133 lignes),
+  cockpit_generations (brouillons + note publie_tel_quel / retouche / jete, insertion serveur seulement,
+  grant update (note, brouillon_final)), bucket PRIVE cockpit-inspirations (23 captures, URL signee pour
+  l'equipe), cockpit_matiere_pages.tsv_en (index anglais pour les PDF d'ICT).
+- Regles d'ecriture : cockpit_methode_textes, cles generateur:* (fiche de style de Brice, formats, regles
+  notees en memoire), poussees par le meme script. Rien de doctrinal dans le code hors CONSIGNES
+  (generation-pur.ts : les six regles du GO et le contrat de sortie).
+- Serveur : `src/lib/generation-pur.ts` (choix 4 a 8 inspirations forme, 1 a 4 passages de matiere,
+  prompt, schema JSON), `src/lib/generation.ts` (genererPost, partage), route `POST /api/cockpit/generation`
+  (Bearer + allowlist), modele `claude-opus-5-5` (constante MODELE_GENERATION, sortie en
+  output_config.format : le tool_choice force est refuse par ce modele), prix ajoute a ia-prix.ts.
+- Agent AOK : outil `generer_post` (`src/lib/generation-agent.ts`), sans carte, capture = derniere piece
+  recue (canal.piece), consigne dans SYSTEM_PROMPT (« LES BROUILLONS DE POSTS »), tables declarees au catalogue.
+- Verifs : `scripts/verifier-generation.mjs [--pousser]`, essai hors navigateur `scripts/essai-generation.ts`
+  (la cle ANTHROPIC_API_KEY_COCKPIT n'existe que sur Vercel : les essais reels passent par la route deployee).
+
 ## Base de connaissances produits (18/10/2026, commits 712091e, ee9d476, 357f9bb)
 
 Demande de Brice : le bot Live Club ne connaissait pas les produits. Source unique :

@@ -24,6 +24,8 @@ export interface PrixModele {
 
 const USD_PAR_MTOK: Record<string, PrixModele> = {
   'claude-opus-5': { in: 5, out: 25, cacheWrite: 6.25, cacheRead: 0.5 },
+  // Opus 5.5 (generateur de posts du cockpit, 19/10/2026) : 4 / 20, lecture de cache 0,20.
+  'claude-opus-5-5': { in: 4, out: 20, cacheWrite: 5, cacheRead: 0.2 },
   'claude-sonnet-5': { in: 2, out: 10, cacheWrite: 2.5, cacheRead: 0.2 },
   'claude-haiku-4-5': { in: 1, out: 5, cacheWrite: 1.25, cacheRead: 0.1 },
   // Modèles encore susceptibles d'être posés par une variable d'env

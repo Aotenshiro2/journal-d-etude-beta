@@ -13,6 +13,7 @@ import { fichePersonnePourAgent, resoudrePersonnePourEffacement, resoudrePersonn
 import { controlerActionEffacement } from '@/lib/effacement'
 import { controlerReponseMembre, rendreLaMainPourAgent } from '@/lib/reponse-membre'
 import type { PieceAgent } from '@/lib/liveclub/support-pont-pur'
+import { OUTIL_GENERER_POST, genererPostPourAgent } from '@/lib/generation-agent'
 import type Anthropic from '@anthropic-ai/sdk'
 
 // LE CERVEAU de l'agent cockpit, sans interface : prompt systeme, outil SQL
@@ -64,6 +65,8 @@ Les tables et vues du cockpit (schéma public, PostgreSQL) :
 - cockpit_liveclub_tarifs_reserves : reserve_id, qui, email, telegram_id, produit_id, price_id, tarif_cree (vrai = tarif créé pour cette personne), montant (euros), devise, recurrence (month|year), lien_id, lien_url (son lien de paiement personnel, email prérempli), cree_par, cree_le, paye_le (null = en attente de paiement), abonnement_id, retire_le, retire_par, note. Les TARIFS RÉSERVÉS : un prix PERSONNEL ouvert à UNE personne, celle de cet email, et à personne d'autre. Active = retire_le is null. Une ligne ne dit RIEN du prix d'une autre personne, même si le nom du produit évoque un groupe (« Live Club ETM », « élève », « symbolique ») : sans réservation à son email, quelqu'un d'autre paie le prix public.
 - cockpit_demandes : demande_id, cree_le, auteur (libellé du compte Telegram de l'équipe, ou 'cockpit:<uuid>' depuis la fenêtre du cockpit), source (agent_cockpit|agent_telegram), texte (la demande reformulée), citation (telle qu'écrite), statut (nouvelle|au_picker|faite|refusee), traite_le, note. Les demandes de l'équipe que tu as notées faute d'outil (noter_demande). En attente = statut 'nouvelle'.
 - cockpit_decoupages : id, auteur (uuid), auteur_label (Brice, Melanie, Adil...), titre (de quoi on veut parler), phrase (l'idée en une phrase), usage (savoir|production), parent_idee (la plus grande idée au-dessus, facultative), noeuds (jsonb, tableau plat des pièces : id, parent (null = directement sous la ligne), ordre, texte, marque (v = vécu, b = cas de banque-contenus, i = idées du moment, m = thèse sans cas, q = trou à questionner, fait, a_faire, null = pas encore adossé), source, question, mure (bool, tient en une phrase)), guide (jsonb, état du mode guidé), cree_le, maj_le, retire_le, retire_par. Les sujets et productions DÉCOUPÉS dans l'onglet Création (méthode 5 x 5) : la ligne est l'aïeul, ses pièces sont dans noeuds, la numérotation (1.5.2) se calcule par ordre parmi les frères. Actif = retire_le is null. Pour « qu'est-ce que j'ai déjà découpé sur X » : titre, phrase ou parent_idee ILIKE, et jsonb_array_elements(noeuds)->>'texte' ILIKE.
+- cockpit_inspirations : id (B-M-01, M-T-14...), personne (brice|mel), axe (mindset|technique), role (forme = texte écrit publié, modèle de voix ; matiere = live, vidéo, coaching, PDF), format (lettre A à AH), format_cible, objectifs (text[]), canal, canal_registre, date_pub (texte, parfois partielle), source, texte (verbatim), image, declencheur, pourquoi, refus, reactions, concepts (text[]), extra (jsonb). La base d'inspirations de posts, miroir des JSONL (npm run pousser:inspirations). Lecture seule.
+- cockpit_generations : id, cree_le, cree_par, origine (cockpit|agent_telegram|agent_cockpit), personne, canal, objectif, sens (idee|capture), parent_id, consigne, entree (jsonb), inspirations (text[], ids réellement utilisés), sources (jsonb), brouillon, contenu (jsonb), modele, cout_micros, note (publie_tel_quel|retouche|jete, null = pas encore notée), brouillon_final, note_le, note_par. Les brouillons de posts écrits par generer_post ou l'écran Génération. La qualité se lit par la note.
 - cockpit_decoupage_propositions : id, decoupage_id (null pour le geste titre), geste (assiste = jugement des pièces de l'auteur, genere = trois découpages proposés, titre = matière trouvée pour un titre), cible (id du nœud visé dans noeuds, null = l'aïeul), demande (jsonb, ce qui a été envoyé), contenu (jsonb, la sortie de l'IA), statut (proposee|gardee|ecartee), decisions (jsonb, décision par élément), cree_le, cree_par, tranche_le, tranche_par. Ce que l'IA a proposé dans l'onglet Création, et ce que l'équipe en a gardé.
 LA RÉPARTITION BRICE / MÉLANIE (six tables, 08/10, voir plus bas) :
 - cockpit_partenaires : partenaire_id (le nom en minuscules sans espace ni accent, ex. raisefx), nom, nature (broker|affiliation), note. Les brokers et partenaires qui versent des commissions.
@@ -175,6 +178,14 @@ Sur Telegram (Agent AOK, ou le bot des membres qui te transmet ce qu'écrit l'é
 - Un message transféré avec un commentaire arrive en DEUX messages, le commentaire d'abord. Si on te parle d'une image ou d'un document que tu ne vois pas, ne dis pas que tu ne reçois rien : dis en une ligne que tu l'attends dans le message suivant, sans lancer de requête.
 - Plusieurs photos envoyées ensemble (un album) arrivent une par une, chacune dans son propre tour : réponds sur celle que tu vois, sans conclure qu'il manque quelque chose.
 - Une capture se lit comme les documents ci-dessus : dis ce que tu as reçu, confronte à la base, n'invente aucune ligne illisible. Une capture de téléphone (une liste de paiements Stripe, par exemple) ne montre souvent qu'un nom, sans email : cherche alors par nom et alias (membres, puis archive), et dis pour chacun que le rattachement est fait par le nom, donc à confirmer.
+
+LES BROUILLONS DE POSTS : generer_post (19/10) :
+Brice ou Mélanie t'envoient une idée, un sujet, une source ou une capture de chart et veulent un post (Live Club, canal MELMOM, Skool, newsletter, réseau social) : c'est generer_post, jamais un texte que tu écrirais toi-même.
+- Avant l'appel, il te faut le canal cible et l'objectif (enseigner, creer_du_lien, rassurer, convertir, retenir, acquerir, recadrer, celebrer, animer). S'ils ne se déduisent pas clairement de la demande, demande-les en une seule question courte.
+- Une capture : demande en UNE fois ce qui manque parmi le sujet à enseigner (un mot), le biais du jour, le trade pris et son résultat, posté en direct ou en relecture. L'actif, l'unité de temps et la date seulement si le filigrane TradingView est illisible. Si on te répond « peu importe » ou « lance », appelle sans.
+- Le brouillon rendu se recopie TEL QUEL, sans retouche de ta part, pour être copié-collé. Les questions qu'il rend (vécu manquant) se posent telles quelles : le vécu ne s'invente pas.
+- « Refais », « une autre version » : retoucher = le generation_id, sans consigne. « Plus court », « sans émoji », toute retouche : retoucher + consigne.
+- Tu ne postes RIEN dans le Live Club ni ailleurs : aucun outil ne le fait, et tu ne le proposes pas.
 
 LES PERSONNES : LA FICHE ET LES PAROLES (15/10) :
 « Parle-moi de X », « qui est X ? », « que devient X ? », « des nouvelles de X ? », « donne-moi les infos sur X » : appelle D'ABORD fiche_personne avec qui = ce qu'on t'a donné (nom, ancien nom, @pseudo, numéro u..., email). Elle cherche partout à la fois (tous les noms passés, le groupe, les messages, l'archive, les fiches membres, les emails) et rend la fiche, ou les candidats, ou rien.
@@ -343,6 +354,8 @@ async function executerSql(sql: string): Promise<string> {
 }
 
 const OUTILS: Anthropic.Tool[] = [
+  // Le generateur de posts (19/10) : sans carte, rien ne part nulle part.
+  OUTIL_GENERER_POST,
   {
     name: 'requete_sql',
     description:
@@ -1143,6 +1156,17 @@ export async function boucleAgent(
           resultats.push({
             type: 'tool_result', tool_use_id: bloc.id, content: contenu,
             ...(contenu.startsWith('{"erreur"') ? { is_error: true } : {}),
+          })
+          continue
+        }
+
+        // Un brouillon de post (19/10) : execute ici, sans carte. Rien n'est
+        // publie : le brouillon revient au modele, qui le recopie.
+        if (bloc.name === 'generer_post') {
+          const g = await genererPostPourAgent(bloc.input, userId, canal.source, canal.piece ?? null)
+          resultats.push({
+            type: 'tool_result', tool_use_id: bloc.id, content: g.contenu,
+            ...(g.erreur ? { is_error: true } : {}),
           })
           continue
         }
