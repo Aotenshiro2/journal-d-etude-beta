@@ -3,7 +3,7 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
-## Base de connaissances produits (18/10/2026, commit 712091e)
+## Base de connaissances produits (18/10/2026, commits 712091e, ee9d476, 357f9bb)
 
 Demande de Brice : le bot Live Club ne connaissait pas les produits. Source unique :
 `docs/connaissances/*.md` (11 fiches : carnet-du-trader, journal-d-etudes, pilotage,
@@ -11,14 +11,19 @@ masterclass, academie, live-club, dix-pour-cent-club, espace-membre, connexion,
 ressources-gratuites, liens-utiles ; en-tete sujet/titre/resume/mots/verifie/sources,
 sections imposees). `node scripts/generer-connaissances.mjs [--site] [--verifier]` produit
 `src/lib/connaissances.generated.ts` (module pur) et, avec `--site`,
-`sites/Aoknowledgecom/v3/src/data/connaissances.generated.ts` (genere, non commite, importe
-nulle part). Le script refuse tiret long, « jamais », « garanti », gras, email autre que support@.
-- Bot Live Club : OUTIL `connaissances_produits(sujets[1..3])` (prompt-membre.ts,
-  `resultatConnaissances` partagee prod/eval), pas d'injection : la base fait environ 6 500
-  jetons. Regle au prompt : question produit = fiches, sinon « pas l'info » + demander_un_humain.
-- Evals : K01, K02 neufs ; juge de eval-fuites.mjs informe des fiches (resumes autorises).
-- A brancher : /aide (AidePage.tsx) et le chat support (support-prompt.ts) sur la meme base.
-- Toute modif d'une fiche : relancer le script (avec --site), puis K01/K02.
+`sites/Aoknowledgecom/v3/src/data/connaissances.generated.ts` (commite dans le monorepo, lu
+par /aide). Le script refuse tiret long, « jamais », « garanti », gras, email autre que support@.
+Plus aucune fiche n'envoie vers Skool (ee9d476) : l'Academie du site a pris le relais.
+- Outil commun `connaissances_produits(sujets[1..3])` : src/lib/connaissances-outil.ts
+  (consigne par bot). Bot Live Club (prompt-membre.ts) ET chat support du site (357f9bb :
+  boucle d'outils dans api/support/chat/route.ts, 3 tours au plus ; texte produit fige retire
+  de support-prompt.ts). Pas d'injection : la base fait environ 6 500 jetons.
+- /aide : rubrique « Les produits » (monorepo d626c7d + 74a60e7, en ligne).
+- Evals : K01, K02 (liveclub), K03 (support:site) ; juge informe des fiches.
+- ECART A TRANCHER : le prompt du bot Live Club (politique-information.ts, URL_FORMATION_LIVECLUB,
+  evals F01 a F03) envoie encore la formation incluse vers Skool, alors que les fiches disent
+  l'Academie.
+- Toute modif d'une fiche : relancer le script avec --site (et commiter les deux fichiers), puis K01 a K03.
 
 ## Mon espace, lot 2 (18/10/2026)
 
