@@ -2773,12 +2773,13 @@ test('formation incluse : une seule adresse (l academie du site depuis le 18/10)
   const info = politique.slice(politique.indexOf("sujet: 'La formation incluse dans le Live Club'"))
   assert.match(info.slice(0, 900), /seulement: 'liveclub'/)
   assert.match(politique, /\.filter\(i => !i\.seulement \|\| i\.seulement === bot\)/)
-  // L'email de bienvenue : le bot pour la communaute, l'academie pour les cours.
+  // L'email de bienvenue : le bot pour la communaute, Skool pour les videos
+  // tant que Brice n'a pas verifie les modules de l'academie (18/10 au soir).
   const emails = lire('liveclub/emails.ts')
   const bienvenue = emails.slice(emails.indexOf('export function modeleBienvenue('), emails.indexOf('\n}\n', emails.indexOf('export function modeleBienvenue(')))
-  assert.ok(bienvenue.includes('${URL_FORMATION_LIVECLUB}'))
-  assert.match(bienvenue, /c'est pour la communauté ; les cours de formation inclus sont sur l'académie du site/)
-  assert.ok(!/skool/i.test(bienvenue.replace(/\/\/.*$/gm, '')))
+  assert.ok(bienvenue.includes('${URL_FORMATION_EMAIL_BIENVENUE}'))
+  assert.match(bienvenue, /c'est pour la communauté ; les vidéos de formation incluses sont sur Skool/)
+  assert.match(lire('liveclub/config.ts'), /URL_FORMATION_EMAIL_BIENVENUE = 'https:\/\/www\.skool\.com\//)
 })
 
 console.log(`\n${n} blocs verifies, tout est bon.`)

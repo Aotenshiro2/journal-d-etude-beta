@@ -47,10 +47,18 @@ export const SUPPORT = 'support@aoknowledge.com'
  * (demande d'entree validee par l'equipe).
  *
  * Une seule constante, lue par le bot des membres (politique-information.ts,
- * prompt-membre.ts) et par l'email de bienvenue (emails.ts). Evals F01 a F03
+ * prompt-membre.ts) (l'email de bienvenue lit URL_FORMATION_EMAIL_BIENVENUE en attendant). Evals F01 a F03
  * (scripts/eval-fuites.mjs).
  */
 export const URL_FORMATION_LIVECLUB = 'https://aoknowledge.com/academie'
+
+/**
+ * L'email de bienvenue garde Skool tant que Brice n'a pas repasse lui-meme
+ * sur les modules de l'academie (decision du 18/10 au soir : il part a
+ * chaque nouvel abonne sans question, un module qui ne s'ouvre pas toucherait
+ * tout le monde). A basculer sur URL_FORMATION_LIVECLUB apres sa verification.
+ */
+export const URL_FORMATION_EMAIL_BIENVENUE = 'https://www.skool.com/ao-knowledge-trading-5563/about?ref=8d5bde6137124c10a3abe0535ca5f6ec'
 
 /**
  * La phrase « abonne-toi », avec les deux adresses, reprise partout (bot,
