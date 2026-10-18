@@ -26,7 +26,7 @@ Pour tous les élèves : du débutant complet (Novice en trading commence de zé
 - Inclus dans le Live Club, tant que l'abonnement est actif : Bienvenue, Novice en trading, Les bases Smart Money, la partie 1 de La Formation complète (épisodes 0 à 19), Plan de Trading en 21 jours, Psychologie et émotions. L'académie les retrouve par l'email de ton abonnement.
 - Tout le catalogue avec la formation complète du 10% Club (1 999 €).
 - Prix affichés à l'unité : Les bases Smart Money 29 €, Plan de Trading en 21 jours 39 €, Psychologie et émotions 49 €, Journaling 49 €, Chroniques de l'Accélérateur 79 €, Sérénité Financière 99 €, Macros : Les Archives Privées 399 €. La vente à l'unité n'est pas encore ouverte : le bouton d'achat est grisé pour l'instant.
-- L'Appât du Grand Public se débloquera avec ta participation, quand les points de l'académie seront en place. Si tu l'avais sur Skool, tu le gardes.
+- L'Appât du Grand Public se débloquera avec ta participation, quand les points de l'académie seront en place. Si tu l'avais déjà, tu le gardes.
 
 ## Comment y aller
 
@@ -38,7 +38,7 @@ Pour tous les élèves : du débutant complet (Novice en trading commence de zé
 Tes accès se retrouvent par l'email vérifié de ton compte. Si tu as payé avec une autre adresse, écris au support en précisant cette adresse : l'équipe fait le lien.
 
 ### Je suis au Live Club, où est la formation ?
-Les vidéos de formation incluses sont aussi sur Skool pour l'instant. Sur l'académie du site, les cours du Live Club s'ouvrent quand tu te connectes avec l'email de ton abonnement.
+Sur l'académie du site, https://aoknowledge.com/academie : connecte-toi avec l'email de ton abonnement, et les cours inclus dans le Live Club s'ouvrent.
 
 ### Je peux acheter un seul module ?
 Pas encore : les prix à l'unité sont affichés, mais l'achat n'est pas encore ouvert. La formation complète, elle, est disponible avec le 10% Club.

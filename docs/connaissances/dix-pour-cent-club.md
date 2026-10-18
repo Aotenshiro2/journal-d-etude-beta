@@ -1,17 +1,17 @@
 ---
 sujet: dix-pour-cent-club
 titre: Le 10% Club
-resume: La formation complète d'AOKnowledge, en vidéo sur Skool : 1 999 € en une fois, accès à vie, avec le Carnet Premium, le Journal d'Études et Pilotage.
-mots: 10% club, dix pour cent, formation complète, skool, smart money, paypal, accès à vie, club
+resume: La formation complète d'AOKnowledge, en vidéo sur l'Académie du site : 1 999 € en une fois, accès à vie, avec le Carnet Premium, le Journal d'Études et Pilotage.
+mots: 10% club, dix pour cent, formation complète, académie, smart money, paypal, accès à vie, club
 verifie: 2026-10-18
 sources: sites/Aoknowledgecom/v3/src/pages/AccelerateurPage.tsx (/club) ; table academie_offres (offre formation-complete) ; apps/journal-d-etude/src/lib/entitlements.ts (raison formation)
 ---
 
 ## Ce que c'est
 
-Le 10% Club est la formation complète d'AOKnowledge : la lecture Smart Money du marché, le process et la psychologie du trader, en vidéo sur Skool. Tu avances à ton rythme.
+Le 10% Club est la formation complète d'AOKnowledge : la lecture Smart Money du marché, le process et la psychologie du trader, en vidéo sur l'Académie du site (https://aoknowledge.com/academie). Tu avances à ton rythme.
 
-Le parcours : Novice en trading, Les bases Smart Money, La formation partie 1 (la logique du prix et du temps), La formation partie 2 (les stratégies Breakers, Gaps, IOF), Fondations et plan de trading, Psychologie et émotions, Sérénité financière. Avec des modules complémentaires : Chronique de l'Accélérateur, Journaling, Macros : les archives privées, L'Appât du grand public, les replays des masterclass, les replays Premium, la rediffusion des lives et des articles.
+Elle ouvre tout le catalogue de l'académie : Bienvenue, Novice en trading, Les bases Smart Money, La Formation complète (la logique du prix et du temps, puis les stratégies Breakers, Gaps, IOF), Plan de Trading en 21 jours, Macros : Les Archives Privées, Psychologie et émotions, Chroniques de l'Accélérateur, Journaling, Sérénité Financière et L'Appât du Grand Public.
 
 ## Pour qui
 

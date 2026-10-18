@@ -2,7 +2,7 @@
 sujet: live-club
 titre: Le Live Club
 resume: L'abonnement de lives éducatifs animés par Mélanie et Brice, avec le groupe Telegram, les replays, les modules de formation et le Carnet Premium. 139 € par mois, sans engagement.
-mots: live club, lives, abonnement, telegram, groupe, replays, skool, pause, arrêt, bot, prix
+mots: live club, lives, abonnement, telegram, groupe, replays, académie, pause, arrêt, bot, prix
 verifie: 2026-10-18
 sources: sites/Aoknowledgecom/v3/src/pages/LiveClubPage.tsx ; sites/Aoknowledgecom/v3/src/pages/LiveClubCGVPage.tsx ; apps/journal-d-etude/src/lib/liveclub/config.ts (URLS_ABONNEMENT, URL_PORTAIL_CARTE, URL_FORMATION_LIVECLUB) ; src/lib/politique-information.ts ; src/lib/liveclub/accueil-groupe.ts
 ---
@@ -12,7 +12,7 @@ sources: sites/Aoknowledgecom/v3/src/pages/LiveClubPage.tsx ; sites/Aoknowledgec
 Le Live Club, c'est l'entraînement sur le marché réel, animé par Mélanie et Brice.
 - Deux à trois lives éducatifs chaque semaine, sur le marché en temps réel ou autour d'un thème, avec un temps de questions à la fin.
 - Les replays : chaque live est rangé dans le Telegram du Live Club, dans le sujet Replay, à revoir quand tu veux.
-- Les modules de formation inclus, sur Skool pour l'instant.
+- Les modules de l'Académie inclus : https://aoknowledge.com/academie (connecte-toi avec l'email de ton abonnement).
 - Le groupe Telegram du Live Club : l'entraide entre membres, les explications de charts, les projections hebdomadaires Nasdaq et S&P 500. Les messages épinglés du groupe expliquent comment il marche.
 - Le Carnet du Trader Premium inclus, et le Journal d'Études et Pilotage gratuits.
 
