@@ -25,7 +25,7 @@ Pour tous les élèves : du débutant complet (Novice en trading commence de zé
 - Gratuit avec un compte : Bienvenue, Novice en trading et Les bases Smart Money.
 - Inclus dans le Live Club, tant que l'abonnement est actif : Bienvenue, Novice en trading, Les bases Smart Money, la partie 1 de La Formation complète (épisodes 0 à 19), Plan de Trading en 21 jours, Psychologie et émotions. L'académie les retrouve par l'email de ton abonnement.
 - Tout le catalogue avec la formation complète du 10% Club (1 999 €).
-- Prix affichés à l'unité : Les bases Smart Money 29 €, Plan de Trading en 21 jours 39 €, Psychologie et émotions 49 €, Journaling 49 €, Chroniques de l'Accélérateur 79 €, Sérénité Financière 99 €, Macros : Les Archives Privées 399 €. La vente à l'unité n'est pas encore ouverte : le bouton d'achat est grisé pour l'instant.
+- Prix affichés à l'unité : Plan de Trading en 21 jours 39 €, Psychologie et émotions 49 €, Journaling 49 €, Chroniques de l'Accélérateur 79 €, Sérénité Financière 99 €, Macros : Les Archives Privées 399 €. La vente à l'unité n'est pas encore ouverte : le bouton d'achat est grisé pour l'instant.
 - L'Appât du Grand Public se débloquera avec ta participation, quand les points de l'académie seront en place. Si tu l'avais déjà, tu le gardes.
 
 ## Comment y aller

@@ -33,11 +33,12 @@ export function modeleBienvenue(lienBot: string): ModeleMessage {
       "Ton paiement est bien passé. Il reste une étape pour entrer dans le groupe Telegram, et ça prend une minute.",
       "Ouvre notre bot avec le bouton ci-dessous et appuie sur Démarrer. Il te donne le lien du groupe : tu demandes à rejoindre, et c'est accepté tout seul.",
       "Ce lien est personnel, garde-le pour toi.",
-      // (15/10, Brice) Le bot pour la communaute, Skool pour les videos de
-      // formation incluses (URL_FORMATION_LIVECLUB, config.ts). L'adresse
-      // finit la phrase : une ponctuation collee entrerait dans le lien.
-      "À retenir : le bot et le groupe Telegram, c'est pour la communauté ; les vidéos de formation incluses sont sur Skool. "
-        + `Pour y entrer, demande à rejoindre avec l'email de ton abonnement, l'équipe valide ton entrée : ${URL_FORMATION_LIVECLUB}`,
+      // (15/10, Brice) Le bot pour la communaute, la formation incluse a
+      // part (URL_FORMATION_LIVECLUB, config.ts : l'academie du site depuis
+      // le 18/10, Skool avant). L'adresse finit la phrase : une ponctuation
+      // collee entrerait dans le lien.
+      "À retenir : le bot et le groupe Telegram, c'est pour la communauté ; les cours de formation inclus sont sur l'académie du site. "
+        + `Connecte-toi avec l'email de ton abonnement et ils s'ouvrent : ${URL_FORMATION_LIVECLUB}`,
       `Un souci ? Réponds à cet email ou écris à ${SUPPORT}.`,
     ],
     bouton: { texte: 'Ouvrir le bot Telegram', url: lienBot },

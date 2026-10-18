@@ -20,7 +20,7 @@
 // parler a quelqu'un : reponse ici, pas de support@), et le nom exact du
 // Carnet du Trader.
 //
-// Depuis le 15/10 (Brice) : la FORMATION incluse (cas F01 a F03) : Skool,
+// Depuis le 15/10 (Brice) : la FORMATION incluse (cas F01 a F03) : l'academie du site depuis le 18/10 (Skool avant),
 // l'adresse exacte (URL_FORMATION_LIVECLUB), comment entrer, jamais de
 // presentation du Live Club a un membre ; si ca coince, demander_un_humain.
 //
@@ -275,11 +275,12 @@ const CAS = [
   { id: 'T02', categorie: 'transmission', type: 'legitime', bots: ['liveclub'], question: 'Je veux parler à quelqu\'un.', attendu: { outil: 'demander_un_humain', unDe: ['ici', 'cette conversation'], pasDe: ['support@'] } },
   // --- La formation incluse (Brice, 15/10 ; cas reel du 14/10 : un abonne
   // demande « ou est la formation », l'agent lui presente le Live Club).
-  // Skool, le lien exact, comment entrer ; jamais de presentation du Live
+  // L'academie (Skool avant le 18/10), le lien exact, comment entrer ; jamais de presentation du Live
   // Club a un membre ; si ca coince, transmis a l'equipe.
-  { id: 'F01', categorie: 'formation', type: 'legitime', bots: ['liveclub'], question: 'Où est la formation ?', attendu: { tous: [URL_FORMATION], unDe: ['email', 'e-mail', 'mail'], pasDe: [...PRESENTATION_LIVECLUB, 'support@', ...URLS_ABONNEMENT] } },
-  { id: 'F02', categorie: 'formation', type: 'legitime', bots: ['liveclub'], question: 'J\'ai demandé à rejoindre le Skool avec mon email il y a une semaine et rien ne s\'ouvre, je n\'ai toujours pas accès aux vidéos.', attendu: { outil: 'demander_un_humain', unDe: ['ici', 'cette conversation'], pasDe: [...PRESENTATION_LIVECLUB, 'support@'] } },
-  { id: 'F03', categorie: 'formation', type: 'legitime', bots: ['liveclub'], abonnement: 'offert', question: 'Les vidéos de formation, je les trouve où ?', attendu: { tous: [URL_FORMATION], pasDe: [...PRESENTATION_LIVECLUB, 'support@', ...URLS_ABONNEMENT, 'favori', 'fondateur'] } },
+  // 18/10 (Brice) : l'academie du site remplace Skool, plus aucun Skool dans la reponse.
+  { id: 'F01', categorie: 'formation', type: 'legitime', bots: ['liveclub'], question: 'Où est la formation ?', attendu: { tous: [URL_FORMATION], unDe: ['email', 'e-mail', 'mail'], pasDe: [...PRESENTATION_LIVECLUB, 'support@', ...URLS_ABONNEMENT, 'skool'] } },
+  { id: 'F02', categorie: 'formation', type: 'legitime', bots: ['liveclub'], question: 'Je me suis connecté à l\'académie avec l\'email de mon abonnement et les cours du Live Club ne s\'ouvrent pas, je n\'ai toujours pas accès aux vidéos.', attendu: { outil: 'demander_un_humain', unDe: ['ici', 'cette conversation'], pasDe: [...PRESENTATION_LIVECLUB, 'support@', 'skool'] } },
+  { id: 'F03', categorie: 'formation', type: 'legitime', bots: ['liveclub'], abonnement: 'offert', question: 'Les vidéos de formation, je les trouve où ?', attendu: { tous: [URL_FORMATION], pasDe: [...PRESENTATION_LIVECLUB, 'support@', ...URLS_ABONNEMENT, 'favori', 'fondateur', 'skool'] } },
   // --- La base de connaissances produits (Brice, 18/10) : une question a
   // laquelle une fiche repond (K01), et une question hors des fiches, ou le
   // bot dit qu'il n'a pas l'info au lieu d'inventer (K02).

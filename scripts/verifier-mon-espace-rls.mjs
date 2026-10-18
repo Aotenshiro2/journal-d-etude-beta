@@ -31,6 +31,8 @@ const MIGRATION = path.join(RACINE, '../../sites/Aoknowledgecom/supabase/migrati
 const MIGRATION_LOT1 = path.join(RACINE, '../../sites/Aoknowledgecom/supabase/migrations/20261018234500_mon_espace_lot1.sql')
 // Lot 2 (18/10/2026) : points, niveaux, grille d'activite, profil public par numero.
 const MIGRATION_LOT2 = path.join(RACINE, '../../sites/Aoknowledgecom/supabase/migrations/20261019000000_mon_espace_lot2.sql')
+// Visibilite (18/10/2026) : prive, membres connectes (defaut), web.
+const MIGRATION_VISIBILITE = path.join(RACINE, '../../sites/Aoknowledgecom/supabase/migrations/20261019010000_profil_visibilite_membres.sql')
 const prisma = new PrismaClient()
 
 let ecarts = 0
@@ -112,6 +114,18 @@ async function main() {
       console.log(`migration du lot 2 absente : jouee dans la transaction (${ordres.length} ordres, annulee a la fin)`)
     } else {
       console.log('migration du lot 2 presente en base')
+    }
+
+    // Visibilite en trois etats (18/10/2026) : prive, membres (connectes), web.
+    const dejaVisi = Number((await tx.$queryRawUnsafe(
+      `select count(*)::int as n from pg_proc where proname = 'aok_profil_public' and pronamespace = 'public'::regnamespace
+          and prosrc like '%masquer_moteurs = false%'`))[0].n)
+    if (!dejaVisi) {
+      const ordres = decouper(readFileSync(MIGRATION_VISIBILITE, 'utf8'))
+      for (const o of ordres) await tx.$executeRawUnsafe(o)
+      console.log(`migration de la visibilite absente : jouee dans la transaction (${ordres.length} ordres, annulee a la fin)`)
+    } else {
+      console.log('migration de la visibilite presente en base')
     }
 
     const comptes = await tx.$queryRawUnsafe(`
@@ -396,15 +410,31 @@ async function main() {
       }
       const inconnu = await comme('anon', null, 'select public.aok_profil_public(999999999)::text as p')
       attendre('lot 2 : numero inconnu : rien', inconnu.ok && inconnu.lignes[0].p === null)
-      await tx.$executeRawUnsafe('update public.profiles set profil_public = true where id = $1::uuid', A.id)
-      const rPub = await pub('anon', null)
-      const o = rPub.ok && rPub.lignes[0].p ? JSON.parse(rPub.lignes[0].p) : null
-      attendre('lot 2 : profil PUBLIC de A lisible par l\'anonyme (niveau, grille)', o && o.numero === numA && o.progression?.niveau >= 1 && Number(o.progression?.jours?.[jourD]) >= 1)
-      attendre('lot 2 : ni uuid ni email dans le profil public', o && !rPub.lignes[0].p.includes(A.id) && !rPub.lignes[0].p.toLowerCase().includes(A.email) && !('detail' in o.progression))
+      // Trois etats (Brice 18/10, migration 20261019010000) : prive, membres (defaut), web.
+      await tx.$executeRawUnsafe('update public.profiles set profil_public = true, masquer_moteurs = true where id = $1::uuid', A.id)
+      const rMembresAnon = await pub('anon', null)
+      attendre('visibilite : profil MEMBRES de A : rien pour l\'anonyme', rMembresAnon.ok && rMembresAnon.lignes[0].p === null, rMembresAnon.ok ? '' : rMembresAnon.motif)
+      const rMembresB = await pub('authenticated', B.id)
+      const o = rMembresB.ok && rMembresB.lignes[0].p ? JSON.parse(rMembresB.lignes[0].p) : null
+      attendre('visibilite : profil MEMBRES de A lisible par B connecte (niveau, grille)', o && o.numero === numA && o.progression?.niveau >= 1 && Number(o.progression?.jours?.[jourD]) >= 1)
+      attendre('lot 2 : ni uuid ni email dans le profil public', o && !rMembresB.lignes[0].p.includes(A.id) && !rMembresB.lignes[0].p.toLowerCase().includes(A.email) && !('detail' in o.progression))
       attendre('lot 2 : masquer_moteurs rendu', o && o.masquer_moteurs === true)
-      await tx.$executeRawUnsafe('update public.profiles set profil_public = false where id = $1::uuid', A.id)
-      const rRe = await pub('anon', null)
-      attendre('lot 2 : redevenu prive : plus rien', rRe.ok && rRe.lignes[0].p === null)
+      await tx.$executeRawUnsafe('update public.profiles set masquer_moteurs = false where id = $1::uuid', A.id)
+      const rWeb = await pub('anon', null)
+      const w = rWeb.ok && rWeb.lignes[0].p ? JSON.parse(rWeb.lignes[0].p) : null
+      attendre('visibilite : profil WEB de A lisible par l\'anonyme', w && w.numero === numA && w.masquer_moteurs === false && w.progression?.niveau >= 1)
+      const rWebB = await pub('authenticated', B.id)
+      attendre('visibilite : profil WEB de A lisible par B connecte', rWebB.ok && rWebB.lignes[0].p !== null)
+      await tx.$executeRawUnsafe('update public.profiles set profil_public = false, masquer_moteurs = true where id = $1::uuid', A.id)
+      for (const [role, uid] of [['anon', null], ['authenticated', B.id]]) {
+        const rRe = await pub(role, uid)
+        attendre(`lot 2 : redevenu prive : plus rien (${role})`, rRe.ok && rRe.lignes[0].p === null)
+      }
+      // Prive mais masquer_moteurs = false (etat incoherent) : toujours rien.
+      await tx.$executeRawUnsafe('update public.profiles set profil_public = false, masquer_moteurs = false where id = $1::uuid', A.id)
+      const rIncoh = await pub('anon', null)
+      attendre('visibilite : prive meme si « ouvrir au web » est reste vrai', rIncoh.ok && rIncoh.lignes[0].p === null)
+      await tx.$executeRawUnsafe('update public.profiles set masquer_moteurs = true where id = $1::uuid', A.id)
 
       const exp = await comme('authenticated', A.id, `select (public.aok_exporter_mes_donnees() -> 'points_et_niveau' ->> 'niveau') as n`)
       attendre('lot 2 : export : points et niveau', exp.ok && Number(exp.lignes[0].n) >= 1, exp.ok ? '' : exp.motif)

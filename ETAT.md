@@ -33,6 +33,19 @@ Plus aucune fiche n'envoie vers Skool (ee9d476) : l'Academie du site a pris le r
   des poids, seuils `aok_niveaux_seuils`), calcul a la volee ; `verifier-mon-espace-rls.mjs` etendu (lot 2).
 - Chat support : une question d abonnement Live Club renvoie vers le bot Telegram (support-prompt.ts),
   evals L25 et R03 rejouees.
+- Visibilite en trois etats (Brice 18/10 soir, migration `20261019010000_profil_visibilite_membres.sql`
+  APPLIQUEE) : prive / membres (profil_public + masquer_moteurs true, le defaut, lisible seulement avec
+  auth.uid()) / web (masquer_moteurs false, anonymes + index). `/api/membres/photo` exige un Bearer valide
+  pour un profil membres (no-store, CORS GET), public pour un profil web. RLS : 108 controles ok.
+
+## Decisions du 18/10/2026 (soir)
+
+- Bot Live Club : la formation incluse = `https://aoknowledge.com/academie` (URL_FORMATION_LIVECLUB,
+  config.ts ; Skool avant, lien d affiliation garde en commentaire). Reponse a qui demande, pas d annonce.
+  Email de bienvenue aligne. Evals F01 a F03 rejouees seules : 3/3 reponse_correcte.
+- Les bases Smart Money : gratuit avec un compte (lead magnet). Migration
+  `20261019011000_academie_bases_smart_money_gratuit.sql` APPLIQUEE : prix_eur null (module et offre),
+  canal aucun, ancien prix 29 EUR consigne dans academie_offres.note. Produit et prix Stripe NON touches.
 
 ## Routes du compte pour le site (18/10/2026)
 

@@ -44,8 +44,8 @@
 //   variantes texteLiveClub et PHRASES_BOT ; le bot support garde son texte.
 // - l'extension s'appelle « Le Carnet du Trader » (plus « Carnet de Note »).
 //
-// Brice, 15/10 : la formation incluse est sur Skool (URL_FORMATION_LIVECLUB,
-// config.ts), en attendant l'espace formation du site. Le bot des membres le
+// Brice, 18/10 : la formation incluse est sur l'academie du site
+// (URL_FORMATION_LIVECLUB, config.ts), Skool avant. Le bot des membres le
 // sait (info marquee seulement: 'liveclub') ; le bot support ne change pas.
 
 import { ARGUMENT_TARIF_PAUSE, SUPPORT, URLS_ABONNEMENT, URL_FORMATION_LIVECLUB, URL_PORTAIL_CARTE, lienBotAccueil } from './liveclub/config'
@@ -114,17 +114,17 @@ export const INFOS_PUBLIQUES: readonly InfoPublique[] = [
     source: 'apps/journal-d-etude/src/lib/liveclub/config.ts (URLS_ABONNEMENT, décision de Brice du 29/09)',
   },
   {
-    // Brice, 15/10 : un abonne qui demande « ou est la formation » va sur
-    // Skool pour l'instant, sur notre site quand la plateforme sera en place
-    // (URL_FORMATION_LIVECLUB, config.ts, la seule a changer). Bot des membres
-    // seulement : le bot support du site ne change pas. L'adresse finit la
-    // phrase (Telegram avalerait une ponctuation collee au lien).
+    // Brice, 18/10 : un abonne qui demande « ou est la formation » va sur
+    // l'academie du site (URL_FORMATION_LIVECLUB, config.ts). Avant (15/10) :
+    // Skool. Reponse a qui demande, pas d'annonce. Bot des membres seulement :
+    // le bot support du site ne change pas. L'adresse finit la phrase
+    // (Telegram avalerait une ponctuation collee au lien).
     sujet: 'La formation incluse dans le Live Club',
-    texte: "Les membres du Live Club (abonnés, ou accès offert) ont accès aux vidéos de formation incluses, sur Skool, pour l'instant. "
-      + "Pour y entrer : sur la page Skool, demander à rejoindre avec l'email de son abonnement (pour un accès offert, l'email sous lequel l'équipe le connaît) ; "
-      + `l'équipe valide l'entrée et ouvre les modules du Live Club. L'adresse : ${URL_FORMATION_LIVECLUB}`,
+    texte: "Les membres du Live Club (abonnés, ou accès offert) ont accès aux cours de formation inclus, sur l'académie du site. "
+      + "Pour y entrer : se connecter à l'académie avec l'email de son abonnement (pour un accès offert, l'email sous lequel l'équipe le connaît) ; "
+      + `les cours inclus dans le Live Club s'ouvrent alors tout seuls. L'adresse : ${URL_FORMATION_LIVECLUB}`,
     seulement: 'liveclub',
-    source: 'apps/journal-d-etude/src/lib/liveclub/config.ts (URL_FORMATION_LIVECLUB) ; décision de Brice du 2026-10-15 (Skool en attendant l\'espace formation du site)',
+    source: 'apps/journal-d-etude/src/lib/liveclub/config.ts (URL_FORMATION_LIVECLUB) ; décision de Brice du 2026-10-18 (l\'académie du site remplace Skool)',
   },
   {
     sujet: 'MelTrade',

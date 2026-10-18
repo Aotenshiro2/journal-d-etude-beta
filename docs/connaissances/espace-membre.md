@@ -22,7 +22,7 @@ Pour toute personne qui a un compte AOKnowledge.
 ## Prix et accès
 
 - Gratuit, avec ton compte AOKnowledge.
-- Ton profil est privé au départ. Si tu le rends public, les autres membres connectés voient ton nom, ta photo, ta présentation et les espaces que tu as choisi de montrer.
+- Ton profil est privé au départ : personne d'autre ne le voit. Visible des membres, ta page (aoknowledge.com/membres/ton numéro) se montre aux seuls membres connectés : ton nom, ta photo, ta présentation, ton niveau, ton activité et les espaces que tu as choisi de montrer. Ouverte au web (réglage à part, dans Paramètres, rubrique Profil), elle se voit aussi sans compte et sur les moteurs de recherche.
 - Achats : l'historique de tes paiements, achats et Live Club, avec un bouton Reçu. Un paiement PayPal n'a pas de reçu en ligne : écris au support.
 - Données : le bouton Exporter télécharge un fichier avec ton compte, ton profil, tes achats, ton Live Club, ta progression, tes demandes au support et tes notes du Journal.
 - Supprimer son compte : rubrique Données, Demander la suppression. La demande part à l'équipe, qui revient vers toi pour voir ce que tu souhaites. Rien n'est supprimé sans ton accord, et les factures restent archivées, c'est une obligation comptable.

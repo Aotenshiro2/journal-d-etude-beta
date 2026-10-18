@@ -34,33 +34,23 @@ export const URL_PORTAIL_CARTE = 'https://billing.stripe.com/p/login/bJecN48kK4V
 export const SUPPORT = 'support@aoknowledge.com'
 
 /**
- * L'ENDROIT DE LA FORMATION INCLUSE dans le Live Club (Brice, 15/10 : « il
- * devrait etre dirige vers Skool pour l'instant ; une fois notre plateforme
- * en place, vers notre site »). Les videos de formation incluses sont sur le
- * Skool d'AOKnowledge : l'abonne demande a rejoindre avec l'email de son
- * abonnement, l'equipe valide son entree et lui ouvre les modules du Live
- * Club.
+ * L'ENDROIT DE LA FORMATION INCLUSE dans le Live Club. Depuis le 18/10
+ * (Brice : « tu peux deja envoyer les membres vers l'academie pour ceux qui
+ * posent la question ») : l'academie du site. Le membre se connecte avec
+ * l'email de son abonnement (acces offert : l'email sous lequel l'equipe le
+ * connait) et les cours inclus dans le Live Club s'ouvrent seuls (droits de
+ * l'academie, src/lib/academie/droits.ts). Pas d'annonce : le bot le dit a
+ * qui le demande, il ne pousse pas l'info.
  *
- * A REMPLACER par l'espace formation d'aoknowledge.com quand il sera en ligne.
+ * Avant (15/10 au 18/10) : le Skool d'AOKnowledge, lien d'affiliation de
+ * Melanie https://www.skool.com/ao-knowledge-trading-5563/about?ref=8d5bde6137124c10a3abe0535ca5f6ec
+ * (demande d'entree validee par l'equipe).
  *
  * Une seule constante, lue par le bot des membres (politique-information.ts,
- * prompt-membre.ts) et par l'email de bienvenue (emails.ts). Lien d'affiliation
- * Skool de Melanie, donne par Brice le 15/10 (le groupe est
- * ao-knowledge-trading-5563 ; l'ancienne adresse aoknowledge-trading des
- * videos de Brice n'est plus la bonne).
+ * prompt-membre.ts) et par l'email de bienvenue (emails.ts). Evals F01 a F03
+ * (scripts/eval-fuites.mjs).
  */
-export const URL_FORMATION_LIVECLUB = lienFormation(
-  'https://www.skool.com/ao-knowledge-trading-5563/about', '8d5bde6137124c10a3abe0535ca5f6ec')
-
-/**
- * Le lien de la formation, avec le parametre d'affiliation de Melanie quand
- * on le connaitra. 15/10 : son ?ref= est INCONNU. Le poser a la place du null
- * ci-dessus, tel qu'elle le donne, jamais celui de quelqu'un d'autre. Sans
- * ref, le lien nu.
- */
-function lienFormation(base: string, ref: string | null): string {
-  return ref ? `${base}?ref=${encodeURIComponent(ref)}` : base
-}
+export const URL_FORMATION_LIVECLUB = 'https://aoknowledge.com/academie'
 
 /**
  * La phrase « abonne-toi », avec les deux adresses, reprise partout (bot,

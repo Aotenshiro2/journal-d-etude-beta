@@ -2748,22 +2748,23 @@ test('comptes Telegram : journal, fil Support et resume du matin', () => {
   assert.equal(lignes[i + 1], "- Zoé A., zap@exemple.fr : conflit à vérifier : u8817429863 dit être le titulaire, l'abonnement est utilisé par @wrdxr2d2 (u8367915893)")
 })
 
-test('formation incluse : une seule adresse (Skool pour l instant), dans le bot des membres et l email de bienvenue (Brice 15/10)', () => {
-  // Skool en attendant l'espace formation du site, avec le lien d'affiliation de Melanie (Brice 15/10).
-  assert.equal(URL_FORMATION_LIVECLUB, 'https://www.skool.com/ao-knowledge-trading-5563/about?ref=8d5bde6137124c10a3abe0535ca5f6ec')
+test('formation incluse : une seule adresse (l academie du site depuis le 18/10), dans le bot des membres et l email de bienvenue (Brice 15/10 puis 18/10)', () => {
+  // Brice 18/10 : l'academie du site remplace Skool (lien d'affiliation de Melanie, 15/10 au 18/10).
+  assert.equal(URL_FORMATION_LIVECLUB, 'https://aoknowledge.com/academie')
   const lire = (f) => readFileSync(new URL(`../src/lib/${f}`, import.meta.url), 'utf8')
   const config = lire('liveclub/config.ts')
-  assert.match(config, /A REMPLACER par l'espace formation d'aoknowledge\.com quand il sera en ligne/)
-  assert.equal((config.match(/https:\/\/www\.skool\.com\/ao-knowledge-trading-5563/g) ?? []).length, 1, 'une seule adresse en dur')
-  // Personne d'autre n'ecrit l'adresse en dur : tous lisent la constante.
+  assert.equal((config.match(/'https:\/\/aoknowledge\.com\/academie'/g) ?? []).length, 1, 'une seule adresse en dur')
+  // Personne d'autre n'ecrit l'adresse en dur ni ne renvoie vers Skool : tous lisent la constante.
   for (const f of ['liveclub/prompt-membre.ts', 'politique-information.ts', 'liveclub/emails.ts', 'liveclub/bot-membre.ts', 'support-prompt.ts']) {
-    assert.ok(!lire(f).includes('skool.com/ao-knowledge-trading-5563'), f)
+    const t = lire(f)
+    assert.ok(!t.includes('skool.com/ao-knowledge-trading-5563') && !t.includes("'https://aoknowledge.com/academie'"), f)
   }
   // Le prompt des membres : la constante, jamais de presentation du Live Club a un membre, transmission si ca coince.
   const prompt = lire('liveclub/prompt-membre.ts')
   assert.ok(prompt.includes('${URL_FORMATION_LIVECLUB}'))
   assert.match(prompt, /tu ne lui présentes jamais le Live Club comme à quelqu'un qui le découvre/)
-  assert.match(prompt, /demande à rejoindre avec l'email de son abonnement/)
+  assert.match(prompt, /il se connecte à l'académie avec l'email de son abonnement/)
+  assert.match(prompt, /Tu n'en parles pas s'il ne le demande pas/)
   assert.match(prompt, /ça coince, tu transmets à l'équipe \(demander_un_humain\)/)
   // L'adresse finit la ligne du prompt (pas de ponctuation collee au lien).
   assert.match(prompt, /\$\{URL_FORMATION_LIVECLUB\}\n/)
@@ -2772,11 +2773,12 @@ test('formation incluse : une seule adresse (Skool pour l instant), dans le bot 
   const info = politique.slice(politique.indexOf("sujet: 'La formation incluse dans le Live Club'"))
   assert.match(info.slice(0, 900), /seulement: 'liveclub'/)
   assert.match(politique, /\.filter\(i => !i\.seulement \|\| i\.seulement === bot\)/)
-  // L'email de bienvenue : le bot pour la communaute, Skool pour les videos.
+  // L'email de bienvenue : le bot pour la communaute, l'academie pour les cours.
   const emails = lire('liveclub/emails.ts')
   const bienvenue = emails.slice(emails.indexOf('export function modeleBienvenue('), emails.indexOf('\n}\n', emails.indexOf('export function modeleBienvenue(')))
   assert.ok(bienvenue.includes('${URL_FORMATION_LIVECLUB}'))
-  assert.match(bienvenue, /c'est pour la communauté ; les vidéos de formation incluses sont sur Skool/)
+  assert.match(bienvenue, /c'est pour la communauté ; les cours de formation inclus sont sur l'académie du site/)
+  assert.ok(!/skool/i.test(bienvenue.replace(/\/\/.*$/gm, '')))
 })
 
 console.log(`\n${n} blocs verifies, tout est bon.`)
