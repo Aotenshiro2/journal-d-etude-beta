@@ -15,7 +15,7 @@ import { requeteTsquery } from '@/lib/creation-pur'
 import {
   CONSIGNES, MAX_PASSAGE, MODELE_GENERATION, SCHEMA_SORTIE,
   assemblerPassages, axeCible, choisirBanque, choisirFormes, choisirMatiereInspirations,
-  entreeGeneration, motsDeLaDemande, registreDuCanal, validerSortie,
+  entreeGeneration, motsDeLaDemande, registreDuCanal, requeteAnglaise, termesAnglais, textesReference, validerSortie,
   type ContenuGeneration, type DemandeGeneration, type Inspiration, type Parent, type Passage,
 } from '@/lib/generation-pur'
 
@@ -99,13 +99,15 @@ export async function genererPost(d: DemandeGeneration, userId: string, origine:
     return { ok: false, status: 422, erreur: 'Aucune inspiration « forme » pour cette personne dans la base.' }
   }
   const requete = requeteTsquery(mots)
+  // La reference ICT est en anglais : sa requete a elle (19/10), sans appel IA.
+  const requeteEn = requeteAnglaise(termesAnglais(textesReference(d, formes)))
   const chercher = async (reference: boolean): Promise<Passage[]> => {
-    if (!requete) return []
+    if (!(reference ? requeteEn : requete)) return []
     try {
       const pages = reference
         ? await prisma.$queryRaw<LignePage[]>`
             select m.auteur, m.source, m.page, m.texte
-            from public.cockpit_matiere_pages m, to_tsquery('english', ${requete}) q
+            from public.cockpit_matiere_pages m, to_tsquery('english', ${requeteEn}) q
             where m.reference and m.tsv_en @@ q and length(m.texte) > 200
             order by ts_rank(m.tsv_en, q) desc, m.source, m.page
             limit ${MAX_PAGES}`
@@ -204,6 +206,7 @@ export async function genererPost(d: DemandeGeneration, userId: string, origine:
     image: d.image ? { media_type: d.image.media_type, octets_b64: d.image.data.length } : null,
     axe,
     mots,
+    requete_reference: requeteEn,
     envoyees,
   }
   try {

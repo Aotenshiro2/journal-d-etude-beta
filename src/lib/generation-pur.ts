@@ -203,6 +203,106 @@ export function registreDuCanal(toutes: Inspiration[], canal: string): string | 
   return toutes.find((i) => (i.canal ?? '').toLowerCase() === c && i.canal_registre)?.canal_registre ?? null
 }
 
+// --- La requete anglaise de la reference ICT (cockpit_matiere_pages.tsv_en) -------
+//
+// Les PDF d'ICT sont en anglais : chercher avec les mots francais de la demande
+// ne remonte rien (essai du 19/10). Sans appel IA : les termes ICT deja en
+// anglais (et les sigles en capitales) de l'idee, des reponses et des concepts
+// des inspirations choisies, plus un petit dictionnaire des notions courantes.
+
+/** Notions francaises (minuscules, sans accents) -> termes anglais d'ICT. Les expressions longues d'abord. */
+export const DICTIONNAIRE_ICT: ReadonlyArray<readonly [string, readonly string[]]> = [
+  ['prise de liquidite', ['liquidity raid', 'sweep']],
+  ['chasse aux stops', ['stop hunt', 'stop run']],
+  ['cassure de structure', ['break of structure', 'market structure shift']],
+  ['changement de structure', ['market structure shift']],
+  ['range d ouverture', ['opening range']],
+  ['prix d ouverture', ['opening price']],
+  ['ecart de juste valeur', ['fair value gap']],
+  ['bloc d ordre', ['order block']],
+  ['faux mouvement', ['judas swing']],
+  ['faux break', ['turtle soup', 'judas swing']],
+  ['gestion du risque', ['risk management']],
+  ['biais du jour', ['daily bias']],
+  ['biais', ['daily bias', 'bias']],
+  ['liquidite', ['liquidity']],
+  ['desequilibre', ['imbalance']],
+  ['structure', ['market structure']],
+  ['killzone', ['killzone', 'kill zone']],
+  ['opr', ['opening range']],
+  ['ouverture', ['opening range', 'opening price']],
+  ['premium', ['premium']],
+  ['discount', ['discount']],
+  ['equilibre', ['equilibrium']],
+  ['cible', ['target', 'draw on liquidity']],
+  ['objectif de prix', ['target', 'draw on liquidity']],
+  ['consolidation', ['consolidation']],
+  ['expansion', ['expansion']],
+  ['retracement', ['retracement']],
+  ['retournement', ['reversal']],
+  ['renversement', ['reversal']],
+  ['manipulation', ['manipulation', 'judas swing']],
+  ['londres', ['london']],
+  ['new york', ['new york']],
+  ['asie', ['asian range']],
+  ['tendance', ['trend']],
+  ['hebdo', ['weekly']],
+  ['semaine', ['weekly']],
+  ['mensuel', ['monthly']],
+  ['divergence', ['smt divergence']],
+  ['partiel', ['partial']],
+]
+
+/** Termes ICT deja en anglais, reconnus tels quels dans le texte (minuscules). */
+const TERMES_ANGLAIS = [
+  'fair value gap', 'order block', 'breaker', 'liquidity', 'killzone', 'kill zone', 'bias', 'pd array', 'imbalance',
+  'displacement', 'sweep', 'raid', 'premium', 'discount', 'equilibrium', 'opening range', 'judas swing', 'turtle soup',
+  'mitigation', 'silver bullet', 'power of three', 'market structure', 'draw on liquidity', 'optimal trade entry',
+  'consolidation', 'expansion', 'reversal', 'macro', 'daily', 'weekly', 'london', 'asian', 'buyside', 'sellside',
+]
+
+/** Sigles ignores : ce ne sont pas des notions ICT. */
+const SIGLES_VIDES = new Set(['UT', 'TP', 'SL', 'BE', 'RR', 'NB', 'OK', 'PDF', 'ICT'])
+
+const normaliser = (t: string) =>
+  t.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ')
+
+/** Les termes anglais de la recherche dans la reference : expressions (un tableau de mots chacune), sans doublon, 20 au plus. */
+export function termesAnglais(textes: Array<string | null | undefined>): string[][] {
+  const termes = new Map<string, string[]>()
+  const ajouter = (t: string) => {
+    const mots = normaliser(t).split(' ').filter((m) => /^[a-z]+$/.test(m))
+    if (mots.length && !termes.has(mots.join(' '))) termes.set(mots.join(' '), mots)
+  }
+  for (const brut of textes) {
+    if (typeof brut !== 'string' || !brut.trim()) continue
+    for (const sigle of brut.match(/\b[A-Z]{2,5}\b/g) ?? []) if (!SIGLES_VIDES.has(sigle)) ajouter(sigle)
+    const tout = ` ${normaliser(brut)} `
+    let reste = tout
+    for (const [fr, en] of DICTIONNAIRE_ICT) {
+      if (reste.includes(` ${fr} `)) {
+        en.forEach(ajouter)
+        reste = reste.split(` ${fr} `).join('  ')
+      }
+    }
+    for (const en of TERMES_ANGLAIS) if (tout.includes(` ${en} `)) ajouter(en)
+  }
+  return [...termes.values()].slice(0, 20)
+}
+
+/** La requete to_tsquery('english') : les expressions en OU, les mots d'une expression en suite (<->). */
+export function requeteAnglaise(termes: string[][]): string {
+  return termes.map((t) => (t.length > 1 ? `(${t.join(' <-> ')})` : t[0])).join(' | ')
+}
+
+/** Les textes d'ou partent les termes : la demande, puis les concepts des 3 premieres inspirations choisies. */
+export function textesReference(d: Pick<DemandeGeneration, 'idee' | 'reponses' | 'consigne'>, formes: FormeChoisie[]): string[] {
+  return [
+    d.reponses.sujet, d.idee, d.reponses.biais, d.reponses.actif, d.consigne,
+    ...formes.slice(0, 3).flatMap((f) => f.inspiration.concepts),
+  ].filter((x): x is string => typeof x === 'string' && !!x.trim())
+}
+
 // --- La matiere -----------------------------------------------------------------
 
 export type TypePassage = 'inspiration' | 'pdf' | 'reference' | 'banque'
