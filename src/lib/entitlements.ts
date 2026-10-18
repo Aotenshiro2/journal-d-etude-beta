@@ -17,7 +17,7 @@
 // l'extension.
 import { prisma } from './db'
 
-export type MentoratReason = 'etm' | 'manuel' | 'liveclub' | 'skool-vip' | 'skool-premium' | 'carnet-premium'
+export type MentoratReason = 'etm' | 'manuel' | 'liveclub' | 'skool-vip' | 'skool-premium' | 'formation' | 'carnet-premium'
 
 // Le produit « Carnet Premium » (5,99 €/mois) sur le Stripe aoknowledge —
 // créé le 28/08/2026. La vérification en direct donne l'accès IMMÉDIAT après
@@ -250,6 +250,21 @@ export async function checkMentoratAccess(userId: string): Promise<MentoratAcces
     if (m.tier_skool === 'vip') return { entitled: true, reason: 'skool-vip', email }
     if (m.tier_skool === 'premium') return { entitled: true, reason: 'skool-premium', email }
   }
+
+  // 2 bis. Le pack Formation complète (1 999 €) ouvre aussi les apps, comme le
+  // rang Premium de Skool le faisait (décision Brice 18/10/2026). Lu dans
+  // academie_acces par email ou par compte : actif = non retiré, commencé,
+  // sans fin ou fin future.
+  const pack = await prisma.$queryRaw<{ un: number }[]>`
+    select 1 as un
+    from academie_acces a
+    join academie_offres o on o.id = a.offre_id
+    where o.slug = 'formation-complete'
+      and a.retire_le is null and a.debut <= now() and (a.fin is null or a.fin > now())
+      and (a.user_id = ${userId}::uuid or a.email = ${email})
+    limit 1
+  `
+  if (pack.length > 0) return { entitled: true, reason: 'formation', email }
 
   // 3. Abonnement Carnet Premium (Stripe aoknowledge, vérif en direct :
   // l'accès s'ouvre dans la minute qui suit le paiement)

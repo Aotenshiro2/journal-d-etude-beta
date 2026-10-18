@@ -177,7 +177,7 @@ export async function droitsAcademie(userId: string): Promise<DroitsAcademie> {
 // Club, Premium, VIP, ETM), PAS par le Carnet Premium seul. Donc, dans
 // l'ordre : profiles.role = 'admin', sinon checkMentoratAccess
 // (src/lib/entitlements.ts), qui rend UNE raison : etm, manuel, liveclub,
-// skool-vip, skool-premium ouvrent, carnet-premium n'ouvre pas.
+// skool-vip, skool-premium, formation ouvrent, carnet-premium n'ouvre pas.
 // checkMentoratAccess essaie le Carnet Premium en DERNIER : s'il rend
 // 'carnet-premium', c'est qu'aucune autre raison n'a ete trouvee, l'exclure
 // ne cache donc aucun membre payant. Le Live Club y est lu par l'etat du
@@ -194,7 +194,7 @@ export type AccesAcademieEssai = {
 }
 
 const RAISONS_MEMBRE_PAYANT: ReadonlySet<MentoratReason> = new Set<MentoratReason>([
-  'etm', 'manuel', 'liveclub', 'skool-vip', 'skool-premium',
+  'etm', 'manuel', 'liveclub', 'skool-vip', 'skool-premium', 'formation',
 ])
 
 function estRaisonMembrePayant(r: MentoratReason | null): r is Exclude<MentoratReason, 'carnet-premium'> {
