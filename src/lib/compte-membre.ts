@@ -54,9 +54,10 @@ type Paiement = { paiement_id?: unknown; recu?: unknown }
 /** Les paiements que la page montre au membre, avec reçu possible. */
 async function paiementsAvecRecu(userId: string): Promise<Set<string>> {
   const l = await prisma.$queryRawUnsafe<{ c: string | null }[]>('select public.aok_compte_de($1::uuid)::text as c', userId)
-  const o = JSON.parse(l[0]?.c ?? '{}') as { achats?: Paiement[]; live_club_dernier_paiement?: Paiement | null }
+  const o = JSON.parse(l[0]?.c ?? '{}') as { achats?: Paiement[]; live_club_dernier_paiement?: Paiement | null; live_club_paiements?: Paiement[] }
   const ids = new Set<string>()
-  for (const p of [...(o.achats ?? []), ...(o.live_club_dernier_paiement ? [o.live_club_dernier_paiement] : [])]) {
+  // (18/10, lot 1) live_club_paiements : l'historique des paiements de la page Achats.
+  for (const p of [...(o.achats ?? []), ...(o.live_club_dernier_paiement ? [o.live_club_dernier_paiement] : []), ...(o.live_club_paiements ?? [])]) {
     if (p.recu === true && typeof p.paiement_id === 'string') ids.add(p.paiement_id)
   }
   return ids

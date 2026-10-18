@@ -4,6 +4,8 @@ import { getUserId } from '@/lib/api-auth'
 import { corsHeaders, corsPreflight } from '@/lib/support-cors'
 import { telechargerImageTelegram } from '@/lib/agent-cockpit-telegram'
 import { estImage, lirePieceSupport } from '@/lib/liveclub/support-pont-pur'
+import { lireCapture } from '@/lib/support-membre'
+import { cheminCapture } from '@/lib/support-membre-pur'
 
 /**
  * POST /api/cockpit/support/piece : l'IMAGE d'une piece jointe d'un fil
@@ -53,6 +55,18 @@ export async function POST(req: NextRequest) {
   const piece = lirePieceSupport(lignes[0].piece)
   if (!piece) return erreur('Pièce jointe introuvable', 404)
   if (!estImage(piece)) return erreur("Ce fichier n'est pas une image : pas d'aperçu.", 415)
+
+  // (18/10) Une capture de la page Support du site : bucket prive
+  // support-captures (file_id « stockage:<chemin> »), lue avec la cle de service.
+  if (piece.file_id.startsWith('stockage:')) {
+    const chemin = cheminCapture(piece.file_id)
+    const lu = chemin ? await lireCapture(chemin) : null
+    if (!lu || !lu.ok) return erreur('Capture illisible pour le moment.', 502)
+    return new NextResponse(new Uint8Array(lu.octets), {
+      status: 200,
+      headers: { ...headers, 'Content-Type': lu.mime, 'Cache-Control': 'private, max-age=600', 'X-Content-Type-Options': 'nosniff' },
+    })
+  }
 
   const issue = await telechargerImageTelegram('liveclub', {
     fileId: piece.file_id, source: piece.type, typeAnnonce: null, taille: piece.taille,
