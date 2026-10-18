@@ -11,26 +11,23 @@
 import type Anthropic from '@anthropic-ai/sdk'
 import { consignesPolitique } from './politique-information'
 import { lienBotAccueil } from './liveclub/config'
+import { NOM_OUTIL_CONNAISSANCES, OUTIL_CONNAISSANCES, resultatConnaissances } from './connaissances-outil'
+
+// 18/10 : le texte produit fige (extension, journal, site, masterclass,
+// connexion, problemes frequents) est remplace par les fiches de
+// docs/connaissances/, lues par l'outil connaissances_produits (meme base que
+// le bot Live Club). Les problemes frequents y sont passes (carnet-du-trader,
+// journal-d-etudes).
 
 // Le robot répond d'abord ; « parler à un humain » reste toujours ouvert.
 // Périmètre volontairement borné : il aide sur NOS produits, jamais de
 // conseil de trading personnalisé, jamais d'invention.
 export const SYSTEM_PROMPT_SUPPORT = `Tu es l'assistant support d'Ao Knowledge (AOK), une école de trading française fondée par Brice. Tu aides les membres sur les produits AOK, en français, en tutoyant, avec des réponses courtes et concrètes. N'utilise jamais de tiret cadratin.
 
-Les produits :
-- L'extension Chrome « Le Carnet du Trader » : capture de notes de trading sans quitter l'analyse (notes, captures d'écran, trades avec jugements A/B/C, warmups/cooldowns, DOL, dossiers et sous-dossiers, dictée vocale locale, exports PDF/DOCX/Google Drive, sync vers le journal).
-- Le « Journal d'Études » (journal.aoknowledge.com) : l'espace web d'étude des notes (canvas, groupes, vue document, relecture, concepts, analytics).
-- Le site aoknowledge.com et la masterclass (masterclass.aoknowledge.com).
-- La connexion : compte AOK via Google, le même compte partout.
-
-Réponses aux problèmes fréquents :
-- Sync extension vers journal : l'état est visible en bas du panneau (« ✓ sync » ou « N à synchroniser »). Si déconnecté, se reconnecter via l'icône compte, puis « Tout renvoyer » dans Compte si besoin.
-- Dictée vocale : au premier usage Chrome demande l'autorisation micro dans un onglet dédié, puis le modèle (~170 Mo) se télécharge une fois. Le choix du micro se fait dans Paramètres, section Dictée vocale.
-- Notes A/B/C : la note juge la QUALITÉ de la décision, jamais le résultat. Un trade perdant peut mériter un A.
-- Sous-dossiers : survoler un dossier dans l'historique et cliquer l'icône dossier+ (un niveau de profondeur).
+Les produits et services (le Carnet du Trader, le Journal d'Études, Pilotage, les masterclass, l'académie, le Live Club, le 10% Club, Mon espace, la connexion au compte, les ressources gratuites, les liens utiles) : tout ce que tu en sais est dans leurs fiches, que tu lis avec l'outil connaissances_produits. Une question sur un produit (ce que c'est, pour qui, le prix, ce qui est inclus, comment y aller, un souci d'utilisation) : appelle-le avant de répondre, puis réponds depuis ses fiches, avec les adresses recopiées en entier. Si la réponse n'y est pas, dis que tu n'as pas l'info et propose le bouton « Parler à un humain ». Ne nomme pas l'outil à la personne.
 
 Règles strictes :
-- Ne réponds QUE sur ce que tu sais des produits et de l'école. Si tu n'es pas sûr, ou si la question sort du périmètre (facturation, remboursement, accès à un achat, bug que tu ne connais pas, situation de compte), dis-le simplement et propose de contacter un humain via le bouton prévu.
+- Ne réponds QUE sur ce que tu sais des produits et de l'école : leurs fiches et les informations publiques plus bas. Si tu n'es pas sûr, ou si la question sort du périmètre (facturation, remboursement, accès à un achat, bug que tu ne connais pas, situation de compte), dis-le simplement et propose de contacter un humain via le bouton prévu.
 - Tu ne vois aucun compte, aucun abonnement, aucun paiement : ni celui de la personne, ni celui de quelqu'un d'autre. Pour sa situation à elle, c'est le bouton « Parler à un humain ».
 - Une question sur l'abonnement Live Club (paiement, prélèvement, pause, arrêt, résiliation, accès au groupe Telegram) : renvoie d'abord, en une phrase, vers le bot Telegram du Live Club, ${lienBotAccueil()}, qui voit son abonnement et le fait tout de suite. Puis rappelle que le bouton « Parler à un humain » reste possible.
 - Jamais de conseil de trading personnalisé, jamais de promesse de gains, jamais d'avis sur une position.
@@ -90,6 +87,22 @@ export function versMessagesSupport(fil: readonly MessageFilSupport[], message: 
   return sortie
 }
 
+/**
+ * Les outils du bot support (18/10) : la seule lecture des fiches produits
+ * (src/lib/connaissances-outil.ts, commun au bot Live Club). Aucun outil ne
+ * voit un compte.
+ */
+export const OUTILS_SUPPORT: Anthropic.Tool[] = [OUTIL_CONNAISSANCES]
+
+/** Tours d'outils au plus par message (la route et l'eval). */
+export const MAX_TOURS_SUPPORT = 3
+
+/** Le resultat d'un appel d'outil du bot support, le meme en prod et dans l'eval. */
+export function resultatOutilSupport(nom: string, entree: unknown): { contenu: string; erreur?: true } {
+  if (nom === NOM_OUTIL_CONNAISSANCES) return { contenu: JSON.stringify(resultatConnaissances(entree, 'support')) }
+  return { contenu: JSON.stringify({ erreur: 'Outil inconnu.' }), erreur: true }
+}
+
 /** La requete du bot support : la meme en prod et dans l'eval. */
 export function requeteSupport(model: string, app: string, messages: Anthropic.MessageParam[]): Anthropic.MessageCreateParamsNonStreaming {
   return {
@@ -97,6 +110,7 @@ export function requeteSupport(model: string, app: string, messages: Anthropic.M
     max_tokens: 2048,
     output_config: { effort: 'low' },
     system: [{ type: 'text', text: systemeSupport(app), cache_control: { type: 'ephemeral' } }],
+    tools: OUTILS_SUPPORT,
     messages,
   }
 }

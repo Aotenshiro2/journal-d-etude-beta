@@ -4,7 +4,8 @@ import { getUserId } from '@/lib/api-auth'
 import { aiClient, AI_MODEL, logAiUsage, textOf, aiErrorMessage } from '@/lib/ai'
 import { corsHeaders, corsPreflight } from '@/lib/support-cors'
 import { filtrerSortie } from '@/lib/politique-information'
-import { requeteSupport, versMessagesSupport } from '@/lib/support-prompt'
+import type Anthropic from '@anthropic-ai/sdk'
+import { MAX_TOURS_SUPPORT, requeteSupport, resultatOutilSupport, versMessagesSupport } from '@/lib/support-prompt'
 
 // L'appel Claude peut dépasser les 10 s par défaut des fonctions Vercel
 export const maxDuration = 60
@@ -60,14 +61,33 @@ export async function POST(req: NextRequest) {
 
   try {
     const model = AI_MODEL.support
-    const response = await client.messages.create(requeteSupport(model, app, versMessagesSupport(recent, message)))
+    // Boucle d'outils (18/10) : le seul outil est la lecture des fiches
+    // produits (connaissances_produits, src/lib/connaissances-outil.ts), comme
+    // le bot Live Club. Chaque tour est trace dans AiUsage.
+    const messages = versMessagesSupport(recent, message)
+    let texte = ''
+    for (let tour = 0; tour < MAX_TOURS_SUPPORT; tour++) {
+      const response = await client.messages.create(requeteSupport(model, app, messages))
+      await logAiUsage(userId, 'support', model, response.usage)
+      if (response.stop_reason !== 'tool_use') {
+        texte = textOf(response)
+        break
+      }
+      messages.push({ role: 'assistant', content: response.content })
+      const resultats: Anthropic.ToolResultBlockParam[] = []
+      for (const bloc of response.content) {
+        if (bloc.type !== 'tool_use') continue
+        const r = resultatOutilSupport(bloc.name, bloc.input)
+        resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: r.contenu, ...(r.erreur ? { is_error: true } : {}) })
+      }
+      messages.push({ role: 'user', content: resultats })
+    }
     // Filet de sortie (politique d'information, 30/09) : emails, téléphones et
     // prénoms d'équipe non publics que le membre n'a ni écrits ni reçus de
     // l'équipe (réponses 'human' du fil, qu'il a déjà lues).
-    const filtre = filtrerSortie(textOf(response), [message, ...recent.filter(m => m.role === 'user' || m.role === 'human').map(m => m.content)])
+    const filtre = filtrerSortie(texte, [message, ...recent.filter(m => m.role === 'user' || m.role === 'human').map(m => m.content)])
     if (filtre.retraits) console.warn(`[support/chat] ${filtre.retraits} donnee(s) retiree(s) de la reponse`)
     const reply = filtre.texte || 'Je ne peux pas répondre à ça. Utilise « Parler à un humain » et on te répondra directement.'
-    await logAiUsage(userId, 'support', model, response.usage)
 
     const now = new Date().toISOString()
     const updated: ThreadMessage[] = [
