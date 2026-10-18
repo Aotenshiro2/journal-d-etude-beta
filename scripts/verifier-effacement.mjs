@@ -323,8 +323,9 @@ const importeStatique = (texte, module) => new RegExp(`from ['"]@/lib/${module}[
 test('perimetre : seuls l\'agent du cockpit et stripe-actions touchent a l\'effacement', () => {
   const statiques = TOUS.filter((f) => importeStatique(f.texte, 'effacement')).map((f) => f.rel).sort()
   assert.deepEqual(statiques, ['src/lib/agent-cockpit.ts'])
-  const dynamiques = TOUS.filter((f) => f.texte.includes("import('@/lib/effacement')")).map((f) => f.rel)
-  assert.deepEqual(dynamiques, ['src/lib/stripe-actions.ts'])
+  const dynamiques = TOUS.filter((f) => f.texte.includes("import('@/lib/effacement')")).map((f) => f.rel).sort()
+  // compte-membre.ts (18/10) : la suppression du compte par le membre lui-meme, depuis le site.
+  assert.deepEqual(dynamiques, ['src/lib/compte-membre.ts', 'src/lib/stripe-actions.ts'])
   const sql = TOUS.filter((f) => /cockpit_effacer\(|cockpit_effacement_apercu\(|cockpit_effacement_cibles\(/.test(f.texte)).map((f) => f.rel)
   assert.deepEqual(sql, ['src/lib/effacement.ts'])
   // effacement.ts n'importe pas la fiche : l'agent lui passe le resolveur.
@@ -338,6 +339,20 @@ test('perimetre : seuls l\'agent du cockpit et stripe-actions touchent a l\'effa
       assert.ok(!f.texte.includes(interdit), `${f.rel} contient ${interdit}`)
     }
   }
+})
+
+test('suppression par le membre : son compte seulement, niveau 3, mot SUPPRIMER', () => {
+  const lib = TOUS.find((f) => f.rel === 'src/lib/compte-membre.ts').texte
+  const route = TOUS.find((f) => f.rel === 'src/app/api/compte/supprimer/route.ts').texte
+  // La cible ne vient que de l'email confirme du jeton.
+  assert.match(lib, /lireCible\(\{ telegram: \[\], membres: \[\], archives: \[\], emails: \[compte\.email\] \}\)/)
+  assert.match(lib, /params: \{ niveau: 3, qui: 'compte du site \(demande du membre\)', cible \}/)
+  assert.match(lib, /export const MOT_CONFIRMATION = 'SUPPRIMER'/)
+  assert.match(lib, /u\.email && u\.email_confirmed_at \?/)
+  assert.match(route, /if \(corps\?\.confirmation !== MOT_CONFIRMATION\) return refus\('confirmation', 400\)/)
+  assert.match(route, /supprimerCompte\(\{ id: compte\.id, email: compte\.email \}\)/)
+  // Rien du corps de la requete n'atteint la cible.
+  assert.ok(!/corps\??\.(email|cible|qui|telegram|membres)/.test(route))
 })
 
 test('agent du cockpit : outil declare, niveau en enum, carte du serveur, texte avant la carte', () => {

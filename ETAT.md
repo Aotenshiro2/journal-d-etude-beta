@@ -3,6 +3,19 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
+## Routes du compte pour le site (18/10/2026)
+
+`POST /api/compte/recu` et `POST /api/compte/supprimer` (`src/lib/compte-membre.ts`), appelees par
+`/mon-espace/parametres` d aoknowledge.com avec le jeton Bearer du site, CORS de l academie.
+- Recu : le paiement doit etre dans `aok_compte_de(<uuid du jeton>)` (migration
+  `20261018233000_mon_espace_parametres.sql`) ; charge lue sur le compte Stripe du paiement
+  (STRIPE_AGENT_KEY_AOKNOWLEDGE pour le comptant, STRIPE_READ_KEY_MELANIE pour le Live Club).
+  Seule `receipt_url` repart.
+- Suppression : niveau 3 de l effacement sur l email confirme du jeton, mot SUPPRIMER exige
+  (docs/EFFACEMENT-DONNEES.md, section 3 bis). Compte rendu a l equipe par Agent AOK.
+- Verifications : `scripts/verifier-mon-espace-rls.mjs` (transaction annulee, 42 controles) et
+  `scripts/verifier-effacement.mjs` (perimetre etendu a compte-membre.ts).
+
 ## Securite de la base (30/09/2026)
 
 Constat : `npm run verifier:rls` du 29/09, puis deux mesures independantes en
