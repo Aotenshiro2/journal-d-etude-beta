@@ -22,7 +22,14 @@
 //   un aller-retour dans la meme journee ne se voit pas ;
 // - les tables du cockpit : acces broker, exemptions, tarifs reserves poses
 //   ou payes, demandes d'humain en attente (SupportThread), demandes de
-//   l'equipe (cockpit_demandes).
+//   l'equipe (cockpit_demandes) ;
+// - (18/10) les membres A CONTACTER (cockpit_membres_risque) dont une fenetre
+//   s'est ouverte depuis le dernier resume : la memoire des episodes deja
+//   annonces vit a cote de l'instantane Stripe (risque_annonces, migration
+//   20261018220000), et un episode marque « fait » au cockpit
+//   (cockpit_actions_traitees) n'est pas annonce. Ce bloc suffit a faire
+//   partir le resume. En pied, le nombre de ceux qui entrent dans une fenetre
+//   sous 7 jours (cockpit_membres_a_venir), jamais envoye pour lui seul.
 //
 // UNE FOIS PAR JOUR : table cockpit_liveclub_resumes (migration
 // 20261015120000), une ligne par jour de Paris (cle primaire), reservee AVANT
@@ -52,11 +59,11 @@ function idsListe(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
 }
 import {
-  attentesHorsEquipe, changementsAbonnements, changementsHorsDuBot, cleGeste, composerResume, decouperResume, detailAccesBroker,
-  detailAttenteHumain, detailDemande, detailExemption, detailNouvelAbonnement, detailRepriseBot, detailTarifReserve,
-  entreesHistoriqueResume, estNouvelAbonnement, evenementDeChangement, evenementDeGeste, instantaneAbonnements,
-  texteSur,
-  type EvenementResume, type GesteResume, type Personne,
+  attentesHorsEquipe, changementsAbonnements, changementsHorsDuBot, cleAnnonce, cleGeste, composerResume, decouperResume,
+  detailAccesBroker, detailAContacter, detailAttenteHumain, detailDemande, detailExemption, detailNouvelAbonnement,
+  detailRepriseBot, detailTarifReserve, entreesHistoriqueResume, episodesAAnnoncer, estNouvelAbonnement,
+  evenementDeChangement, evenementDeGeste, instantaneAbonnements, memoireAnnonces, texteSur,
+  type EvenementResume, type GesteResume, type MembreAContacter, type MotifContact, type Personne,
 } from './resume-pur'
 import { repriseAutomatique } from './support-pont-pur'
 
@@ -83,26 +90,30 @@ export function resumeActif(): boolean {
 const bilan = (etat: EtatResume, extra: Partial<BilanResume> = {}): BilanResume =>
   ({ etat, lignes: 0, destinataires: 0, livres: 0, messages: 0, ...extra })
 
-type Repere = { jusqua: Date; etat: Record<string, string> | null }
+type Repere = { jusqua: Date; etat: Record<string, string> | null; annonces: string[] | null }
 
 /** Le dernier resume qui fait repere (envoye, ou premier instantane). Jette (table absente comprise). */
 async function dernierRepere(): Promise<Repere | null> {
-  const lignes = await prisma.$queryRaw<{ jusqua: Date; etat_abonnements: unknown }[]>`
-    select jusqua, etat_abonnements from public.cockpit_liveclub_resumes
+  const lignes = await prisma.$queryRaw<{ jusqua: Date; etat_abonnements: unknown; risque_annonces: unknown }[]>`
+    select jusqua, etat_abonnements, risque_annonces from public.cockpit_liveclub_resumes
     where statut in ('repere', 'envoye')
     order by jusqua desc limit 1`
   const l = lignes[0]
   if (!l) return null
   const etat = l.etat_abonnements && typeof l.etat_abonnements === 'object' && !Array.isArray(l.etat_abonnements)
     ? l.etat_abonnements as Record<string, string> : null
-  return { jusqua: l.jusqua, etat: etat && Object.keys(etat).length > 0 ? etat : null }
+  const annonces = Array.isArray(l.risque_annonces) ? l.risque_annonces.filter((x): x is string => typeof x === 'string') : null
+  return { jusqua: l.jusqua, etat: etat && Object.keys(etat).length > 0 ? etat : null, annonces }
 }
 
 /** Reserve la ligne du jour. false = deja la (un autre passage, ou un rejeu). Jette sur une panne. */
-async function reserverJour(o: { jour: string; depuis: Date; jusqua: Date; statut: 'en_cours' | 'repere'; etat: Record<string, string> | null }): Promise<boolean> {
+async function reserverJour(o: {
+  jour: string; depuis: Date; jusqua: Date; statut: 'en_cours' | 'repere'; etat: Record<string, string> | null; annonces: string[] | null
+}): Promise<boolean> {
   const n = await prisma.$executeRaw`
-    insert into public.cockpit_liveclub_resumes (jour, depuis, jusqua, statut, etat_abonnements)
-    values (${o.jour}::date, ${o.depuis}, ${o.jusqua}, ${o.statut}, ${JSON.stringify(o.etat ?? {})}::jsonb)
+    insert into public.cockpit_liveclub_resumes (jour, depuis, jusqua, statut, etat_abonnements, risque_annonces)
+    values (${o.jour}::date, ${o.depuis}, ${o.jusqua}, ${o.statut}, ${JSON.stringify(o.etat ?? {})}::jsonb,
+      ${o.annonces === null ? null : JSON.stringify(o.annonces)}::jsonb)
     on conflict (jour) do nothing`
   return n > 0
 }
@@ -495,9 +506,50 @@ export async function resumeDuMatin(o: { maintenant?: Date; apercu?: boolean } =
       ajouter({ rubrique: 'demandes', qui: `d${d.id}`, quand: d.cree_le.toISOString(), detail: detailDemande(d.texte, d.statut) }, { nom: d.auteur })
     }
 
+    // (18/10) Les membres a contacter : une fenetre ouverte depuis le dernier
+    // resume, ni deja annoncee ni marquee « fait » au cockpit. Vue illisible :
+    // rien d'annonce, et la memoire du repere est gardee telle quelle.
+    const risque = await facultatif('membres_risque', erreurs, () => prisma.$queryRaw<{
+      membre_id: string; cle_episode: string; motif: string; nom: string | null; email: string | null; telegram: string | null
+      prochain_prelevement: string | null; prochaine_tentative: string | null; jours_silence: number | null
+      jours_anciennete: number | null; entree: string | null
+    }[]>`
+      select membre_id::text as membre_id, cle_episode, motif, nom, email_principal as email, telegram,
+        prochain_prelevement::text as prochain_prelevement, prochaine_tentative::text as prochaine_tentative,
+        jours_silence, jours_anciennete, entree::text as entree
+      from public.cockpit_membres_risque`)
+    const risqueLu = !erreurs.includes('membres_risque')
+    const traitees = await facultatif('risque_traitees', erreurs, () => prisma.$queryRaw<{ membre_id: string; motif: string }[]>`
+      select membre_id::text as membre_id, motif from public.cockpit_actions_traitees where motif like 'a_risque:%'`)
+    const membresRisque: MembreAContacter[] = risque.map(r => ({
+      membreId: r.membre_id, cleEpisode: r.cle_episode, motif: r.motif as MotifContact,
+      prochainPrelevement: r.prochain_prelevement, prochaineTentative: r.prochaine_tentative,
+      joursSilence: r.jours_silence === null ? null : Number(r.jours_silence),
+      joursAnciennete: r.jours_anciennete === null ? null : Number(r.jours_anciennete), entree: r.entree,
+    }))
+    const aAnnoncer = risqueLu ? episodesAAnnoncer(membresRisque, {
+      annoncesAvant: repere?.annonces ?? null,
+      traitees: new Set(traitees.map(t => cleAnnonce(t.membre_id, t.motif))),
+      depuisJour: jourParis(depuis.toISOString()),
+    }) : []
+    const fiche = new Map(risque.map(r => [r.membre_id, r]))
+    for (const m of aAnnoncer) {
+      const r = fiche.get(m.membreId)
+      // Un meme instant pour tous : le tri (stable) de composerResume garde l'ordre des fenetres.
+      ajouter({ rubrique: 'contacter', qui: `m${m.membreId}`, quand: jusqua.toISOString(), detail: detailAContacter(m, jour) },
+        { nom: r?.nom ?? null, email: r?.email ?? null, pseudo: r?.telegram ?? null })
+    }
+    const annonces = risqueLu
+      ? memoireAnnonces(membresRisque.map(m => cleAnnonce(m.membreId, m.cleEpisode)), repere?.annonces ?? null, jour)
+      : repere?.annonces ?? null
+    // Le pied « Bientot » : un nombre, jamais une raison d'envoyer.
+    const aVenir = await facultatif('membres_a_venir', erreurs, () => prisma.$queryRaw<{ n: number }[]>`
+      select count(*)::int as n from public.cockpit_membres_a_venir where entree <= current_date + 7`)
+    const bientot = Number(aVenir[0]?.n ?? 0)
+
     // 4. Les noms, emails et pseudos.
     await resoudre(annuaire, new Set(evenements.map(e => e.qui)), parId, erreurs)
-    const texte = composerResume(evenements, annuaire.personnes, { depuis: depuis.toISOString(), jusqua: jusqua.toISOString() })
+    const texte = composerResume(evenements, annuaire.personnes, { depuis: depuis.toISOString(), jusqua: jusqua.toISOString(), bientot })
     const lignes = texte ? texte.split('\n').filter(l => l.startsWith('- ')).length : 0
 
     if (apercu) {
@@ -508,7 +560,7 @@ export async function resumeDuMatin(o: { maintenant?: Date; apercu?: boolean } =
       // Rien a dire. Le tout premier resume pose quand meme un repere (son
       // instantane), sans quoi les changements Stripe ne se verraient jamais.
       if (!repere && instantane) {
-        await reserverJour({ jour, depuis, jusqua, statut: 'repere', etat: instantane })
+        await reserverJour({ jour, depuis, jusqua, statut: 'repere', etat: instantane, annonces })
         console.log(`[liveclub/resume] rien a dire, premier repere pose (${Object.keys(instantane).length} abonnements)`)
         return bilan('premier_repere')
       }
@@ -517,7 +569,7 @@ export async function resumeDuMatin(o: { maintenant?: Date; apercu?: boolean } =
     }
 
     // 5. La ligne du jour, AVANT l'envoi : un rejeu ne renverra rien.
-    if (!await reserverJour({ jour, depuis, jusqua, statut: 'en_cours', etat: instantane })) return bilan('deja_fait')
+    if (!await reserverJour({ jour, depuis, jusqua, statut: 'en_cours', etat: instantane, annonces })) return bilan('deja_fait')
 
     const destinataires = await prisma.$queryRaw<{ telegram_id: bigint }[]>`
       select telegram_id from public.cockpit_telegram_comptes order by cree_le`

@@ -18,7 +18,7 @@ export type Personne = { nom: string | null; email: string | null; pseudo: strin
 
 export type RubriqueResume =
   | 'nouveaux' | 'arrets' | 'pauses' | 'impayes' | 'sorties' | 'entrees' | 'acces' | 'adresses' | 'comptes' | 'humains'
-  | 'reprises' | 'demandes'
+  | 'reprises' | 'demandes' | 'contacter'
 
 /** Les rubriques, dans l'ordre du message. */
 export const RUBRIQUES_RESUME: readonly { cle: RubriqueResume; titre: string }[] = [
@@ -31,6 +31,7 @@ export const RUBRIQUES_RESUME: readonly { cle: RubriqueResume; titre: string }[]
   { cle: 'acces', titre: 'Accès broker, exemptions et tarifs réservés' },
   { cle: 'adresses', titre: 'Adresses rattachées automatiquement' },
   { cle: 'comptes', titre: 'Comptes Telegram changés ou en conflit' },
+  { cle: 'contacter', titre: 'À contacter' },
   { cle: 'humains', titre: "Demandes d'humain en attente" },
   { cle: 'reprises', titre: "Fils rendus au bot seul (24 h sans message de l'équipe)" },
   { cle: 'demandes', titre: "Nouvelles demandes de l'équipe" },
@@ -388,6 +389,111 @@ export function detailDemande(texte: string, statut: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Les membres a contacter (18/10, cockpit_membres_risque)
+// ---------------------------------------------------------------------------
+//
+// Brice : les membres a risque sont une liste de personnes a CONTACTER
+// (message perso, invitation a un live, rappel de carte), jamais une sanction.
+// Le resume annonce ceux dont une fenetre s'est OUVERTE depuis le dernier
+// resume : un episode (membre_id::cle_episode) absent de la memoire du resume
+// precedent (cockpit_liveclub_resumes.risque_annonces), et pas deja marque
+// « fait » au cockpit (cockpit_actions_traitees, meme cle que l'ecran). Sans
+// memoire (les resumes d'avant le 18/10) : seules les fenetres ouvertes apres
+// le jour du dernier resume, et aucun echec (sa date d'ouverture n'est pas
+// connue) : le premier resume ne deverse pas toute la liste.
+
+export type MotifContact = 'echec' | 'prelevement' | 'silence' | 'accueil'
+
+/** Une ligne de cockpit_membres_risque, telle que le resume la lit. */
+export type MembreAContacter = {
+  membreId: string
+  cleEpisode: string
+  motif: MotifContact
+  prochainPrelevement: string | null
+  prochaineTentative: string | null
+  joursSilence: number | null
+  joursAnciennete: number | null
+  /** Jour d'ouverture de la fenetre (AAAA-MM-JJ), nul pour un echec. */
+  entree: string | null
+}
+
+/** La cle d'un episode, la meme que celle du cockpit (cleTraitee, ATraiter.tsx). */
+export const cleAnnonce = (membreId: string, cleEpisode: string) => `${membreId}::${cleEpisode}`
+
+/** Jours entre deux dates AAAA-MM-JJ (b - a). */
+function ecartJours(a: string, b: string): number {
+  return Math.round((Date.parse(`${b.slice(0, 10)}T00:00:00Z`) - Date.parse(`${a.slice(0, 10)}T00:00:00Z`)) / 86_400_000)
+}
+
+/** L'ordre des fenetres, celui de l'ecran du cockpit. */
+export const ORDRE_MOTIFS_CONTACT: readonly MotifContact[] = ['echec', 'prelevement', 'silence', 'accueil']
+
+/**
+ * Les episodes a annoncer : ni deja annonces (memoire), ni marques « fait ».
+ * `annoncesAvant` null = pas de memoire : on retient les fenetres ouvertes
+ * apres `depuisJour` (le jour de Paris du dernier resume), sans les echecs.
+ * Ranges par fenetre (echec, prelevement, silence, accueil), puis par entree.
+ */
+export function episodesAAnnoncer(
+  membres: readonly MembreAContacter[],
+  o: { annoncesAvant: readonly string[] | null; traitees: ReadonlySet<string>; depuisJour: string },
+): MembreAContacter[] {
+  const connus = o.annoncesAvant ? new Set(o.annoncesAvant) : null
+  return membres.filter(m => {
+    const cle = cleAnnonce(m.membreId, m.cleEpisode)
+    if (o.traitees.has(cle)) return false
+    if (connus) return !connus.has(cle)
+    return m.motif !== 'echec' && !!m.entree && m.entree.slice(0, 10) > o.depuisJour
+  }).sort((a, b) => ORDRE_MOTIFS_CONTACT.indexOf(a.motif) - ORDRE_MOTIFS_CONTACT.indexOf(b.motif)
+    || (a.entree ?? '').localeCompare(b.entree ?? ''))
+}
+
+/** Au-dela, une cle n'est plus gardee en memoire (aucune fenetre ne dure autant). */
+const MEMOIRE_JOURS = 62
+
+/**
+ * La memoire a garder : les episodes presents aujourd'hui, plus ceux d'avant
+ * dont la date (fin de la cle, AAAA-MM-JJ ou AAAA-MM pour un echec) a moins de
+ * 62 jours. Un membre qui sort de la liste un jour (collecte en retard) puis
+ * revient avec le meme episode n'est donc pas reannonce. Triee, sans doublon.
+ */
+export function memoireAnnonces(cles: readonly string[], avant: readonly string[] | null, aujourdhui: string): string[] {
+  const garde = (cle: string) => {
+    const m = /:(\d{4}-\d{2})(-\d{2})?$/.exec(cle)
+    if (!m) return false
+    return ecartJours(`${m[1]}${m[2] ?? '-01'}`, aujourdhui) <= MEMOIRE_JOURS
+  }
+  return [...new Set([...cles, ...(avant ?? []).filter(garde)])].sort()
+}
+
+/** Le motif d'un membre a contacter, en minuscule et sans point final (il suit le nom). */
+export function detailAContacter(m: MembreAContacter, aujourdhui: string): string {
+  switch (m.motif) {
+    case 'echec': {
+      const tentative = dateFr(m.prochaineTentative)
+      return `paiement en échec${tentative ? `, nouvelle tentative le ${tentative}` : ''}`
+    }
+    case 'prelevement': {
+      const n = m.prochainPrelevement ? ecartJours(aujourdhui, m.prochainPrelevement) : null
+      const quand = n === null ? 'proche' : n <= 0 ? "aujourd'hui" : n === 1 ? 'demain' : `dans ${n} jours`
+      return `prélèvement ${quand}, rien écrit depuis 30 j`
+    }
+    case 'silence':
+      return `silencieux depuis ${m.joursSilence ?? 14} jours`
+    case 'accueil':
+      return `nouveau, pas encore un mot (arrivé il y a ${m.joursAnciennete ?? 5} j)`
+  }
+}
+
+/** La ligne « Bientôt », ou rien. Elle ne fait jamais partir le resume a elle seule (composerResume). */
+export function ligneBientot(n: number): string | null {
+  if (!Number.isFinite(n) || n <= 0) return null
+  return n === 1
+    ? 'Bientôt : 1 membre entre dans une fenêtre cette semaine'
+    : `Bientôt : ${n} membres entrent dans une fenêtre cette semaine`
+}
+
+// ---------------------------------------------------------------------------
 // Le message
 // ---------------------------------------------------------------------------
 
@@ -408,12 +514,14 @@ export function titreResume(depuisIso: string, jusquaIso: string): string {
  * Le resume, ou null s'il n'y a rien a dire. Une ligne par personne et par
  * rubrique (ses evenements separes par « ; »), dans l'ordre ou ils sont
  * arrives ; rubriques vides omises ; un evenement en double (meme detail pour
- * la meme personne) n'est dit qu'une fois.
+ * la meme personne) n'est dit qu'une fois. `bientot` (18/10) : le nombre de
+ * membres qui entrent dans une fenetre de contact dans les 7 jours, dit en
+ * pied ; il ne suffit jamais a envoyer.
  */
 export function composerResume(
   evenements: readonly EvenementResume[],
   personnes: ReadonlyMap<string, Personne>,
-  o: { depuis: string; jusqua: string },
+  o: { depuis: string; jusqua: string; bientot?: number },
 ): string | null {
   if (!ilYAMouvement(evenements)) return null
   const tries = [...evenements].sort((a, b) => Date.parse(a.quand) - Date.parse(b.quand))
@@ -430,6 +538,10 @@ export function composerResume(
     const lignes = [...parQui].map(([qui, details]) => `- ${identite(personnes.get(qui), qui)} : ${details.join(' ; ')}`)
     blocs.push([titre, ...lignes].join('\n'))
   }
+  // (18/10) Qui entre dans une fenetre de contact dans les 7 jours : un
+  // nombre, en pied, seulement si autre chose fait deja partir le resume.
+  const bientot = ligneBientot(o.bientot ?? 0)
+  if (bientot) blocs.push(bientot)
   return blocs.join('\n\n')
 }
 
