@@ -301,3 +301,62 @@ select p.lecon_id::text as lecon_id, p.position_max_s, p.derniere_position_s, p.
   from public.academie_progression p
  where p.user_id = $1::uuid
 `
+
+// ---------------------------------------------------------------------------
+// Gestes du cockpit (route /api/cockpit/academie, 18/10/2026)
+// ---------------------------------------------------------------------------
+
+/**
+ * Accorder une offre a un email (source 'offert'). $1 = email (minuscules),
+ * $2 = slug de l'offre, $3 = dernier jour d'acces 'YYYY-MM-DD' (ou null = a
+ * vie : l'acces court jusqu'a minuit, heure de Paris, de ce jour-la),
+ * $4 = pose_par (cockpit:<uuid>), $5 = note (la raison).
+ * Idempotent : un acces ACTIF de cette offre deja pose sur l'email, ou sur un
+ * compte qui a cet email verifie, n'est pas double (deja_id le rend).
+ * offre_connue = 0 : slug inconnu, rien n'est pose.
+ */
+export const SQL_GESTE_ACCORDER = `
+with o as (
+  select id from public.academie_offres where slug = $2::text
+), deja as (
+  select a.id from public.academie_acces a
+    join o on o.id = a.offre_id
+   where a.retire_le is null and (a.fin is null or a.fin > now())
+     and (a.email = $1::text or a.user_id in (
+       select u.id from auth.users u
+        where lower(btrim(u.email)) = $1::text and u.email_confirmed_at is not null
+       union
+       select pe.profile_id from public.profile_emails pe
+        where lower(btrim(pe.email)) = $1::text and pe.verified = true))
+   limit 1
+), ins as (
+  insert into public.academie_acces (email, offre_id, source, fin, pose_par, note)
+  select $1::text, o.id, 'offert',
+         case when $3::date is null then null
+              else (($3::date + 1)::timestamp at time zone 'Europe/Paris') end,
+         $4::text, $5::text
+    from o
+   where not exists (select 1 from deja)
+  returning id, debut, fin
+)
+select (select count(*)::int from o) as offre_connue,
+       (select id::text from deja) as deja_id,
+       ins.id::text as acces_id, ins.debut, ins.fin
+  from (select 1) x left join ins on true
+`
+
+/**
+ * Retirer un acces. $1 = id de l'acces, $2 = retire_par (cockpit:<uuid>),
+ * $3 = ajout a la note ('Retrait : <raison>'). L'ancienne note est gardee
+ * devant, tronquee pour que l'ajout tienne dans les 1 000 caracteres. Aucune
+ * ligne rendue = acces inconnu ou deja retire.
+ */
+export const SQL_GESTE_RETIRER = `
+update public.academie_acces a set
+  retire_le = now(),
+  retire_par = $2::text,
+  note = case when a.note is null or a.note = '' then $3::text
+              else left(left(a.note, greatest(0, 997 - length($3::text))) || ' | ' || $3::text, 1000) end
+ where a.id = $1::uuid and a.retire_le is null
+returning a.id::text as acces_id, a.retire_le
+`
