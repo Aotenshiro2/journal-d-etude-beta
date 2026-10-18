@@ -1,7 +1,7 @@
 // Les gestes du compte que le site statique ne peut pas faire seul (Brice,
 // 18/10/2026, page /mon-espace/parametres d'aoknowledge.com) : le RECU d'un
-// paiement (il faut une cle Stripe) et la SUPPRESSION DU COMPTE (elle
-// reprend l'effacement de niveau 3 du cockpit, effacement.ts).
+// paiement (il faut une cle Stripe) et la DEMANDE DE SUPPRESSION du compte
+// (transmise a l'equipe, rien n'est efface depuis le site).
 //
 // Le compte est TOUJOURS celui du jeton Bearer : aucune route n'accepte un
 // identifiant, un email ou une cible venus du navigateur.
@@ -11,18 +11,18 @@
 //   memes regles que la page) ; puis la charge est lue chez Stripe sur le
 //   compte du paiement (aoknowledge pour le comptant, melanie pour le Live
 //   Club) et seule son adresse receipt_url repart.
-// - Suppression : la cible est l'email CONFIRME du compte du jeton, rien
-//   d'autre. cockpit_effacement_cibles l'etend comme pour l'equipe (comptes,
-//   fiches, Telegram). Memes refus que la carte du cockpit (compte de
-//   l'equipe, formateur, tarif reserve, cible trop large), meme ordre
-//   (Stripe, base, Telegram). L'equipe est prevenue par Agent AOK avec le
-//   compte rendu, qui dit ce qui reste a faire a la main.
+// - Demande de suppression (Brice, 18/10/2026 : « une demande via l'equipe
+//   est mieux, ca evite les decisions impulsives ») : le site ne supprime
+//   rien. L'equipe est prevenue par Agent AOK avec l'email confirme du compte
+//   du jeton ; elle voit avec la personne le niveau (1, 2 ou 3) puis
+//   l'execute depuis le cockpit (proposer_effacement), comme une demande
+//   transmise par le bot (docs/EFFACEMENT-DONNEES.md, section 3 bis).
 //
 // Jamais un email, un jeton ni une cle dans un log.
 
 import { createClient } from '@supabase/supabase-js'
 import { prisma } from '@/lib/db'
-import { cleAgent, stripeGet, RefusAction, type ActionAgent } from '@/lib/stripe-actions'
+import { cleAgent, stripeGet } from '@/lib/stripe-actions'
 import { cleStripeLecture } from '@/lib/liveclub/config'
 import { messageErreur } from '@/lib/liveclub/pur'
 
@@ -99,73 +99,47 @@ export async function recuDuPaiement(userId: string, paiementId: string): Promis
   }
 }
 
-// ---------------------------------------------------------------- Suppression
+// ---------------------------------------------------------------- Demande de suppression
 
-export const MOT_CONFIRMATION = 'SUPPRIMER'
+export type IssueDemandeSuppression = { ok: true } | { ok: false; erreur: 'panne' }
 
-export type IssueSuppression =
-  | { ok: true; message: string | null }
-  | { ok: false; erreur: 'refus' | 'panne' }
-
-/** La photo du compte (bucket prive avatars-membres), retiree avec la cle de service. Ne jette pas. */
-async function retirerPhoto(userId: string): Promise<void> {
-  const url = (process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '').trim()
-  const cle = (process.env.SUPABASE_SERVICE_ROLE_KEY ?? '').trim()
-  if (!url || !cle) return
-  try {
-    const s = createClient(url, cle, { auth: { persistSession: false, autoRefreshToken: false } })
-    await s.storage.from('avatars-membres').remove([`${userId}/avatar`])
-  } catch (err) {
-    console.warn(`[compte/supprimer] photo non retiree : ${messageErreur(err).slice(0, 120)}`)
-  }
-}
-
-/** Le compte rendu a l'equipe, par Agent AOK. Ne jette pas. */
-async function prevenirEquipe(texte: string): Promise<void> {
+/** Le message a l'equipe, par Agent AOK. Vrai si au moins un compte de l'equipe l'a recu. */
+async function prevenirEquipe(texte: string): Promise<boolean> {
+  let recu = false
   try {
     const { tgCockpit } = await import('@/lib/agent-cockpit-telegram')
     const dest = await prisma.$queryRaw<{ telegram_id: bigint }[]>`
       select telegram_id from public.cockpit_telegram_comptes order by cree_le`
     for (const d of dest) {
       const chat = Number(d.telegram_id)
-      if (Number.isSafeInteger(chat) && chat > 0) await tgCockpit('sendMessage', { chat_id: chat, text: texte.slice(0, 4000) })
+      if (!Number.isSafeInteger(chat) || chat <= 0) continue
+      try {
+        await tgCockpit('sendMessage', { chat_id: chat, text: texte.slice(0, 4000) })
+        recu = true
+      } catch (err) {
+        console.warn(`[compte/supprimer] un compte de l'equipe non prevenu : ${messageErreur(err).slice(0, 120)}`)
+      }
     }
   } catch (err) {
     console.warn(`[compte/supprimer] equipe non prevenue : ${messageErreur(err).slice(0, 120)}`)
   }
-}
-
-/** Le recapitulatif pour la personne, tel que le compte rendu de l'effacement le porte. */
-export function recapitulatifDuCompteRendu(compteRendu: string): string | null {
-  const m = /À transmettre à la personne :\n« ([\s\S]+) »\s*$/.exec(compteRendu)
-  return m ? m[1].trim() : null
+  return recu
 }
 
 /**
- * Niveau 3 pour le compte du jeton. Refus (equipe, formateur, tarif reserve,
- * cible trop large, rien a effacer) = rien n'est fait, le membre ecrit au
- * support ; panne = le message dit ce qui a deja ete fait, cote equipe.
+ * Transmet a l'equipe la demande de suppression du compte du jeton. Rien
+ * n'est efface ici : l'equipe qualifie le niveau avec la personne puis
+ * l'execute depuis le cockpit. Panne = personne de l'equipe n'a recu le
+ * message : le membre est invite a ecrire au support.
  */
-export async function supprimerCompte(compte: { id: string; email: string }): Promise<IssueSuppression> {
-  const { executerActionEffacement } = await import('@/lib/effacement')
-  const { lireCible } = await import('@/lib/effacement-pur')
-  const cible = lireCible({ telegram: [], membres: [], archives: [], emails: [compte.email] })
-  if (typeof cible === 'string') return { ok: false, erreur: 'refus' }
-  const action: ActionAgent = {
-    type: 'effacement', compte: 'cockpit',
-    params: { niveau: 3, qui: 'compte du site (demande du membre)', cible },
-  }
-  let compteRendu: string
-  try {
-    compteRendu = await executerActionEffacement(action, 'membre:mon-espace')
-  } catch (err) {
-    const refus = err instanceof RefusAction
-    console.warn(`[compte/supprimer] ${refus ? 'refus' : 'panne'} : ${messageErreur(err).slice(0, 200)}`)
-    await prevenirEquipe(`Un membre a demandé la suppression de son compte depuis mon-espace : ${refus ? 'REFUSÉE' : 'EN PANNE'}.\n`
-      + `${messageErreur(err).slice(0, 1500)}\nIl a été invité à écrire à support@aoknowledge.com.`)
-    return { ok: false, erreur: refus ? 'refus' : 'panne' }
-  }
-  await retirerPhoto(compte.id)
-  await prevenirEquipe(`Un membre a supprimé son compte depuis mon-espace (niveau 3, geste du membre).\n${compteRendu}`)
-  return { ok: true, message: recapitulatifDuCompteRendu(compteRendu) }
+export async function transmettreDemandeSuppression(compte: { id: string; email: string }): Promise<IssueDemandeSuppression> {
+  const recu = await prevenirEquipe(
+    `Demande de suppression de compte, depuis mon-espace (site).
+`
+    + `Compte : ${compte.email}
+`
+    + `Rien n'a été supprimé. À voir avec la personne (par email) : ce qu'elle souhaite vraiment, niveau 1, 2 ou 3, `
+    + `puis l'effacement depuis le cockpit (« efface ${compte.email}, niveau … »).`,
+  )
+  return recu ? { ok: true } : { ok: false, erreur: 'panne' }
 }

@@ -55,27 +55,22 @@ formateur d'un cours (`courses.instructor_id`), tarif réservé en attente de pa
 est encore actif : le retirer d'abord), cible trop large (plus de 3 fiches ou comptes AOK, plus de 6
 comptes Telegram). Tout niveau : rien à effacer.
 
-## 3 bis. Suppression par le membre lui-même (site, 18/10/2026)
+## 3 bis. Demande de suppression depuis le site (18/10/2026)
 
-Décision de Brice du 18/10 (écran Paramètres de `/mon-espace`, rubrique Données) : le membre peut
-supprimer SON compte lui-même. Ce n'est pas une exception aux règles de la section 1 : c'est la
-personne qui choisit, explicitement, le niveau 3 (« Supprimer mon compte », puis écrire SUPPRIMER).
-Le bot des membres, lui, ne propose toujours rien.
+Rubrique Données de `/mon-espace/parametres`. Décision de Brice du 18/10 : « une demande via l'équipe est
+mieux, ça évite les décisions impulsives ». Le site N'EFFACE RIEN : c'est le même parcours qu'une demande
+transmise par le bot (section 3, étape 2).
 
-- Route : `POST /api/compte/supprimer` (`src/lib/compte-membre.ts`), jeton Bearer du site, corps
-  `{ confirmation: 'SUPPRIMER' }`. La cible est l'email CONFIRMÉ du compte du jeton, rien d'autre
-  (aucun identifiant, email ni cible venus du navigateur) ; `cockpit_effacement_cibles` l'étend comme
-  pour l'équipe.
-- Même exécution que la carte du cockpit (`executerActionEffacement`, niveau 3, acteur
-  `membre:mon-espace`) : mêmes refus (équipe, formateur, tarif réservé, cible trop large), même ordre
-  (Stripe, base, Telegram). Un refus ou une panne : rien de nouveau n'est fait, le membre est invité à
-  écrire au support.
-- La photo de profil (bucket privé `avatars-membres`, `<uuid>/avatar`) est retirée après l'effacement,
-  avec la clé de service. Sur le chemin de l'équipe (carte du cockpit), elle reste à retirer à la main
-  tant que `executerActionEffacement` ne le fait pas.
-- L'équipe reçoit le compte rendu complet par Agent AOK (ce qui reste à faire à la main compris) ; le
-  membre reçoit le récapitulatif « À transmettre à la personne ».
-- Garde-fou statique : `scripts/verifier-effacement.mjs` (« suppression par le membre »).
+- Route : `POST /api/compte/supprimer` (`transmettreDemandeSuppression`, `src/lib/compte-membre.ts`),
+  jeton Bearer du site, sans corps. Le compte est celui du jeton, avec son email CONFIRMÉ.
+- L'équipe reçoit par Agent AOK : « Demande de suppression de compte, depuis mon-espace », l'email du
+  compte, « Rien n'a été supprimé », et la phrase à donner à l'agent du cockpit pour l'effacement.
+- Le membre lit : « C'est noté : ta demande est transmise à l'équipe. Elle revient vers toi par email pour
+  voir avec toi ce que tu souhaites. Rien n'est supprimé d'ici là. » Si aucun compte de l'équipe n'a reçu
+  le message, il est invité à écrire au support.
+- La photo de profil (bucket privé `avatars-membres`, `<uuid>/avatar`) n'est pas encore retirée par
+  `executerActionEffacement` : à retirer à la main au niveau 3 (Brice : sans importance pour l'instant).
+- Garde-fou statique : `scripts/verifier-effacement.mjs` (« suppression depuis le site »).
 
 ## 4. Comment on retrouve tout ce qui est à elle
 
