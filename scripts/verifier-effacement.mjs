@@ -414,4 +414,18 @@ test('migration : droits postgres seulement, apercu STABLE, payeur fige en premi
   }
 })
 
+// Lot 2 de Mon espace (18/10/2026) : les points du profil sont DERIVES, rien de neuf a effacer.
+test('points du profil : calcul derive, oublis Telegram ecartes, aucune table personnelle neuve', () => {
+  const lot2 = readFileSync(path.join(RACINE, '../../sites/Aoknowledgecom/supabase/migrations/20261019000000_mon_espace_lot2.sql'), 'utf8')
+  const tables = [...lot2.matchAll(/create table if not exists public\.([a-z_]+)/g)].map((m) => m[1])
+  assert.deepEqual(tables, ['aok_points_bareme'])
+  const debut = lot2.indexOf('as $activite$')
+  const corpsActivite = lot2.slice(debut, lot2.indexOf('$activite$', debut + 14))
+  assert.match(corpsActivite, /cockpit_telegram_oublis/)
+  assert.match(corpsActivite, /"deletedAt" is null/)
+  assert.ok(!/presence|cockpit_lives/i.test(corpsActivite), 'aucune presence aux lives')
+  assert.match(lot2, /'points_et_niveau', public\.aok_points_calcul\(v_uid, true\)/)
+  assert.match(lot2, /revoke all on function public\.aok_activite_par_jour\(uuid, text\) from public, anon, authenticated, service_role/)
+})
+
 console.log(`\n${n} blocs verifies, tout est bon.`)

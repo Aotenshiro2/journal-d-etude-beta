@@ -29,6 +29,8 @@ const RACINE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const MIGRATION = path.join(RACINE, '../../sites/Aoknowledgecom/supabase/migrations/20261018233000_mon_espace_parametres.sql')
 // Lot 1 (18/10/2026) : bio, liens, fuseau, espaces visibles, support.
 const MIGRATION_LOT1 = path.join(RACINE, '../../sites/Aoknowledgecom/supabase/migrations/20261018234500_mon_espace_lot1.sql')
+// Lot 2 (18/10/2026) : points, niveaux, grille d'activite, profil public par numero.
+const MIGRATION_LOT2 = path.join(RACINE, '../../sites/Aoknowledgecom/supabase/migrations/20261019000000_mon_espace_lot2.sql')
 const prisma = new PrismaClient()
 
 let ecarts = 0
@@ -100,6 +102,16 @@ async function main() {
       console.log(`migration du lot 1 absente : jouee dans la transaction (${ordres.length} ordres, annulee a la fin)`)
     } else {
       console.log('migration du lot 1 presente en base')
+    }
+
+    const dejaLot2 = Number((await tx.$queryRawUnsafe(
+      `select count(*)::int as n from pg_proc where proname = 'aok_ma_progression' and pronamespace = 'public'::regnamespace`))[0].n)
+    if (!dejaLot2) {
+      const ordres = decouper(readFileSync(MIGRATION_LOT2, 'utf8'))
+      for (const o of ordres) await tx.$executeRawUnsafe(o)
+      console.log(`migration du lot 2 absente : jouee dans la transaction (${ordres.length} ordres, annulee a la fin)`)
+    } else {
+      console.log('migration du lot 2 presente en base')
     }
 
     const comptes = await tx.$queryRawUnsafe(`
@@ -333,12 +345,78 @@ async function main() {
     const cTrop = await deposer(A.id, `${A.id}/${randomUUID()}.webp`)
     attendre('captures : 16e capture du jour refusee', !cTrop.ok, cTrop.motif)
 
+    // --- Lot 2 : points, niveau, grille, profil public ---------------------------------
+    {
+      const bar = await comme('anon', null, 'select count(*)::int as n from public.aok_points_bareme')
+      attendre('lot 2 : bareme lisible par l\'anonyme', bar.ok && bar.lignes[0].n >= 4, bar.ok ? `${bar.lignes[0].n}` : bar.motif)
+      const barEcrit = await comme('authenticated', A.id, `update public.aok_points_bareme set points = 999 returning 1`)
+      attendre('lot 2 : bareme non modifiable par un membre', !barEcrit.ok || barEcrit.lignes.length === 0, barEcrit.ok ? '' : barEcrit.motif)
+      for (const [role, uid] of [['anon', null], ['authenticated', A.id]]) {
+        const c = await comme(role, uid, 'select public.aok_points_calcul($1::uuid, true) as p', B.id)
+        attendre(`lot 2 : aok_points_calcul fermee (${role})`, !c.ok, c.motif)
+        const a = await comme(role, uid, `select count(*)::int as n from public.aok_activite_par_jour($1::uuid, 'Europe/Paris')`, B.id)
+        attendre(`lot 2 : aok_activite_par_jour fermee (${role})`, !a.ok, a.motif)
+      }
+      const maAnon = await comme('anon', null, 'select public.aok_ma_progression() as p')
+      attendre('lot 2 : aok_ma_progression fermee a l\'anonyme', !maAnon.ok, maAnon.motif)
+
+      // Une activite d'essai chez A, 200 jours en arriere (jour de Paris), et un message Telegram.
+      await tx.$executeRawUnsafe(`update public.profiles set fuseau = 'Europe/Paris', profil_public = false, masquer_moteurs = true where id = $1::uuid`, A.id)
+      const jourD = (await tx.$queryRawUnsafe(`select ((now() - interval '200 days') at time zone 'Europe/Paris')::date::text as j`))[0].j
+      const progB = async () => {
+        const r = await comme('authenticated', B.id, 'select public.aok_ma_progression()::text as p')
+        return r.ok ? r.lignes[0].p : null
+      }
+      const avantB = await progB()
+      await tx.$executeRawUnsafe(`insert into public.academie_lectures (user_id, evenement, cree_le) values ($1::uuid, 'connexion', now() - interval '200 days')`, A.id)
+      const tgEssai = 990000000 + Math.floor(Math.random() * 9000000)
+      await tx.$executeRawUnsafe(`insert into public.cockpit_liveclub_rattachements (telegram_id, email, source) values ($1::bigint, $2, 'manuel')`, tgEssai, A.email)
+      await tx.$executeRawUnsafe(
+        `insert into public.cockpit_telegram_messages (chat_id, message_id, groupe, telegram_id, dit_le) values (-1009999999999, 1, 'essai', $1::bigint, now() - interval '200 days')`, tgEssai)
+      const progA = async () => {
+        const r = await comme('authenticated', A.id, 'select public.aok_ma_progression() as p')
+        return r.ok ? r.lignes[0].p : null
+      }
+      const pA = await progA()
+      attendre('lot 2 : A lit sa progression (niveau 1 a 9, points)', pA && pA.niveau >= 1 && pA.niveau <= 9 && pA.points >= 1 && pA.detail && Array.isArray(pA.bareme),
+        pA ? `niveau ${pA.niveau}, ${pA.points} pts` : 'rien')
+      attendre('lot 2 : la grille de A porte le jour d\'essai', pA && Number(pA.jours?.[jourD]) >= 2, pA ? `${pA.jours?.[jourD]}` : '')
+      attendre('lot 2 : le message Telegram rattache compte', pA && pA.detail.messages >= 1)
+      attendre('lot 2 : la progression de B ne bouge pas avec l\'activite de A', avantB !== null && avantB === (await progB()))
+      await tx.$executeRawUnsafe(`insert into public.cockpit_telegram_oublis (telegram_id, note) values ($1::bigint, 'essai')`, tgEssai)
+      const pA2 = await progA()
+      attendre('lot 2 : plus de messages apres « ne plus etre suivi »', pA2 && pA2.detail.messages === pA.detail.messages - 1,
+        pA2 ? `${pA.detail.messages} -> ${pA2.detail.messages}` : '')
+
+      const numA = Number((await tx.$queryRawUnsafe('select client_number::bigint as n from public.profiles where id = $1::uuid', A.id))[0].n)
+      const pub = (role, uid) => comme(role, uid, 'select public.aok_profil_public($1::bigint)::text as p', numA)
+      for (const [role, uid] of [['anon', null], ['authenticated', B.id]]) {
+        const r = await pub(role, uid)
+        attendre(`lot 2 : profil PRIVE de A : rien pour ${role === 'anon' ? 'l\'anonyme' : 'B'} (points, grille, niveau)`, r.ok && r.lignes[0].p === null, r.ok ? '' : r.motif)
+      }
+      const inconnu = await comme('anon', null, 'select public.aok_profil_public(999999999)::text as p')
+      attendre('lot 2 : numero inconnu : rien', inconnu.ok && inconnu.lignes[0].p === null)
+      await tx.$executeRawUnsafe('update public.profiles set profil_public = true where id = $1::uuid', A.id)
+      const rPub = await pub('anon', null)
+      const o = rPub.ok && rPub.lignes[0].p ? JSON.parse(rPub.lignes[0].p) : null
+      attendre('lot 2 : profil PUBLIC de A lisible par l\'anonyme (niveau, grille)', o && o.numero === numA && o.progression?.niveau >= 1 && Number(o.progression?.jours?.[jourD]) >= 1)
+      attendre('lot 2 : ni uuid ni email dans le profil public', o && !rPub.lignes[0].p.includes(A.id) && !rPub.lignes[0].p.toLowerCase().includes(A.email) && !('detail' in o.progression))
+      attendre('lot 2 : masquer_moteurs rendu', o && o.masquer_moteurs === true)
+      await tx.$executeRawUnsafe('update public.profiles set profil_public = false where id = $1::uuid', A.id)
+      const rRe = await pub('anon', null)
+      attendre('lot 2 : redevenu prive : plus rien', rRe.ok && rRe.lignes[0].p === null)
+
+      const exp = await comme('authenticated', A.id, `select (public.aok_exporter_mes_donnees() -> 'points_et_niveau' ->> 'niveau') as n`)
+      attendre('lot 2 : export : points et niveau', exp.ok && Number(exp.lignes[0].n) >= 1, exp.ok ? '' : exp.motif)
+    }
+
     // --- Fonctions : search_path fixe, security definer --------------------------------
     const fns = await tx.$queryRawUnsafe(`
       select p.proname, p.prosecdef, coalesce(array_to_string(p.proconfig, ','), '') as conf
         from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname like 'aok\\_%'`)
     const attendues = ['aok_avatar_lisible', 'aok_mes_sessions', 'aok_revoquer_session', 'aok_emails_verifies', 'aok_compte_de',
-      'aok_mon_compte', 'aok_exporter_mes_donnees', 'aok_profils_publics', 'aok_espaces_reels', 'aok_capture_ecrivable']
+      'aok_mon_compte', 'aok_exporter_mes_donnees', 'aok_profils_publics', 'aok_espaces_reels', 'aok_capture_ecrivable',
+      'aok_activite_par_jour', 'aok_points_calcul', 'aok_ma_progression', 'aok_profil_public']
     for (const nom of attendues) {
       const f = fns.find((x) => x.proname === nom)
       attendre(`fonction ${nom} : security definer, search_path vide`, f && f.prosecdef && /search_path=("")?$|search_path=""/.test(f.conf), f ? f.conf : 'absente')

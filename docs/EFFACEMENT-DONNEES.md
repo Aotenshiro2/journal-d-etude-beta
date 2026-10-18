@@ -72,6 +72,21 @@ transmise par le bot (section 3, étape 2).
   `executerActionEffacement` : à retirer à la main au niveau 3 (Brice : sans importance pour l'instant).
 - Garde-fou statique : `scripts/verifier-effacement.mjs` (« suppression depuis le site »).
 
+## 3 ter. Points, niveaux et grille d'activité du profil (lot 2, 18/10/2026)
+
+Migration `20261019000000_mon_espace_lot2.sql`. AUCUNE table nouvelle de données personnelles : les points
+et la grille sont CALCULÉS à la lecture (`aok_activite_par_jour`, `aok_points_calcul`) depuis des tables déjà
+couvertes ici : `auth.audit_log_entries` (connexions), `academie_lectures`, `academie_progression`, `Note`,
+`ActiviteJour`, `cockpit_telegram_messages` des comptes Telegram rattachés. Ce qui part avec ces tables part
+des points. La seule table neuve, `aok_points_bareme`, est le barème (aucune donnée de personne).
+- Niveau 1 (« ne plus être suivi ») : ses messages sont effacés, et le calcul écarte en plus tout compte
+  Telegram de `cockpit_telegram_oublis` : plus aucun point de message.
+- Niveau 3 : le compte AOK supprimé, le profil (donc la page `/membres/<n°>`) disparaît. Les lignes
+  `auth.audit_log_entries` gardent l'uuid du compte supprimé (journal de Supabase Auth, hors de nos mains),
+  mais plus rien ne les relie à un profil.
+- Export (`aok_exporter_mes_donnees`) : clé `points_et_niveau`.
+- Garde-fou statique : `scripts/verifier-effacement.mjs` (« points du profil »).
+
 ## 4. Comment on retrouve tout ce qui est à elle
 
 Le serveur part des liens certains de la fiche d'une personne (même compte, rattachement, numéro posé à

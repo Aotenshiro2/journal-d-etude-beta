@@ -3,6 +3,15 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
+## Mon espace, lot 2 (18/10/2026)
+
+- `GET /api/membres/photo?numero=<n°>` (route PUBLIQUE, middleware.ts) : la photo d un profil PUBLIC pour
+  aoknowledge.com/membres/<n°>, lue avec la cle de service (bucket prive avatars-membres), l uuid ne sort pas.
+- Points et niveaux : migration `20261019000000_mon_espace_lot2.sql` (bareme `aok_points_bareme`, seul endroit
+  des poids, seuils `aok_niveaux_seuils`), calcul a la volee ; `verifier-mon-espace-rls.mjs` etendu (lot 2).
+- Chat support : une question d abonnement Live Club renvoie vers le bot Telegram (support-prompt.ts),
+  evals L25 et R03 rejouees.
+
 ## Routes du compte pour le site (18/10/2026)
 
 `POST /api/compte/recu` et `POST /api/compte/supprimer` (`src/lib/compte-membre.ts`), appelees par
