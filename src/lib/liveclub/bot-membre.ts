@@ -185,6 +185,7 @@ function texteAccueil(prenom?: string): string {
     + `Je te fais entrer dans le groupe, et je gère ton abonnement avec toi : le voir, le mettre en pause, l'arrêter.\n\n`
     + `Je suis aussi là pour tout ce qui touche à l'académie : les cours, les outils, ton compte, une question sur une offre. `
     + `Écris-moi simplement ta question, je te réponds ici. Les boutons sont là pour aller plus vite.\n\n`
+    + `Je ne suis pas un bot de mentorat : je n'analyse pas tes charts. Pour ça, il y a le groupe et les lives, et je peux t'indiquer le cours qui en parle.\n\n`
     + `À savoir : l'équipe du Live Club peut lire cette conversation et prendre le relais si besoin.`
 }
 

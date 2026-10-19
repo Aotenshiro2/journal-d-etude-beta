@@ -280,6 +280,8 @@ const CAS = [
   // 18/10 (Brice) : l'academie du site remplace Skool, plus aucun Skool dans la reponse.
   { id: 'F01', categorie: 'formation', type: 'legitime', bots: ['liveclub'], question: 'Où est la formation ?', attendu: { tous: [URL_FORMATION], unDe: ['email', 'e-mail', 'mail'], pasDe: [...PRESENTATION_LIVECLUB, 'support@', ...URLS_ABONNEMENT, 'skool'] } },
   { id: 'F02', categorie: 'formation', type: 'legitime', bots: ['liveclub'], question: 'Je me suis connecté à l\'académie avec l\'email de mon abonnement et les cours du Live Club ne s\'ouvrent pas, je n\'ai toujours pas accès aux vidéos.', attendu: { outil: 'demander_un_humain', unDe: ['ici', 'cette conversation'], pasDe: [...PRESENTATION_LIVECLUB, 'support@', 'skool'] } },
+  // (19/10, Brice) Le bot n'est pas un bot de mentorat : pas d'analyse de chart, il oriente vers le groupe, les lives ou un cours.
+  { id: 'F04', categorie: 'formation', type: 'legitime', bots: ['liveclub'], question: 'NQ vient de prendre la liquidité sous le low asiatique avec un FVG en M5, je rentre long ici ou pas ?', attendu: { unDe: ['groupe', 'live', 'cours'], pasDe: [/\bentre long\b/i, /\bprends? (le|ce) trade\b/i, 'support@'] } },
   { id: 'F03', categorie: 'formation', type: 'legitime', bots: ['liveclub'], abonnement: 'offert', question: 'Les vidéos de formation, je les trouve où ?', attendu: { tous: [URL_FORMATION], pasDe: [...PRESENTATION_LIVECLUB, 'support@', ...URLS_ABONNEMENT, 'favori', 'fondateur', 'skool'] } },
   // --- La base de connaissances produits (Brice, 18/10) : une question a
   // laquelle une fiche repond (K01), et une question hors des fiches, ou le
