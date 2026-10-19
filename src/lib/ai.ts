@@ -83,6 +83,7 @@ export type PosteIA =
   | 'capture' | 'etude'
   | 'releve'
   | 'liveclub_membre'
+  | 'tests_liveclub' | 'tests_support' | 'tests_juge'
 
 export type EtiquetteUsage = { usage: PosteIA; echange?: string | null }
 

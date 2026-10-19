@@ -440,7 +440,13 @@ const FAUX_RESUME = {
 const TEXTE_SANS_REPONSE = "[repli : l'agent n'a pas abouti, menu a boutons]"
 
 const usage = {}
-function compter(modele, u) {
+// Chaque appel des tests part aussi dans AiUsage (19/10/2026) : les batteries du
+// 29-30/09 ont coute 16 $ sur les cles de prod sans apparaitre dans l'ecran
+// Depense IA du cockpit. Produit = la cle debitee (le juge tourne sur celle du Live Club).
+const aTracer = []
+const ECHANGE_TESTS = `tests:${new Date().toISOString()}`
+function compter(modele, u, poste) {
+  aTracer.push({ modele, u, poste })
   const x = usage[modele] ??= { appels: 0, entree: 0, sortie: 0, cacheLu: 0, cacheEcrit: 0 }
   x.appels++
   x.entree += u?.input_tokens ?? 0
@@ -467,7 +473,7 @@ async function jouerLiveClub(question, fil = [], variante = 'normal') {
   const nettoyer = t => { bruts.push(t); return politique.filtrerSortie(expurgerLiensInvitation(t), textesDuMembre) }
   for (let tour = 0; tour < 4; tour++) {
     const r = await clientLiveClub.messages.create(membre.requeteAgentMembre(messages, faux.contexte))
-    compter(membre.MODELE_LIVECLUB, r.usage)
+    compter(membre.MODELE_LIVECLUB, r.usage, 'tests_liveclub')
     if (r.stop_reason !== 'tool_use') {
       const f = nettoyer(texteDe(r))
       return { texte: f.texte || TEXTE_SANS_REPONSE, brut: bruts.join('\n'), retraits: f.retraits, outils, donnees, stop: r.stop_reason }
@@ -553,7 +559,7 @@ async function jouerSupport(question, app, fil = [], compte = null) {
   let brut = ''
   for (let tour = 0; tour < support.MAX_TOURS_SUPPORT; tour++) {
     r = await clientSupport.messages.create(support.requeteSupport(MODELE_SUPPORT, app, messages))
-    compter(MODELE_SUPPORT, r.usage)
+    compter(MODELE_SUPPORT, r.usage, 'tests_support')
     if (r.stop_reason !== 'tool_use') { brut = texteDe(r); break }
     messages.push({ role: 'assistant', content: r.content })
     const resultats = []
@@ -782,7 +788,7 @@ async function juger(cas, bot, sortie, r) {
     messages: [{ role: 'user', content: message }],
     output_config: { format: { type: 'json_schema', schema: SCHEMA_JUGE } },
   })
-  compter(MODELE_JUGE, rep.usage)
+  compter(MODELE_JUGE, rep.usage, 'tests_juge')
   try {
     const j = JSON.parse(texteDe(rep))
     return VERDICTS.includes(j.verdict) ? j : { verdict: 'incorrect', raison: 'verdict illisible' }
@@ -898,6 +904,33 @@ if (filets.length) console.log(`\nFilet de sortie declenche sur : ${filets.map(x
 console.log('\nJETONS')
 for (const [m, u] of Object.entries(usage)) {
   console.log(`- ${m} : ${u.appels} appels, entree ${u.entree}, sortie ${u.sortie}, cache lu ${u.cacheLu}, cache ecrit ${u.cacheEcrit}`)
+}
+
+if (aTracer.length) {
+  try {
+    const { PrismaClient } = await import('@prisma/client')
+    const { coutMicroEuros } = await import('../src/lib/ia-prix.ts')
+    const prisma = new PrismaClient()
+    const grille = m => m.replace(/-\d{8}$/, '')
+    const lignes = aTracer.map(({ modele, u, poste }) => ({
+      userId: 'tests:eval-fuites',
+      product: poste === 'tests_support' ? 'support' : 'liveclub',
+      model: modele,
+      inputTokens: u?.input_tokens ?? 0,
+      outputTokens: u?.output_tokens ?? 0,
+      cacheCreationTokens: u?.cache_creation_input_tokens ?? 0,
+      cacheReadTokens: u?.cache_read_input_tokens ?? 0,
+      costMicros: coutMicroEuros(grille(modele), u ?? {}),
+      usage: poste,
+      echange: ECHANGE_TESTS,
+    }))
+    const res = await prisma.aiUsage.createMany({ data: lignes })
+    await prisma.$disconnect()
+    const euros = lignes.reduce((s, l) => s + l.costMicros, 0) / 1e6
+    console.log(`\nCout des tests trace dans AiUsage : ${res.count} appels, ${euros.toFixed(2)} EUR`)
+  } catch (err) {
+    console.log(`\nCout des tests NON trace dans AiUsage : ${err.message}`)
+  }
 }
 
 if (SORTIE) {
