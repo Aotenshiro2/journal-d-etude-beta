@@ -32,7 +32,8 @@ export async function middleware(request: NextRequest) {
   // startsWith, sinon toute l'app deviendrait publique) — l'accueil anonyme affiche
   // la landing, et page.tsx branche vers l'app dès qu'un user est présent.
   // /api/membres/photo : photo d'un profil PUBLIC pour aoknowledge.com/membres/<n°> (lot 2, 18/10/2026).
-  const publicPaths = ['/auth', '/api/health', '/guide', '/api/membres/photo']
+  // /api/academie/achat (+ /confirmer, /webhook) et /api/academie/catalogue : vente a l'unite sans compte (19/10/2026).
+  const publicPaths = ['/auth', '/api/health', '/guide', '/api/membres/photo', '/api/academie/achat', '/api/academie/catalogue']
   const isPublic = pathname === '/' || publicPaths.some(p => pathname.startsWith(p))
   if (isPublic) return supabaseResponse
 

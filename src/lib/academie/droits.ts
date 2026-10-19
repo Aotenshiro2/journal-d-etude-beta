@@ -169,6 +169,22 @@ export async function droitsAcademie(userId: string): Promise<DroitsAcademie> {
   return { ...preparerDroits({ ...faits, liveClub }), erreurs }
 }
 
+/**
+ * Les droits d'un visiteur sans compte (19/10/2026, /api/academie/catalogue) :
+ * seulement les offres de base (compte gratuit, Live Club), Live Club non lu.
+ * Ce que le compte gratuit ouvre sort donc « ouvert » avec la raison
+ * 'compte' : la page dit « gratuit avec un compte », elle ne le lit pas.
+ */
+export async function droitsVisiteur(): Promise<DroitsAcademie> {
+  const lignesSql = await prisma.$queryRawUnsafe<LigneAccesSql[]>(SQL_ACCES, '00000000-0000-0000-0000-000000000000', [])
+  const lignes: LigneAcces[] = lignesSql
+    .filter(l => l.origine === 'base')
+    .map(l => ({
+      origine: l.origine, source: l.source, slug: l.slug, ouvreTout: l.ouvre_tout === true, moduleId: l.module_id, sectionId: l.section_id,
+    }))
+  return { ...preparerDroits({ admin: false, etm: false, secoursEssai: false, liveClub: 'non_lu', lignes }), erreurs: [] }
+}
+
 // ---------------------------------------------------------------------------
 // L'essai d'avant les tables (decision B, 06/10)
 // ---------------------------------------------------------------------------

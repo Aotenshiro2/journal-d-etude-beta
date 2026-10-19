@@ -360,3 +360,85 @@ update public.academie_acces a set
  where a.id = $1::uuid and a.retire_le is null
 returning a.id::text as acces_id, a.retire_le
 `
+
+// ---------------------------------------------------------------------------
+// Vente a l'unite (achat.ts, 19/10/2026 ; index 20261019150000)
+// ---------------------------------------------------------------------------
+
+/**
+ * $1 = slug du module. L'offre « module-<slug> » si le module se vend seul
+ * chez Stripe Ao Knowledge : module publie, offre de type module, canal
+ * stripe_aok, prix et stripe_price_id poses. Aucune ligne = pas en vente.
+ */
+export const SQL_OFFRE_EN_VENTE = `
+select m.slug as module_slug, m.titre as module_titre, o.slug as offre_slug, o.stripe_price_id
+  from public.academie_modules m
+  join public.academie_offres o on o.slug = 'module-' || m.slug
+ where m.slug = $1::text and m.statut = 'publie'
+   and o.type = 'module' and o.canal = 'stripe_aok'
+   and o.prix_eur is not null and o.prix_eur > 0 and o.stripe_price_id is not null
+ limit 1
+`
+
+/** $1 = uuid du compte. Son email s'il est confirme (prerempli dans Checkout). */
+export const SQL_EMAIL_CONFIRME = `
+select lower(btrim(u.email)) as email
+  from auth.users u
+ where u.id = $1::uuid and u.email is not null and u.email_confirmed_at is not null
+`
+
+/**
+ * L'acces d'un achat Stripe, une seule fois par session Checkout (index
+ * academie_acces_stripe_reference_idx). $1 = user_id ou null, $2 = email ou
+ * null, $3 = slug de l'offre, $4 = id de session (cs_...), $5 = montant EUR,
+ * $6 = moment du paiement (renonciation a la retractation, texte du bouton
+ * Payer), $7 = note, $8 = paiement_id (stripe:ch_...) ou null.
+ * Rend { offre_connue, cree } : cree = false si la session etait deja notee.
+ */
+export const SQL_POSER_ACHAT = `
+with o as (
+  select id from public.academie_offres where slug = $3::text and type = 'module'
+),
+ins as (
+  insert into public.academie_acces (user_id, email, offre_id, source, reference, montant_eur, debut,
+                                     renonciation_retractation_le, pose_par, note, paiement_id, cote)
+  select $1::uuid, $2::text, o.id, 'stripe', $4::text, $5::numeric, now(), $6::timestamptz, 'stripe', $7::text, $8::text, 'brice'
+    from o
+  on conflict (reference) where source = 'stripe' and reference is not null do nothing
+  returning id
+)
+select (select count(*)::int from o) as offre_connue, (select count(*)::int from ins) as cree
+`
+
+/** Complete le paiement d'un acces deja pose sans lui. $1 = cs_..., $2 = stripe:ch_... */
+export const SQL_COMPLETER_PAIEMENT = `
+update public.academie_acces set paiement_id = $2::text
+ where source = 'stripe' and reference = $1::text and paiement_id is null
+`
+
+/**
+ * Remboursement total : l'acces se retire (rien ne s'efface). $1 =
+ * stripe:ch_..., $2 = liste des sessions Checkout du paiement (cs_..., pour
+ * un acces pose sans paiement_id). Rend le nombre d'acces retires.
+ */
+export const SQL_RETIRER_REMBOURSE = `
+with r as (
+  update public.academie_acces a set
+    retire_le = now(),
+    retire_par = 'stripe:remboursement',
+    note = left(coalesce(nullif(a.note, '') || ' | ', '') || 'Rembourse chez Stripe', 1000)
+   where a.source = 'stripe' and a.retire_le is null
+     and (a.paiement_id = $1::text or a.reference = any($2::text[]))
+  returning a.id
+)
+select count(*)::int as retires from r
+`
+
+/** $1 = email (minuscules). Les comptes du site qui portent cet email VERIFIE (memes regles que SQL_IDENTITE). */
+export const SQL_COMPTES_DE_EMAIL = `
+select u.id::text as id from auth.users u
+ where lower(btrim(u.email)) = $1::text and u.email_confirmed_at is not null
+union
+select pe.profile_id::text from public.profile_emails pe
+ where lower(btrim(pe.email)) = $1::text and pe.verified = true
+`

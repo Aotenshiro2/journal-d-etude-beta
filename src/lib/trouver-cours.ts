@@ -33,6 +33,16 @@ const DUREE_CACHE_MS = 10 * 60 * 1000
 const cacheDroits = new CacheCourt<Droits>(500)
 const cacheCompteTelegram = new CacheCourt<string | null>(500)
 
+/**
+ * Oublie les droits gardes d'un compte : appele apres un achat de l'academie
+ * (achat.ts), pour qu'un bot ne dise pas « pas dans tes acces » juste apres.
+ * Cache par instance : seule l'instance qui pose l'achat est videe, les autres
+ * expirent dans les 10 minutes.
+ */
+export function oublierDroitsDuCompte(userId: string): void {
+  cacheDroits.oublier(userId)
+}
+
 /** Les droits d'un compte du site, une fois par 10 minutes. null = illisibles (pas de cache). */
 async function droitsDuCompte(userId: string): Promise<Droits | null> {
   const enCache = cacheDroits.lire(userId)

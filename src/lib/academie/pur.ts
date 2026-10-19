@@ -297,6 +297,11 @@ export class CacheCourt<V> {
     this.entrees.set(cle, { valeur, expire: maintenant + dureeMs })
   }
 
+  /** Oublie une entree (un achat vient de changer les droits, 19/10/2026). */
+  oublier(cle: string): void {
+    this.entrees.delete(cle)
+  }
+
   get taille(): number {
     return this.entrees.size
   }

@@ -3,6 +3,29 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
+## Vente a l'unite des modules de l'academie (19/10/2026, PUBLIC FERME)
+
+Decision de Brice (19/10) : le moins de friction. Stripe Embedded Checkout dans une fenetre du site, sans
+compte exige avant de payer, paiements express laisses aux reglages du compte Stripe Ao Knowledge.
+- Routes PUBLIQUES (middleware.ts) : `POST /api/academie/achat` (session, Bearer facultatif : email confirme
+  prerempli + client_reference_id), `POST /api/academie/achat/confirmer` (relit la session chez Stripe, pose
+  l'acces sans attendre le webhook, dit compte_lie), `POST /api/academie/achat/webhook` (signature,
+  checkout.session.completed / async_payment_succeeded = acces, charge.refunded total = acces retire),
+  `GET /api/academie/catalogue` (vue visiteur, meme forme que /moi, droitsVisiteur).
+- Code : `src/lib/academie/achat-pur.ts` (session, lecture d'une session payee, signature),
+  `achat.ts` (Stripe, ecriture), `vue-moi.ts` (construire, sorti de la route /moi). Acces = academie_acces
+  source stripe, reference cs_..., paiement_id stripe:ch_..., cote brice, renonciation_retractation_le =
+  paiement (texte sous le bouton Payer). Index unique `20261019150000_academie_achat_stripe.sql` APPLIQUE.
+  Cache des droits des bots (trouver-cours.ts) vide apres un achat (par instance).
+- Interrupteur : sans `ACADEMIE_ACHAT_PUBLIC=1`, seules les demandes « essai » passent (site ouvert avec
+  ?achat=essai). Cote site : ACHAT_OUVERT = false.
+- Variables a poser : `STRIPE_PUBLISHABLE_KEY_AOKNOWLEDGE` (pk_live), `STRIPE_CHECKOUT_KEY_AOKNOWLEDGE` (cle
+  restreinte : Checkout Sessions ecriture, PaymentIntents lecture ; sinon STRIPE_AGENT_KEY_AOKNOWLEDGE est
+  essayee, 503 'config' sans la permission), `STRIPE_WEBHOOK_SECRET_ACADEMIE` (scripts/creer-webhook-achat-academie.mjs).
+- Cockpit : description « Académie AOK : <module> » classee academie-module par push_membres_supabase.py.
+- Verifs : `node scripts/verifier-achat-academie.mjs` (5 blocs hors ligne). NON teste : une vraie session
+  (aucune cle test, la cle du coffre n'a pas Checkout en ecriture).
+
 ## trouver_cours : le bon cours de l'academie ou la bonne masterclass (19/10/2026)
 
 Demande de Brice : le bot Live Club n'est pas un bot de mentorat, mais il oriente vers le BON cours.
