@@ -421,5 +421,8 @@ export function filtrerSortie(texte: string, textesDuMembre: readonly string[]):
     retraits++
     return TEXTE_RETIRE
   })
-  return { texte: sansPrenoms, retraits }
+  // (19/10) Aucun tiret long ni demi-cadratin dans une reponse (regle de
+  // Brice, que le modele oublie parfois) : remplace, pas compte comme retrait.
+  const sansTiretLong = sansPrenoms.replace(/[ \t]*[—–][ \t]*/g, ' : ')
+  return { texte: sansTiretLong, retraits }
 }

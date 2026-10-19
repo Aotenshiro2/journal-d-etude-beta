@@ -25,6 +25,15 @@ Demande de Brice : le bot Live Club n'est pas un bot de mentorat, mais il orient
   desormais les adresses rendues par un outil de lecture.
 - A trancher : 168 lecons video sans texte ne sont trouvables que par leur titre ; titres faibles
   (Bienvenue x3, « 9 - Exercice », « Mindset », « Cast Forward »).
+- Acces REELS (Brice, 19/10 soir) : migration `20261019140000_academie_trouver_cours_droits.sql`
+  APPLIQUEE (la fonction rend module_id, section_id, usage, apercu). trouver-cours.ts applique
+  ouvertureLecon aux droits de droitsAcademie (droits.ts APPELE, pas modifie), en cache 10 min par
+  compte (une fois par conversation). Support : compte du jeton (« ouvert pour toi » / « pas dans tes
+  acces, il s'ouvre avec... ») ; la route exige deja un compte, le cas visiteur reste code mais ne sert
+  pas aujourd'hui. Live Club : rattachement Telegram -> email du payeur -> compte du site a cet email
+  verifie, s'il est unique (12 rattaches sur 118 au 19/10), sinon hypothese Live Club actif.
+  Eval K06 (support connecte, droits simules par scripts/droits-simules.mjs). filtrerSortie remplace
+  desormais tout tiret long ou demi-cadratin par « : » (Opus en a mis dans K06).
 
 ## Generateur de posts du cockpit (19/10/2026, etapes 1 a 3 du GO de Brice du 18/10)
 

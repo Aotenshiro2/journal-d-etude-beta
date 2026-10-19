@@ -80,7 +80,7 @@ export async function POST(req: NextRequest) {
       const resultats: Anthropic.ToolResultBlockParam[] = []
       for (const bloc of response.content) {
         if (bloc.type !== 'tool_use') continue
-        const r = await resultatOutilSupport(bloc.name, bloc.input, e => trouverCours(e, 'support'))
+        const r = await resultatOutilSupport(bloc.name, bloc.input, e => trouverCours(e, 'support', { userId }))
         resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: r.contenu, ...(r.erreur ? { is_error: true } : {}) })
       }
       messages.push({ role: 'user', content: resultats })

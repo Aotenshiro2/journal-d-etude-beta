@@ -209,7 +209,7 @@ export async function repondreAuMembre(
       // Le bon cours de l'academie ou la bonne masterclass (Brice, 19/10) :
       // lecture en direct des lecons publiees, aucune donnee de membre.
       if (bloc.name === NOM_OUTIL_TROUVER_COURS) {
-        resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify(await trouverCours(bloc.input, 'liveclub')) })
+        resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify(await trouverCours(bloc.input, 'liveclub', { telegramId })) })
         continue
       }
 
