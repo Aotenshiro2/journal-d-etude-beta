@@ -36,7 +36,7 @@
 
 import { readFileSync, readdirSync, writeFileSync, existsSync } from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const RACINE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const DOSSIER = path.join(RACINE, 'docs', 'connaissances')
@@ -130,7 +130,40 @@ function lireDoc(fichier) {
   }
 }
 
-function generer() {
+// LES MASTERCLASS (19/10/2026, outil trouver_cours) : la liste vient du site
+// des masterclass lui-meme (sites/Masterclass/src/data/masterclasses.ts, que
+// Node 22 importe en supprimant les types). Le site n'a qu'une page, sans
+// adresse propre a chaque masterclass (src/App.tsx : vues internes) : l'URL
+// est celle du site. Les tirets longs des titres deviennent « : ». La fiche
+// masterclass.md doit citer chaque titre : sinon le script refuse (la fiche
+// ne derive pas de la liste).
+const SOURCE_MASTERCLASS = path.resolve(RACINE, '..', '..', 'sites', 'Masterclass', 'src', 'data', 'masterclasses.ts')
+const URL_MASTERCLASS = 'https://masterclass.aoknowledge.com'
+
+const sansTiretLong = s => String(s).replace(/\s*[—–]\s*/g, ' : ').trim()
+
+async function lireMasterclasses(docs) {
+  const { masterclasses } = await import(pathToFileURL(SOURCE_MASTERCLASS).href)
+  if (!Array.isArray(masterclasses) || !masterclasses.length) throw new Error(`${SOURCE_MASTERCLASS} : aucune masterclass`)
+  const liste = masterclasses.map(m => ({
+    id: String(m.id),
+    titre: sansTiretLong(m.title),
+    description: sansTiretLong(m.subtitle),
+    pointsCles: (m.keyPoints ?? []).map(sansTiretLong),
+    url: URL_MASTERCLASS,
+  }))
+  const controle = JSON.stringify(liste)
+  for (const { re, raison } of INTERDITS) {
+    if (re.test(controle)) throw new Error(`masterclasses : ${raison} interdit apres nettoyage`)
+  }
+  const fiche = docs.find(d => d.sujet === 'masterclass')
+  if (!fiche) throw new Error('fiche masterclass absente')
+  const manquants = liste.filter(m => !fiche.texte.includes(m.titre)).map(m => m.titre)
+  if (manquants.length) throw new Error(`masterclass.md ne cite pas : ${manquants.join(' | ')}`)
+  return liste
+}
+
+async function generer() {
   const fichiers = readdirSync(DOSSIER).filter(f => f.endsWith('.md')).sort()
   if (!fichiers.length) throw new Error(`aucun doc dans ${DOSSIER}`)
   const docs = fichiers.map(lireDoc)
@@ -139,6 +172,7 @@ function generer() {
     if (vus.has(d.sujet)) throw new Error(`sujet en double : ${d.sujet}`)
     vus.add(d.sujet)
   }
+  const masterclasses = await lireMasterclasses(docs)
   const sujets = docs.map(d => JSON.stringify(d.sujet))
   return `// FICHIER GENERE par apps/journal-d-etude/scripts/generer-connaissances.mjs
 // depuis apps/journal-d-etude/docs/connaissances/*.md. Ne pas modifier a la
@@ -167,10 +201,22 @@ export type DocConnaissance = {
 export const SUJETS_CONNAISSANCES: readonly SujetConnaissance[] = [${sujets.join(', ')}]
 
 export const CONNAISSANCES: readonly DocConnaissance[] = ${JSON.stringify(docs, null, 2)}
+
+/** Une masterclass, lue dans sites/Masterclass/src/data/masterclasses.ts. */
+export type MasterclassConnue = {
+  id: string
+  titre: string
+  description: string
+  pointsCles: readonly string[]
+  /** Le site n'a qu'une page : la meme adresse pour toutes. */
+  url: string
+}
+
+export const MASTERCLASSES: readonly MasterclassConnue[] = ${JSON.stringify(masterclasses, null, 2)}
 `
 }
 
-const contenu = generer()
+const contenu = await generer()
 const cibles = [SORTIE_JOURNAL, ...(AVEC_SITE ? [SORTIE_SITE] : [])]
 let perime = false
 for (const cible of cibles) {

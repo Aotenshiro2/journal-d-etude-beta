@@ -12,6 +12,7 @@ import type Anthropic from '@anthropic-ai/sdk'
 import { consignesPolitique } from './politique-information'
 import { lienBotAccueil } from './liveclub/config'
 import { NOM_OUTIL_CONNAISSANCES, OUTIL_CONNAISSANCES, resultatConnaissances } from './connaissances-outil'
+import { NOM_OUTIL_TROUVER_COURS, OUTIL_TROUVER_COURS } from './trouver-cours-pur'
 
 // 18/10 : le texte produit fige (extension, journal, site, masterclass,
 // connexion, problemes frequents) est remplace par les fiches de
@@ -24,7 +25,9 @@ import { NOM_OUTIL_CONNAISSANCES, OUTIL_CONNAISSANCES, resultatConnaissances } f
 // conseil de trading personnalisé, jamais d'invention.
 export const SYSTEM_PROMPT_SUPPORT = `Tu es l'assistant support d'Ao Knowledge (AOK), une école de trading française fondée par Brice. Tu aides les membres sur les produits AOK, en français, en tutoyant, avec des réponses courtes et concrètes. N'utilise jamais de tiret cadratin.
 
-Les produits et services (le Carnet du Trader, le Journal d'Études, Pilotage, les masterclass, l'académie, le Live Club, le 10% Club, Mon espace, la connexion au compte, les ressources gratuites, les liens utiles) : tout ce que tu en sais est dans leurs fiches, que tu lis avec l'outil connaissances_produits. Une question sur un produit (ce que c'est, pour qui, le prix, ce qui est inclus, comment y aller, un souci d'utilisation) : appelle-le avant de répondre, puis réponds depuis ses fiches, avec les adresses recopiées en entier. Si la réponse n'y est pas, dis que tu n'as pas l'info et propose le bouton « Parler à un humain ». Ne nomme pas l'outil à la personne.
+Les produits et services (le Carnet du Trader, le Journal d'Études, Pilotage, les masterclass, l'académie, le Live Club, le 10% Club, Mon espace, la connexion au compte, les ressources gratuites, les liens utiles) : tout ce que tu en sais est dans leurs fiches, que tu lis avec l'outil connaissances_produits. Une question sur un produit (ce que c'est, pour qui, le prix, ce qui est inclus, comment y aller, un souci d'utilisation) : appelle-le avant de répondre, puis réponds depuis ses fiches, avec les adresses recopiées en entier. Si la réponse n'y est pas, dis que tu n'as pas l'info et propose le bouton « Parler à un humain ». Ne nomme pas les outils à la personne.
+
+Un cours sur une notion de trading (« il y a un cours sur les FVG ? », « je veux apprendre la gestion du risque », une masterclass sur un sujet) : appelle l'outil trouver_cours, qui cherche dans les leçons de l'académie et dans les masterclass, puis donne le ou les deux ou trois liens les plus utiles, adresses recopiées en entier, avec leur accès tel que l'outil l'écrit. Tu n'expliques pas la notion toi-même : tu orientes vers le cours.
 
 Règles strictes :
 - Ne réponds QUE sur ce que tu sais des produits et de l'école : leurs fiches et les informations publiques plus bas. Si tu n'es pas sûr, ou si la question sort du périmètre (facturation, remboursement, accès à un achat, bug que tu ne connais pas, situation de compte), dis-le simplement et propose de contacter un humain via le bouton prévu.
@@ -88,18 +91,23 @@ export function versMessagesSupport(fil: readonly MessageFilSupport[], message: 
 }
 
 /**
- * Les outils du bot support (18/10) : la seule lecture des fiches produits
- * (src/lib/connaissances-outil.ts, commun au bot Live Club). Aucun outil ne
- * voit un compte.
+ * Les outils du bot support : la lecture des fiches produits (18/10,
+ * src/lib/connaissances-outil.ts) et trouver_cours (19/10,
+ * src/lib/trouver-cours-pur.ts), tous deux communs au bot Live Club. Aucun
+ * outil ne voit un compte.
  */
-export const OUTILS_SUPPORT: Anthropic.Tool[] = [OUTIL_CONNAISSANCES]
+export const OUTILS_SUPPORT: Anthropic.Tool[] = [OUTIL_CONNAISSANCES, OUTIL_TROUVER_COURS]
+
+/** La lecture en direct de trouver_cours (src/lib/trouver-cours.ts), passee par la route et par l'eval : ce module reste pur. */
+export type TrouverCoursSupport = (entree: unknown) => Promise<Record<string, unknown>>
 
 /** Tours d'outils au plus par message (la route et l'eval). */
 export const MAX_TOURS_SUPPORT = 3
 
 /** Le resultat d'un appel d'outil du bot support, le meme en prod et dans l'eval. */
-export function resultatOutilSupport(nom: string, entree: unknown): { contenu: string; erreur?: true } {
+export async function resultatOutilSupport(nom: string, entree: unknown, trouverCours?: TrouverCoursSupport): Promise<{ contenu: string; erreur?: true }> {
   if (nom === NOM_OUTIL_CONNAISSANCES) return { contenu: JSON.stringify(resultatConnaissances(entree, 'support')) }
+  if (nom === NOM_OUTIL_TROUVER_COURS && trouverCours) return { contenu: JSON.stringify(await trouverCours(entree)) }
   return { contenu: JSON.stringify({ erreur: 'Outil inconnu.' }), erreur: true }
 }
 

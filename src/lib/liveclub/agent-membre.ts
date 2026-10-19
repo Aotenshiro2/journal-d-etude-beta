@@ -35,6 +35,8 @@ import { textOf } from '@/lib/ai'
 import { coutMicroEuros } from '@/lib/ia-prix'
 import { expurgerLiensInvitation } from '@/lib/stripe-actions'
 import { filtrerSortie } from '@/lib/politique-information'
+import { trouverCours } from '@/lib/trouver-cours'
+import { NOM_OUTIL_TROUVER_COURS } from '@/lib/trouver-cours-pur'
 import { TEXTE_PAUSE_AVANT_ARRET } from './config'
 import { montantsDuMembre, preparerAction, situationDuMembre } from './actions-membre'
 import type { ActionMembre, MessageConserve } from './conversations'
@@ -201,6 +203,13 @@ export async function repondreAuMembre(
       // aucune donnee de membre, la meme reponse que dans l'eval.
       if (bloc.name === 'connaissances_produits') {
         resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify(resultatConnaissances(bloc.input)) })
+        continue
+      }
+
+      // Le bon cours de l'academie ou la bonne masterclass (Brice, 19/10) :
+      // lecture en direct des lecons publiees, aucune donnee de membre.
+      if (bloc.name === NOM_OUTIL_TROUVER_COURS) {
+        resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify(await trouverCours(bloc.input, 'liveclub')) })
         continue
       }
 

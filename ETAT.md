@@ -3,6 +3,29 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
+## trouver_cours : le bon cours de l'academie ou la bonne masterclass (19/10/2026)
+
+Demande de Brice : le bot Live Club n'est pas un bot de mentorat, mais il oriente vers le BON cours.
+- Base : migration `20261019120000_academie_trouver_cours.sql` APPLIQUEE : extension unaccent,
+  configuration plein texte `public.aok_fr` (french sans accents), index GIN sur titre + contenu des
+  lecons, fonction `public.academie_trouver_cours(requete, limite)` SECURITY DEFINER (execute retire a
+  public, anon, authenticated) : lecons publiees des modules publies hors essai, rang (titre de lecon >
+  section/module > contenu, prefixe pour les mots de 5 lettres et plus, 2 lecons max par module), acces
+  calcule comme droitsAcademie (offres compte-gratuit, live-club par module ou section, formation-complete).
+- Code : `src/lib/trouver-cours-pur.ts` (outil, abreviations FVG/OB/DOL/AMD... et « risque » ->
+  « money management » en phrase exacte, masterclass, libelles d'acces par bot, consignes),
+  `src/lib/trouver-cours.ts` (lecture prisma). Branche dans agent-membre.ts (Live Club) et
+  api/support/chat/route.ts (resultatOutilSupport devient async, lecture injectee). Consignes dans
+  prompt-membre.ts et support-prompt.ts : lien + acces, pas d'explication de la notion, pas d'annonce.
+- Masterclass : `generer-connaissances.mjs` lit sites/Masterclass/src/data/masterclasses.ts et produit
+  MASTERCLASSES (tirets longs -> « : ») ; il refuse si masterclass.md ne cite pas chaque titre. Le site
+  des masterclass n'a qu'une page : PAS de lien profond par masterclass (meme URL pour toutes).
+- Verifs : `node scripts/verifier-trouver-cours.mjs [--sans-base] [notions]` ; evals K04 (FVG, liveclub)
+  et K05 (masterclass risque, liveclub + support:site). La regle « lien de la liste modifie » accepte
+  desormais les adresses rendues par un outil de lecture.
+- A trancher : 168 lecons video sans texte ne sont trouvables que par leur titre ; titres faibles
+  (Bienvenue x3, « 9 - Exercice », « Mindset », « Cast Forward »).
+
 ## Generateur de posts du cockpit (19/10/2026, etapes 1 a 3 du GO de Brice du 18/10)
 
 - Base : migrations `20261019030000_cockpit_generation.sql` + `20261019030100_cockpit_inspirations_date_texte.sql`

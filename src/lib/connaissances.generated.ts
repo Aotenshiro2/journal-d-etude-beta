@@ -429,7 +429,7 @@ export const CONNAISSANCES: readonly DocConnaissance[] = [
   {
     "sujet": "masterclass",
     "titre": "Les masterclass",
-    "resume": "Des replays gratuits de masterclass sur la psychologie et l'exécution, sur masterclass.aoknowledge.com, avec un compte AOKnowledge.",
+    "resume": "Cinq replays gratuits de masterclass sur la psychologie, le risque et l'exécution, sur masterclass.aoknowledge.com, avec un compte AOKnowledge.",
     "motsCles": [
       "masterclass",
       "replay",
@@ -438,13 +438,16 @@ export const CONNAISSANCES: readonly DocConnaissance[] = [
       "perte",
       "stop-loss",
       "risque",
+      "gestion des risques",
+      "objectifs",
+      "compétence",
       "gratuit"
     ],
-    "verifieLe": "2026-10-18",
+    "verifieLe": "2026-10-19",
     "sections": [
       {
         "titre": "Ce que c'est",
-        "texte": "Les masterclass sont des sessions complètes, en replay, sur la psychologie et l'exécution du trader. Par exemple : ta dernière perte comme outil de progression, le stop-loss vu comme un signal, le piège du trader compétent, la gestion des risques, la préparation de tes objectifs."
+        "texte": "Les masterclass sont des sessions complètes, en replay, sur la psychologie et l'exécution du trader. Il y en a cinq :\n- Ta Dernière Perte est une Mine d'Or : transformer chaque perte en outil de progression (lire une perte au-delà du chiffre, ton point de bascule entre discipline et impulsion, un journaling qui fait progresser).\n- Transforme tes SL en guide vers le succès : le stop-loss comme un signal, pas une défaite (stop technique ou émotionnel, analyser tes SL pour affiner ton placement).\n- Le Piège du Trader Compétent : pourquoi la compétence seule ne suffit pas (le trader qui sait mais ne performe pas, passer de la compétence à la cohérence).\n- Gestion des Risques : construire un cadre solide pour préserver ton capital (un risque adapté à la taille de ton compte, le sizing de chaque trade, une règle de risque tenable sur le long terme).\n- Comment préparer tes objectifs : Trading 2025 : fixer des objectifs réalistes et structurer ta progression sur l'année."
       },
       {
         "titre": "Pour qui",
@@ -456,16 +459,20 @@ export const CONNAISSANCES: readonly DocConnaissance[] = [
       },
       {
         "titre": "Comment y aller",
-        "texte": "- https://masterclass.aoknowledge.com"
+        "texte": "- https://masterclass.aoknowledge.com\n- Toutes les masterclass sont sur cette même page : il n'y a pas d'adresse propre à chacune. Tu choisis la tienne avec le bouton Replays (ou « Voir toutes les masterclasses »)."
       }
     ],
     "questions": [
       {
         "q": "Je n'arrive pas à ouvrir un replay.",
         "r": "Le plus souvent, c'est un autre email que celui de ton compte AOKnowledge. Connecte-toi avec le même email que sur le site. Si ça coince encore, l'équipe regarde."
+      },
+      {
+        "q": "Il y a une masterclass sur la gestion du risque ?",
+        "r": "Oui : « Gestion des Risques », sur https://masterclass.aoknowledge.com (bouton Replays). Elle est gratuite avec un compte AOKnowledge."
       }
     ],
-    "texte": "Les masterclass. Des replays gratuits de masterclass sur la psychologie et l'exécution, sur masterclass.aoknowledge.com, avec un compte AOKnowledge.\n\nCe que c'est :\nLes masterclass sont des sessions complètes, en replay, sur la psychologie et l'exécution du trader. Par exemple : ta dernière perte comme outil de progression, le stop-loss vu comme un signal, le piège du trader compétent, la gestion des risques, la préparation de tes objectifs.\n\nPour qui :\nPour tout trader, membre ou non.\n\nPrix et accès :\n- Accès libre et gratuit.\n- Pour regarder un replay, tu te connectes ou tu crées ton compte AOKnowledge sur le site des masterclass. C'est le même compte que sur aoknowledge.com : utilise le même email.\n\nComment y aller :\n- https://masterclass.aoknowledge.com\n\nQuestions fréquentes :\nQ : Je n'arrive pas à ouvrir un replay.\nR : Le plus souvent, c'est un autre email que celui de ton compte AOKnowledge. Connecte-toi avec le même email que sur le site. Si ça coince encore, l'équipe regarde."
+    "texte": "Les masterclass. Cinq replays gratuits de masterclass sur la psychologie, le risque et l'exécution, sur masterclass.aoknowledge.com, avec un compte AOKnowledge.\n\nCe que c'est :\nLes masterclass sont des sessions complètes, en replay, sur la psychologie et l'exécution du trader. Il y en a cinq :\n- Ta Dernière Perte est une Mine d'Or : transformer chaque perte en outil de progression (lire une perte au-delà du chiffre, ton point de bascule entre discipline et impulsion, un journaling qui fait progresser).\n- Transforme tes SL en guide vers le succès : le stop-loss comme un signal, pas une défaite (stop technique ou émotionnel, analyser tes SL pour affiner ton placement).\n- Le Piège du Trader Compétent : pourquoi la compétence seule ne suffit pas (le trader qui sait mais ne performe pas, passer de la compétence à la cohérence).\n- Gestion des Risques : construire un cadre solide pour préserver ton capital (un risque adapté à la taille de ton compte, le sizing de chaque trade, une règle de risque tenable sur le long terme).\n- Comment préparer tes objectifs : Trading 2025 : fixer des objectifs réalistes et structurer ta progression sur l'année.\n\nPour qui :\nPour tout trader, membre ou non.\n\nPrix et accès :\n- Accès libre et gratuit.\n- Pour regarder un replay, tu te connectes ou tu crées ton compte AOKnowledge sur le site des masterclass. C'est le même compte que sur aoknowledge.com : utilise le même email.\n\nComment y aller :\n- https://masterclass.aoknowledge.com\n- Toutes les masterclass sont sur cette même page : il n'y a pas d'adresse propre à chacune. Tu choisis la tienne avec le bouton Replays (ou « Voir toutes les masterclasses »).\n\nQuestions fréquentes :\nQ : Je n'arrive pas à ouvrir un replay.\nR : Le plus souvent, c'est un autre email que celui de ton compte AOKnowledge. Connecte-toi avec le même email que sur le site. Si ça coince encore, l'équipe regarde.\nQ : Il y a une masterclass sur la gestion du risque ?\nR : Oui : « Gestion des Risques », sur https://masterclass.aoknowledge.com (bouton Replays). Elle est gratuite avec un compte AOKnowledge."
   },
   {
     "sujet": "pilotage",
@@ -557,5 +564,78 @@ export const CONNAISSANCES: readonly DocConnaissance[] = [
       }
     ],
     "texte": "Les ressources gratuites. La bibliothèque, le workbook de 83 pages, le blog, la newsletter, le podcast Trading Edge Club, la chaîne YouTube et les masterclass.\n\nCe que c'est :\nCe qu'AOKnowledge met à disposition gratuitement :\n- La bibliothèque : les outils et les ressources, au même endroit.\n- Le workbook « De la compréhension à l'exécution » : un PDF de 83 pages en huit étapes, des bases du marché à la gestion du risque, avec des exercices. Il s'envoie par email.\n- Le blog : des articles Smart Money et ICT, de psychologie et de discipline du trading.\n- La newsletter AOKnowledge.\n- Le podcast Trading Edge Club, sur Spotify et Apple Podcasts.\n- La chaîne YouTube de Brice.\n- Les masterclass en replay, avec un compte.\n\nPour qui :\nPour tout trader, et pour qui veut découvrir la façon de travailler d'AOKnowledge avant de s'engager.\n\nPrix et accès :\nGratuit. Le workbook demande ton email pour te l'envoyer ; les masterclass demandent un compte AOKnowledge.\n\nComment y aller :\n- La bibliothèque : https://aoknowledge.com/library\n- Le workbook : https://aoknowledge.com/library/workbooks\n- Le blog : https://aoknowledge.com/blog\n- La newsletter : https://aoknowledge.com/newsletter\n- Le podcast : https://aoknowledge.com/podcast, sur Spotify https://open.spotify.com/show/033uUTFunwByY1Dl1ppng4 et sur Apple Podcasts https://podcasts.apple.com/fr/podcast/trading-edge-club/id1896899847\n- YouTube : https://youtube.com/@BriceDlb\n- Les masterclass : https://masterclass.aoknowledge.com\n\nQuestions fréquentes :\nQ : Par où commencer si je débute ?\nR : Le workbook gratuit donne les huit étapes, et le blog et le podcast montrent la façon de travailler d'AOKnowledge. Sur l'académie, Novice en trading est gratuit avec un compte."
+  }
+]
+
+/** Une masterclass, lue dans sites/Masterclass/src/data/masterclasses.ts. */
+export type MasterclassConnue = {
+  id: string
+  titre: string
+  description: string
+  pointsCles: readonly string[]
+  /** Le site n'a qu'une page : la meme adresse pour toutes. */
+  url: string
+}
+
+export const MASTERCLASSES: readonly MasterclassConnue[] = [
+  {
+    "id": "perte",
+    "titre": "Ta Dernière Perte est une Mine d'Or",
+    "description": "Transforme chaque perte en outil de progression",
+    "pointsCles": [
+      "Lire réellement une perte au-delà du simple chiffre",
+      "Identifier ton point de bascule entre discipline et impulsion",
+      "Comprendre le Fonctionnement Intégral : technique, psychologie, comportement",
+      "Structurer un journaling utile qui fait vraiment progresser"
+    ],
+    "url": "https://masterclass.aoknowledge.com"
+  },
+  {
+    "id": "sl",
+    "titre": "Transforme tes SL en guide vers le succès",
+    "description": "Comprendre le stop-loss comme un signal, pas une défaite",
+    "pointsCles": [
+      "Distinguer le stop technique du stop émotionnel",
+      "Utiliser chaque sortie comme une information exploitable",
+      "Analyser tes SL pour affiner ton placement et ta stratégie",
+      "Sortir de la logique \"gagner/perdre\" pour entrer dans la logique de progression"
+    ],
+    "url": "https://masterclass.aoknowledge.com"
+  },
+  {
+    "id": "piege",
+    "titre": "Le Piège du Trader Compétent",
+    "description": "Pourquoi la compétence seule ne suffit pas",
+    "pointsCles": [
+      "Identifier le paradoxe du trader qui sait mais ne performe pas",
+      "Comprendre pourquoi la maîtrise technique peut devenir un frein",
+      "Les comportements inconscients qui sabotent l'exécution malgré le savoir",
+      "Le passage de la compétence à la cohérence"
+    ],
+    "url": "https://masterclass.aoknowledge.com"
+  },
+  {
+    "id": "risques",
+    "titre": "Gestion des Risques",
+    "description": "Construire un cadre solide pour préserver ton capital",
+    "pointsCles": [
+      "Définir un cadre de risque adapté à la taille de ton compte",
+      "Calculer le sizing optimal pour chaque trade",
+      "Éviter les erreurs classiques qui détruisent les comptes en bonne santé",
+      "Construire une règle de risque que tu peux tenir sur le long terme"
+    ],
+    "url": "https://masterclass.aoknowledge.com"
+  },
+  {
+    "id": "objectifs",
+    "titre": "Comment préparer tes objectifs : Trading 2025",
+    "description": "Fixer des objectifs réalistes et structurer ta progression",
+    "pointsCles": [
+      "Fixer des objectifs de performance réalistes et mesurables",
+      "Éviter les pièges des objectifs financiers à court terme",
+      "Structurer ta progression sur une vision annuelle cohérente",
+      "Aligner tes objectifs avec ton niveau et ta psychologie de trader"
+    ],
+    "url": "https://masterclass.aoknowledge.com"
   }
 ]

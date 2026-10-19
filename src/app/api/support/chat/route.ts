@@ -6,6 +6,7 @@ import { corsHeaders, corsPreflight } from '@/lib/support-cors'
 import { filtrerSortie } from '@/lib/politique-information'
 import type Anthropic from '@anthropic-ai/sdk'
 import { MAX_TOURS_SUPPORT, requeteSupport, resultatOutilSupport, versMessagesSupport } from '@/lib/support-prompt'
+import { trouverCours } from '@/lib/trouver-cours'
 
 // L'appel Claude peut dépasser les 10 s par défaut des fonctions Vercel
 export const maxDuration = 60
@@ -61,9 +62,11 @@ export async function POST(req: NextRequest) {
 
   try {
     const model = AI_MODEL.support
-    // Boucle d'outils (18/10) : le seul outil est la lecture des fiches
-    // produits (connaissances_produits, src/lib/connaissances-outil.ts), comme
-    // le bot Live Club. Chaque tour est trace dans AiUsage.
+    // Boucle d'outils (18/10) : la lecture des fiches produits
+    // (connaissances_produits, src/lib/connaissances-outil.ts) et, depuis le
+    // 19/10, trouver_cours (lecons de l'academie en direct et masterclass,
+    // src/lib/trouver-cours.ts), comme le bot Live Club. Chaque tour est
+    // trace dans AiUsage.
     const messages = versMessagesSupport(recent, message)
     let texte = ''
     for (let tour = 0; tour < MAX_TOURS_SUPPORT; tour++) {
@@ -77,7 +80,7 @@ export async function POST(req: NextRequest) {
       const resultats: Anthropic.ToolResultBlockParam[] = []
       for (const bloc of response.content) {
         if (bloc.type !== 'tool_use') continue
-        const r = resultatOutilSupport(bloc.name, bloc.input)
+        const r = await resultatOutilSupport(bloc.name, bloc.input, e => trouverCours(e, 'support'))
         resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: r.contenu, ...(r.erreur ? { is_error: true } : {}) })
       }
       messages.push({ role: 'user', content: resultats })
