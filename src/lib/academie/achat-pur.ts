@@ -37,9 +37,18 @@ export type OffreEnVente = {
   stripePriceId: string
 }
 
-/** Le texte sous le bouton Payer (contenu numerique : acces immediat, art. L221-28 du code de la consommation). */
+/** Les conditions generales du site, liees dans la case a cocher de Checkout. */
+export const URL_CGV = 'https://aoknowledge.com/conditions-generales'
+
+/**
+ * La phrase de la case a cocher de Checkout (consent_collection
+ * terms_of_service 'required') : accord EXPRES de l'acheteur, coche par lui.
+ * Contenu numerique fourni tout de suite : art. L221-28 13 du code de la
+ * consommation. renonciation_retractation_le n'est pose que si la session
+ * revient avec consent.terms_of_service = 'accepted'.
+ */
 export const TEXTE_RETRACTATION =
-  "En payant, tu demandes l'accès immédiat au module et tu renonces à ton droit de rétractation de 14 jours."
+  `J'accepte les [conditions générales](${URL_CGV}) et je demande l'accès immédiat au module : je renonce à mon droit de rétractation de 14 jours.`
 
 /**
  * Les parametres de la session Checkout (application/x-www-form-urlencoded).
@@ -62,7 +71,9 @@ export function corpsSession(o: OffreEnVente, p: {
   c.set('line_items[0][quantity]', '1')
   c.set('locale', 'fr')
   c.set('customer_creation', 'always')
-  c.set('custom_text[submit][message]', TEXTE_RETRACTATION)
+  // Exige une URL de conditions dans les reglages publics du compte Stripe (sinon Stripe refuse la session).
+  c.set('consent_collection[terms_of_service]', 'required')
+  c.set('custom_text[terms_of_service_acceptance][message]', TEXTE_RETRACTATION)
   if (p.userId) {
     c.set('client_reference_id', p.userId)
     c.set('metadata[user_id]', p.userId)
@@ -92,6 +103,8 @@ export type AchatLu = {
   chargeId: string | null
   essai: boolean
   payeLe: Date
+  /** Le moment du paiement si l'acheteur a coche la case (consent.terms_of_service = 'accepted'), sinon null. */
+  renonciationLe: Date | null
 }
 
 export type LectureAchat =
@@ -141,6 +154,7 @@ export function lireAchat(s: Record<string, unknown>): LectureAchat {
   const total = typeof s.amount_total === 'number' ? s.amount_total : null
   const cree = typeof s.created === 'number' ? new Date(s.created * 1000) : new Date()
   if (!email && !estUuid(ref)) return { ok: false, raison: 'incomplet' }
+  const consent = (s.consent && typeof s.consent === 'object' ? s.consent : {}) as Record<string, unknown>
   return {
     ok: true,
     achat: {
@@ -153,6 +167,7 @@ export function lireAchat(s: Record<string, unknown>): LectureAchat {
       chargeId: chargeDe(s.payment_intent),
       essai: meta.essai === '1',
       payeLe: cree,
+      renonciationLe: consent.terms_of_service === 'accepted' ? cree : null,
     },
   }
 }

@@ -48,7 +48,8 @@ export const ventePublique = () => process.env.ACADEMIE_ACHAT_PUBLIC?.trim() ===
 
 /** Une erreur Stripe, sans son message (il peut reprendre un email). */
 export class ErreurStripe extends Error {
-  constructor(public statut: number, public type: string, public permission: boolean) {
+  /** conditions : Stripe refuse consent_collection, l'URL des conditions manque dans les reglages publics du compte. */
+  constructor(public statut: number, public type: string, public permission: boolean, public conditions = false) {
     super(`stripe ${statut} ${type}`)
     this.name = 'ErreurStripe'
   }
@@ -71,7 +72,7 @@ async function appeler(cle: string, chemin: string, corps?: URLSearchParams): Pr
     const e = (j.error ?? {}) as Record<string, unknown>
     const message = typeof e.message === 'string' ? e.message : ''
     throw new ErreurStripe(r.status, typeof e.type === 'string' ? e.type : 'inconnu',
-      r.status === 403 || /permission/i.test(message))
+      r.status === 403 || /permission/i.test(message), /terms of service/i.test(message))
   }
   return j
 }
@@ -128,7 +129,7 @@ export async function enregistrerAchat(session: Record<string, unknown>): Promis
   const paiement = a.chargeId ? `stripe:${a.chargeId}` : null
   const note = a.essai ? 'Achat test (?achat=essai), avant ouverture publique' : null
   const l = (await prisma.$queryRawUnsafe<{ offre_connue: number; cree: number }[]>(
-    SQL_POSER_ACHAT, a.userId, a.email, a.offreSlug, a.sessionId, a.montantEur, a.payeLe, note, paiement,
+    SQL_POSER_ACHAT, a.userId, a.email, a.offreSlug, a.sessionId, a.montantEur, a.renonciationLe, note, paiement,
   ))[0]
   if (!l || l.offre_connue === 0) return { ok: false, raison: 'offre_inconnue' }
   if (l.cree === 0 && paiement) await prisma.$executeRawUnsafe(SQL_COMPLETER_PAIEMENT, a.sessionId, paiement)

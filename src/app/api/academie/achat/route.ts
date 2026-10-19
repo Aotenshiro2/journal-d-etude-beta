@@ -82,6 +82,10 @@ export async function POST(req: NextRequest) {
       console.warn(`[academie/achat] cle Stripe sans la permission Checkout Sessions (${err.statut})`)
       return refus('config', 503)
     }
+    if (err instanceof ErreurStripe && err.conditions) {
+      console.warn('[academie/achat] Stripe exige une URL de conditions dans les reglages publics du compte (consent_collection)')
+      return refus('config', 503)
+    }
     console.warn(`[academie/achat] Stripe a refuse la session module=${slug} : ${err instanceof ErreurStripe ? err.message : messageErreur(err)}`)
     return refus('stripe', 502)
   }

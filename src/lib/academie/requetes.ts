@@ -391,8 +391,8 @@ select lower(btrim(u.email)) as email
  * L'acces d'un achat Stripe, une seule fois par session Checkout (index
  * academie_acces_stripe_reference_idx). $1 = user_id ou null, $2 = email ou
  * null, $3 = slug de l'offre, $4 = id de session (cs_...), $5 = montant EUR,
- * $6 = moment du paiement (renonciation a la retractation, texte du bouton
- * Payer), $7 = note, $8 = paiement_id (stripe:ch_...) ou null.
+ * $6 = renonciation a la retractation (moment du paiement si la case de
+ * Checkout est cochee, sinon null), $7 = note, $8 = paiement_id (stripe:ch_...) ou null.
  * Rend { offre_connue, cree } : cree = false si la session etait deja notee.
  */
 export const SQL_POSER_ACHAT = `

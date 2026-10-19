@@ -32,7 +32,9 @@ bloc('session : embarquee, compte pose par le serveur, libelle pour le cockpit',
   assert.equal(c.get('metadata[essai]'), '1')
   assert.equal(c.get('metadata[academie_offre]'), 'module-journaling')
   assert.match(c.get('payment_intent_data[description]'), /^Académie AOK : Journaling$/)
-  assert.equal(c.get('custom_text[submit][message]'), TEXTE_RETRACTATION)
+  assert.equal(c.get('consent_collection[terms_of_service]'), 'required')
+  assert.equal(c.get('custom_text[terms_of_service_acceptance][message]'), TEXTE_RETRACTATION)
+  assert.match(TEXTE_RETRACTATION, /\(https:\/\/aoknowledge\.com\/conditions-generales\)/)
   assert.equal(c.has('payment_method_types[0]'), false, 'moyens de paiement laisses au tableau de bord (express)')
   const anonyme = corpsSession(offre, { retourUrl: 'x', userId: null, email: null, essai: false })
   assert.equal(anonyme.has('client_reference_id'), false)
@@ -46,6 +48,7 @@ const payee = {
   customer_details: { email: ' Eleve@Exemple.FR ' },
   metadata: { source: 'academie', academie_module: 'journaling', academie_offre: 'module-journaling', essai: '1' },
   payment_intent: { id: 'pi_1', latest_charge: 'ch_abcdef123' },
+  consent: { terms_of_service: 'accepted' },
 }
 
 bloc('achat : session payee lue', () => {
@@ -56,6 +59,9 @@ bloc('achat : session payee lue', () => {
   assert.equal(r.achat.chargeId, 'ch_abcdef123')
   assert.equal(r.achat.userId, '11111111-2222-3333-4444-555555555555')
   assert.equal(r.achat.essai, true)
+  assert.ok(r.achat.renonciationLe instanceof Date, 'case cochee : renonciation posee')
+  const sansCase = lireAchat({ ...payee, consent: null })
+  assert.equal(sansCase.ok && sansCase.achat.renonciationLe, null, 'sans case cochee : pas de renonciation')
 })
 
 bloc('achat : refus', () => {

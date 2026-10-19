@@ -15,7 +15,9 @@ compte exige avant de payer, paiements express laisses aux reglages du compte St
 - Code : `src/lib/academie/achat-pur.ts` (session, lecture d'une session payee, signature),
   `achat.ts` (Stripe, ecriture), `vue-moi.ts` (construire, sorti de la route /moi). Acces = academie_acces
   source stripe, reference cs_..., paiement_id stripe:ch_..., cote brice, renonciation_retractation_le =
-  paiement (texte sous le bouton Payer). Index unique `20261019150000_academie_achat_stripe.sql` APPLIQUE.
+  paiement SEULEMENT si la case de Checkout est cochee (consent_collection terms_of_service required, phrase
+  de renonciation + lien /conditions-generales ; Stripe exige l'URL des conditions dans les reglages publics
+  du compte, sinon 503 'config'). Seul le canal stripe_aok se vend (L'Appat : canal aucun, 20261019160000). Index unique `20261019150000_academie_achat_stripe.sql` APPLIQUE.
   Cache des droits des bots (trouver-cours.ts) vide apres un achat (par instance).
 - Interrupteur : sans `ACADEMIE_ACHAT_PUBLIC=1`, seules les demandes « essai » passent (site ouvert avec
   ?achat=essai). Cote site : ACHAT_OUVERT = false.
