@@ -182,9 +182,10 @@ async function demandeDejaTraitee(updateId: number): Promise<boolean> {
 
 function texteAccueil(prenom?: string): string {
   return `Salut${prenom ? ` ${prenom.slice(0, 40)}` : ''} ! Je suis le bot du Live Club.\n\n`
-    + `Je te fais entrer dans le groupe, et je gère ton abonnement avec toi : le voir, le mettre en pause, l'arrêter. `
-    + `Tu peux m'écrire ou utiliser les boutons.\n\n`
-    + `À savoir : l'équipe du Live Club peut lire cette conversation, pour t'aider si besoin.`
+    + `Je te fais entrer dans le groupe, et je gère ton abonnement avec toi : le voir, le mettre en pause, l'arrêter.\n\n`
+    + `Je suis aussi là pour tout ce qui touche à l'académie : les cours, les outils, ton compte, une question sur une offre. `
+    + `Écris-moi simplement ta question, je te réponds ici. Les boutons sont là pour aller plus vite.\n\n`
+    + `À savoir : l'équipe du Live Club peut lire cette conversation et prendre le relais si besoin.`
 }
 
 /**
