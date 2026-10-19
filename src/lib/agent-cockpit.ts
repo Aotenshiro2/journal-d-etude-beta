@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/db'
+import { randomUUID } from 'node:crypto'
 import { aiClient, AI_MODEL, logAiUsage, textOf } from '@/lib/ai'
 import {
   validerAction, resumeAction, cleAgent, cleTelegramPresente, nomVariableCle,
@@ -108,7 +109,8 @@ L'ACADÉMIE (aoknowledge.com/academie, espace Académie du cockpit, 18/10) :
 - cockpit_metrics_monthly : month (YYYY-MM), source, metric, value (séries mensuelles toutes plateformes)
 - cockpit_snapshots : snapshot_date, generated_at, source_export_dates (json), missing (json)
 - cockpit_support_threads (vue) : id, user_id, email, app, messages (jsonb, [{role,content,at}], role user = le membre, assistant = l'IA ou un message du bot, human = l'équipe, system = une étape ou un geste du bot Live Club, préfixé « [système] »), escalated_at (non null = le membre veut un humain), created_at, updated_at, telegram_id, membre_id. app dit d'où écrit le membre (extension, apps, site...) ; app = 'telegram' = conversation privée avec le bot membre du Live Club : user_id vaut alors 'telegram:<numéro>', email est celui donné au bot quand il le connaît. Toutes ces conversations s'affichent dans l'onglet Support du cockpit, demandes d'humain en tête, et la réponse écrite là repart au membre dans Telegram. Répondre reste un geste humain : depuis l'onglet Support, ou d'ici par proposer_reponse_membre (carte de confirmation, voir « RÉPONDRE À UN MEMBRE » plus bas).
-- "AiUsage" (guillemets obligatoires, colonnes camelCase entre guillemets) : "userId", product, model, "inputTokens", "outputTokens", "createdAt"
+- "AiUsage" (guillemets obligatoires, colonnes camelCase entre guillemets) : "userId", product, model, "inputTokens", "outputTokens", "cacheCreationTokens", "cacheReadTokens", "costMicros", "usage" (le poste : agent_cockpit, agent_telegram, generation_ecran, generation_agent_cockpit, generation_agent_telegram, creation_*, enquete, support_chat, liveclub_membre, mentorat_chat, capture, etude, releve... null = avant le 19/10/2026, non détaillé), "echange" (regroupe les appels d'un même message), "createdAt"
+- cockpit_ia_depense_jour (vue) : jour (Paris), produit, poste, modele, appels, echanges, personnes, tokens_entree, tokens_sortie, tokens_cache_ecrits, tokens_cache_lus, cout_micros. LA dépense IA par poste et par jour (écran Dépense IA). cockpit_depenses_ia_fixes : abonnements IA saisis à la main (libelle, montant, devise, periodicite mensuel|annuel, debut, fin, retire_le). cockpit_ia_facture_jour : le montant FACTURÉ par Anthropic (montant_usd par jour, workspace et ligne), vide tant que la clé admin n'est pas posée (statut dans cockpit_ia_collectes).
 - cockpit_releves_audience : relevés d'audience par compte (colonnes à découvrir au besoin)
 - cockpit_top_items : snapshot_date, kind, rank, label, sublabel, metrics (jsonb). kind = youtube_top_watchtime | youtube_traffic_sources | gsc_top_queries | kit_broadcasts | stripe_by_product | audience_par_compte. TOUJOURS filtrer sur le dernier snapshot_date, sinon la même vidéo revient une fois par semaine collectée.
 - cockpit_ia_usage (vue) : user_id, email, produit, appels, tokens_entree, tokens_sortie, dernier_appel, appels_30j, tokens_cache_ecrits, tokens_cache_lus, cout_micros (millionièmes d'euro, figé à l'écriture). Le coût de l'IA PAR MEMBRE, que la console Anthropic ne donne pas.
@@ -1004,6 +1006,9 @@ export async function boucleAgent(
     })
   }
 
+  // Une question = un echange (ecran Depense IA) : les tours d'outils s'y rangent.
+  const echange = randomUUID()
+  const poste = canal.source === 'agent_telegram' ? 'agent_telegram' : 'agent_cockpit'
   for (let tour = 0; tour < MAX_TOURS; tour++) {
       const response = await client.messages.create({
         model,
@@ -1013,7 +1018,7 @@ export async function boucleAgent(
         tools: OUTILS,
         messages,
       })
-      await logAiUsage(userId, 'cockpit', model, response.usage)
+      await logAiUsage(userId, 'cockpit', model, response.usage, null, { usage: poste, echange })
 
       if (response.stop_reason !== 'tool_use') {
         return { reply: textOf(response) || 'Je n’ai pas de réponse.', etapes }

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getUserId } from '@/lib/api-auth'
@@ -69,9 +70,11 @@ export async function POST(req: NextRequest) {
     // trace dans AiUsage.
     const messages = versMessagesSupport(recent, message)
     let texte = ''
+    // Un message du membre = un echange, quel que soit le nombre de tours d'outils.
+    const echange = randomUUID()
     for (let tour = 0; tour < MAX_TOURS_SUPPORT; tour++) {
       const response = await client.messages.create(requeteSupport(model, app, messages))
-      await logAiUsage(userId, 'support', model, response.usage)
+      await logAiUsage(userId, 'support', model, response.usage, null, { usage: 'support_chat', echange })
       if (response.stop_reason !== 'tool_use') {
         texte = textOf(response)
         break

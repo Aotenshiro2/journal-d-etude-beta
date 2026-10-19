@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import type Anthropic from '@anthropic-ai/sdk'
 import { prisma } from '@/lib/db'
 import { getUserId } from '@/lib/api-auth'
-import { aiClient, aiErrorMessage, AI_MODEL } from '@/lib/ai'
+import { aiClient, aiErrorMessage, AI_MODEL, logAiUsage } from '@/lib/ai'
 import { corsHeaders, corsPreflight } from '@/lib/support-cors'
 
 // CHERCHER EN LIGNE CE QU'ON SAIT D'UNE PERSONNE DU FONDS (07/09/2026).
@@ -181,6 +181,9 @@ export async function POST(req: NextRequest) {
     ]
     let compteRendu = ''
     let sources: string[] = []
+    // Trace (19/10) : ces appels n'etaient pas comptes. Une enquete = un echange,
+    // recherche web comprise (facturee a la requete, cf. ia-prix.ts).
+    const echange = randomUUID()
     for (let tour = 0; tour < 6; tour++) {
       const reponse = await client.messages.create({
         model: modele,
@@ -193,6 +196,7 @@ export async function POST(req: NextRequest) {
         tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 6, blocked_domains: BLOQUES }],
         messages,
       })
+      await logAiUsage(userId, 'cockpit', modele, reponse.usage, null, { usage: 'enquete', echange })
       // Un tour peut s'arrêter en pause quand la recherche est longue : on
       // rejoue la réponse telle quelle et on laisse le modèle continuer.
       if (reponse.stop_reason === 'pause_turn') {
@@ -217,6 +221,7 @@ export async function POST(req: NextRequest) {
       messages: [{ role: 'user', content: `Compte rendu :\n\n${compteRendu}\n\nURL consultées :\n${sources.join('\n')}` }],
       output_config: { format: { type: 'json_schema', schema: SCHEMA_PROPOSITIONS } },
     })
+    await logAiUsage(userId, 'cockpit', modele, structure.usage, null, { usage: 'enquete', echange })
     const texte = structure.content.find((b) => b.type === 'text')
     const json = texte && texte.type === 'text' ? JSON.parse(texte.text) : { propositions: [], homonymes: '', resume: '' }
     const propositions: Proposition[] = Array.isArray(json.propositions) ? json.propositions : []

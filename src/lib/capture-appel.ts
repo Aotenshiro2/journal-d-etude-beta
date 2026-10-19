@@ -104,7 +104,7 @@ export async function appelerCapture<T>(d: DemandeCapture): Promise<ResultatCapt
     output_config,
   } as Anthropic.MessageCreateParamsNonStreaming)
 
-  await logAiUsage(d.userId, produit, modele, reponse.usage, d.niveau)
+  await logAiUsage(d.userId, produit, modele, reponse.usage, d.niveau, { usage: secretaire ? 'capture' : 'etude' })
 
   const brut = textOf(reponse)
   if (!brut) throw new Error('Réponse vide du modèle.')

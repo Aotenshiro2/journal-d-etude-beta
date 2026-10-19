@@ -302,7 +302,7 @@ export async function POST(req: NextRequest) {
       { status: 502, headers },
     )
   }
-  await logAiUsage(userId, 'cockpit', model, reponse.usage)
+  await logAiUsage(userId, 'cockpit', model, reponse.usage, null, { usage: `creation_${geste}` })
 
   const bloc = reponse.content.find((b): b is Anthropic.ToolUseBlock => b.type === 'tool_use')
   if (!bloc || reponse.stop_reason === 'max_tokens') {

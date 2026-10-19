@@ -155,7 +155,7 @@ export async function POST(req: NextRequest) {
       ],
     } as never)
 
-    await logAiUsage(userId, 'pilotage', model, response.usage)
+    await logAiUsage(userId, 'pilotage', model, response.usage, null, { usage: 'releve' })
 
     const bloc_outil = response.content.find(
       (c: { type: string }) => c.type === 'tool_use',

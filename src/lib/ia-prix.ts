@@ -46,7 +46,13 @@ export interface JetonsUtilises {
   output_tokens?: number | null
   cache_creation_input_tokens?: number | null
   cache_read_input_tokens?: number | null
+  /** Outils serveur (19/10/2026) : la recherche web est facturée à la requête, hors jetons. */
+  server_tool_use?: { web_search_requests?: number | null } | null
 }
+
+/** Recherche web : 10 USD les 1 000 recherches (tarif Anthropic relevé le 19/10/2026),
+ *  en plus des jetons des pages lues. Seule l'enquête du fonds s'en sert. */
+const USD_PAR_RECHERCHE_WEB = 0.01
 
 /**
  * Coût d'un appel en MICRO-euros (millionièmes d'euro), en entier.
@@ -60,7 +66,8 @@ export function coutMicroEuros(modele: string, usage: JetonsUtilises): number {
       (usage.output_tokens ?? 0) * p.out +
       (usage.cache_creation_input_tokens ?? 0) * p.cacheWrite +
       (usage.cache_read_input_tokens ?? 0) * p.cacheRead) /
-    1_000_000
+    1_000_000 +
+    (usage.server_tool_use?.web_search_requests ?? 0) * USD_PAR_RECHERCHE_WEB
   return Math.round(usd * USD_VERS_EUR * 1_000_000)
 }
 

@@ -63,6 +63,30 @@ export const AI_MODEL: Record<AiProduct, string> = {
 }
 
 /**
+ * Le POSTE d'un appel (écran Dépense IA du cockpit, 19/10/2026). Le produit dit
+ * quelle clé paie ; le poste dit à quoi l'argent a servi à l'intérieur d'un
+ * produit : l'agent du cockpit et le générateur de posts partagent la clé
+ * 'cockpit' et n'ont rien à voir. Une ligne sans poste (historique d'avant le
+ * 19/10) se lit « non détaillé ».
+ *
+ * `echange` regroupe les appels d'un même échange utile (une question à
+ * l'agent qui fait trois tours d'outils = 1 message, 3 appels) : c'est le
+ * dénominateur du coût par unité. Sans lui, chaque appel compte pour un.
+ */
+export type PosteIA =
+  | 'agent_cockpit' | 'agent_telegram'
+  | 'generation_ecran' | 'generation_agent_cockpit' | 'generation_agent_telegram'
+  | 'creation_assiste' | 'creation_genere' | 'creation_titre'
+  | 'enquete'
+  | 'mentorat_chat' | 'mentorat_plan'
+  | 'support_chat'
+  | 'capture' | 'etude'
+  | 'releve'
+  | 'liveclub_membre'
+
+export type EtiquetteUsage = { usage: PosteIA; echange?: string | null }
+
+/**
  * Log d'usage par membre — la source de l'écran cockpit « jetons/coûts par
  * membre » ET l'assiette des budgets IA. Best-effort : un échec de log ne
  * casse jamais la réponse.
@@ -77,7 +101,8 @@ export async function logAiUsage(
   product: AiProduct,
   model: string,
   usage: JetonsUtilises,
-  niveau?: string | null
+  niveau?: string | null,
+  etiquette?: EtiquetteUsage
 ): Promise<void> {
   try {
     await prisma.aiUsage.create({
@@ -91,6 +116,8 @@ export async function logAiUsage(
         cacheReadTokens: usage.cache_read_input_tokens ?? 0,
         costMicros: coutMicroEuros(model, usage),
         niveau: niveau ?? null,
+        usage: etiquette?.usage ?? null,
+        echange: etiquette?.echange ?? null,
       },
     })
   } catch (err) {

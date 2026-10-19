@@ -179,7 +179,9 @@ export async function genererPost(d: DemandeGeneration, userId: string, origine:
     console.error('[generation] appel', err)
     return { ok: false, status: 502, erreur: aiErrorMessage(err, 'ANTHROPIC_API_KEY_COCKPIT') }
   }
-  await logAiUsage(userId, 'cockpit', MODELE_GENERATION, reponse.usage)
+  await logAiUsage(userId, 'cockpit', MODELE_GENERATION, reponse.usage, null, {
+    usage: origine === 'cockpit' ? 'generation_ecran' : `generation_${origine}`,
+  })
   const cout = coutMicroEuros(MODELE_GENERATION, reponse.usage)
 
   if (reponse.stop_reason === 'refusal') {

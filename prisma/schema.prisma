@@ -199,6 +199,15 @@ model AiUsage {
   // plafond global du niveau libre et à la ventilation par palier au cockpit.
   niveau String?
 
+  // Le POSTE de l'appel (19/10/2026, écran Dépense IA du cockpit) : à quoi
+  // l'argent a servi à l'intérieur d'un produit (agent du cockpit, générateur,
+  // enquête...). Null = ligne d'avant le 19/10, « non détaillé ». Valeurs :
+  // type PosteIA de src/lib/ai.ts.
+  usage   String?
+  // Regroupe les appels d'un même échange (une question de l'agent qui fait
+  // trois tours d'outils = un message, trois appels). Dénominateur du coût par unité.
+  echange String?
+
   createdAt DateTime @default(now())
 
   @@index([userId, createdAt])

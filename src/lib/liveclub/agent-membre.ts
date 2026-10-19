@@ -29,6 +29,7 @@
 // ANTHROPIC_API_KEY_LIVECLUB, repli sur ANTHROPIC_API_KEY_SUPPORT tant que le
 // workspace dedie n'existe pas.
 
+import { randomUUID } from 'node:crypto'
 import Anthropic from '@anthropic-ai/sdk'
 import { prisma } from '@/lib/db'
 import { textOf } from '@/lib/ai'
@@ -129,7 +130,7 @@ function modeleGrille(modele: string): string {
  * est 'liveclub:u<telegram_id>' : un membre du groupe n'a pas forcement de
  * compte AOK.
  */
-async function tracerUsage(telegramId: number, usage: Anthropic.Usage): Promise<void> {
+async function tracerUsage(telegramId: number, usage: Anthropic.Usage, echange: string): Promise<void> {
   try {
     await prisma.aiUsage.create({
       data: {
@@ -141,6 +142,8 @@ async function tracerUsage(telegramId: number, usage: Anthropic.Usage): Promise<
         cacheCreationTokens: usage.cache_creation_input_tokens ?? 0,
         cacheReadTokens: usage.cache_read_input_tokens ?? 0,
         costMicros: coutMicroEuros(modeleGrille(MODELE_LIVECLUB), usage),
+        usage: 'liveclub_membre',
+        echange,
       },
     })
   } catch (err) {
@@ -174,9 +177,11 @@ export async function repondreAuMembre(
     return f.texte
   }
 
+  // Un message du membre = un echange (ecran Depense IA du cockpit).
+  const echange = randomUUID()
   for (let tour = 0; tour < MAX_TOURS; tour++) {
     const response = await client.messages.create(requeteAgentMembre(messages, o.contexte))
-    await tracerUsage(telegramId, response.usage)
+    await tracerUsage(telegramId, response.usage, echange)
 
     if (response.stop_reason !== 'tool_use') {
       const texte = nettoyer(textOf(response))

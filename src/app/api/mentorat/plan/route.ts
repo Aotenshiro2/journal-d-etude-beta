@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
     })
     const plan = textOf(response)
     if (!plan) return NextResponse.json({ error: 'Génération vide, réessaie.' }, { status: 502 })
-    await logAiUsage(userId, 'mentorat', model, response.usage)
+    await logAiUsage(userId, 'mentorat', model, response.usage, null, { usage: 'mentorat_plan' })
 
     const saved = await prisma.mentoratPlan.create({
       data: {

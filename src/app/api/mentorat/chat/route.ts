@@ -151,7 +151,7 @@ export async function POST(req: NextRequest) {
       messages,
     })
 
-    await logAiUsage(userId, 'mentorat', model, reponse.usage, acces.niveau)
+    await logAiUsage(userId, 'mentorat', model, reponse.usage, acces.niveau, { usage: 'mentorat_chat' })
 
     const reply = textOf(reponse)
     if (!reply) {
