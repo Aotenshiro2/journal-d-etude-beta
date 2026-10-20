@@ -95,6 +95,7 @@ export function aide(): Record<string, unknown> {
       },
       reponse: 'id du brouillon, contenu (brouillon, questions sur le vécu à poser à Brice telles quelles, sources utilisées), cout_euros. Le vécu ne s\'invente pas : si le brouillon pose des questions, il faut les poser à Brice.',
       cout: 'Environ 0,07 à 0,19 euro par brouillon sans image, environ 0,23 euro avec une capture, compté dans la dépense IA (poste generation_tab).',
+      duree: 'Compter 30 à 60 secondes par brouillon (modèle Opus, effort élevé) : garder la connexion ouverte.',
       exemple: { personne: 'brice', canal: 'Live Club', objectif: 'enseigner', sens: 'idee', idee: 'Pourquoi attendre le DOL avant d\'entrer.' },
     },
     exemples_d_appels: [
