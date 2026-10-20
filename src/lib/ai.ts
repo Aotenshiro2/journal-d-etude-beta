@@ -84,6 +84,9 @@ export type PosteIA =
   | 'releve'
   | 'liveclub_membre'
   | 'tests_liveclub' | 'tests_support' | 'tests_juge'
+  // Chaine clips (20/10/2026) : notation des passages d'un live par la grille, faite par le script
+  // local automations/clips (cle du cockpit, tracee par conso_ia.py, echange = le replay).
+  | 'clips_tri'
 
 export type EtiquetteUsage = { usage: PosteIA; echange?: string | null }
 
