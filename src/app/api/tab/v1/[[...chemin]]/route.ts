@@ -1,0 +1,185 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { prisma } from '@/lib/db'
+import { journaliser, parametresJournal, verifierCle } from '@/lib/tab/acces'
+import { aide } from '@/lib/tab/aide'
+import { connaissances, donnees, schema } from '@/lib/tab/generique'
+import {
+  aFaire, avatars, contenus, depenseIA, encaissements, membres, paiements, personne, pubs, reseaux, resumeDuJour, support, youtube,
+  type Ctx, type Sortie,
+} from '@/lib/tab/lectures'
+import { heureParisLisible, jourParis, lirePagination, lirePeriode, type DefautPeriode } from '@/lib/tab/pur'
+import { lireDemandeGeneration } from '@/lib/generation-pur'
+import { genererPost } from '@/lib/generation'
+
+/**
+ * L'API DE TAB (20/10/2026) : /api/tab/v1/... , JSON, LECTURE SEULE.
+ *
+ * Tab est l'assistant IA personnel de Brice (il lui parle par WhatsApp) : il
+ * lit le cockpit ici, avec une cle dediee (Authorization: Bearer). La cle,
+ * la limite de debit et le journal d'acces : src/lib/tab/acces.ts. Les
+ * lectures metier : src/lib/tab/lectures.ts ; la lecture generique (schema,
+ * donnees/<table>, connaissances) : src/lib/tab/generique.ts ; l'aide :
+ * src/lib/tab/aide.ts.
+ *
+ * Toute lecture tourne dans UNE transaction READ ONLY (delai de 8 s par
+ * requete) : rien ne peut ecrire, meme par erreur. Les deux seules ecritures
+ * sont le journal d'acces (cockpit_tab_acces) et POST /generer-post (le
+ * generateur de posts du cockpit, origine 'tab', poste generation_tab).
+ *
+ * Route publique pour le middleware (pas de session) : la cle est verifiee ici.
+ */
+
+export const maxDuration = 300
+export const dynamic = 'force-dynamic'
+
+type Lecture = { f: (c: Ctx) => Promise<Sortie>; defaut: DefautPeriode }
+
+const LECTURES: Record<string, Lecture> = {
+  'resume-du-jour': { f: resumeDuJour, defaut: 'jour' },
+  'a-faire': { f: aFaire, defaut: 'jour' },
+  encaissements: { f: encaissements, defaut: 'mois' },
+  membres: { f: membres, defaut: '7j' },
+  paiements: { f: paiements, defaut: '30j' },
+  support: { f: support, defaut: '30j' },
+  'depense-ia': { f: depenseIA, defaut: 'mois' },
+  pubs: { f: pubs, defaut: 'mois' },
+  youtube: { f: youtube, defaut: '7j' },
+  reseaux: { f: reseaux, defaut: '7j' },
+  contenus: { f: contenus, defaut: 'semaine' },
+  personne: { f: personne, defaut: 'tout' },
+  avatars: { f: avatars, defaut: 'tout' },
+  connaissances: { f: connaissances, defaut: 'tout' },
+  schema: { f: schema, defaut: 'tout' },
+}
+
+const ENTETES = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }
+
+function ipDe(req: NextRequest): string | null {
+  return req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || req.headers.get('x-real-ip') || null
+}
+
+async function cheminDe(ctx: { params: Promise<{ chemin?: string[] }> }): Promise<string[]> {
+  const p = await ctx.params
+  return (p.chemin ?? []).map((s) => decodeURIComponent(s)).filter(Boolean)
+}
+
+function repondre(corps: Record<string, unknown>, status: number) {
+  return NextResponse.json(corps, { status, headers: ENTETES })
+}
+
+export async function GET(req: NextRequest, ctx: { params: Promise<{ chemin?: string[] }> }) {
+  const debut = Date.now()
+  const url = new URL(req.url)
+  const chemin = await cheminDe(ctx)
+  const route = `/${chemin.join('/')}`
+  const parametres = parametresJournal(url)
+  const ip = ipDe(req)
+
+  const verdict = await verifierCle(req.headers.get('authorization'))
+  if (!verdict.ok) {
+    await journaliser({ cleId: verdict.cleId, route, parametres, statut: verdict.status, dureeMs: Date.now() - debut, lignes: null, ip, erreur: verdict.erreur })
+    return repondre({ ok: false, erreur: verdict.erreur, aide: `${url.origin}/api/tab/v1/aide` }, verdict.status)
+  }
+  const fin = async (corps: Record<string, unknown>, statut: number, lignes: number | null, erreur?: string) => {
+    const duree = Date.now() - debut
+    await journaliser({ cleId: verdict.cleId, route, parametres, statut, dureeMs: duree, lignes, ip, erreur })
+    return repondre({ ...corps, duree_ms: duree }, statut)
+  }
+
+  const genereLe = new Date()
+  const enTete = { route, genere_le: genereLe.toISOString(), genere_le_paris: heureParisLisible(genereLe) }
+
+  if (chemin.length === 0 || chemin[0] === 'aide') {
+    return fin({ ok: true, ...enTete, ...aide() }, 200, null)
+  }
+
+  const nom = chemin[0]
+  if (nom === 'generer-post') {
+    return fin({ ok: false, ...enTete, erreur: 'generer-post se demande en POST.' }, 405, null)
+  }
+  const lecture = nom === 'donnees' ? { f: null, defaut: 'tout' as DefautPeriode } : LECTURES[nom]
+  if (!lecture || (nom === 'donnees' && chemin.length !== 2) || (nom !== 'donnees' && chemin.length !== 1)) {
+    return fin({ ok: false, ...enTete, erreur: `Route inconnue : ${route}. La liste : /api/tab/v1/aide.` }, 404, null, 'route inconnue')
+  }
+
+  const aujourdhui = jourParis()
+  const periode = lirePeriode(url.searchParams, lecture.defaut, aujourdhui)
+  if (typeof periode === 'string') return fin({ ok: false, ...enTete, erreur: periode }, 400, null, periode)
+  const pag = lirePagination(url.searchParams)
+  if (typeof pag === 'string') return fin({ ok: false, ...enTete, erreur: pag }, 400, null, pag)
+
+  try {
+    const sortie = await prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe('set transaction read only')
+      await tx.$executeRawUnsafe(`set local statement_timeout = '8000ms'`)
+      const c: Ctx = { tx, periode, pag, aujourdhui, params: url.searchParams }
+      return nom === 'donnees' ? donnees(c, chemin[1]) : lecture.f!(c)
+    }, { maxWait: 8000, timeout: 45000 })
+    const statut = sortie.statut ?? 200
+    const corps = {
+      ok: statut === 200,
+      ...enTete,
+      libelle: sortie.libelle,
+      ...(lecture.defaut === 'tout' && !url.searchParams.get('du') && !url.searchParams.get('au') ? {} : { periode }),
+      sources: sortie.sources,
+      donnees: sortie.donnees,
+      ...(sortie.pagination ? { pagination: sortie.pagination } : {}),
+      ...(sortie.notes?.length ? { notes: sortie.notes } : {}),
+    }
+    return fin(corps, statut, sortie.lignes, statut === 200 ? undefined : String((sortie.donnees as { erreur?: string }).erreur ?? ''))
+  } catch (err) {
+    const raison = err instanceof Error ? err.message.split('\n').filter(Boolean).pop() ?? '' : String(err)
+    console.error(`[tab] ${route}`, raison.slice(0, 300))
+    const delai = /statement timeout|canceling statement/i.test(raison)
+    return fin({
+      ok: false, ...enTete,
+      erreur: delai ? 'Lecture trop longue (plus de 8 secondes) : resserre la période ou les filtres.' : 'Lecture impossible pour l\'instant (erreur de la base). Réessaie dans un instant.',
+      detail: raison.slice(0, 200),
+    }, delai ? 504 : 502, null, raison)
+  }
+}
+
+export async function POST(req: NextRequest, ctx: { params: Promise<{ chemin?: string[] }> }) {
+  const debut = Date.now()
+  const url = new URL(req.url)
+  const chemin = await cheminDe(ctx)
+  const route = `/${chemin.join('/')}`
+  const ip = ipDe(req)
+  const corps = await req.json().catch(() => null) as Record<string, unknown> | null
+  const parametres = parametresJournal(url, corps)
+
+  const verdict = await verifierCle(req.headers.get('authorization'))
+  if (!verdict.ok) {
+    await journaliser({ cleId: verdict.cleId, route, parametres, statut: verdict.status, dureeMs: Date.now() - debut, lignes: null, ip, erreur: verdict.erreur })
+    return repondre({ ok: false, erreur: verdict.erreur }, verdict.status)
+  }
+  const fin = async (c: Record<string, unknown>, statut: number, lignes: number | null, erreur?: string) => {
+    const duree = Date.now() - debut
+    await journaliser({ cleId: verdict.cleId, route, parametres, statut, dureeMs: duree, lignes, ip, erreur })
+    return repondre({ ...c, route, genere_le: new Date().toISOString(), duree_ms: duree }, statut)
+  }
+  if (route !== '/generer-post') return fin({ ok: false, erreur: `${route} : seule /generer-post accepte POST. Les lectures sont en GET.` }, 405, null)
+
+  const demande = lireDemandeGeneration(corps)
+  if (typeof demande === 'string') return fin({ ok: false, erreur: demande, aide: `${url.origin}/api/tab/v1/aide` }, 400, null, demande)
+
+  // Les brouillons de Tab sont ranges au nom de Brice (son compte de l'allowlist du cockpit).
+  const brice = await prisma.$queryRaw<{ user_id: string }[]>`
+    select user_id::text as user_id from public.cockpit_allowlist where label = 'Brice' limit 1`
+  if (!brice[0]) return fin({ ok: false, erreur: 'Compte de Brice introuvable dans le cockpit.' }, 503, null)
+
+  const r = await genererPost(demande, brice[0].user_id, 'tab')
+  if (!r.ok) return fin({ ok: false, erreur: r.erreur }, r.status, null, r.erreur)
+  return fin({
+    ok: true,
+    libelle: 'Brouillon de post (rien n\'est publié)',
+    id: r.id,
+    contenu: r.contenu,
+    envoyees: r.envoyees,
+    cout_euros: Math.round(r.cout_micros / 10_000) / 100,
+    notes: [
+      'Le brouillon est rangé dans le cockpit (onglet Création > Génération) : Brice peut le noter (publié tel quel, retouché, jeté).',
+      'Refaire : même corps avec parent_id = id. Retoucher : parent_id + consigne.',
+    ],
+  }, 200, 1)
+}

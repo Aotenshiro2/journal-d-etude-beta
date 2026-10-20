@@ -3,6 +3,28 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
+## API de Tab : le cockpit en lecture seule pour l'assistant de Brice (20/10/2026)
+
+Tab (assistant IA de Brice, WhatsApp) lit le cockpit par `GET /api/tab/v1/...` (JSON, cle en
+`Authorization: Bearer`). Public pour le middleware, la cle est verifiee dans la route.
+- Code : `src/app/api/tab/v1/[[...chemin]]/route.ts` ; `src/lib/tab/` : `pur.ts` (periodes de Paris,
+  pagination, exclusions), `acces.ts` (empreinte sha256 en temps constant, 60 appels par minute,
+  journal), `lectures.ts` (routes metier : resume-du-jour, a-faire, encaissements, membres, paiements,
+  support, depense-ia, pubs, youtube, reseaux, contenus, personne, avatars), `generique.ts` (schema,
+  donnees/<table> avec filtres, connaissances?q=), `aide.ts` (la page d'aide, presentation du cockpit).
+- Lecture seule : transaction READ ONLY. Deux ecritures seulement : le journal `cockpit_tab_acces` et
+  `POST /generer-post` (genererPost, origine 'tab', poste AiUsage generation_tab, au nom du compte Brice).
+- Cles : `cockpit_tab_cles` (empreinte seule), coupees depuis le cockpit (Accueil, bloc « Acces de Tab »).
+  Nouvelle cle : `node scripts/creer-cle-tab.mjs <fichier du coffre>` (jamais affichee).
+  La cle en service : coffre `credentials.local/tab-api.local.json`.
+- VUES GARDEES : les 7 vues filtrees par is_cockpit_member() rendaient 0 ligne au serveur (role postgres,
+  sans session), l'Agent AOK compris. Fonctions `cockpit_serveur_*()` (migration
+  20261020160000, arbitrage de Brice) ; `src/lib/vues-serveur.ts` les branche dans requete_sql de l'agent
+  (WITH de meme nom) et dans l'API. Une vue modifiee = sa fonction a modifier avec.
+  Verif : `node scripts/verifier-vues-serveur.mjs`.
+- Migrations appliquees : 20261020150000_cockpit_tab_api, 20261020151000_cockpit_generations_origine_tab,
+  20261020160000_cockpit_vues_serveur.
+
 ## Vente a l'unite des modules de l'academie (19/10/2026, PUBLIC FERME)
 
 Decision de Brice (19/10) : le moins de friction. Stripe Embedded Checkout dans une fenetre du site, sans

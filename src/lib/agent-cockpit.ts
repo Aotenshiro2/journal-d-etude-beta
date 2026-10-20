@@ -15,6 +15,7 @@ import { controlerActionEffacement } from '@/lib/effacement'
 import { controlerReponseMembre, rendreLaMainPourAgent } from '@/lib/reponse-membre'
 import type { PieceAgent } from '@/lib/liveclub/support-pont-pur'
 import { OUTIL_GENERER_POST, genererPostPourAgent } from '@/lib/generation-agent'
+import { avecVuesServeur } from '@/lib/vues-serveur'
 import type Anthropic from '@anthropic-ai/sdk'
 
 // LE CERVEAU de l'agent cockpit, sans interface : prompt systeme, outil SQL
@@ -339,7 +340,9 @@ async function executerSql(sql: string): Promise<string> {
       await tx.$executeRawUnsafe('set transaction read only')
       await tx.$executeRawUnsafe(`set local statement_timeout = '8000ms'`)
       // Enveloppe : borne dure sur le volume, quelle que soit la requête.
-      return tx.$queryRawUnsafe(`select * from (${sql}) sous_requete limit 200`)
+      // (20/10) Les vues gardees par is_cockpit_member() ne rendaient rien ici
+      // (role postgres, sans session) : relues par leur fonction serveur.
+      return tx.$queryRawUnsafe(`select * from (${avecVuesServeur(sql)}) sous_requete limit 200`)
     })
     const json = JSON.stringify(lignes, (_k, v) => {
       if (typeof v === 'bigint') return Number(v)

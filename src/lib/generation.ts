@@ -19,7 +19,7 @@ import {
   type ContenuGeneration, type DemandeGeneration, type Inspiration, type Parent, type Passage,
 } from '@/lib/generation-pur'
 
-export type OrigineGeneration = 'cockpit' | 'agent_telegram' | 'agent_cockpit'
+export type OrigineGeneration = 'cockpit' | 'agent_telegram' | 'agent_cockpit' | 'tab'
 
 export type ResultatGeneration =
   | {

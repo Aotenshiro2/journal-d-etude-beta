@@ -656,3 +656,22 @@ export async function fichePersonnePourAgent(entree: unknown): Promise<string> {
     })
   }
 }
+
+/**
+ * La fiche pour l'API de Tab (20/10/2026, /api/tab/v1/personne) : meme
+ * resolution et meme fiche que l'outil de l'agent, dans la transaction READ
+ * ONLY de l'appelant, avec un budget plus large, PLUS les identifiants de la
+ * personne (pour lire ses paiements a part). Jette sur une panne.
+ */
+export async function ficheEtIdsPourTab(tx: Tx, entree: unknown, budget = 40000): Promise<
+  | { statut: 'un'; fiche: string; ids: { telegram: number[]; membres: string[]; archives: string[] } }
+  | { statut: 'plusieurs' | 'aucun' | 'erreur'; reponse: string }
+> {
+  const qui = lireQui(entree)
+  if ('erreur' in qui) return { statut: 'erreur', reponse: JSON.stringify({ statut: 'erreur', erreur: qui.erreur }) }
+  const r = await resoudrePersonne(tx, qui)
+  if (r.statut !== 'un') return { statut: r.statut, reponse: r.reponse }
+  const donnees = await lireFiche(tx, r.groupe)
+  if (ficheVide(donnees)) return { statut: 'aucun', reponse: reponseAucun(r.libelle, r.indices) }
+  return { statut: 'un', fiche: fichePourAgent(donnees, budget), ids: idsDuGroupe(r.groupe) }
+}
