@@ -24,6 +24,16 @@ Tab (assistant IA de Brice, WhatsApp) lit le cockpit par `GET /api/tab/v1/...` (
   Verif : `node scripts/verifier-vues-serveur.mjs`.
 - Migrations appliquees : 20261020150000_cockpit_tab_api, 20261020151000_cockpit_generations_origine_tab,
   20261020160000_cockpit_vues_serveur.
+- ESPACE PERSO (20/10, migrations 20261020230000 + 231000) : notes entre Tab et Claude Code, table
+  `cockpit_perso_notes` (sens vers_claude / vers_tab, statut nouvelle / lue / traitee, instance = Umi (WSL)
+  / Sora (Windows) / les_deux, lue_par). Lisible par `is_cockpit_perso()` (allowlist.acces_perso : Brice et
+  Tab seuls), ecrite par le serveur seulement. Routes de Tab : GET /notes, POST /notes (champ pour),
+  POST /notes/<id>/lu : avec /generer-post, les seules ecritures de la cle. Route du cockpit et du script
+  local : POST /api/cockpit/perso/notes (jeton de session acces_perso, ou cle de service en Bearer).
+  Ping : note vers_tab = email Resend (RESEND_API_KEY) a TAB_NOTES_EMAIL (defaut brice.delannay@mail.tab.bot),
+  expediteur TAB_NOTES_FROM_EMAIL (defaut support@aoknowledge.com), couper par TAB_NOTES_PING=off ; note
+  vers_claude = message du bot Agent AOK a Brice. Code : `src/lib/tab/notes.ts`, `notes-pur.ts`. L'Agent AOK
+  refuse `cockpit_perso_*` (il tourne en postgres pour Mel et Adil). Verif : `node scripts/verifier-perso-rls.mjs`.
 
 ## Vente a l'unite des modules de l'academie (19/10/2026, PUBLIC FERME)
 
