@@ -52,6 +52,12 @@ export type DemandeGeneration = {
   parent_id: string | null
   /** Retoucher : la consigne libre. Absente avec un parent = regenerer. */
   consigne: string | null
+  /**
+   * Reprendre la capture GARDEE d'un brouillon (20/10/2026) sans la renvoyer :
+   * l'ecran rouvre un brouillon, l'image reste dans le bucket. Sans image ni
+   * image_de, une regeneration ou une retouche reprend celle du parent.
+   */
+  image_de?: string | null
 }
 
 export const MAX_IDEE = 8000
@@ -120,11 +126,13 @@ export function lireDemandeGeneration(brut: unknown): DemandeGeneration | string
   }
   const parent = typeof brut.parent_id === 'string' && UUID.test(brut.parent_id.trim()) ? brut.parent_id.trim().toLowerCase() : null
   const consigne = propre(brut.consigne, MAX_CONSIGNE)
+  const imageDe = !image && typeof brut.image_de === 'string' && UUID.test(brut.image_de.trim()) ? brut.image_de.trim().toLowerCase() : null
   if (consigne && !parent) return 'une retouche demande parent_id.'
-  if (brut.sens === 'capture' && !image) return 'sens capture : image requise.'
-  if (!image && !idee && !reponses.sujet && !parent) return 'une idée, un sujet, une source ou une capture à écrire.'
-  const sens: Sens = image ? 'capture' : 'idee'
-  return { personne, canal, objectif, sens, idee, reponses, image, parent_id: parent, consigne }
+  if (brut.sens === 'capture' && !image && !imageDe && !parent) return 'sens capture : image requise.'
+  if (!image && !imageDe && !idee && !reponses.sujet && !parent) return 'une idée, un sujet, une source ou une capture à écrire.'
+  // Une capture reprise (image_de, ou celle du parent) se charge cote serveur : le sens est alors corrige la-bas.
+  const sens: Sens = image || imageDe ? 'capture' : 'idee'
+  return { personne, canal, objectif, sens, idee, reponses, image, parent_id: parent, consigne, image_de: imageDe }
 }
 
 /** Une idee de l'auteur ET une capture : l'idee fixe le sujet, la capture l'illustre (20/10). */
@@ -424,6 +432,136 @@ inspirations : les ids des inspirations dont tu as réellement pris la voix ou l
 questions : ce qu'il faut demander à l'auteur (vécu manquant, information que rien ne donne), une question courte par ligne, vide si rien ne manque.
 risques : en une ou deux lignes, ce que l'auteur doit vérifier avant de publier (raccourci, supposition, source un peu large), ou null.
 Réponds uniquement par l'objet JSON demandé.`
+
+// --- Le prompt systeme : n'envoyer que ce qui sert (20/10/2026) -------------------
+//
+// Mesure du 19/10 : 22 562 jetons de regles fixes par post de Brice (54 % du
+// cout), dont la fiche de style ENTIERE (podcast, livre, slides...) pour un tip
+// Telegram. Depuis le 20/10 : un noyau ferme toujours envoye, puis seulement
+// les sections de la fiche utiles a la FAMILLE du canal (table ci-dessous), et
+// des regles notees en memoire, seulement celles qui ne sont pas deja dites
+// dans CONSIGNES ou le noyau.
+//
+// RETOUR ARRIERE : PROMPT_COMPLET = true (ou GENERATEUR_PROMPT_COMPLET=1 sur
+// Vercel, sans redeployer de code) renvoie la fiche entiere et toutes les
+// regles, comme le 19/10. La cle generateur:fiche-de-style reste poussee pour ca.
+
+export const PROMPT_COMPLET = false
+
+/** Toujours envoye, quel que soit le canal (Brice et Mel). Court : les regles qui ne se negocient pas. */
+export const NOYAU_FERME = `LE NOYAU (vaut pour tous les canaux, avant toute autre règle) :
+- Aucun tiret long (U+2014) ni demi-cadratin dans ce que tu écris : point, virgule, deux-points ou parenthèses à la place.
+- Une idée tirée d'ICT se formule « ICT a dit [...] » ; une définition de glossaire, « dans le vocabulaire ICT ».
+- Aucun « jamais » dans une promesse ou un engagement envers les membres : on s'engage au présent (« tes données ne sont pas revendues »).
+- Le vécu ne s'invente pas (scène, chiffre, trade, résultat, date, parole d'un membre) : s'il manque, un repère [à compléter : ...] à l'endroit exact et la question dans « questions ».
+- Live Club : « tu » par défaut dans Mindset, « vous » par défaut dans Explication charts. (un défaut, pas une cage : un texte à tout le groupe peut passer en vous). Ailleurs, le registre des inspirations du canal.
+- Aucun référent implicite : chaque phrase se relit sans deviner à quoi elle renvoie (« vous avez raison » sur quoi, « l'inverse » de quoi).
+- Pas d'ouverture recopiée d'un post à l'autre. « Disons que vous... » et « En vrai, c'est un réflexe très commun » reviennent trop : ce sont des trouvailles d'un post du 29/08, pas un gabarit. Chaque post trouve sa propre entrée.
+- Un tip Live Club n'a pas à finir sur une question d'engagement : s'arrêter net sur la consigne ou l'image finale suffit souvent. La fin reboucle sur la situation de l'ouverture (dire le lien, ne pas le laisser deviner), et reste réutilisable un autre jour (pas de « cette semaine »).`
+
+/**
+ * La famille d'un canal : elle decide des sections de la fiche de style
+ * envoyees pour Brice. Un canal inconnu tombe dans 'autre' = fiche entiere
+ * (prudence : mieux vaut payer que perdre en qualite sur un canal neuf).
+ */
+export type FamilleCanal = 'telegram' | 'newsletter' | 'skool' | 'chronique' | 'reseau' | 'blog' | 'livre' | 'autre'
+
+export function familleCanal(canal: string): FamilleCanal {
+  const c = canal.toLowerCase()
+  if (/^live ?club|melmom|as .*du nas|telegram/.test(c)) return 'telegram'
+  if (/newsletter/.test(c)) return 'newsletter'
+  if (/classroom|chronique/.test(c)) return 'chronique'
+  if (/skool/.test(c)) return 'skool'
+  if (/r[ée]seau|tweet|thread|instagram|linkedin|twitter|x \(/.test(c)) return 'reseau'
+  if (/blog|article/.test(c)) return 'blog'
+  if (/livre/.test(c)) return 'livre'
+  return 'autre'
+}
+
+/**
+ * LA TABLE CANAL -> SECTIONS DE LA FICHE DE BRICE (cles generateur:fiche:<slug>,
+ * decoupees par pousser:inspirations). Lecture : ce qui fait la voix partout
+ * (VOIX), puis la recette du format et les entrees du journal de calibrage qui
+ * le concernent. Jamais envoyes pour un post : 0-hierarchie (comment lire les
+ * echantillons, dit autrement en 5), podcast, live, slides (des formats oraux).
+ */
+const VOIX = ['1-principe', '2-adn', '3-lexique', '5-sevrage-ia', '6-orthographe', '7-anti-patterns'] as const
+
+export const SECTIONS_PAR_FAMILLE: Record<Exclude<FamilleCanal, 'autre'>, readonly string[]> = {
+  // Canaux Telegram (Live Club, MELMOM, AS du NAS) : la recette Live Club, Post Skool
+  // (la plus proche : court, une idee) et la typographie. PAS l'entree du journal de
+  // calibrage du 28/08 (9-live-club, ~2 200 jetons) : surtout de la procedure
+  // d'extraction (transcriptions, sources techniques, deja dite dans CONSIGNES 4 et 5),
+  // et ses ouvertures validees le 29/08 (« Disons que », « en vrai c'est le plus
+  // commun ») sont justement celles que Brice voit revenir a chaque post (20/10).
+  // Ses deux lecons propres (reboucler sur l'ouverture, chute sans date) sont dans le noyau.
+  telegram: [...VOIX, '4-live-club', '4-post-skool', '9-typographie'],
+  // Newsletter : sa recette, la narration (scene, tension), la checklist, les guillemets.
+  newsletter: [...VOIX, '4-newsletter', '4bis-narration', '8-checklist', '9-typographie'],
+  // Skool (communaute) : la recette Post Skool.
+  skool: [...VOIX, '4-post-skool', '9-typographie'],
+  // Skool / Classroom (chroniques) : un format long et pedagogique.
+  chronique: [...VOIX, '4-article-academie', '4bis-narration', '9-typographie'],
+  // Reseau social : des punchlines (lecons du banc du 20/10 dans la regle canal-et-objectif),
+  // la recette courte la plus proche est Post Skool.
+  reseau: [...VOIX, '4-post-skool', '9-typographie'],
+  blog: [...VOIX, '4-blog-perso', '4-article-academie', '4bis-narration', '9-typographie'],
+  livre: [...VOIX, '4-livre', '4bis-narration', '9-typographie'],
+}
+
+/**
+ * Les regles notees en memoire (generateur:regle:<nom>) envoyees en mode
+ * decoupe. Les autres sont DEJA dites dans CONSIGNES et le noyau :
+ * citer-ict-a-dit, feedback_tiret_cadratin_generation (surtout l'histoire du
+ * livre), engagements-sans-jamais ; project_live_club_tips (procedure de
+ * session : chemins du disque, cases a cocher, et son point 4 « ne pas viser
+ * court par prudence » contredit le banc du 20/10 « Telegram, c'est court »).
+ */
+export const REGLES_ENVOYEES = ['canal-et-objectif-avant-le-texte'] as const
+
+export type BlocSysteme = { texte: string; cles: string[] }
+
+/**
+ * Le prompt systeme en deux blocs, dans l'ordre du cache (prefixe commun
+ * d'abord) : 1. consignes, noyau, regles, formats (identique pour tout le
+ * monde) ; 2. pour Brice, les sections de la fiche de son canal. `cles` dit
+ * ce qui est parti (range dans entree.prompt).
+ */
+export function systemeGeneration(regles: Map<string, string>, d: Pick<DemandeGeneration, 'personne' | 'canal'>, complet: boolean = PROMPT_COMPLET): BlocSysteme[] {
+  const nomsRegles = [...regles.keys()]
+    .filter((cle) => cle.startsWith('generateur:regle:'))
+    .filter((cle) => complet || (REGLES_ENVOYEES as readonly string[]).includes(cle.slice('generateur:regle:'.length)))
+    .sort((a, b) => a.localeCompare(b))
+  const commun: BlocSysteme = {
+    cles: [...nomsRegles, 'generateur:formats'],
+    texte: [
+      CONSIGNES,
+      ...(complet ? [] : ['---', NOYAU_FERME]),
+      '---',
+      'LES RÈGLES DE BRICE, TELLES QU\'IL LES A DONNÉES (notes de travail, à appliquer au brouillon) :',
+      ...nomsRegles.map((cle) => `=== ${cle.slice('generateur:regle:'.length)} ===\n${regles.get(cle) ?? ''}`),
+      '---',
+      'LES FORMATS (README de la base d\'inspirations et essai du 18/10) :',
+      regles.get('generateur:formats') ?? '',
+    ].join('\n\n'),
+  }
+  const blocs = [commun]
+  if (d.personne !== 'brice') return blocs
+  const famille = familleCanal(d.canal)
+  const entiere = regles.get('generateur:fiche-de-style')
+  const slugs = complet || famille === 'autre' ? null : SECTIONS_PAR_FAMILLE[famille]
+  const sections = slugs?.map((s) => [`generateur:fiche:${s}`, regles.get(`generateur:fiche:${s}`)] as const)
+  // Une section absente en base (decoupage pas encore pousse) : la fiche entiere, sans risque.
+  if (!sections || sections.some(([, t]) => !t)) {
+    if (entiere) blocs.push({ cles: ['generateur:fiche-de-style'], texte: `LA FICHE DE STYLE DE BRICE (sa voix, tous formats) :\n\n${entiere}` })
+    return blocs
+  }
+  blocs.push({
+    cles: sections.map(([cle]) => cle),
+    texte: `LA FICHE DE STYLE DE BRICE (sa voix ; seules les sections utiles à ce canal) :\n\n${sections.map(([, t]) => t).join('\n\n')}`,
+  })
+  return blocs
+}
 
 const NOMS: Record<Personne, string> = {
   brice: 'Brice (fondateur d\'AO Knowledge)',

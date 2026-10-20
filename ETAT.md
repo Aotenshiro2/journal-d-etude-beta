@@ -100,7 +100,21 @@ Demande de Brice : le bot Live Club n'est pas un bot de mentorat, mais il orient
 - Agent AOK : outil `generer_post` (`src/lib/generation-agent.ts`), sans carte, capture = derniere piece
   recue (canal.piece), consigne dans SYSTEM_PROMPT (« LES BROUILLONS DE POSTS »), tables declarees au catalogue.
 - Verifs : `scripts/verifier-generation.mjs [--pousser]`, essai hors navigateur `scripts/essai-generation.ts`
-  (la cle ANTHROPIC_API_KEY_COCKPIT n'existe que sur Vercel : les essais reels passent par la route deployee).
+  (la cle ANTHROPIC_API_KEY_COCKPIT est aussi au coffre D: credentials.local/anthropic-cockpit-chatbot.local.json,
+  lue sans l'afficher par `scripts/mesurer-prompt.ts`).
+- 20/10 PROMPT DECOUPE : noyau ferme (NOYAU_FERME) + sections de la fiche de Brice selon la famille du canal
+  (SECTIONS_PAR_FAMILLE, cles generateur:fiche:<slug> poussees par pousser:inspirations) + une seule regle en
+  memoire (canal-et-objectif). Regles fixes : Brice 23 938 -> ~12 500 jetons, Mel 10 983 -> 7 498 (count_tokens,
+  `npx tsx scripts/mesurer-prompt.ts`). RETOUR ARRIERE : PROMPT_COMPLET = true ou GENERATEUR_PROMPT_COMPLET=1 sur
+  Vercel. Cache 5 min garde (1 h mesure sur l'historique : -2 % seulement, perd sur les rafales). entree.prompt dit
+  ce qui est parti.
+- 20/10 CAPTURE GARDEE : generation-capture.ts, webp < 200 Ko (sharp, import dynamique) dans le bucket prive
+  cockpit-inspirations sous generations/<id>.webp, colonne image_chemin ; regenerer / retoucher / image_de
+  reprennent le chemin (aucune copie). Ecran, Agent AOK et API de Tab passent par genererPost.
+- 20/10 REACTIONS : migrations 20261020200000 / 201000 / 202000 : colonnes publication_* / reactions / similarite /
+  correspondance sur cockpit_generations, fonction cockpit_generations_rapprocher() (suites de trois mots, sure >= 0,5,
+  incertaine 0,25 a 0,5), vue cockpit_generations_reperes. Lancee par collecter_telegram.py (fin de collecte) et par
+  l'ecran Generation a l'ouverture.
 
 ## Base de connaissances produits (18/10/2026, commits 712091e, ee9d476, 357f9bb)
 

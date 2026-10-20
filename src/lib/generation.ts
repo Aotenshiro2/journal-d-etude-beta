@@ -5,7 +5,8 @@
 // pur (choix, prompt, validation) est dans generation-pur.ts.
 //
 // Rien n'est publie ni envoye a personne : le brouillon se copie-colle.
-// L'image d'une capture part au modele et n'est pas stockee.
+// L'image d'une capture part au modele ; depuis le 20/10 elle est aussi GARDEE,
+// reduite, avec le brouillon (generation-capture.ts), pour pouvoir le reprendre.
 
 import type Anthropic from '@anthropic-ai/sdk'
 import { prisma } from '@/lib/db'
@@ -13,11 +14,13 @@ import { aiClient, logAiUsage, aiErrorMessage } from '@/lib/ai'
 import { coutMicroEuros } from '@/lib/ia-prix'
 import { requeteTsquery } from '@/lib/creation-pur'
 import {
-  CONSIGNES, MAX_PASSAGE, MODELE_GENERATION, SCHEMA_SORTIE,
+  MAX_PASSAGE, MODELE_GENERATION, PROMPT_COMPLET, SCHEMA_SORTIE,
   assemblerPassages, axeCible, choisirBanque, choisirFormes, choisirMatiereInspirations, depart,
-  entreeGeneration, motsDeLaDemande, registreDuCanal, requeteAnglaise, termesAnglais, textesReference, validerSortie,
+  entreeGeneration, motsDeLaDemande, registreDuCanal, requeteAnglaise, systemeGeneration, termesAnglais, textesReference,
+  validerSortie,
   type ContenuGeneration, type DemandeGeneration, type Inspiration, type Parent, type Passage,
 } from '@/lib/generation-pur'
+import { garderCapture, lireCapture } from '@/lib/generation-capture'
 
 export type OrigineGeneration = 'cockpit' | 'agent_telegram' | 'agent_cockpit' | 'tab'
 
@@ -29,6 +32,8 @@ export type ResultatGeneration =
       /** Ce qui a ete envoye (affiche, cliquable a l'ecran). */
       envoyees: { inspirations: string[]; sources: Array<{ type: Passage['type']; libelle: string; ref: string }> }
       cout_micros: number
+      /** La capture gardee (bucket prive cockpit-inspirations), ou null. */
+      image_chemin: string | null
     }
   | { ok: false; status: number; erreur: string }
 
@@ -52,14 +57,51 @@ function passagePage(p: LignePage, type: 'pdf' | 'reference'): Passage {
   }
 }
 
-/** Genere un brouillon et le range. Ne jette pas : une erreur rend { ok: false, status, erreur }. */
-export async function genererPost(d: DemandeGeneration, userId: string, origine: OrigineGeneration): Promise<ResultatGeneration> {
+/**
+ * Duree du cache des regles fixes. Mesure du 20/10 (scripts/mesurer-prompt.ts,
+ * rapport dans ETAT.md) : voir CACHE_TTL_RAISON. '5m' = ecriture 1,25x,
+ * '1h' = ecriture 2x ; une lecture coute 0,1x dans les deux cas.
+ */
+export const CACHE_TTL: '5m' | '1h' = '5m'
+
+/** Le retour arriere sans code : GENERATEUR_PROMPT_COMPLET=1 sur Vercel renvoie la fiche entiere. */
+function promptComplet(): boolean {
+  return PROMPT_COMPLET || process.env.GENERATEUR_PROMPT_COMPLET === '1'
+}
+
+export type Preparation = {
+  d: DemandeGeneration
+  axe: ReturnType<typeof axeCible>
+  mots: string[]
+  requeteEn: string
+  formes: ReturnType<typeof choisirFormes>
+  passages: Passage[]
+  systeme: Anthropic.TextBlockParam[]
+  clesPrompt: string[]
+  complet: boolean
+  contenuUtilisateur: Anthropic.ContentBlockParam[]
+  /** La capture gardee reutilisee (parent ou image_de) : aucun nouvel envoi au bucket. */
+  imageChemin: string | null
+}
+
+/**
+ * Lectures, choix et prompt, sans appel au modele : partage par genererPost
+ * et par la mesure des jetons (scripts/mesurer-prompt.ts, count_tokens).
+ */
+export async function preparerGeneration(
+  d0: DemandeGeneration,
+  options: { complet?: boolean } = {},
+): Promise<{ ok: true; p: Preparation } | { ok: false; status: number; erreur: string }> {
+  let d = d0
   // --- 1. Les textes de regles et les inspirations ----------------------------
   let regles: Map<string, string>
   let toutes: Inspiration[]
   let parent: Parent | null = null
+  let imageChemin: string | null = null
   try {
-    const [lignesRegles, lignesInsp, lignesParent] = await Promise.all([
+    // La capture d'origine : celle du parent (regenerer, retoucher) ou d'un brouillon rouvert (image_de).
+    const source = d.image ? null : (d.image_de ?? d.parent_id)
+    const [lignesRegles, lignesInsp, lignesParent, lignesImage] = await Promise.all([
       prisma.$queryRaw<{ cle: string; contenu: string }[]>`
         select cle, contenu from public.cockpit_methode_textes
         where cle like 'generateur:%' or cle = 'matiere:banque-contenus.md'`,
@@ -71,12 +113,29 @@ export async function genererPost(d: DemandeGeneration, userId: string, origine:
         ? prisma.$queryRaw<{ brouillon: string }[]>`
             select brouillon from public.cockpit_generations where id = ${d.parent_id}::uuid`
         : Promise.resolve([] as { brouillon: string }[]),
+      source
+        ? prisma.$queryRaw<{ image_chemin: string | null }[]>`
+            select image_chemin from public.cockpit_generations where id = ${source}::uuid`
+            .catch(() => [] as { image_chemin: string | null }[])
+        : Promise.resolve([] as { image_chemin: string | null }[]),
     ])
     regles = new Map(lignesRegles.map((l) => [l.cle, l.contenu]))
     toutes = lignesInsp
     if (d.parent_id) {
       if (!lignesParent[0]) return { ok: false, status: 404, erreur: 'Brouillon d\'origine introuvable.' }
       parent = { brouillon: lignesParent[0].brouillon, consigne: d.consigne }
+    }
+    const chemin = lignesImage[0]?.image_chemin ?? null
+    if (chemin) {
+      const image = await lireCapture(chemin)
+      if (image) {
+        d = { ...d, image, sens: 'capture' }
+        imageChemin = chemin
+      } else if (d.image_de) {
+        return { ok: false, status: 404, erreur: 'La capture gardée de ce brouillon est illisible : recolle-la.' }
+      }
+    } else if (d.image_de) {
+      return { ok: false, status: 404, erreur: 'Ce brouillon n\'a pas de capture gardée : recolle-la.' }
     }
   } catch (err) {
     console.error('[generation] lecture', err)
@@ -136,44 +195,49 @@ export async function genererPost(d: DemandeGeneration, userId: string, origine:
   })
 
   // --- 3. Le prompt -------------------------------------------------------------
-  const cache = { type: 'ephemeral' as const }
-  const reglesTextes = [...regles.entries()]
-    .filter(([cle]) => cle.startsWith('generateur:regle:'))
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([cle, contenu]) => `=== ${cle.slice('generateur:regle:'.length)} ===\n${contenu}`)
-  const systeme: Anthropic.TextBlockParam[] = [{
-    type: 'text',
-    cache_control: cache,
-    text: [
-      CONSIGNES,
-      '---',
-      'LES RÈGLES DE BRICE, TELLES QU\'IL LES A DONNÉES (notes de travail, à appliquer au brouillon) :',
-      ...reglesTextes,
-      '---',
-      'LES FORMATS (README de la base d\'inspirations et essai du 18/10) :',
-      regles.get('generateur:formats') ?? '',
-    ].join('\n\n'),
-  }]
-  const fiche = regles.get('generateur:fiche-de-style')
-  if (d.personne === 'brice' && fiche) {
-    systeme.push({ type: 'text', cache_control: cache, text: `LA FICHE DE STYLE DE BRICE (sa voix, tous formats) :\n\n${fiche}` })
-  }
+  // Deux blocs dans l'ordre du cache : le commun (tout le monde), puis la fiche
+  // de Brice decoupee pour la famille du canal (generation-pur.ts, systemeGeneration).
+  const complet = options.complet ?? promptComplet()
+  const cache = CACHE_TTL === '1h' ? { type: 'ephemeral' as const, ttl: '1h' as const } : { type: 'ephemeral' as const }
+  const blocs = systemeGeneration(regles, d, complet)
+  const systeme: Anthropic.TextBlockParam[] = blocs.map((b) => ({ type: 'text', cache_control: cache, text: b.texte }))
   const texte = entreeGeneration({ d, registre: registreDuCanal(toutes, d.canal), formes, passages, parent })
   const contenuUtilisateur: Anthropic.ContentBlockParam[] = []
   if (d.image) {
     contenuUtilisateur.push({ type: 'image', source: { type: 'base64', media_type: d.image.media_type, data: d.image.data } })
   }
   contenuUtilisateur.push({ type: 'text', text: texte })
+  return {
+    ok: true,
+    p: {
+      d, axe, mots, requeteEn, formes, passages, systeme, complet, contenuUtilisateur, imageChemin,
+      clesPrompt: blocs.flatMap((b) => b.cles),
+    },
+  }
+}
+
+/** Les parametres de l'appel (partages avec count_tokens). */
+export function parametresAppel(p: Preparation) {
+  return {
+    model: MODELE_GENERATION,
+    system: p.systeme,
+    messages: [{ role: 'user' as const, content: p.contenuUtilisateur }],
+  }
+}
+
+/** Genere un brouillon et le range. Ne jette pas : une erreur rend { ok: false, status, erreur }. */
+export async function genererPost(d0: DemandeGeneration, userId: string, origine: OrigineGeneration): Promise<ResultatGeneration> {
+  const prep = await preparerGeneration(d0)
+  if (!prep.ok) return prep
+  const { d, axe, mots, requeteEn, formes, passages, clesPrompt, complet, imageChemin } = prep.p
 
   // --- 4. L'appel ---------------------------------------------------------------
   let reponse: Anthropic.Message
   try {
     reponse = await aiClient('cockpit').messages.create({
-      model: MODELE_GENERATION,
+      ...parametresAppel(prep.p),
       max_tokens: 16000,
       output_config: { effort: 'high', format: { type: 'json_schema', schema: SCHEMA_SORTIE } },
-      system: systeme,
-      messages: [{ role: 'user', content: contenuUtilisateur }],
     })
   } catch (err) {
     console.error('[generation] appel', err)
@@ -211,20 +275,34 @@ export async function genererPost(d: DemandeGeneration, userId: string, origine:
     mots,
     requete_reference: requeteEn,
     envoyees,
+    // Ce qui est parti dans le prompt systeme (20/10) : les cles, et si c'etait la fiche entiere.
+    prompt: { complet, cles: clesPrompt, cache: CACHE_TTL },
   }
+  let id: string
   try {
     const [ligne] = await prisma.$queryRaw<{ id: string }[]>`
       insert into public.cockpit_generations
         (cree_par, origine, personne, canal, objectif, sens, parent_id, consigne, entree, inspirations, sources,
-         brouillon, contenu, modele, cout_micros)
+         brouillon, contenu, modele, cout_micros, image_chemin)
       values (${userId}::uuid, ${origine}, ${d.personne}, ${d.canal}, ${d.objectif}, ${d.sens},
               ${d.parent_id}::uuid, ${d.consigne}, ${JSON.stringify(entree)}::jsonb, ${contenu.inspirations}::text[],
               ${JSON.stringify(contenu.sources)}::jsonb, ${contenu.brouillon}, ${JSON.stringify(contenu)}::jsonb,
-              ${MODELE_GENERATION}, ${cout})
+              ${MODELE_GENERATION}, ${cout}, ${imageChemin})
       returning id::text as id`
-    return { ok: true, id: ligne.id, contenu, envoyees, cout_micros: cout }
+    id = ligne.id
   } catch (err) {
     console.error('[generation] rangement', err)
     return { ok: false, status: 503, erreur: 'Le brouillon est écrit mais n\'a pas pu être rangé, réessaie.' }
   }
+
+  // --- 6. La capture gardee (20/10) : une NOUVELLE image seulement ; une reprise garde le chemin d'origine.
+  let image_chemin = imageChemin
+  if (d.image && !imageChemin) {
+    image_chemin = await garderCapture(id, d.image)
+    if (image_chemin) {
+      await prisma.$executeRaw`update public.cockpit_generations set image_chemin = ${image_chemin} where id = ${id}::uuid`
+        .catch((err) => console.error('[generation] chemin de la capture non range', err))
+    }
+  }
+  return { ok: true, id, contenu, envoyees, cout_micros: cout, image_chemin }
 }

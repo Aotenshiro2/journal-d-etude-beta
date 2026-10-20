@@ -36,7 +36,7 @@ async function jouerComme(role, uuid, sql) {
         const r = await tx.$queryRawUnsafe(sql)
         resultat = { lu: true, lignes: Number(r[0]?.n ?? r.length) }
       } catch (e) {
-        resultat = { lu: false, motif: String(e.message).split('\n').find((l) => l.includes('permission') || l.includes('policy')) ?? 'refus' }
+        resultat = { lu: false, motif: String(e.message).split('\n').find((l) => l.includes('permission') || l.includes('policy') || l.includes('reserve')) ?? 'refus' }
       }
       throw new Error('__rollback__')
     })
@@ -89,6 +89,18 @@ async function main() {
   attendre('bucket cockpit-inspirations : hors allowlist ne voit rien', bi.lu && bi.lignes === 0, bi.lu ? `${bi.lignes}` : bi.motif)
   const pub = (await prisma.$queryRawUnsafe("select public from storage.buckets where id = 'cockpit-inspirations'"))[0]?.public
   attendre('bucket cockpit-inspirations : prive', pub === false)
+
+  // 20/10/2026 : le rapprochement brouillon -> post publie et la vue des reperes.
+  const rm = await jouerComme('authenticated', membre, 'select public.cockpit_generations_rapprocher() as n')
+  attendre('rapprochement : l equipe le lance', rm.lu, rm.lu ? `${rm.lignes} lie(s)` : rm.motif)
+  const ri = await jouerComme('authenticated', INCONNU, 'select public.cockpit_generations_rapprocher() as n')
+  attendre('rapprochement : hors allowlist refuse', !ri.lu, ri.motif)
+  const ra = await jouerComme('anon', null, 'select public.cockpit_generations_rapprocher() as n')
+  attendre('rapprochement : anonyme refuse', !ra.lu, ra.motif)
+  const vm = await jouerComme('authenticated', membre, 'select count(*)::int as n from public.cockpit_generations_reperes')
+  attendre('reperes : l equipe lit', vm.lu && vm.lignes > 0, vm.lu ? `${vm.lignes}` : vm.motif)
+  const vi = await jouerComme('authenticated', INCONNU, 'select count(*)::int as n from public.cockpit_generations_reperes')
+  attendre('reperes : hors allowlist ne voit rien', vi.lu && vi.lignes === 0, vi.lu ? `${vi.lignes}` : vi.motif)
 
   for (const [nom, auth] of [['sans jeton', null], ['faux jeton', 'Bearer faux.jeton.x']]) {
     try {
