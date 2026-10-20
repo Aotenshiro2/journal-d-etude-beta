@@ -55,7 +55,9 @@ export function parametresJournal(url: URL, corps?: Record<string, unknown> | nu
   if (corps) {
     // Le generateur : on garde la demande, jamais l'image elle-meme.
     const { image, ...reste } = corps as { image?: unknown }
-    p.corps = { ...reste, ...(image ? { image: '[image]' } : {}) }
+    // Les textes longs (une note de 20 000 caracteres) sont coupes : le journal garde la trace, pas le contenu.
+    const coupe = Object.fromEntries(Object.entries(reste).map(([k, v]) => [k, typeof v === 'string' && v.length > 500 ? `${v.slice(0, 500)} [...]` : v]))
+    p.corps = { ...coupe, ...(image ? { image: '[image]' } : {}) }
   }
   return p
 }

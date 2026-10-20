@@ -24,7 +24,10 @@ const ROUTES: Route[] = [
   { route: '/connaissances?q=', methode: 'GET', sert_a: 'Recherche dans toute la matière de création : inspirations de posts, PDF, leçons de l\'académie (transcriptions comprises), règles du générateur et fiche de style de Brice, manifeste, banque de contenus, brouillons, découpages 5 x 5, graphe du business, décisions, vidéos, publications, publicités. sources=telegram pour ajouter les messages des groupes.', parametres: ['q', 'sources (liste séparée par des virgules)', 'limite (par source, 50 au plus)', 'texte_max'] },
   { route: '/schema', methode: 'GET', sert_a: 'Toutes les tables et vues lisibles, leurs colonnes et une phrase de description. q= filtre par mot, colonnes=non pour la liste seule.', parametres: ['q', 'colonnes'] },
   { route: '/donnees/<table>', methode: 'GET', sert_a: 'Lire n\'importe quelle table ou vue du schéma, avec filtres, tri, colonnes choisies et pagination (voir filtres_de_donnees).', parametres: ['colonnes', 'tri', 'du', 'au', 'date', 'q', 'eq.<col>', 'ne.<col>', 'contient.<col>', 'dans.<col>', 'min.<col>', 'max.<col>', 'nul.<col>', 'limite', 'curseur', 'texte_max'] },
-  { route: '/generer-post', methode: 'POST', sert_a: 'Écrire un BROUILLON de post dans la voix de Brice ou de Mel avec le générateur du cockpit (inspirations, fiche de style, PDF, référence ICT). Coût : environ 0,07 à 0,19 euro par brouillon sans image, environ 0,23 euro avec une capture (modèle Opus), compté dans la dépense IA (poste « Générateur, demandé par Tab »). Rien n\'est publié : le brouillon est rangé dans le cockpit et rendu ici. C\'est la seule route qui écrit (en plus du journal d\'accès).' },
+  { route: '/generer-post', methode: 'POST', sert_a: 'Écrire un BROUILLON de post dans la voix de Brice ou de Mel avec le générateur du cockpit (inspirations, fiche de style, PDF, référence ICT). Coût : environ 0,07 à 0,19 euro par brouillon sans image, environ 0,23 euro avec une capture (modèle Opus), compté dans la dépense IA (poste « Générateur, demandé par Tab »). Rien n\'est publié : le brouillon est rangé dans le cockpit et rendu ici. Avec /notes, une des seules routes qui écrivent (en plus du journal d\'accès).' },
+  { route: '/notes', methode: 'GET', sert_a: 'Les notes que Claude Code (ou Brice) t\'a laissées, les plus récentes d\'abord. statut=nouvelle par défaut (lue, traitee, toutes). C\'est le canal recommandé entre toi et Claude, à la place du Google Doc « Notes Tab → Claude ». Chaque nouvelle note pour toi t\'arrive aussi par email (objet « Note de Claude : <sujet> »).', parametres: ['statut', 'limite (200 au plus)'] },
+  { route: '/notes', methode: 'POST', sert_a: 'Laisser une note à Claude Code : corps JSON { sujet, texte, projet?, liens?, pour? } (voir notes). Écris à Sora, à Umi, ou aux deux (pour = sora, umi ou les_deux, par défaut les_deux). Brice est prévenu sur Telegram, Claude la lit au démarrage de sa prochaine session.' },
+  { route: '/notes/<id>/lu', methode: 'POST', sert_a: 'Marquer lue une note que Claude t\'a laissée (corps vide). À faire dès que tu l\'as lue : sinon elle reste « nouvelle » dans le cockpit de Brice.' },
 ]
 
 export function aide(): Record<string, unknown> {
@@ -98,12 +101,27 @@ export function aide(): Record<string, unknown> {
       duree: 'Compter 30 à 60 secondes par brouillon (modèle Opus, effort élevé) : garder la connexion ouverte.',
       exemple: { personne: 'brice', canal: 'Live Club', objectif: 'enseigner', sens: 'idee', idee: 'Pourquoi attendre le DOL avant d\'entrer.' },
     },
+    notes: {
+      ce_que_c_est: 'L\'espace perso de Brice dans le cockpit (écran « Perso », visible par Brice et toi seulement, ni Mélanie ni Adil) : un fil de notes entre toi et Claude Code, l\'assistant de développement de Brice sur son PC. Brice a DEUX instances de Claude Code : Umi (sous Linux, WSL) et Sora (sous Windows). Écris à Sora, à Umi, ou aux deux. Il remplace le Google Doc « Notes Tab → Claude ».',
+      champs: {
+        sujet: 'Une ligne, 200 caractères au plus.',
+        texte: 'Le contenu, 20 000 caractères au plus.',
+        projet: 'aok (par défaut), belrive (le jeu de Brice), perso ou autre.',
+        liens: 'Facultatif : une liste d\'adresses (20 au plus).',
+        pour: 'Facultatif : sora, umi ou les_deux (par défaut les_deux). Chaque instance voit les notes qui lui sont adressées et celles pour les deux. Dans les notes que tu reçois, instance dit quelle instance de Claude t\'écrit (sora ou umi, vide quand c\'est Brice depuis le cockpit).',
+      },
+      statuts: 'nouvelle, lue, traitee. Toi, tu marques lue (POST /notes/<id>/lu) ; Brice ou Claude passent en traitée.',
+      reveil: 'Une note de Claude pour toi déclenche un email à ton adresse (objet « Note de Claude (Sora) : <sujet> » ou « Note de Claude (Umi) : <sujet> »). Une note de toi pour Claude prévient Brice sur Telegram et s\'affiche au démarrage de la session suivante de Claude.',
+      exemple: { sujet: 'Retours de Brice sur la sélection Opus', texte: 'Brice garde les rangs 13 et 19...', projet: 'aok', pour: 'les_deux' },
+    },
     exemples_d_appels: [
       `curl -H "Authorization: Bearer <clé>" ${BASE}/resume-du-jour`,
       `curl -H "Authorization: Bearer <clé>" "${BASE}/encaissements?du=2026-09-01&au=2026-09-30"`,
       `curl -H "Authorization: Bearer <clé>" "${BASE}/personne?q=@pseudo"`,
       `curl -H "Authorization: Bearer <clé>" "${BASE}/donnees/cockpit_abonnements?dans.statut=past_due,unpaid&colonnes=membre_id,montant,derniere_erreur"`,
       `curl -H "Authorization: Bearer <clé>" "${BASE}/connaissances?q=liquidité&sources=inspirations,regles"`,
+      `curl -H "Authorization: Bearer <clé>" "${BASE}/notes?statut=nouvelle"`,
+      `curl -X POST -H "Authorization: Bearer <clé>" -H "Content-Type: application/json" -d '{"sujet":"...","texte":"...","projet":"aok","pour":"sora"}' ${BASE}/notes`,
     ],
     forme_des_reponses: {
       ok: true,

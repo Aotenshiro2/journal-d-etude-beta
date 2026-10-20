@@ -10,6 +10,8 @@ import {
 import { heureParisLisible, jourParis, lirePagination, lirePeriode, type DefautPeriode } from '@/lib/tab/pur'
 import { lireDemandeGeneration } from '@/lib/generation-pur'
 import { genererPost } from '@/lib/generation'
+import { estUuid, lireFiltreStatut, lireNoteEntrante } from '@/lib/tab/notes-pur'
+import { creerNote, listerNotes, marquerLueParTab, prevenirBrice } from '@/lib/tab/notes'
 
 /**
  * L'API DE TAB (20/10/2026) : /api/tab/v1/... , JSON, LECTURE SEULE.
@@ -94,6 +96,25 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ chemin?: st
   }
 
   const nom = chemin[0]
+  // L'espace perso (20/10/2026) : les notes de Claude (ou de Brice) pour Tab.
+  if (nom === 'notes') {
+    if (chemin.length !== 1) return fin({ ok: false, ...enTete, erreur: 'Marquer lue se demande en POST /notes/<id>/lu.' }, 405, null)
+    const statut = lireFiltreStatut(url.searchParams.get('statut'))
+    if (statut !== 'toutes' && !['nouvelle', 'lue', 'traitee'].includes(statut)) return fin({ ok: false, ...enTete, erreur: statut }, 400, null, statut)
+    const limite = Math.min(Math.max(Number(url.searchParams.get('limite')) || 50, 1), 200)
+    try {
+      const notes = await listerNotes('vers_tab', statut as 'nouvelle', limite)
+      return fin({
+        ok: true, ...enTete,
+        libelle: `Notes pour Tab (${statut === 'toutes' ? 'toutes' : statut})`,
+        donnees: { notes },
+        notes: ['Une note lue : POST /notes/<note_id>/lu. Pour écrire à Claude : POST /notes { sujet, texte, projet }.'],
+      }, 200, notes.length)
+    } catch (err) {
+      const raison = err instanceof Error ? err.message.split('\n').filter(Boolean).pop() ?? '' : String(err)
+      return fin({ ok: false, ...enTete, erreur: 'Lecture des notes impossible pour l\'instant.' }, 502, null, raison)
+    }
+  }
   if (nom === 'generer-post') {
     return fin({ ok: false, ...enTete, erreur: 'generer-post se demande en POST.' }, 405, null)
   }
@@ -158,7 +179,35 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ chemin?: s
     await journaliser({ cleId: verdict.cleId, route, parametres, statut, dureeMs: duree, lignes, ip, erreur })
     return repondre({ ...c, route, genere_le: new Date().toISOString(), duree_ms: duree }, statut)
   }
-  if (route !== '/generer-post') return fin({ ok: false, erreur: `${route} : seule /generer-post accepte POST. Les lectures sont en GET.` }, 405, null)
+  // L'espace perso (20/10/2026) : Tab ecrit une note pour Claude, ou marque lue une note de Claude.
+  if (route === '/notes') {
+    const note = lireNoteEntrante(corps)
+    if (typeof note === 'string') return fin({ ok: false, erreur: note, aide: `${url.origin}/api/tab/v1/aide` }, 400, null, note)
+    try {
+      const creee = await creerNote('vers_claude', 'tab', note)
+      const brice = await prevenirBrice(creee)
+      return fin({
+        ok: true, libelle: 'Note pour Claude enregistrée', donnees: { note: creee },
+        notes: [brice ? 'Brice est prévenu sur Telegram.' : 'Brice n\'a pas pu être prévenu sur Telegram (la note est bien enregistrée).',
+          'Claude la lit au démarrage de sa prochaine session.'],
+      }, 201, 1)
+    } catch (err) {
+      const raison = err instanceof Error ? err.message.split('\n').filter(Boolean).pop() ?? '' : String(err)
+      return fin({ ok: false, erreur: 'Note non enregistrée (erreur de la base). Réessaie dans un instant.' }, 502, null, raison)
+    }
+  }
+  if (chemin.length === 3 && chemin[0] === 'notes' && chemin[2] === 'lu') {
+    if (!estUuid(chemin[1])) return fin({ ok: false, erreur: 'Identifiant de note invalide (uuid attendu).' }, 400, null, 'id invalide')
+    try {
+      const note = await marquerLueParTab(chemin[1])
+      if (!note) return fin({ ok: false, erreur: 'Note introuvable parmi les notes pour Tab.' }, 404, null, 'note introuvable')
+      return fin({ ok: true, libelle: 'Note marquée lue', donnees: { note } }, 200, 1)
+    } catch (err) {
+      const raison = err instanceof Error ? err.message.split('\n').filter(Boolean).pop() ?? '' : String(err)
+      return fin({ ok: false, erreur: 'Écriture impossible pour l\'instant.' }, 502, null, raison)
+    }
+  }
+  if (route !== '/generer-post') return fin({ ok: false, erreur: `${route} : seules /generer-post, /notes et /notes/<id>/lu acceptent POST. Les lectures sont en GET.` }, 405, null)
 
   const demande = lireDemandeGeneration(corps)
   if (typeof demande === 'string') return fin({ ok: false, erreur: demande, aide: `${url.origin}/api/tab/v1/aide` }, 400, null, demande)

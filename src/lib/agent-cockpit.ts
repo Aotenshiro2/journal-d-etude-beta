@@ -319,6 +319,10 @@ const SCHEMAS_INTERDITS = /\b(auth|storage|vault|extensions|pgsodium|graphql[a-z
 // cockpit_oublis_emails (15/10) : les emails effaces, haches ; un hache se
 // retrouve en essayant des emails connus. Serveur et pipeline seulement.
 const TABLES_SERVEUR = /\bcockpit_liveclub_codes\w*|\bcockpit_oublis_emails\b/i
+// L'espace perso de Brice (20/10/2026, cockpit_perso_notes) : Brice et Tab seuls
+// (is_cockpit_perso). L'agent tourne en postgres pour Melanie et Adil aussi :
+// il ne le lit pas.
+const TABLES_PERSO = /\bcockpit_perso_\w*/i
 const SQL_DYNAMIQUE = /\bu&["']|\b(query_to_xml\w*|table_to_xml\w*|cursor_to_xml\w*|schema_to_xml\w*|database_to_xml\w*|dblink\w*|ts_stat|crosstab\w*|connectby)\b/i
 
 function verrouSql(sql: string): string | null {
@@ -328,6 +332,7 @@ function verrouSql(sql: string): string | null {
   if (SQL_INTERDIT.test(s)) return 'Requête refusée : lecture seule.'
   if (SCHEMAS_INTERDITS.test(s)) return 'Requête refusée : uniquement les tables du cockpit (schéma public).'
   if (TABLES_SERVEUR.test(s)) return 'Requête refusée : table réservée au serveur du bot.'
+  if (TABLES_PERSO.test(s)) return 'Requête refusée : espace personnel de Brice, hors de l\'agent.'
   if (SQL_DYNAMIQUE.test(s)) return 'Requête refusée : pas de SQL dynamique ni d\'identifiant échappé.'
   return null
 }
