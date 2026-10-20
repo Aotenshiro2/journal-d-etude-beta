@@ -20,7 +20,7 @@ import type { PieceAgent } from '@/lib/liveclub/support-pont-pur'
 export const OUTIL_GENERER_POST: Anthropic.Tool = {
   name: 'generer_post',
   description:
-    "Écrit un BROUILLON de post (Live Club, canal MELMOM, Skool, newsletter, réseau social) dans la voix de Brice ou de Mel, à partir d'une idée (sens idee) ou de la dernière capture reçue dans la conversation (sens capture). Rien n'est publié ni envoyé : le brouillon revient ici et se copie-colle. Sans carte. AVANT d'appeler : il faut le canal cible et l'objectif ; pour une capture, demande en une seule fois ce qui manque parmi le sujet à enseigner (un mot), le biais du jour, le trade pris et son résultat, posté en direct ou en relecture (l'actif, l'unité de temps et la date seulement si le filigrane TradingView n'est pas lisible). Le vécu ne s'invente pas : s'il manque, l'outil le demande dans « questions ».",
+    "Écrit un BROUILLON de post (Live Club, canal MELMOM, Skool, newsletter, réseau social) dans la voix de Brice ou de Mel, à partir d'une idée (sens idee) ou de la dernière capture reçue dans la conversation (sens capture), ou des deux : sens capture AVEC idee = l'idée fixe le sujet et l'intention, la capture l'illustre (le chart à joindre). Rien n'est publié ni envoyé : le brouillon revient ici et se copie-colle. Sans carte. AVANT d'appeler : il faut le canal cible et l'objectif ; pour une capture, demande en une seule fois ce qui manque parmi le sujet à enseigner (un mot), le biais du jour, le trade pris et son résultat, posté en direct ou en relecture (l'actif, l'unité de temps et la date seulement si le filigrane TradingView n'est pas lisible). Le vécu ne s'invente pas : s'il manque, l'outil le demande dans « questions ».",
   input_schema: {
     type: 'object',
     properties: {
@@ -30,7 +30,7 @@ export const OUTIL_GENERER_POST: Anthropic.Tool = {
         description: "Le canal cible, tel qu'il est nommé dans la base : « Live club / Mindset », « Live club / Explication charts. », « MELMOM | ICT Trading », « Skool (communauté) », « Newsletter (Kit) », ou un autre (réseau social, en clair).",
       },
       objectif: { type: 'string', enum: [...OBJECTIFS] },
-      sens: { type: 'string', enum: ['idee', 'capture'] },
+      sens: { type: 'string', enum: ['idee', 'capture'], description: "capture = la dernière capture reçue part au modèle ; avec une idee, c'est l'idée qui donne le sujet." },
       idee: { type: 'string', description: "L'idée, le sujet ou la source, avec les mots de ton interlocuteur." },
       sujet: { type: 'string', description: 'Le sujet à enseigner, en un mot ou deux.' },
       biais: { type: 'string', description: 'Le biais du jour.' },

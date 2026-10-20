@@ -20,7 +20,7 @@ async function main() {
     select id, personne, axe, role, format, format_cible, objectifs, canal, canal_registre, date_pub, source, texte,
            image, declencheur, pourquoi, refus, concepts
     from public.cockpit_inspirations`
-  const formes = choisirFormes(toutes, d, axeCible(d.canal, d.sens), motsDeLaDemande(d))
+  const formes = choisirFormes(toutes, d, axeCible(d.canal, d.sens, d.idee), motsDeLaDemande(d))
   const requete = requeteAnglaise(termesAnglais(textesReference(d, formes)))
   console.log(`requete : ${requete}`)
   const pages = await prisma.$queryRaw<{ source: string; page: number }[]>`

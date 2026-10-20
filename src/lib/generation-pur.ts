@@ -22,6 +22,12 @@ export const OBJECTIFS = [
 export type Objectif = (typeof OBJECTIFS)[number]
 
 export type Personne = 'brice' | 'mel'
+/**
+ * Le sens se DEDUIT depuis le 20/10 : une image presente = 'capture' (la lecture
+ * du chart compte), sinon 'idee'. Une idee ET une capture ensemble restent
+ * 'capture' en base (pas de valeur 'mixte', aucune migration) : le melange se
+ * lit par `estMixte` (image + idee), et `entree.depart` le dit dans la ligne.
+ */
 export type Sens = 'idee' | 'capture'
 export type Moment = 'direct' | 'relecture'
 export type TypeImage = 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif'
@@ -88,8 +94,10 @@ export function lireDemandeGeneration(brut: unknown): DemandeGeneration | string
   if (!canal) return 'canal requis.'
   const objectif = typeof brut.objectif === 'string' ? brut.objectif.trim() as Objectif : null
   if (!objectif || !OBJECTIFS.includes(objectif)) return `objectif attendu : ${OBJECTIFS.join(', ')}.`
-  const sens = brut.sens === 'capture' ? 'capture' : brut.sens === 'idee' ? 'idee' : null
-  if (!sens) return 'sens attendu : idee ou capture.'
+  // sens facultatif (20/10) : s'il est donne, il doit etre lisible, mais c'est l'image qui decide.
+  if (brut.sens !== undefined && brut.sens !== null && brut.sens !== 'idee' && brut.sens !== 'capture') {
+    return 'sens attendu : idee ou capture (ou absent, il se déduit de l\'image).'
+  }
   const idee = propre(brut.idee, MAX_IDEE)
   const r = estObjet(brut.reponses) ? brut.reponses : {}
   const moment = r.moment === 'direct' || r.moment === 'relecture' ? r.moment : null
@@ -113,9 +121,20 @@ export function lireDemandeGeneration(brut: unknown): DemandeGeneration | string
   const parent = typeof brut.parent_id === 'string' && UUID.test(brut.parent_id.trim()) ? brut.parent_id.trim().toLowerCase() : null
   const consigne = propre(brut.consigne, MAX_CONSIGNE)
   if (consigne && !parent) return 'une retouche demande parent_id.'
-  if (sens === 'capture' && !image) return 'sens capture : image requise.'
-  if (sens === 'idee' && !idee && !reponses.sujet && !parent) return 'sens idee : une idée, un sujet ou une source à écrire.'
+  if (brut.sens === 'capture' && !image) return 'sens capture : image requise.'
+  if (!image && !idee && !reponses.sujet && !parent) return 'une idée, un sujet, une source ou une capture à écrire.'
+  const sens: Sens = image ? 'capture' : 'idee'
   return { personne, canal, objectif, sens, idee, reponses, image, parent_id: parent, consigne }
+}
+
+/** Une idee de l'auteur ET une capture : l'idee fixe le sujet, la capture l'illustre (20/10). */
+export function estMixte(d: Pick<DemandeGeneration, 'idee' | 'image'>): boolean {
+  return !!d.image && !!d.idee
+}
+
+/** Le point de depart, pour la ligne en base (entree.depart). */
+export function depart(d: Pick<DemandeGeneration, 'idee' | 'image'>): 'idee' | 'capture' | 'idee_et_capture' {
+  return estMixte(d) ? 'idee_et_capture' : d.image ? 'capture' : 'idee'
 }
 
 // --- Les inspirations -----------------------------------------------------------
@@ -142,11 +161,17 @@ export type Inspiration = {
 
 export type Axe = 'mindset' | 'technique'
 
-/** L'axe vise : une capture est technique, sinon le canal le dit (Mindset, Explication charts), sinon aucun. */
-export function axeCible(canal: string, sens: Sens): Axe | null {
-  if (sens === 'capture') return 'technique'
+/**
+ * L'axe vise : une capture seule est technique ; avec une idee (20/10), c'est
+ * l'idee qui donne le sujet, donc le canal decide d'abord (une capture peut
+ * illustrer un propos mindset), technique par defaut. Sans capture, le canal
+ * le dit (Mindset, Explication charts), sinon aucun.
+ */
+export function axeCible(canal: string, sens: Sens, idee: string | null = null): Axe | null {
+  if (sens === 'capture' && !idee) return 'technique'
   if (/mindset/i.test(canal)) return 'mindset'
   if (/chart|technique/i.test(canal)) return 'technique'
+  if (sens === 'capture') return 'technique'
   return null
 }
 
@@ -391,6 +416,7 @@ Les règles de Brice, dans cet ordre :
 
 Sens A (une idée, un sujet, une source) : le post. Si le sujet est technique, « chart » décrit le chart à joindre (actif, unité de temps, ce qui doit être tracé), sinon chart = null. lecture = null.
 Sens B (une capture) : « lecture » dit ce que tu lis sur l'image (actif, unité de temps et date si le filigrane TradingView les montre, niveaux, annotations, ce qui s'est passé), puis le brouillon est le tip qui colle à ce que l'auteur veut enseigner. Ce que l'image seule ne dit pas (biais du jour, trade pris et résultat, direct ou relecture) vient des réponses de l'auteur, sinon c'est une question. chart = null (la capture est le chart).
+Sens C (une idée de l'auteur ET une capture) : l'idée fixe le sujet et l'intention du post, la capture l'illustre ou la nourrit. « lecture » dit ce que tu lis sur l'image, comme au sens B, et le brouillon ne prend de l'image que ce qui sert l'idée : jamais l'inverse, la capture ne remplace pas le sujet. « chart » propose la capture fournie comme chart à joindre, en une ou deux lignes : ce qu'elle montre pour ce post, et ce qu'il faudrait y tracer ou y entourer si cela aide. Si la capture ne colle pas à l'idée, dis-le dans « risques ». Le vécu (trade pris, résultat, biais du jour, direct ou relecture) ne vient que de la demande, sinon c'est une question.
 
 Le texte du post va dans « brouillon », prêt à coller tel quel : pas de guillemets autour, pas de titre « Brouillon », pas de commentaire. Des messages en rafale (formats G, H, J de Mel) : sépare-les par une ligne qui ne contient que ---.
 format : la lettre et le nom du format choisi (README de la base).
@@ -445,9 +471,13 @@ export function entreeGeneration(p: {
     `- Qui écrit : ${NOMS[d.personne]}.`,
     `- Canal cible : ${d.canal}.${p.registre ? ` Registre par défaut de ce canal : ${sansTiretLong(p.registre)}` : ' Aucune inspiration de ce canal dans la base : pars des inspirations de l\'auteur qui servent le même objectif, et dis dans « debordement » ce que tu empruntes.'}`,
     `- Objectif : ${d.objectif}.`,
-    `- Sens : ${d.sens === 'capture' ? 'B, une capture est jointe (image ci-dessus)' : 'A, une idée, un sujet ou une source'}.`,
-    d.idee ? `- Idée, sujet ou source donnés par l'auteur :\n${bloc(d.idee)}` : null,
-    lignesReponses.length ? `- Réponses de l'auteur :\n${lignesReponses.join('\n')}` : (d.sens === 'capture' ? "- Réponses de l'auteur : aucune. Ce que l'image ne dit pas est une question." : null),
+    `- Sens : ${estMixte(d)
+      ? "C, une idée de l'auteur ET une capture jointe (image ci-dessus) : l'idée fixe le sujet et l'intention, la capture l'illustre"
+      : d.image ? 'B, une capture est jointe (image ci-dessus)' : 'A, une idée, un sujet ou une source'}.`,
+    d.idee
+      ? `- ${estMixte(d) ? "Idée de l'auteur (elle donne le sujet, la capture l'illustre)" : "Idée, sujet ou source donnés par l'auteur"} :\n${bloc(d.idee)}`
+      : null,
+    lignesReponses.length ? `- Réponses de l'auteur :\n${lignesReponses.join('\n')}` : (d.image ? "- Réponses de l'auteur : aucune. Ce que l'image ne dit pas est une question." : null),
   ].filter((x): x is string => x !== null)
 
   parties.push('', `INSPIRATIONS « FORME » (${p.formes.length}) : la voix et le format.`)

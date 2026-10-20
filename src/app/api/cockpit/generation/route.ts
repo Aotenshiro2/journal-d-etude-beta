@@ -8,8 +8,8 @@ import { genererPost } from '@/lib/generation'
 /**
  * POST /api/cockpit/generation : l'ecran Generation de l'onglet Creation du
  * cockpit (19/10/2026). Ecrit un brouillon de post dans la voix de Brice ou
- * de Mel, a partir d'une idee (sens idee) ou d'une capture (sens capture,
- * image en base64, jamais stockee), le range dans cockpit_generations et le
+ * de Mel, a partir d'une idee, d'une capture (image en base64, jamais
+ * stockee) ou des deux (20/10 : le sens se deduit de l'image), le range dans cockpit_generations et le
  * rend. Regenerer et retoucher passent par la meme route (parent_id, et
  * consigne pour une retouche). Rien n'est publie : le brouillon se
  * copie-colle, la note (publie tel quel, retouche, jete) s'ecrit depuis

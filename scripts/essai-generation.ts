@@ -37,7 +37,7 @@ async function main() {
     const toutes = await prisma.$queryRaw<Inspiration[]>`select id, personne, axe, role, format, format_cible, objectifs, canal, canal_registre, date_pub, source, texte, image, declencheur, pourquoi, refus, concepts from public.cockpit_inspirations`
     const [banque] = await prisma.$queryRaw<{ contenu: string }[]>`
       select contenu from public.cockpit_methode_textes where cle = 'matiere:banque-contenus.md'`
-    const axe = axeCible(d.canal, d.sens)
+    const axe = axeCible(d.canal, d.sens, d.idee)
     const mots = motsDeLaDemande(d)
     const formes = choisirFormes(toutes, d, axe, mots)
     const passages = assemblerPassages(axe, {

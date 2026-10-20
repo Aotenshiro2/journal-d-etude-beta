@@ -14,7 +14,7 @@ import { coutMicroEuros } from '@/lib/ia-prix'
 import { requeteTsquery } from '@/lib/creation-pur'
 import {
   CONSIGNES, MAX_PASSAGE, MODELE_GENERATION, SCHEMA_SORTIE,
-  assemblerPassages, axeCible, choisirBanque, choisirFormes, choisirMatiereInspirations,
+  assemblerPassages, axeCible, choisirBanque, choisirFormes, choisirMatiereInspirations, depart,
   entreeGeneration, motsDeLaDemande, registreDuCanal, requeteAnglaise, termesAnglais, textesReference, validerSortie,
   type ContenuGeneration, type DemandeGeneration, type Inspiration, type Parent, type Passage,
 } from '@/lib/generation-pur'
@@ -92,7 +92,7 @@ export async function genererPost(d: DemandeGeneration, userId: string, origine:
   }
 
   // --- 2. Le choix : formes, puis matiere -------------------------------------
-  const axe = axeCible(d.canal, d.sens)
+  const axe = axeCible(d.canal, d.sens, d.idee)
   const mots = motsDeLaDemande(d)
   const formes = choisirFormes(toutes, d, axe, mots)
   if (!formes.length) {
@@ -203,6 +203,7 @@ export async function genererPost(d: DemandeGeneration, userId: string, origine:
     sources: passages.map((p) => ({ type: p.type, libelle: p.libelle, ref: p.ref })),
   }
   const entree = {
+    depart: depart(d),
     idee: d.idee,
     reponses: d.reponses,
     image: d.image ? { media_type: d.image.media_type, octets_b64: d.image.data.length } : null,
