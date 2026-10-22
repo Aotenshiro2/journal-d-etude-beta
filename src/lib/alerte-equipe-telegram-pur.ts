@@ -21,8 +21,10 @@ export type DemandeHumain = {
   /**
    * (16/10) 'demande' : il demande un humain. 'reponse' : l'equipe a la main
    * dans ce fil et le membre lui a repondu (bot Live Club, support-pont-pur.ts).
+   * (22/10) 'annulee' : il a annule sa demande avant que l'equipe ne reponde
+   * (bot Live Club, annulerDemandeEquipe) : rien a faire.
    */
-  genre?: 'demande' | 'reponse'
+  genre?: 'demande' | 'reponse' | 'annulee'
   /** (16/10) Son message porte une image : 'jointe' sous l'alerte, ou 'onglet' (a voir dans l'onglet Support). */
   image?: 'jointe' | 'onglet' | null
 }
@@ -63,6 +65,14 @@ export function texteDemandeHumain(d: DemandeHumain): string {
     : /^\(.*\)$/.test(message) ? `Son dernier message : ${message}`
       : `${d.genre === 'reponse' ? 'Son message' : 'Son dernier message'} : « ${cite} »`
   const qui = d.qui?.trim() || null
+  // (22/10) Une demande annulee par le membre : qui, son message, rien a faire.
+  if (d.genre === 'annulee') {
+    return [
+      `${qui ?? 'Un membre'} a annulé sa demande (${d.origine}) : rien à faire.`,
+      message && !/^\(.*\)$/.test(message) ? `Son message : « ${cite} »` : null,
+      reference ? `Si tu veux quand même lui écrire : dis-moi « réponds-lui : ton message » (${reference}).` : null,
+    ].filter(Boolean).join('\n')
+  }
   return [
     d.genre === 'reponse'
       ? `${qui ?? 'Un membre'} a répondu à l'équipe (${d.origine}).`
@@ -84,7 +94,7 @@ export function texteDemandeHumain(d: DemandeHumain): string {
  * conversation avec Agent AOK : l'alerte n'est pas une question de l'equipe,
  * et le fil qu'elle cite est celui que vise « reponds-lui » juste en dessous.
  */
-export const MARQUEUR_DEMANDE_HUMAIN = "[système] Alerte du support (un membre demande un humain, ou répond à l'équipe), envoyée automatiquement par Agent AOK (ce n'est pas une question de l'équipe)."
+export const MARQUEUR_DEMANDE_HUMAIN = "[système] Alerte du support (un membre demande un humain, répond à l'équipe, ou annule sa demande), envoyée automatiquement par Agent AOK (ce n'est pas une question de l'équipe)."
 
 /** Les deux lignes ajoutees a l'historique d'Agent AOK : le marqueur, puis l'alerte telle qu'envoyee. */
 export function entreesHistoriqueDemandeHumain(texte: string, id: string): { role: 'user' | 'assistant'; content: string; id: string }[] {

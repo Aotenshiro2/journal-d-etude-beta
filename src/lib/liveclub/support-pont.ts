@@ -42,6 +42,7 @@ import { masquerCodes } from './verification-pur'
 import type { Bouton } from './telegram'
 import {
   PREFIXE_SYSTEME, LIGNE_EQUIPE_PREVENUE, LIGNE_MAIN_RENDUE, alerteAutorisee, estImage, quiRepond,
+  DEBUT_ATTENTE_HUMAIN, LIGNE_DEMANDE_ANNULEE, alertePartieDepuis,
   type PieceSupport,
 } from './support-pont-pur'
 
@@ -64,6 +65,14 @@ export type EchangeSupport = {
    * demande un humain) ou 'reponse' (l'equipe a la main et il lui repond).
    */
   alerte?: 'demande' | 'reponse'
+  /**
+   * (22/10, Brice : « j'ai cru que l'IA avait parle ») Pour un message du bot
+   * (role 'ia') : 'bot' = texte fixe du bot (menu, « je previens l'equipe »...),
+   * 'ia' = reponse de l'agent. Garde sur le message (champ `auteur`), le role
+   * reste 'assistant' : le cockpit affiche « Bot » ou « IA », un ecran qui ne
+   * connait pas le champ affiche « IA » comme avant.
+   */
+  auteur?: 'bot' | 'ia'
 }
 
 /** Ce que l'enregistrement a fait : le fil, et s'il vient de passer en attente (atomique). */
@@ -122,7 +131,7 @@ function echapper(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
-type MessageFil = { role: string; content: string; at?: string; piece?: PieceSupport }
+type MessageFil = { role: string; content: string; at?: string; piece?: PieceSupport; auteur?: 'bot' | 'ia' }
 
 /**
  * Prevenir l'equipe qu'un membre du bot veut un humain, comme
@@ -139,7 +148,7 @@ async function alerterEquipe(email: string | null, messages: MessageFil[], genre
       .map(s => s.trim())
       .filter(Boolean)
     const transcript = messages.slice(-6)
-      .map(m => `<p><strong>${m.role === 'user' ? 'Membre' : m.role === 'human' ? 'Équipe' : m.role === 'system' ? 'Bot' : 'IA'}</strong> : ${
+      .map(m => `<p><strong>${m.role === 'user' ? 'Membre' : m.role === 'human' ? 'Équipe' : m.role === 'system' || m.auteur === 'bot' ? 'Bot' : 'IA'}</strong> : ${
         echapper(String(m.content)).slice(0, 600)
       }${m.piece ? ' <em>(pièce jointe, à voir dans l\'onglet Support)</em>' : ''}</p>`)
       .join('\n')
@@ -202,7 +211,10 @@ export async function enregistrerEchangeSupport(e: EchangeSupport, db: ClientSup
     if (!texte) return null
     const role = ROLE_SUPPORT[e.role]
     if (!role) return null
-    const message: MessageFil = { role, content: texte, at: new Date().toISOString(), ...(e.piece ? { piece: e.piece } : {}) }
+    const message: MessageFil = {
+      role, content: texte, at: new Date().toISOString(), ...(e.piece ? { piece: e.piece } : {}),
+      ...(e.role === 'ia' && (e.auteur === 'bot' || e.auteur === 'ia') ? { auteur: e.auteur } : {}),
+    }
     const veut = e.veutHumain === true && e.role !== 'humain'
     const prisEnMain = e.role === 'humain'
     const email = typeof e.email === 'string' && e.email.trim() ? e.email.trim().toLowerCase().slice(0, 200) : null
@@ -281,6 +293,119 @@ export async function lireMessagesFil(telegramId: number): Promise<unknown[] | n
   }
 }
 
+/** (22/10) L'etat du fil relu juste avant un message du bot : ses messages, et depuis quand il attend un humain. */
+export type EtatFil = { messages: unknown[]; attend: boolean; escaladeLe: Date | null }
+
+/**
+ * L'etat du fil Telegram de ce compte, en une lecture (Brice, 22/10 : les
+ * messages du bot autour de l'equipe dependent de l'etat, pas d'une sequence
+ * supposee). null : pas de fil, panne, avant la migration. Ne jette jamais.
+ */
+export async function lireEtatFil(telegramId: number): Promise<EtatFil | null> {
+  try {
+    if (!Number.isSafeInteger(telegramId) || telegramId <= 0) return null
+    const lignes = await prisma.$queryRaw<{ messages: unknown; escalated_at: Date | null }[]>`
+      select messages, "escalatedAt" as escalated_at from public."SupportThread" where "telegramId" = ${telegramId} limit 1`
+    const l = lignes[0]
+    if (!l) return null
+    const escaladeLe = l.escalated_at instanceof Date && Number.isFinite(l.escalated_at.getTime()) ? l.escalated_at : null
+    return { messages: Array.isArray(l.messages) ? l.messages : [], attend: escaladeLe !== null, escaladeLe }
+  } catch (err) {
+    journaliser('lecture de l etat du fil', err)
+    return null
+  }
+}
+
+/**
+ * (22/10, Brice) Le message d'attente, au plus UNE fois par periode
+ * d'attente : il entre au fil seulement si le fil attend encore un humain et
+ * qu'aucun message d'attente n'y est entre depuis le passage en attente
+ * (« escalatedAt »). Une seule requete : sous le verrou de ligne de l'update,
+ * trois messages simultanes du membre n'en font entrer qu'un (le second
+ * relit la ligne a jour et ne trouve plus rien a faire). Meme regle, pure, que
+ * attenteDejaDite (support-pont-pur.ts). Les dates du fil sont des ISO en UTC
+ * (toISOString) : la comparaison de textes au meme format suffit, sans
+ * conversion qui jetterait sur une date mal formee (qui ne compte pas, comme
+ * dans la regle pure).
+ * true = le message est entre au fil : l'appelant l'envoie. Ne jette jamais.
+ */
+export async function direAttenteUneFois(
+  telegramId: number,
+  texte: string,
+  o: { boutons?: Bouton[][] } = {},
+): Promise<boolean> {
+  try {
+    if (!Number.isSafeInteger(telegramId) || telegramId <= 0) return false
+    if (!texte.startsWith(DEBUT_ATTENTE_HUMAIN)) return false
+    const message: MessageFil = {
+      role: ROLE_SUPPORT.ia, content: texteAvecBoutons(texte, o.boutons).slice(0, MAX_CARACTERES),
+      at: new Date().toISOString(), auteur: 'bot',
+    }
+    const lignes = await prisma.$queryRaw<{ id: string }[]>`
+      update public."SupportThread" set
+        messages = coalesce(messages, '[]'::jsonb) || ${JSON.stringify([message])}::jsonb,
+        "updatedAt" = timezone('utc', now())
+      where "telegramId" = ${telegramId}
+        and "escalatedAt" is not null
+        and not exists (
+          select 1 from jsonb_array_elements(coalesce(messages, '[]'::jsonb)) m
+          where m->>'role' = 'assistant'
+            and left(coalesce(m->>'content', ''), ${DEBUT_ATTENTE_HUMAIN.length}::int) = ${DEBUT_ATTENTE_HUMAIN}
+            and coalesce(m->>'at', '') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T'
+            and coalesce(m->>'at', '') >= to_char("escalatedAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
+      returning id`
+    return lignes.length > 0
+  } catch (err) {
+    journaliser('message d attente', err)
+    return false
+  }
+}
+
+/**
+ * (22/10, Brice) Le membre annule sa demande avant que l'equipe ne reponde
+ * (lecture-attente.ts) : la ligne « [système] Demande annulée par le membre. »
+ * au fil, et le fil sort de l'attente, en une requete, SEULEMENT si l'attente
+ * est toujours celle qu'on a lue (`escaladeLue`) : une reponse de l'equipe ou
+ * une nouvelle demande arrivee entre-temps ne sont pas effacees. Si une alerte
+ * est partie pour cette attente (ligne LIGNE_EQUIPE_PREVENUE depuis le passage
+ * en attente), l'equipe recoit « X a annulé sa demande » par Agent AOK, pour
+ * ne pas repondre pour rien ; pas d'email, pas de bouton. Aucune alerte
+ * n'etait partie (rythme des 10 minutes) : rien a retirer, rien d'envoye.
+ * true = annulee. Ne jette jamais.
+ */
+export async function annulerDemandeEquipe(telegramId: number, escaladeLue: Date): Promise<boolean> {
+  try {
+    if (!Number.isSafeInteger(telegramId) || telegramId <= 0) return false
+    const ligne: MessageFil = { role: ROLE_SUPPORT.systeme, content: `${PREFIXE_SYSTEME}${LIGNE_DEMANDE_ANNULEE}`, at: new Date().toISOString() }
+    const lignes = await prisma.$queryRaw<{ id: string; messages: unknown; email: string | null }[]>`
+      update public."SupportThread" set
+        messages = coalesce(messages, '[]'::jsonb) || ${JSON.stringify([ligne])}::jsonb,
+        "escalatedAt" = null,
+        "updatedAt" = timezone('utc', now())
+      where "telegramId" = ${telegramId}
+        and "escalatedAt" = ${escaladeLue.toISOString()}::timestamp(3)
+      returning id, messages, "contactEmail" as email`
+    const l = lignes[0]
+    if (!l) return false
+    const messages = Array.isArray(l.messages) ? l.messages : []
+    if (alertePartieDepuis(messages, escaladeLue.getTime())) {
+      const nom = await nomTelegram(telegramId)
+      await alerterEquipeTelegram({
+        origine: 'bot Live Club',
+        qui: [nom ?? `compte Telegram u${telegramId}`, l.email].filter(Boolean).join(', '),
+        dernierMessage: dernierMessageMembre(messages),
+        reponseDans: 'Telegram',
+        fil: l.id,
+        genre: 'annulee',
+      })
+    }
+    return true
+  } catch (err) {
+    journaliser('annulation', err)
+    return false
+  }
+}
+
 export type IssueMainRendue =
   | { ok: true; dejaAuBot: boolean; messages: unknown; escalatedAt: null }
   | { ok: false; raison: 'introuvable' | 'pas_telegram' }
@@ -319,6 +444,8 @@ export type OptionsTrace = {
   email?: string | null
   /** false : Telegram a refuse l'envoi, le fil le dit (« [non délivré] »). */
   livre?: boolean
+  /** (22/10) 'ia' : une reponse de l'agent. Par defaut 'bot' : un texte fixe du bot (affiche « Bot » au cockpit). */
+  auteur?: 'bot' | 'ia'
 }
 
 /**
@@ -332,7 +459,7 @@ export async function tracerMessageBot(
   db: ClientSupport = prisma,
 ): Promise<void> {
   const corps = texteAvecBoutons(o.livre === false ? `[non délivré] ${texte}` : texte, o.boutons)
-  await enregistrerEchangeSupport({ telegramId, membreId: o.membreId, email: o.email, role: 'ia', texte: corps }, db)
+  await enregistrerEchangeSupport({ telegramId, membreId: o.membreId, email: o.email, role: 'ia', texte: corps, auteur: o.auteur ?? 'bot' }, db)
 }
 
 /**

@@ -86,7 +86,7 @@ export async function alerterEquipeTelegram(d: DemandeHumain, o: OptionsAlerte =
       }
       await ajouterAHistoriqueAgent(chat, chat, entreesHistoriqueDemandeHumain(texte, id)).catch(() => false)
     }
-    console.log(`[alerte-equipe] ${d.genre === 'reponse' ? 'reponse a l equipe' : "demande d'humain"} (${d.origine}) : ${livres}/${destinataires.length} destinataire(s)${o.image ? `, image ${image ? 'jointe' : 'non jointe'}` : ''}`)
+    console.log(`[alerte-equipe] ${d.genre === 'reponse' ? 'reponse a l equipe' : d.genre === 'annulee' ? 'demande annulee' : "demande d'humain"} (${d.origine}) : ${livres}/${destinataires.length} destinataire(s)${o.image ? `, image ${image ? 'jointe' : 'non jointe'}` : ''}`)
     return livres
   } catch (err) {
     console.warn(`[alerte-equipe] alerte Telegram non envoyee : ${(err instanceof Error ? err.message : String(err)).split('\n')[0].slice(0, 160)}`)

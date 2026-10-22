@@ -3,6 +3,34 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
+## Bot des membres : messages autour de l'equipe selon l'ETAT du fil (22/10/2026, en prod avec le cockpit ; aucune migration)
+
+Cas reel de Christine (22/10) et regle de Brice : les messages du bot autour de l'equipe ne supposent plus
+une sequence (bouton, question, accuse), ils relisent l'etat du fil juste avant de partir.
+- « Contacter l'équipe » (bot-membre.ts, boutonEquipe) : l'equipe deja la (quiRepond) ou fil deja en attente =
+  notification du bouton seulement (« L'équipe est déjà avec toi dans cette conversation. » / « L'équipe est déjà
+  prévenue, elle te répond ici. »), aucun message, aucune alerte. Sinon l'appui du bouton passe le fil en attente
+  (atomique : un double clic simultane ne parle qu'une fois) et le texte depend de ce qu'il a ecrit en 24 h
+  (texteEquipe : « Elle voit déjà toute notre conversation, tu n'as rien à réécrire. » ou « Si tu veux aller plus
+  vite, dis-moi en une phrase ce dont tu as besoin. »). TEXTE_EQUIPE fixe supprime.
+- Fil en attente, equipe pas encore la, le membre ecrit (repondreEnAttente) : le message est LU par un appel Haiku
+  court (lecture-attente.ts, consigne CONSIGNE_LECTURE_ATTENTE, « annule » ou « autre », ~470 jetons, ~0,05 centime,
+  delai 6 s, sans relance). Annulation = ligne « [système] Demande annulée par le membre. », fil hors attente (CAS
+  sur escalatedAt lu), « D'accord, je préviens l'équipe que c'est réglé. », et alerte Agent AOK « X a annulé sa
+  demande » seulement si une alerte etait partie pour cette attente (pas d'email). Reste, doute, panne = transmis
+  sans rien annuler, TEXTE_ATTENTE_HUMAIN au plus une fois par attente (direAttenteUneFois, un update atomique).
+- Reponse de l'agent non envoyee si l'equipe a ecrit depuis l'arrivee du message (equipePlusRapide), ligne
+  « [système] Réponse de l'IA non envoyée : l'équipe a écrit entre-temps. ». TEXTE_BAN_TRANSMIS a une variante
+  « deja prevenue » si le fil attend deja.
+- Auteur : les textes fixes du bot entrent au fil avec `auteur: 'bot'` (role assistant inchange), l'agent avec
+  'ia'. Cockpit (depot workspace, NON commite) : views/support/regles.ts (libelleBot) et FilConversation.tsx
+  affichent « Bot » ou « IA ». Email d'alerte : « Bot » aussi.
+- Verifs : `node scripts/verifier-attente-equipe.mjs` (13 blocs), eval `node scripts/eval-lecture-attente.mjs`
+  (2 cas, 2/2 le 22/10). SQL controle en READ ONLY (EXPLAIN sans ANALYZE + regle sur fils construits).
+- A suivre : une question du membre pendant l'attente recoit le message d'attente, pas la reponse de l'agent
+  (proposition dans le rapport du 22/10) ; verifier-fiche-personne.mjs echoue AVANT ce chantier (tab/lectures.ts
+  importe fiche-personne, commit 07a7dc8).
+
 ## API de Tab : le cockpit en lecture seule pour l'assistant de Brice (20/10/2026)
 
 Tab (assistant IA de Brice, WhatsApp) lit le cockpit par `GET /api/tab/v1/...` (JSON, cle en

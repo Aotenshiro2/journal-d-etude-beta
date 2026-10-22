@@ -620,11 +620,11 @@ export function clavierConfirmation(nonce: string): Bouton[][] {
 }
 
 /**
- * Le bouton « Contacter l'equipe » : le fil passe en « veut un humain » dans
- * l'ecran Support du cockpit, et la reponse de l'equipe arrive ici, par le bot.
+ * (22/10, Brice) Le texte du bouton « Contacter l'equipe » n'est plus un texte
+ * fixe : il depend de l'etat du fil (texteEquipe, TEXTE_EQUIPE_DEJA_ECRIT,
+ * TEXTE_EQUIPE_SANS_ECRIT, support-pont-pur.ts), et rien n'est envoye si
+ * l'equipe est deja prevenue ou deja la (bot-membre.ts, boutonEquipe).
  */
-export const TEXTE_EQUIPE = `C'est noté, je préviens l'équipe : quelqu'un va te répondre ici, dans cette conversation.\n\n`
-  + `Écris ta question juste en dessous, en quelques mots.`
 
 /**
  * « Contacter l'equipe » quand le fil Support n'a pas pu passer en attente
@@ -640,9 +640,12 @@ export const TEXTE_EQUIPE_INDISPONIBLE = `Je n'arrive pas à prévenir l'équipe
  */
 export const TEXTE_SECOURS_EQUIPE = `Si personne ne te répond ici, écris à ${SUPPORT} avec l'email de ton paiement.`
 
-/** Pendant qu'un humain de l'equipe a la main : le bot ne repond pas a sa place. */
-export const TEXTE_ATTENTE_HUMAIN = `J'ai transmis ton message à l'équipe : quelqu'un te répond ici, dans cette conversation.\n\n`
-  + `En attendant, les boutons marchent toujours :`
+/**
+ * Le fil attend un humain : le bot ne repond pas a sa place. (22/10) Le texte
+ * vit dans support-pont-pur.ts (teste sans base) : au plus une fois par
+ * periode d'attente, et pas a une annulation (bot-membre.ts, repondreEnAttente).
+ */
+export { TEXTE_ATTENTE_HUMAIN } from './support-pont-pur'
 
 export const TEXTE_NON_RATTACHE = `Je ne sais pas encore qui tu es côté abonnement.\n\n`
   + `Tu as payé ? Envoie-moi ici l'email de ton paiement : je t'envoie un code à 6 chiffres pour vérifier, puis je te relie à ton abonnement.\n\n`

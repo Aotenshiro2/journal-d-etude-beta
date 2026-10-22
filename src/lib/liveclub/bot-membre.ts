@@ -72,6 +72,15 @@
 //   /menu, « Mon abonnement » et un message ecrit relisent le droit en direct
 //   et donnent le lien des que la facture est payee, sans attendre le passage
 //   du lendemain matin. Le message ecrit le donne meme si l'equipe a la main.
+// - (22/10, Brice, meme cas) les messages du bot autour de l'equipe dependent
+//   de l'ETAT du fil relu juste avant l'envoi, plus d'une sequence supposee
+//   (bouton, question, accuse) : « Contacter l'équipe » deja prevenue ou deja
+//   la = une notification du bouton, aucun message (boutonEquipe) ; fil en
+//   attente et membre qui ecrit = son message est LU, une annulation sort le
+//   fil de l'attente, sinon un message d'attente au plus par periode
+//   (repondreEnAttente) ; reponse de l'agent retenue si l'equipe a ecrit
+//   pendant le calcul. Les textes fixes du bot entrent au fil avec
+//   auteur 'bot' (« Bot » au cockpit), ceux de l'agent avec 'ia'.
 
 import { journaliserGesteLiveClub } from '@/lib/stripe-actions'
 import { prisma } from '@/lib/db'
@@ -88,8 +97,8 @@ import {
   preparerAction, executerActionMembre, situationDuMembre, rattachementOuNull, profilSansRattachement,
   clavierMenu, clavierSansRattachement, clavierDureesPause, clavierConfirmation, clavierPauseAvantArret, clavierEquipe,
   clavierAccesOffert,
-  TEXTE_EQUIPE, TEXTE_EQUIPE_INDISPONIBLE, TEXTE_SECOURS_EQUIPE, TEXTE_NON_RATTACHE, TEXTE_PANNE,
-  TEXTE_ATTENTE_HUMAIN, ACTEUR_BOT_MEMBRE, type ProfilSansRattachement,
+  TEXTE_EQUIPE_INDISPONIBLE, TEXTE_SECOURS_EQUIPE, TEXTE_NON_RATTACHE, TEXTE_PANNE,
+  ACTEUR_BOT_MEMBRE, type ProfilSansRattachement,
 } from './actions-membre'
 import {
   premierPassage, reserverMessageIA, lireHistorique, ajouterEchange,
@@ -104,12 +113,16 @@ import {
 import { repondreAuMembre } from './agent-membre'
 import { contexteAccesOffert } from './prompt-membre'
 import {
-  enregistrerEchangeSupport, estEnAttenteHumain, lireMessagesFil, texteAvecBoutons, tracerEtape, tracerMessageBot,
+  annulerDemandeEquipe, direAttenteUneFois, enregistrerEchangeSupport, estEnAttenteHumain, lireEtatFil, lireMessagesFil,
+  texteAvecBoutons, tracerEtape, tracerMessageBot, type EtatFil,
 } from './support-pont'
 import {
   TEXTE_IMAGE_NON_TRANSMISE, TEXTE_IMAGE_TRANSMISE, lirePieceImageMembre,
   lirePieceMessage, quiRepond, reponseAImage, texteFilImage, type PieceSupport,
+  LIGNE_REPONSE_RETENUE, TEXTE_ANNULATION, TEXTE_ATTENTE_HUMAIN, decisionBoutonEquipe, decisionEnAttente,
+  equipePlusRapide, noteBoutonEquipe, texteEquipe,
 } from './support-pont-pur'
+import { lireSensEnAttenteIA } from './lecture-attente'
 import {
   envoyerCodeSiConnu, rattacherParEmail, reserverCode, verifierCode, type CodeReserve, type IssueCode,
   type IssueRattachementEmail,
@@ -226,38 +239,63 @@ async function versSupport(
  * negatif, que le pont ignore). Les boutons n'entrent au fil que par leur
  * libelle, jamais par leur adresse (lien d'invitation). Un envoi refuse par
  * Telegram est trace « [non délivré] ». Ne jette pas.
+ * (22/10) `auteur` : 'bot' (defaut) pour un texte fixe, 'ia' pour une reponse
+ * de l'agent ; le cockpit affiche « Bot » ou « IA ».
  */
 async function envoyer(
   chat: number,
   texte: string,
   boutons?: Bouton[][],
   identite?: IdentiteFil | null,
+  auteur: 'bot' | 'ia' = 'bot',
 ): Promise<Awaited<ReturnType<typeof envoyerTelegram>>> {
   const r = await envoyerTelegram(chat, texte, boutons)
   await tracerMessageBot(chat, texte, {
-    boutons, membreId: identite?.membre_id ?? null, email: identite?.email ?? null, livre: r.ok,
+    boutons, membreId: identite?.membre_id ?? null, email: identite?.email ?? null, livre: r.ok, auteur,
   })
   return r
+}
+
+type OptionsRepondeur = {
+  /** (22/10) 'ia' : une reponse de l'agent (affichee « IA » au cockpit) ; defaut 'bot'. */
+  auteur?: 'bot' | 'ia'
+  /**
+   * (22/10) Avec veutHumain : le texte a envoyer a la place si le fil attend
+   * DEJA un humain (relu juste avant) ; rien n'est alors re-signale a l'equipe.
+   */
+  siDejaPrevenue?: string
 }
 
 /**
  * Envoie au membre ET trace la reponse du bot dans le fil Support.
  *
- * Avec veutHumain, le fil passe d'abord en attente, puis on RELIT l'attente :
- * le pont ne jette jamais et ne dit pas s'il a ecrit. Sans confirmation
- * (panne, migration du support pas appliquee), on ne promet pas une reponse
- * que personne ne verra : `secours` remplace le texte, ou a defaut l'adresse
- * de l'equipe lui est ajoutee. (15/10) C'est le SEUL endroit du bot ou
- * support@ apparait : le pont vers l'equipe est alors lui-meme en panne.
+ * Avec veutHumain, le fil passe d'abord en attente : l'ecriture dit si elle a
+ * eu lieu (null = rien d'ecrit). Sans ecriture (panne, migration du support
+ * pas appliquee), on ne promet pas une reponse que personne ne verra :
+ * `secours` remplace le texte, ou a defaut l'adresse de l'equipe lui est
+ * ajoutee. (15/10) C'est le SEUL endroit du bot ou support@ apparait : le pont
+ * vers l'equipe est alors lui-meme en panne.
+ *
+ * (22/10) `o.siDejaPrevenue` : l'etat du fil est relu juste avant ; s'il
+ * attend deja un humain, ce texte part a la place (pas de second « je
+ * previens l'equipe »).
  */
 function repondeur(chat: number, telegramId: number, r: IdentiteFil | null) {
-  return async (texte: string, boutons?: Bouton[][], veutHumain = false, secours?: string): Promise<void> => {
+  return async (texte: string, boutons?: Bouton[][], veutHumain = false, secours?: string, o: OptionsRepondeur = {}): Promise<void> => {
+    const auteur = o.auteur ?? 'bot'
     if (!veutHumain) {
-      await envoyer(chat, texte, boutons, r)
+      await envoyer(chat, texte, boutons, r, auteur)
       return
     }
-    await versSupport(telegramId, r, 'ia', texteAvecBoutons(texte, boutons), true)
-    if (await estEnAttenteHumain(telegramId)) {
+    if (o.siDejaPrevenue && (await lireEtatFil(telegramId))?.attend) {
+      await envoyer(chat, o.siDejaPrevenue, boutons, r, auteur)
+      return
+    }
+    const ecrit = await enregistrerEchangeSupport({
+      telegramId, membreId: r?.membre_id ?? null, email: r?.email ?? null, role: 'ia',
+      texte: texteAvecBoutons(texte, boutons), veutHumain: true, auteur,
+    })
+    if (ecrit) {
       await envoyerTelegram(chat, texte, boutons)
       return
     }
@@ -463,6 +501,10 @@ const TEXTE_DEMANDE_ACCEPTEE = `C'est bon, ta demande pour rejoindre le Live Clu
 const TEXTE_BAN_TRANSMIS = `Ton accès est bon, mais un ancien blocage t'empêche de revenir dans le groupe, et je n'arrive pas à le lever.\n\n`
   + `Je préviens l'équipe : elle s'en occupe et te répond ici, dans cette conversation.`
 
+/** (22/10) Le meme constat quand le fil attend deja l'equipe (/menu redemande) : pas de second « je previens l'equipe ». */
+const TEXTE_BAN_DEJA_PREVENUE = `Ton accès est bon, mais un ancien blocage t'empêche de revenir dans le groupe, et je n'arrive pas à le lever.\n\n`
+  + `L'équipe est déjà prévenue : elle voit cette conversation et te répond ici.`
+
 /** (15/10) Une panne passagere : reessayer, ou le bouton « Contacter l'equipe » (joint au message). */
 const SINON_EQUIPE = `ou appuie sur « Contacter l'équipe » : elle te répond ici.`
 
@@ -617,7 +659,7 @@ async function proposerRetourAuGroupe(chat: number, u: Utilisateur, updateId: nu
 
   if (await leverBanSiBanni(u, droit) === 'echec') {
     // (15/10) L'equipe sait le lever : on le lui transmet (fil en attente d'un humain).
-    await repondeur(chat, u.id, null)(`${avant}${TEXTE_BAN_TRANSMIS}`, o.boutons, true)
+    await repondeur(chat, u.id, null)(`${avant}${TEXTE_BAN_TRANSMIS}`, o.boutons, true, undefined, { siDejaPrevenue: `${avant}${TEXTE_BAN_DEJA_PREVENUE}` })
     await journaliserGesteLiveClub(
       { geste: 'invitation', resultat: 'echec', regle: 'ban_non_leve', details },
       { ...contexte, updateId: null },
@@ -853,7 +895,7 @@ async function traiterStartJeton(chat: number, u: Utilisateur, jeton: string, up
 
   if (await leverBanSiBanni(u, droit) === 'echec') {
     // (15/10) L'equipe sait le lever : on le lui transmet (fil en attente d'un humain).
-    await repondeur(chat, u.id, null)(TEXTE_BAN_TRANSMIS, undefined, true)
+    await repondeur(chat, u.id, null)(TEXTE_BAN_TRANSMIS, undefined, true, undefined, { siDejaPrevenue: TEXTE_BAN_DEJA_PREVENUE })
     await journal({ geste: 'invitation', resultat: 'echec', regle: 'ban_non_leve', details: { usage: ligne.usage } }, extra)
     return
   }
@@ -1091,9 +1133,13 @@ async function redonnerChoixCompte(chat: number, u: Utilisateur): Promise<boolea
  * (elle ne depend pas du droit), le reste recoit TEXTE_PANNE, ni l'explication
  * ni la raison d'une sortie, qu'on ne peut pas dire a quelqu'un qui a peut-etre
  * un acces offert.
+ *
+ * (22/10) Le fil attend un humain (hors email et code) : repondreEnAttente
+ * (le message est lu, au plus un message d'attente par periode). `recuLe` :
+ * l'arrivee du message (traiterTexteLibre).
  */
 async function traiterNonRattache(
-  chat: number, u: Utilisateur, texte: string, updateId: number, droitIllisible = false, droit?: Droit,
+  chat: number, u: Utilisateur, texte: string, updateId: number, recuLe: number, droitIllisible = false, droit?: Droit,
 ): Promise<void> {
   const intention = intentionNonRattache(texte)
   // Un code tape n'est jamais lisible dans le fil Support, meme glisse dans
@@ -1146,8 +1192,9 @@ async function traiterNonRattache(
     return
   }
 
-  if (await estEnAttenteHumain(u.id)) {
-    await repondre(TEXTE_ATTENTE_HUMAIN, clavierSansRattachement())
+  const etat = await lireEtatFil(u.id)
+  if (etat?.attend) {
+    await repondreEnAttente(chat, u, masquerCodes(texte), null, clavierSansRattachement(), etat, recuLe)
     return
   }
   // (15/10) Un choix de compte encore ouvert (« Utiliser ce compte-ci » ou
@@ -1181,6 +1228,9 @@ async function traiterNonRattache(
  * rien a payer ni a mettre en pause), avec le menu de l'acces offert.
  */
 async function traiterTexteLibre(chat: number, u: Utilisateur, texte: string, updateId: number): Promise<void> {
+  // (22/10) L'arrivee du message : une reponse de l'equipe ecrite APRES lui
+  // retient la reponse prevue du bot (equipePlusRapide).
+  const recuLe = Date.now()
   const r = await rattachementOuNull(u.id)
   // (16/10) L'equipe a la main dans ce fil : son message va a l'equipe, pas a l'IA.
   if (await versEquipeSiElleALaMain(u, r, texte)) {
@@ -1203,7 +1253,7 @@ async function traiterTexteLibre(chat: number, u: Utilisateur, texte: string, up
     // donnerait les liens d'abonnement publics). Si l'equipe a la main,
     // l'agent dit d'attendre, comme d'habitude.
     if (await proposerTarifReserve(chat, u, { emailVerifie: r.email, respecterAttenteHumain: true })) return
-    await converserAvecAgent(chat, u, texte, r, clavierMenu())
+    await converserAvecAgent(chat, u, texte, r, clavierMenu(), recuLe)
     return
   }
   const profil = await profilSansRattachement(u.id, r)
@@ -1212,7 +1262,7 @@ async function traiterTexteLibre(chat: number, u: Utilisateur, texte: string, up
     if (await proposerRetourAuGroupe(chat, u, updateId, {
       declencheur: 'texte', boutons: clavierAccesOffert(), reprendre: true, droit: profil.droit,
     })) return
-    await converserAvecAgent(chat, u, texte, null, clavierAccesOffert(), contexteAccesOffert(profil.acces.texte))
+    await converserAvecAgent(chat, u, texte, null, clavierAccesOffert(), recuLe, contexteAccesOffert(profil.acces.texte))
     return
   }
   if (r === 'illisible') {
@@ -1220,7 +1270,7 @@ async function traiterTexteLibre(chat: number, u: Utilisateur, texte: string, up
     await repondeur(chat, u.id, null)(TEXTE_PANNE, clavierEquipe())
     return
   }
-  await traiterNonRattache(chat, u, texte, updateId, profil.parcours === 'panne', profil.droit)
+  await traiterNonRattache(chat, u, texte, updateId, recuLe, profil.parcours === 'panne', profil.droit)
 }
 
 /**
@@ -1289,12 +1339,63 @@ async function recevoirImageMembre(chat: number, u: Utilisateur, message: Messag
 }
 
 /**
+ * (22/10, Brice) Le fil attend un humain, l'equipe n'a pas encore repondu, et
+ * le membre ECRIT (son message est deja au fil). Le bot ne repond plus a
+ * l'aveugle par un texte fixe : il LIT le message (lecture-attente.ts, un appel
+ * Haiku court), puis relit l'etat du fil juste avant d'agir :
+ * - l'equipe a ecrit entre-temps, ou a la main : rien (elle lit elle-meme) ;
+ * - une annulation (« c'est bon », « c'était un accident », « j'ai trouvé ») :
+ *   le fil sort de l'attente avec « [système] Demande annulée par le membre. »
+ *   (seulement si c'est toujours l'attente lue), TEXTE_ANNULATION au membre,
+ *   et « X a annulé sa demande » a l'equipe si une alerte etait partie pour
+ *   cette attente (annulerDemandeEquipe) ;
+ * - le reste (precision, question, doute, panne de la lecture) : transmis,
+ *   rien n'est annule, et au plus UN message d'attente par periode
+ *   (direAttenteUneFois, atomique : trois messages d'affilee = un seul).
+ * Pas de nouvelle alerte pour une precision : l'equipe est deja prevenue.
+ */
+async function repondreEnAttente(
+  chat: number,
+  u: Utilisateur,
+  texte: string,
+  identite: IdentiteFil | null,
+  clavier: Bouton[][],
+  etat: EtatFil,
+  recuLe: number,
+): Promise<void> {
+  const sens = await lireSensEnAttenteIA(u.id, texte, etat.messages)
+  const relu = await lireEtatFil(u.id)
+  if (relu && (equipePlusRapide(relu.messages, recuLe) || quiRepond(relu.messages, Date.now()) === 'equipe')) return
+  if (decisionEnAttente(sens) === 'annuler' && etat.escaladeLe) {
+    if (await annulerDemandeEquipe(u.id, etat.escaladeLe)) await envoyer(chat, TEXTE_ANNULATION, undefined, identite)
+    return
+  }
+  if (await direAttenteUneFois(u.id, TEXTE_ATTENTE_HUMAIN, { boutons: clavier })) {
+    await envoyerTelegram(chat, TEXTE_ATTENTE_HUMAIN, clavier)
+  }
+}
+
+/** (22/10) L'equipe a-t-elle ecrit dans le fil depuis `depuis` ? Fil illisible : non (le bot repond comme avant). */
+async function equipeAEcritDepuis(telegramId: number, depuis: number): Promise<boolean> {
+  const etat = await lireEtatFil(telegramId)
+  return etat !== null && equipePlusRapide(etat.messages, depuis)
+}
+
+/**
  * L'agent, pour un compte rattache (r) ou a acces offert sans rattachement
  * (r null : son message va au fil Support codes masques, comme tout compte
  * non rattache). `clavier` : le menu joint aux replis (menu complet, ou celui
  * de l'acces offert). `contexte` : la situation d'un acces offert, donnee a
  * l'agent d'emblee (contexteAccesOffert, prompt-membre.ts). Le message du
  * membre est deja trace au fil Support par l'appelant (traiterTexteLibre).
+ *
+ * (22/10, Brice : « ca ne se passe pas dans l'ordre que tu avais prevu, si
+ * moi je suis reactif ») L'etat du fil est relu :
+ * - avant : le fil attend un humain = repondreEnAttente, pas l'agent ;
+ * - apres le calcul (plusieurs secondes) : si l'equipe a ecrit depuis
+ *   l'arrivee du message (`recuLe`), la reponse de l'agent ne part pas, une
+ *   ligne « [système] » le dit au fil, et rien n'entre a l'historique de
+ *   l'agent (le membre ne l'a pas lue).
  */
 async function converserAvecAgent(
   chat: number,
@@ -1302,12 +1403,14 @@ async function converserAvecAgent(
   texte: string,
   r: Rattachement | null,
   clavier: Bouton[][],
+  recuLe: number,
   contexte?: string,
 ): Promise<void> {
   const repondre = repondeur(chat, u.id, r)
 
-  if (await estEnAttenteHumain(u.id)) {
-    await repondre(TEXTE_ATTENTE_HUMAIN, clavier)
+  const etat = await lireEtatFil(u.id)
+  if (etat?.attend) {
+    await repondreEnAttente(chat, u, r ? texte : masquerCodes(texte), r, clavier, etat, recuLe)
     return
   }
 
@@ -1332,11 +1435,21 @@ async function converserAvecAgent(
     reponse = await repondreAuMembre(u.id, historique, texte, { contexte })
   } catch (err) {
     console.warn(`[liveclub/bot] agent indisponible : ${messageErreur(err)}`)
+    // (22/10) L'equipe a repondu pendant ce temps : elle a la main, rien a dire.
+    if (await equipeAEcritDepuis(u.id, recuLe)) return
     // L'agent ne sait pas repondre : le fil passe en « veut un humain ».
     await repondre(`Je n'arrive pas à répondre là, tout de suite, donc je préviens l'équipe : quelqu'un va te répondre ici. En attendant, les boutons marchent :`, clavier, true)
     return
   }
 
+  // (22/10) L'equipe a ecrit pendant le calcul : la reponse ne part pas.
+  if (await equipeAEcritDepuis(u.id, recuLe)) {
+    await tracerEtape(u.id, LIGNE_REPONSE_RETENUE, { membreId: r?.membre_id ?? null })
+    return
+  }
+
+  // Le texte vient de l'agent (« IA » au cockpit), sauf son repli fixe (TEXTE_SANS_REPONSE, « Bot »).
+  const auteur = reponse.repli ? 'bot' : 'ia'
   if (reponse.action) {
     let nonce: string
     try {
@@ -1346,13 +1459,13 @@ async function converserAvecAgent(
       await repondre(TEXTE_PANNE, clavierEquipe())
       return
     }
-    await repondre(reponse.texte, clavierConfirmation(nonce), reponse.veutHumain === true)
+    await repondre(reponse.texte, clavierConfirmation(nonce), reponse.veutHumain === true, undefined, { auteur })
   } else {
     // L'agent n'a pas abouti : le filet est le menu a boutons, joint au
     // message. Arret demande pour la premiere fois : la pause d'abord, avec
     // les memes boutons que le parcours « Arreter » du menu.
     const boutons = reponse.repli ? clavier : reponse.pauseAvantArret ? clavierPauseAvantArret() : undefined
-    await repondre(reponse.texte, boutons, reponse.veutHumain === true)
+    await repondre(reponse.texte, boutons, reponse.veutHumain === true, undefined, { auteur })
   }
   try {
     await ajouterEchange(u.id, texte, reponse.texte)
@@ -1573,6 +1686,54 @@ async function boutonAccesOffert(chat: number, u: Utilisateur, updateId: number,
   await envoyer(chat, p.acces.texte, clavierAccesOffert())
 }
 
+/**
+ * (22/10, Brice, cas de Christine : deux appuis, deux fois le meme texte, qui
+ * lui demandait de reecrire sa question) « Contacter l'équipe », selon l'etat
+ * du fil relu AVANT de repondre au bouton (la notification d'un bouton ne se
+ * donne qu'une fois) :
+ * - l'equipe a deja la main (quiRepond) : la notification « L'équipe est déjà
+ *   avec toi dans cette conversation. », aucun message, aucune alerte ;
+ * - le fil attend deja un humain : « L'équipe est déjà prévenue, elle te
+ *   répond ici. », aucun message, aucune alerte ;
+ * - sinon : l'appui entre au fil et le fait passer en attente (atomique : de
+ *   deux appuis simultanes, seul celui qui l'y fait passer parle, et l'alerte
+ *   part une fois, au rythme habituel), puis le texte selon ce que le membre
+ *   a deja ecrit (texteEquipe). Pont en panne : TEXTE_EQUIPE_INDISPONIBLE.
+ * `nonRattacheSansDroit` : un compte non rattache sans droit, sorti du groupe
+ * il y a peu (06/10), recoit d'abord la raison de sa sortie.
+ */
+async function boutonEquipe(
+  chat: number,
+  u: Utilisateur,
+  idBouton: string,
+  identite: IdentiteFil | null,
+  nonRattacheSansDroit: () => Promise<boolean>,
+): Promise<void> {
+  const etat = await lireEtatFil(u.id)
+  const decision = decisionBoutonEquipe(etat, Date.now())
+  const appui = `[bouton] ${libelleBouton('m:equipe')}`
+  if (decision !== 'prevenir') {
+    await repondreBouton(idBouton, noteBoutonEquipe(decision))
+    await versSupport(u.id, identite, 'membre', appui)
+    return
+  }
+  await repondreBouton(idBouton)
+  // Jamais a un acces offert, ni sur un droit illisible.
+  if (await nonRattacheSansDroit()) await donnerRaisonDeLaSortie(chat, u.id)
+  const issue = await enregistrerEchangeSupport({
+    telegramId: u.id, membreId: identite?.membre_id ?? null, email: identite?.email ?? null,
+    role: 'membre', texte: appui, veutHumain: true, alerte: 'demande',
+  })
+  if (!issue) {
+    console.warn(`[liveclub/bot] mise en attente d'un humain non confirmee pour u${u.id} : adresse de l'equipe donnee`)
+    await envoyerTelegram(chat, TEXTE_EQUIPE_INDISPONIBLE)
+    return
+  }
+  // Un autre appui simultane a deja fait passer le fil en attente : lui a parle.
+  if (!issue.passeEnAttente) return
+  await envoyer(chat, texteEquipe(etat?.messages ?? [], Date.now()), undefined, identite)
+}
+
 /** Un clic sur un bouton. Toujours answerCallbackQuery, quoi qu'il arrive. */
 export async function traiterBouton(bouton: BoutonTg, updateId: number): Promise<void> {
   const u = bouton.from
@@ -1591,7 +1752,8 @@ export async function traiterBouton(bouton: BoutonTg, updateId: number): Promise
   const r = await rattachementOuNull(u.id)
   const identite = r && r !== 'illisible' ? r : null
   // Au fil Support : le libelle du bouton, jamais le nonce d'une confirmation.
-  await versSupport(u.id, identite, 'membre', `[bouton] ${libelleBouton(data)}`)
+  // (22/10) « Contacter l'equipe » trace son appui lui-meme (boutonEquipe).
+  if (data !== 'm:equipe') await versSupport(u.id, identite, 'membre', `[bouton] ${libelleBouton(data)}`)
 
   // (06/10) Sans rattachement lisible, le droit d'abord (acces offert, panne,
   // ou non rattache), lu une seule fois et seulement si un bouton le demande,
@@ -1601,14 +1763,9 @@ export async function traiterBouton(bouton: BoutonTg, updateId: number): Promise
     (profilLu ??= profilSansRattachement(u.id, r === 'illisible' ? 'illisible' : null))
 
   // « Contacter l'equipe » : le fil passe en « veut un humain » (decision 5),
-  // la reponse de l'equipe arrivera ici par le bot.
+  // la reponse de l'equipe arrivera ici par le bot. (22/10) Selon l'etat du fil.
   if (data === 'm:equipe') {
-    await repondreBouton(bouton.id)
-    // Non rattache sans droit, sorti du groupe il y a peu (06/10) : la raison
-    // d'abord (sans boutons), puis l'equipe est prevenue comme d'habitude.
-    // Jamais a un acces offert, ni sur un droit illisible.
-    if (!identite && (await profil()).parcours === 'non_rattache') await donnerRaisonDeLaSortie(chat, u.id)
-    await repondeur(chat, u.id, identite)(TEXTE_EQUIPE, undefined, true, TEXTE_EQUIPE_INDISPONIBLE)
+    await boutonEquipe(chat, u, bouton.id, identite, async () => !identite && (await profil()).parcours === 'non_rattache')
     return
   }
 
