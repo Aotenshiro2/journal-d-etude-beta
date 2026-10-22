@@ -45,11 +45,11 @@ export async function listerNotes(sens: Sens, statut: StatutNote | 'toutes', lim
   return lignes.map(versNote)
 }
 
-/** Destinataire (vers_claude, les_deux par defaut) ou auteur Claude (vers_tab, sora par defaut). Brice : aucune. */
+/** Destinataire (vers_claude, toutes par defaut) ou auteur Claude (vers_tab, sora par defaut). Brice : aucune. */
 function instanceDe(sens: Sens, auteur: Auteur, i: Instance | null): Instance | null {
-  if (sens === 'vers_claude') return i ?? 'les_deux'
+  if (sens === 'vers_claude') return i ?? 'toutes'
   if (auteur !== 'claude') return null
-  return i === 'umi' ? 'umi' : 'sora'
+  return i === 'umi' || i === 'sekai' ? i : 'sora'
 }
 
 export async function creerNote(sens: Sens, auteur: Auteur, n: NoteEntrante): Promise<NotePerso> {
