@@ -1089,7 +1089,8 @@ export function phraseARegler(aRegler: readonly FactureARegler[], o: { lienDansL
 /**
  * Ce que le bot dit a un payeur dont l'acces est suspendu pour un impaye
  * encore ouvert (point 4 de Brice, 30/09) : le montant et le lien de sa
- * facture, « regle-la et ton acces rouvre tout seul, a ton tarif actuel »,
+ * facture, « regle-la avant la date et tu gardes ton tarif actuel » (plus de
+ * « rouvre tout seul » depuis le 22/10 : la reouverture attend le matin),
  * AU LIEU d'un nouvel abonnement. Ton neutre, jamais de relance.
  */
 export function texteDette(d: Dette): string {
@@ -1097,9 +1098,87 @@ export function texteDette(d: Dette): string {
   return [
     "Ton dernier paiement pour le Live Club n'est pas passé, et ça fait plus de 5 jours : ton abonnement ne t'ouvre plus le groupe pour le moment.",
     phraseARegler(d.aRegler, { lienDansLeTexte: true }),
-    `${plusieurs ? 'Règle-les' : 'Règle-la'} et ton accès rouvre tout seul, à ton tarif actuel (si c'est réglé avant le ${formaterDateFr(d.limite)}). `
+    `${plusieurs ? 'Règle-les' : 'Règle-la'} avant le ${formaterDateFr(d.limite)} et tu gardes ton tarif actuel. `
       + `Dès que c'est fait, écris-moi /menu : je te redonne le lien du groupe tout de suite.`,
   ].join('\n\n')
+}
+
+// ---------------------------------------------------------------------------
+// (22/10, Brice, cas de Christine) « J'ai réglé : revenir dans le groupe »
+//
+// Il n'y a pas de webhook Stripe pour le Live Club : la reouverture
+// automatique attend le passage du lendemain matin (tacheReouvertures). Le
+// message de sortie pour impaye (modeleSortieImpaye, version Telegram) porte
+// donc ce bouton : au clic, le bot relit le droit EN DIRECT (droitLiveClub
+// lit Stripe a chaque appel) et donne le lien de retour tout de suite, ou
+// redit ce qui reste a regler.
+// ---------------------------------------------------------------------------
+
+/** Le bouton (callback_data de 7 octets) : message prive seulement, jamais dans un email. */
+export const BOUTON_REGLE = { texte: "J'ai réglé : revenir dans le groupe", data: 'm:regle' } as const
+
+export type IssueBoutonRegle = 'deja_dans_le_groupe' | 'lien' | 'lien_recent' | 'pas_encore_paye' | 'sans_droit' | 'inconnu'
+
+/**
+ * Ce que fait le clic, d'apres la presence dans le groupe (getChatMember) et
+ * le droit relu en direct. Dans le groupe : rien a faire. Droit 'non' : la
+ * dette d'abord (montant et lien de la facture), sinon pas d'abonnement.
+ * Droit ou presence illisibles : on ne donne pas de lien. Droit 'oui' et hors
+ * du groupe : le lien, sauf s'il en a recu un il y a moins de 10 minutes.
+ */
+export function decisionBoutonRegle(p: {
+  presence: 'oui' | 'non' | 'inconnu'
+  droit: 'oui' | 'non' | 'inconnu'
+  dette: boolean
+  lienRecent: boolean
+}): IssueBoutonRegle {
+  if (p.presence === 'oui') return 'deja_dans_le_groupe'
+  if (p.droit === 'non') return p.dette ? 'pas_encore_paye' : 'sans_droit'
+  if (p.droit === 'inconnu' || p.presence === 'inconnu') return 'inconnu'
+  return p.lienRecent ? 'lien_recent' : 'lien'
+}
+
+/** Pas encore paye au moment du clic : une phrase claire, le montant et le lien de la facture. */
+export function texteReglementPasVu(d: Dette): string {
+  const plusieurs = d.aRegler.length > 1
+  return [
+    `Je ne vois pas encore ton paiement : ${plusieurs ? 'tes factures sont toujours ouvertes' : 'ta facture est toujours ouverte'}, donc je ne peux pas encore te redonner le groupe.`,
+    phraseARegler(d.aRegler, { lienDansLeTexte: true }),
+    `Si tu viens de payer, attends une minute et réappuie sur « ${BOUTON_REGLE.texte} ». Dès que le paiement est passé, je te redonne ton lien tout de suite.`,
+  ].filter(Boolean).join('\n\n')
+}
+
+/** Plus d'abonnement du tout au moment du clic (fenetre de 30 jours passee...). portes = texteAbonnement() (config.ts). */
+export function texteReglementSansAbonnement(portes: string): string {
+  return `Je ne vois pas d'abonnement Live Club actif en ce moment, donc je ne peux pas t'ouvrir le groupe.\n\n`
+    + `Si tu viens de payer, attends une minute et réappuie sur « ${BOUTON_REGLE.texte} ».\n\n${portes}`
+}
+
+/** Un lien a deja ete donne il y a moins de 10 minutes : on ne le refait pas a chaque clic. */
+export const TEXTE_LIEN_DEJA_DONNE = `Je t'ai donné ton lien il y a quelques minutes, juste au-dessus dans cette conversation : `
+  + `appuie sur « Rejoindre le groupe », puis demande à rejoindre. C'est accepté tout seul.\n\n`
+  + `Tu ne le retrouves pas ? Réappuie sur « ${BOUTON_REGLE.texte} » dans 10 minutes : je t'en donne un nouveau.`
+
+/**
+ * La phrase « une question ? » d'un message qui part des deux cotes (Brice,
+ * 16/10 puis 22/10) : en message prive, le bot lui-meme (l'equipe repond dans
+ * la conversation), plus jamais support@ ; par email, la reponse a l'email
+ * (replyTo = support@, elle arrive a l'equipe).
+ */
+export function phraseQuestion(canal: 'telegram' | 'email', debut = 'Une question ?'): string {
+  return canal === 'telegram' ? `${debut} Écris-moi ici.` : `${debut} Réponds à cet email.`
+}
+
+/**
+ * La porte de retour du message de sortie pour impaye (Brice, 22/10). En
+ * prive : le bouton BOUTON_REGLE (ou un message ecrit au bot). Par email : le
+ * lien du bot (lienBotAccueil, config.ts), ou le membre se fait reconnaitre.
+ * Le passage du lendemain matin reste le filet (« demain matin »).
+ */
+export function phraseRetourApresReglement(canal: 'telegram' | 'email', lienBot: string): string {
+  return canal === 'telegram'
+    ? `Dès que c'est réglé, appuie sur « ${BOUTON_REGLE.texte} » (ou écris-moi) : je te redonne ton lien tout de suite. Sinon, je te le renvoie demain matin.`
+    : `Dès que c'est réglé, écris au bot du Live Club (${lienBot}) : il te redonne ton lien tout de suite. Sinon, on te le renvoie demain matin.`
 }
 
 /**
@@ -1484,6 +1563,7 @@ const LIBELLES_BOUTONS: Record<string, string> = {
   'm:annuler': 'Annuler un arrêt prévu',
   'm:equipe': "Contacter l'équipe",
   'v:email': "J'ai payé : vérifier mon email",
+  [BOUTON_REGLE.data]: BOUTON_REGLE.texte,
 }
 
 /** Le libelle lisible d'un callback_data (« Mon abonnement », « Pause de 3 mois », « Oui, je confirme »). */
@@ -1595,8 +1675,8 @@ export function refusReintegration(
   if (droit.dette) {
     return {
       genre: 'refus', regle: 'impaye_ouvert',
-      message: `${qui} a un paiement en retard : son accès rouvre tout seul dès que la facture est réglée, `
-        + `et le bot lui donne le lien de la facture dès qu'il lui écrit.`,
+      message: `${qui} a un paiement en retard. Le bot lui donne le lien de la facture dès qu'il lui écrit, `
+        + `et dès qu'elle est réglée, il lui redonne son lien du groupe tout de suite s'il lui écrit (sinon au passage du lendemain matin).`,
     }
   }
   return {

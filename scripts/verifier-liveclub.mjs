@@ -1037,9 +1037,11 @@ test('la dette d abord : montant et lien de la facture, pas de nouvel abonnement
   assert.equal(d.limite, '2026-10-01T10:00:00.000Z')
   assert.equal(d.aRegler.length, 1)
   const t = texteDette(d)
-  for (const attendu of ['89 €', LIEN_FACTURE, '1er octobre 2026', 'tarif actuel', 'rouvre tout seul', '/menu', 'facture du 1er septembre 2026']) {
+  for (const attendu of ['89 €', LIEN_FACTURE, '1er octobre 2026', 'tarif actuel', 'tout de suite', '/menu', 'facture du 1er septembre 2026']) {
     assert.ok(t.includes(attendu), attendu)
   }
+  // 22/10 (Christine) : plus de promesse « rouvre tout seul », la reouverture automatique attend le matin.
+  assert.ok(!/rouvre tout seul/.test(t), t)
   // Pas de liens d'abonnement tant que la facture se regle, ton neutre.
   for (const u of URLS_ABONNEMENT) assert.ok(!t.includes(u), u)
   const horsClavier = new RegExp(`[${[0x2013, 0x2014, 0x2026, 0x201c, 0x201d].map(c => String.fromCharCode(c)).join("")}]`)

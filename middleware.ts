@@ -34,7 +34,8 @@ export async function middleware(request: NextRequest) {
   // /api/membres/photo : photo d'un profil PUBLIC pour aoknowledge.com/membres/<n°> (lot 2, 18/10/2026).
   // /api/academie/achat (+ /confirmer, /webhook) et /api/academie/catalogue : vente a l'unite sans compte (19/10/2026).
   // /api/tab/ : l'API de Tab, cle dediee verifiee dans la route (20/10/2026).
-  const publicPaths = ['/auth', '/api/health', '/guide', '/api/membres/photo', '/api/academie/achat', '/api/academie/catalogue', '/api/tab/']
+  // /api/liveclub/stripe : webhook Stripe du Live Club, signature verifiee dans la route, 503 sans son secret (22/10/2026).
+  const publicPaths = ['/auth', '/api/health', '/guide', '/api/membres/photo', '/api/academie/achat', '/api/academie/catalogue', '/api/tab/', '/api/liveclub/stripe']
   const isPublic = pathname === '/' || publicPaths.some(p => pathname.startsWith(p))
   if (isPublic) return supabaseResponse
 

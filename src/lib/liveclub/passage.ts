@@ -78,7 +78,8 @@ import {
   sortiesActives, sortiesImpayesActives,
 } from './config'
 import {
-  listerAbonnementsLiveClub, clientsStripeParEmail, abonnementsLiveClubParEmail, adopterPause, effacerMetadonneesPause,
+  listerAbonnementsLiveClub, clientsStripeParEmail, abonnementsLiveClubParEmail, abonnementsLiveClubDuClient, adopterPause,
+  effacerMetadonneesPause,
   lireAbonnement, apercuProchaineFacture as apercuStripe, facturesPayeesAbonnement, fermerFenetreImpaye,
   annulerFacturesOuvertes,
   type AbonnementResume,
@@ -96,7 +97,7 @@ import {
   emailRappelFinExemption, emailFinExemption,
   modeleRappelPause, modeleDebutPauseSansReprise, modeleRetour, modeleRappelFinBroker, modeleFinBroker,
   modeleSortieDesabonne, modeleRappelPrelevement, modeleRetourSortieAbusive, modeleSortieImpaye, modeleReouverture,
-  modeleFinFenetre, modeleRappelFinExemption, modeleFinExemption,
+  modeleFinFenetre, modeleRappelFinExemption, modeleFinExemption, boutonsTelegram,
   type ModeleMessage, type ResultatEmail,
 } from './emails'
 import {
@@ -571,7 +572,9 @@ async function prevenir(
   parEmail: (email: string) => Promise<ResultatEmail>,
 ): Promise<{ canal: 'prive' | 'email'; telegramId: number | null } | null> {
   const texte = m.paragraphes.join('\n\n')
-  const boutons = m.bouton ? [[{ texte: m.bouton.texte, url: m.bouton.url }]] : undefined
+  // (22/10) Le bouton a adresse, puis celui qui revient au bot (sortie pour
+  // impaye : « J'ai réglé : revenir dans le groupe »), en prive seulement.
+  const boutons = boutonsTelegram(m)
   for (const tid of telegramIds) {
     const r = await envoyer(tid, texte, boutons)
     if (r.ok) {
@@ -1788,10 +1791,11 @@ async function tacheImpayes(ctx: Contexte, abonnements: AbonnementResume[], parC
 }
 
 /**
- * Le message de sortie pour impaye (montant, lien de la facture, acces qui
- * rouvre tout seul, tarif garde dans les 30 jours), une fois par abonnement,
- * compte et facture, reserve avant l'envoi. En prive s'il a demarre le bot,
- * sinon par email. true = parti.
+ * Le message de sortie pour impaye (montant, lien de la facture, tarif garde
+ * dans les 30 jours ; en prive, le bouton « J'ai réglé : revenir dans le
+ * groupe » qui redonne le lien des que c'est paye, 22/10), une fois par
+ * abonnement, compte et facture, reserve avant l'envoi. En prive s'il a
+ * demarre le bot, sinon par email (lien du bot). true = parti.
  */
 async function messageSortieImpaye(ctx: Contexte, a: AbonnementResume, r: Rattache, impaye: Impaye & { depuis: string }): Promise<boolean> {
   const facture = impaye.factureId
@@ -2695,8 +2699,9 @@ async function tachePurge(ctx: Contexte) {
 // Le passage
 // ---------------------------------------------------------------------------
 
-export async function passageQuotidien(maintenant: Date = new Date()): Promise<SynthesePassage> {
-  const ctx: Contexte = {
+/** Un contexte neuf : celui du passage, ou celui d'une reouverture apres paiement (webhook). */
+function nouveauContexte(maintenant: Date): Contexte {
+  return {
     maintenant,
     debut: Date.now(),
     plafond: new PlafondSorties(PLAFOND_SORTIES_PASSAGE),
@@ -2729,6 +2734,80 @@ export async function passageQuotidien(maintenant: Date = new Date()): Promise<S
       erreurs: [],
     },
   }
+}
+
+export type SyntheseReouvertureClient = {
+  ok: boolean
+  /** Comptes Telegram rattaches a ce client (ou a l'email de la facture). */
+  comptes: number
+  reouvertures: SynthesePassage['reouvertures']
+  messages_perdus: number
+  /** Codes courts, sans aucune donnee personnelle. */
+  erreurs: string[]
+}
+
+/**
+ * (22/10, Brice) PRETE, PAS BRANCHEE : la reouverture (h) pour UN client
+ * Stripe du compte melanie, des que sa facture est payee, appelee par le
+ * webhook invoice.paid (POST /api/liveclub/stripe, actif seulement avec
+ * STRIPE_WEBHOOK_SECRET_LIVECLUB ; reouverture-stripe-pur.ts dit quoi creer
+ * chez Stripe). C'est EXACTEMENT la tache du passage (tacheReouvertures), sur
+ * les seuls comptes rattaches a ce client (ou a l'email de la facture) et les
+ * abonnements Live Club de ce client relus en direct : memes garde-fous
+ * (facture de la sortie reglee apres la sortie, absent du groupe, droit 'oui'
+ * relu en direct), meme reservation (une fois par reouverture : ni le
+ * passage du lendemain ni un second webhook ne renvoient le message), meme
+ * message (lien de demande d'adhesion en prive, sinon lien personnel vers le
+ * bot par email). Ne jette pas : une panne laisse la reouverture au passage.
+ */
+export async function reouvertureApresPaiement(
+  clientStripe: string,
+  emailFacture: string | null,
+  maintenant: Date = new Date(),
+): Promise<SyntheseReouvertureClient> {
+  const ctx = nouveauContexte(maintenant)
+  const fin = (comptes: number): SyntheseReouvertureClient => ({
+    ok: ctx.s.erreurs.length === 0,
+    comptes,
+    reouvertures: ctx.s.reouvertures,
+    messages_perdus: ctx.s.messages_perdus,
+    erreurs: ctx.s.erreurs,
+  })
+  if (!chatId()) {
+    erreur(ctx, 'chat_id_absent')
+    return fin(0)
+  }
+  let rattaches: Rattache[]
+  try {
+    rattaches = await lireRattachements()
+  } catch (err) {
+    erreur(ctx, 'rattachements_illisibles', err)
+    return fin(0)
+  }
+  // Meme lecture que indexerParClient : le client rattache ne compte que s'il
+  // vient du compte melanie ; sinon l'email (celui de la facture).
+  const email = normaliserEmail(emailFacture)
+  const siens = rattaches.filter(r =>
+    (r.clientStripe === clientStripe && (r.compte == null || r.compte === 'melanie'))
+    || (email !== null && normaliserEmail(r.email) === email))
+  if (!siens.length) return fin(0)
+  let abonnements: AbonnementResume[]
+  try {
+    abonnements = await abonnementsLiveClubDuClient(clientStripe)
+  } catch (err) {
+    erreur(ctx, 'stripe_illisible', err)
+    return fin(siens.length)
+  }
+  try {
+    await tacheReouvertures(ctx, abonnements, new Map([[clientStripe, siens]]))
+  } catch (err) {
+    erreur(ctx, 'reouvertures_interrompu', err)
+  }
+  return fin(siens.length)
+}
+
+export async function passageQuotidien(maintenant: Date = new Date()): Promise<SynthesePassage> {
+  const ctx = nouveauContexte(maintenant)
   if (!chatId()) erreur(ctx, 'chat_id_absent')
 
   let rattaches: Rattache[] = []

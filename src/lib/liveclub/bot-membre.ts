@@ -66,6 +66,12 @@
 //   pas, changement de compte) ou propose par le bouton « Contacter
 //   l'equipe » (pannes passageres). support@ ne vient plus que du repondeur,
 //   quand le pont vers l'equipe est lui-meme en panne.
+// - (22/10, Brice, cas de Christine) pas de webhook Stripe pour le Live
+//   Club : apres une sortie pour impaye, le bouton « J'ai réglé : revenir
+//   dans le groupe » du message de sortie (revenirApresReglement), /start,
+//   /menu, « Mon abonnement » et un message ecrit relisent le droit en direct
+//   et donnent le lien des que la facture est payee, sans attendre le passage
+//   du lendemain matin. Le message ecrit le donne meme si l'equipe a la main.
 
 import { journaliserGesteLiveClub } from '@/lib/stripe-actions'
 import { prisma } from '@/lib/db'
@@ -115,6 +121,7 @@ import {
   REGLE_RAISON_SORTIE, jetonBienForme, libelleBouton, messageErreur, normaliserEmail, pauseDejaProposee, relationAbsente,
   sortieAExpliquer, texteDette, texteTarifReserve, type GesteDate,
   COMMANDE_BOT_MEMBRE, aiguillageMessagePrive, TEXTE_TRANSMIS_AU_COCKPIT, TEXTE_NON_TRANSMIS_AU_COCKPIT,
+  BOUTON_REGLE, TEXTE_LIEN_DEJA_DONNE, decisionBoutonRegle, texteReglementPasVu, texteReglementSansAbonnement,
 } from './pur'
 import {
   compteCockpitTelegram, telechargerImageTelegram, traiterTexteAgentTelegram, type CompteCockpitTelegram,
@@ -536,8 +543,8 @@ async function lienEnvoyeRecemment(telegramId: number): Promise<boolean> {
 }
 
 type OptionsRetour = {
-  /** D'ou vient la demande (details du journal). */
-  declencheur: 'start' | 'menu' | 'jeton_invalide' | 'bouton' | 'verification' | 'texte'
+  /** D'ou vient la demande (details du journal). 'regle' : le bouton BOUTON_REGLE (22/10), voir revenirApresReglement. */
+  declencheur: 'start' | 'menu' | 'jeton_invalide' | 'bouton' | 'verification' | 'texte' | 'regle'
   /** Texte place avant l'explication (accueil, lien expire...). */
   entete?: string
   /** Boutons ajoutes sous le lien (le menu, sur /start et /menu). */
@@ -643,6 +650,62 @@ async function proposerRetourAuGroupe(chat: number, u: Utilisateur, updateId: nu
     { ...contexte, updateId },
   )
   return true
+}
+
+/**
+ * (22/10, Brice, cas de Christine : sortie pour impaye a 09:13, facture
+ * payee a 09:23, rien jusqu'au passage du lendemain) Le bouton
+ * « J'ai réglé : revenir dans le groupe » (BOUTON_REGLE), sous le message de
+ * sortie pour impaye envoye en prive par le passage. Pas de webhook Stripe :
+ * c'est le clic qui declenche la relecture. Le droit est relu EN DIRECT
+ * (droitLiveClub lit Stripe a chaque appel, sans cache) :
+ * - paye et hors du groupe : le lien de retour, ban leve s'il le faut
+ *   (proposerRetourAuGroupe) ;
+ * - pas encore paye : le montant et le lien de la facture (la dette d'abord) ;
+ * - deja dans le groupe, lien donne il y a moins de 10 minutes, plus
+ *   d'abonnement : une phrase claire.
+ * Le passage du lendemain matin reste le filet (tacheReouvertures) : un
+ * membre revenu entre-temps n'y recoit rien (deja_revenu).
+ */
+async function revenirApresReglement(chat: number, u: Utilisateur, r: Rattachement, updateId: number): Promise<void> {
+  const presence = await estDansLeGroupe(u.id)
+  const droit = presence === 'oui' ? null : await droitLiveClub(u.id)
+  const lienRecent = presence === 'non' && droit?.statut === 'oui' ? await lienEnvoyeRecemment(u.id) : false
+  const issue = decisionBoutonRegle({ presence, droit: droit?.statut ?? 'inconnu', dette: Boolean(droit?.dette), lienRecent })
+  const contexte = {
+    telegramId: u.id, membreId: droit?.membreId ?? r.membre_id ?? null, acteur: ACTEUR_BOT_MEMBRE,
+    abonnementId: droit?.abonnementId ?? null, updateId: null,
+  }
+  const details = { declencheur: 'regle' }
+  const boutonsRegle: Bouton[][] = [[{ texte: BOUTON_REGLE.texte, data: BOUTON_REGLE.data }], ...clavierEquipe()]
+
+  switch (issue) {
+    case 'deja_dans_le_groupe':
+      await envoyer(chat, `Tu es déjà dans le groupe Live Club, tout est bon.\n\nJe reste là pour ton abonnement :`, clavierMenu(), r)
+      return
+    case 'lien_recent':
+      await envoyer(chat, TEXTE_LIEN_DEJA_DONNE, clavierMenu(), r)
+      return
+    case 'pas_encore_paye':
+      if (droit?.dette) {
+        await envoyer(chat, texteReglementPasVu(droit.dette), boutonsRegle, r)
+        await journaliserGesteLiveClub({ geste: 'invitation', resultat: 'refuse', regle: 'impaye_ouvert', details }, contexte)
+        return
+      }
+      break
+    case 'sans_droit':
+      await envoyer(chat, texteReglementSansAbonnement(texteAbonnement()), boutonsRegle, r)
+      await journaliserGesteLiveClub({ geste: 'invitation', resultat: 'refuse', regle: 'sans_droit', details }, contexte)
+      return
+    case 'lien':
+    case 'inconnu':
+      // Le lien (droit 'oui'), ou « je n'arrive pas a verifier » (droit ou
+      // presence illisibles) : proposerRetourAuGroupe dit l'un ou l'autre.
+      if (await proposerRetourAuGroupe(chat, u, updateId, { declencheur: 'regle', boutons: clavierMenu(), reprendre: true, droit: droit ?? undefined })) return
+      break
+  }
+  // Rien de dit (entre dans le groupe entre les deux lectures) : le menu.
+  await envoyerMenu(chat, u.id, undefined, r)
 }
 
 // ---------------------------------------------------------------------------
@@ -1120,7 +1183,17 @@ async function traiterNonRattache(
 async function traiterTexteLibre(chat: number, u: Utilisateur, texte: string, updateId: number): Promise<void> {
   const r = await rattachementOuNull(u.id)
   // (16/10) L'equipe a la main dans ce fil : son message va a l'equipe, pas a l'IA.
-  if (await versEquipeSiElleALaMain(chat, u, r, texte)) return
+  if (await versEquipeSiElleALaMain(chat, u, r, texte)) {
+    // (22/10, cas de Christine) Sauf le lien de retour, geste du bot et non
+    // reponse de l'IA : un compte rattache dont le droit est ouvert mais qui
+    // est hors du groupe (impaye regle depuis sa sortie) le recoit tout de
+    // suite, meme si l'equipe a la main. Memes garde-fous que d'habitude
+    // (droit 'oui' relu en direct, absence certaine, un lien par 10 minutes).
+    if (r && r !== 'illisible') {
+      await proposerRetourAuGroupe(chat, u, updateId, { declencheur: 'texte', boutons: clavierMenu(), reprendre: true })
+    }
+    return
+  }
   if (r && r !== 'illisible') {
     // (06/10) Droit ouvert mais hors du groupe : le lien d'abord, l'agent
     // n'a pas d'outil pour le donner. Le message du membre est trace avant.
@@ -1587,6 +1660,14 @@ export async function traiterBouton(bouton: BoutonTg, updateId: number): Promise
     // Non rattache, sorti du groupe il y a peu (06/10) : la raison d'abord.
     if (await donnerRaisonDeLaSortie(chat, u.id, { boutons: clavierSansRattachement() })) return
     await envoyer(chat, TEXTE_NON_RATTACHE, clavierSansRattachement())
+    return
+  }
+
+  // (22/10) « J'ai réglé : revenir dans le groupe », sous le message de sortie
+  // pour impaye : le droit relu en direct, le lien tout de suite s'il est paye.
+  if (data === BOUTON_REGLE.data) {
+    await repondreBouton(bouton.id)
+    await revenirApresReglement(chat, u, r, updateId)
     return
   }
 
