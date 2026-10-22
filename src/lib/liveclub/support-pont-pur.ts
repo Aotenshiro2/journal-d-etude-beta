@@ -345,8 +345,9 @@ export function pieceDuResultat(result: unknown, f: Pick<FichierLu, 'mime' | 'no
 // Des qu'un membre de l'equipe repond dans un fil (role human, depuis
 // l'onglet Support ou depuis Agent AOK), l'EQUIPE A LA MAIN : le bot ne
 // repond plus aux messages ecrits du membre, qui vont a l'equipe (fil en
-// attente, alerte « a repondu », un accuse neutre une seule fois). Les
-// boutons du menu restent deterministes.
+// attente, alerte « a repondu »). Le bot ne dit RIEN au membre, pas meme un
+// accuse (Brice, 22/10 : « pourquoi le bot a parle apres mon message ? »).
+// Les boutons du menu restent deterministes.
 // Le bot reprend la main :
 // - quand l'equipe clique « Rendre la main au bot » (onglet Support, bouton
 //   sous l'alerte d'Agent AOK, ou « rends la main au bot » a l'agent) : une
@@ -366,8 +367,6 @@ export const LIGNE_MAIN_RENDUE = "Main rendue au bot par l'équipe."
 export const INTERVALLE_ALERTES_MS = 10 * 60 * 1000
 /** La ligne « [système] » posee au fil quand l'equipe est prevenue : elle date la derniere alerte. */
 export const LIGNE_EQUIPE_PREVENUE = 'Équipe prévenue (Agent AOK et email).'
-/** L'accuse, court et neutre, une seule fois tant que l'equipe a la main. */
-export const TEXTE_ACCUSE_EQUIPE = "Je transmets à l'équipe, elle te répond ici."
 
 type MessageFil = { role?: unknown; content?: unknown; at?: unknown }
 
@@ -448,16 +447,6 @@ export function phraseMainRendue(
     : `C'est fait${ref} : le bot reprend la main et répond de nouveau à ses messages écrits. Le membre n'est pas prévenu.`
 }
 
-/** L'accuse neutre a-t-il deja ete donne depuis que l'equipe a la main ? (une seule fois par periode) */
-export function accuseDejaDonne(fil: unknown): boolean {
-  const p = periodeEquipe(fil)
-  if (!p) return false
-  const l = messages(fil)
-  for (let i = p.debut + 1; i < l.length; i++) {
-    if (l[i].role === 'assistant' && typeof l[i].content === 'string' && (l[i].content as string).startsWith(TEXTE_ACCUSE_EQUIPE)) return true
-  }
-  return false
-}
 
 /** L'instant de la derniere alerte (ligne LIGNE_EQUIPE_PREVENUE), ou null. */
 export function derniereAlerteT(fil: unknown): number | null {

@@ -226,7 +226,7 @@ test('branchement : le bouton dans le bot, les boutons du passage, le lien sur u
   assert.ok(bot.indexOf("if (r === 'illisible' || !r) {", bot.indexOf('export async function traiterBouton')) < bot.indexOf('if (data === BOUTON_REGLE.data) {'))
   // Un message ecrit : le lien, meme si l'equipe a la main.
   const texteLibre = bot.slice(bot.indexOf('async function traiterTexteLibre('), bot.indexOf('async function versEquipeSiElleALaMain('))
-  assert.match(texteLibre, /if \(await versEquipeSiElleALaMain\(chat, u, r, texte\)\) \{\s+(\/\/.*\s+)*if \(r && r !== 'illisible'\) \{\s+await proposerRetourAuGroupe\(chat, u, updateId, \{ declencheur: 'texte'/)
+  assert.match(texteLibre, /if \(await versEquipeSiElleALaMain\(u, r, texte\)\) \{\s+(\/\/.*\s+)*if \(r && r !== 'illisible'\) \{\s+await proposerRetourAuGroupe\(chat, u, updateId, \{ declencheur: 'texte'/)
   // Le passage envoie les deux boutons (adresse, puis retour au bot).
   const passage = lire('passage.ts')
   const prevenir = passage.slice(passage.indexOf('async function prevenir('), passage.indexOf('async function sortir('))

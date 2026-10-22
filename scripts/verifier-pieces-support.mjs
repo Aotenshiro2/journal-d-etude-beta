@@ -61,7 +61,7 @@ test('image d un membre : capture en fichier (mime, ou extension), jamais un PDF
 test('reponse du bot a une image : le texte de Brice, une seule fois pour un album', () => {
   assert.equal(S.TEXTE_IMAGE_TRANSMISE,
     "Bien reçu. Je ne lis pas les images moi-même, alors je transmets ta capture à l'équipe : elle te répond ici. Si tu veux, ajoute un mot pour expliquer.")
-  assert.ok(SOBRE(S.TEXTE_IMAGE_TRANSMISE) && SOBRE(S.TEXTE_IMAGE_NON_TRANSMISE) && SOBRE(S.TEXTE_ACCUSE_EQUIPE))
+  assert.ok(SOBRE(S.TEXTE_IMAGE_TRANSMISE) && SOBRE(S.TEXTE_IMAGE_NON_TRANSMISE))
   // Un album de 3 photos : 3 updates, un seul fait passer le fil en attente (atomique en base).
   const album = [{ filId: FIL, passeEnAttente: true }, { filId: FIL, passeEnAttente: false }, { filId: FIL, passeEnAttente: false }]
   const reponses = album.map(S.reponseAImage)
@@ -188,14 +188,9 @@ test('filet de securite : 24 h sans message de l equipe, glissant', () => {
   assert.ok(RUBRIQUES_RESUME.some((r) => r.cle === 'reprises' && /24 h sans message de l'équipe/.test(r.titre)))
 })
 
-test('accuse neutre : une seule fois tant que l equipe a la main', () => {
-  const avant = [humain(T0 - 3 * H), membre(T0 - 2 * H)]
-  assert.equal(S.accuseDejaDonne(avant), false)
-  const apres = [...avant, ia(T0 - 2 * H + 1000, S.TEXTE_ACCUSE_EQUIPE), humain(T0 - H), membre(T0 - 30 * 60000)]
-  assert.equal(S.accuseDejaDonne(apres), true, 'un nouveau message de l equipe ne le relance pas')
-  // Nouvelle periode (main rendue, ou 24 h sans l'equipe) : l'accuse peut repartir une fois.
-  assert.equal(S.accuseDejaDonne([...apres, rendue(T0 - 20 * 60000), humain(T0 - 10 * 60000)]), false)
-  assert.equal(S.accuseDejaDonne([humain(T0 - 50 * H), ia(T0 - 49 * H, S.TEXTE_ACCUSE_EQUIPE), humain(T0 - H)]), false)
+test('l equipe a la main : plus aucun accuse au membre (Brice, 22/10)', () => {
+  assert.equal(S.TEXTE_ACCUSE_EQUIPE, undefined)
+  assert.equal(S.accuseDejaDonne, undefined)
 })
 
 test('alertes : au plus une par fil toutes les 10 minutes', () => {
@@ -250,6 +245,9 @@ test('statique : passage en attente atomique, alerte rythmee, image du membre au
   assert.ok(bot.indexOf('await transmettreSiEquipe(chat, u, message)') < bot.indexOf('await recevoirImageMembre(chat, u, message)'), 'l equipe d abord')
   const texteLibre = bot.slice(bot.indexOf('async function traiterTexteLibre'))
   assert.ok(texteLibre.indexOf('versEquipeSiElleALaMain(') < texteLibre.indexOf('converserAvecAgent('))
+  // (22/10) Quand l'equipe a la main, le message va a l'equipe sans rien envoyer au membre.
+  const versEquipe = bot.slice(bot.indexOf('async function versEquipeSiElleALaMain'), bot.indexOf('async function recevoirImageMembre'))
+  assert.ok(versEquipe.length > 0 && !/envoyer\(/.test(versEquipe), 'aucun envoi au membre')
 })
 
 test('statique : routes du cockpit gardees, file_id lu en base, jamais du navigateur', () => {

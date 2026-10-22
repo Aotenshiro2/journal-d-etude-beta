@@ -107,7 +107,7 @@ import {
   enregistrerEchangeSupport, estEnAttenteHumain, lireMessagesFil, texteAvecBoutons, tracerEtape, tracerMessageBot,
 } from './support-pont'
 import {
-  TEXTE_ACCUSE_EQUIPE, TEXTE_IMAGE_NON_TRANSMISE, TEXTE_IMAGE_TRANSMISE, accuseDejaDonne, lirePieceImageMembre,
+  TEXTE_IMAGE_NON_TRANSMISE, TEXTE_IMAGE_TRANSMISE, lirePieceImageMembre,
   lirePieceMessage, quiRepond, reponseAImage, texteFilImage, type PieceSupport,
 } from './support-pont-pur'
 import {
@@ -1183,7 +1183,7 @@ async function traiterNonRattache(
 async function traiterTexteLibre(chat: number, u: Utilisateur, texte: string, updateId: number): Promise<void> {
   const r = await rattachementOuNull(u.id)
   // (16/10) L'equipe a la main dans ce fil : son message va a l'equipe, pas a l'IA.
-  if (await versEquipeSiElleALaMain(chat, u, r, texte)) {
+  if (await versEquipeSiElleALaMain(u, r, texte)) {
     // (22/10, cas de Christine) Sauf le lien de retour, geste du bot et non
     // reponse de l'IA : un compte rattache dont le droit est ouvert mais qui
     // est hors du groupe (impaye regle depuis sa sortie) le recoit tout de
@@ -1229,8 +1229,8 @@ async function traiterTexteLibre(chat: number, u: Utilisateur, texte: string, up
  * au bot (support-pont-pur.ts, quiRepond : bouton « Rendre la main au bot »,
  * ou 24 h sans message de l'equipe). Son message ecrit (ou son image) va
  * alors a l'equipe : pas de reponse de l'IA, le fil repasse en attente,
- * alerte « a repondu a l'equipe » (au plus une par 10 minutes, support-pont.ts),
- * et un accuse court et neutre une seule fois tant que l'equipe a la main.
+ * alerte « a repondu a l'equipe » (au plus une par 10 minutes, support-pont.ts).
+ * Le bot ne dit rien au membre, pas meme un accuse (Brice, 22/10).
  * Les boutons et les commandes ne passent pas par ici : ils restent ceux du bot.
  *
  * Un compte non rattache qui tape un email ou un code garde la verification
@@ -1238,7 +1238,6 @@ async function traiterTexteLibre(chat: number, u: Utilisateur, texte: string, up
  * rate : false, le parcours habituel (personne ne verrait le message).
  */
 async function versEquipeSiElleALaMain(
-  chat: number,
   u: Utilisateur,
   r: Rattachement | null | 'illisible',
   texte: string,
@@ -1252,9 +1251,7 @@ async function versEquipeSiElleALaMain(
     telegramId: u.id, membreId: identite?.membre_id ?? null, email: identite?.email ?? null,
     role: 'membre', texte: identite ? texte : masquerCodes(texte), piece, veutHumain: true, alerte: 'reponse',
   })
-  if (!issue) return false
-  if (!accuseDejaDonne(fil)) await envoyer(chat, TEXTE_ACCUSE_EQUIPE, undefined, identite)
-  return true
+  return !!issue
 }
 
 /**
@@ -1272,7 +1269,7 @@ async function recevoirImageMembre(chat: number, u: Utilisateur, message: Messag
   if (!lu) return false
   const r = await rattachementOuNull(u.id)
   const texteFil = texteFilImage(lu.legende)
-  if (await versEquipeSiElleALaMain(chat, u, r, texteFil, lu.piece)) return true
+  if (await versEquipeSiElleALaMain(u, r, texteFil, lu.piece)) return true
   const identite = r && r !== 'illisible' ? r : null
   const issue = await enregistrerEchangeSupport({
     telegramId: u.id, membreId: identite?.membre_id ?? null, email: identite?.email ?? null,
