@@ -9,9 +9,12 @@ import { appareilCourt, ipDuClient } from './pur'
 // Le site en production et le dev local (Vite, port par defaut). Le CORS
 // n'est pas la barriere de securite (le jeton et le droit le sont) : il dit
 // seulement quelles pages ont le droit de lire la reponse.
+// academie.melaniechart.com (23/10/2026) : la meme academie a l'adresse de Mel,
+// theme de son site (site v3, src/lib/hote.ts) ; eleve ET admin.
 const ORIGINES = new Set([
   'https://aoknowledge.com',
   'https://www.aoknowledge.com',
+  'https://academie.melaniechart.com',
   'http://localhost:5173',
 ])
 

@@ -8,6 +8,7 @@ const ALLOWED_ORIGINS = [
   /^https:\/\/(www\.)?aoknowledge\.com$/,
   /^https:\/\/[a-z0-9-]+\.aoknowledge\.com$/, // journal., masterclass., pilotage., futurs sous-domaines
   /^https:\/\/(www\.)?melaniechart\.com$/, // MelTrade, le site de Mélanie (intégré par Adil)
+  /^https:\/\/academie\.melaniechart\.com$/, // l'académie à l'adresse de Mel (23/10/2026), bouton du support
   /^https:\/\/[a-z0-9-]+-aotenshiros-projects\.vercel\.app$/, // previews Vercel
   /^http:\/\/localhost(:\d+)?$/, // dev local
 ]
