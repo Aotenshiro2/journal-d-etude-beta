@@ -165,6 +165,10 @@ await cas('corps trop gros : 413', async () => {
 
 await cas('en-tete MCP-Protocol-Version inconnu : 400, connu : accepte', async () => {
   assert.equal((await post(rpc(1, 'ping'), { version: '2099-01-01' })).status, 400)
+  // (23/10, ChatGPT) initialize avec un en-tete plus recent que les notres : negocie, pas de 400.
+  const initRecent = await post(rpc(1, 'initialize', { protocolVersion: '2026-07-28', capabilities: {}, clientInfo: { name: 'chatgpt', version: '1' } }), { version: '2026-07-28' })
+  assert.equal(initRecent.status, 200)
+  assert.equal(initRecent.corps.result.protocolVersion, P.VERSION_RECENTE)
   for (const v of ['2025-03-26', '2025-06-18', '2025-11-25']) assert.equal((await post(rpc(1, 'ping'), { version: v })).status, 200)
 })
 

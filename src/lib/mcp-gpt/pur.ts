@@ -697,14 +697,18 @@ export async function traiterPost(e: EntreePost, d: Dependances): Promise<Sortie
 
   if (e.brut.length > CORPS_MAX) return refusHttp(413, -32600, 'Requête trop grosse (1 Mo au plus).', 'corps trop gros')
   if (!estJson(e.typeContenu)) return refusHttp(415, -32600, 'Content-Type: application/json attendu.', 'content-type')
-  if (versionEntete && !versionAcceptee(versionEntete)) {
-    return refusHttp(400, -32600, `Version du protocole MCP non prise en charge : ${versionEntete.slice(0, 40)}. Versions : ${VERSIONS_PROTOCOLE.join(', ')}.`, 'version du protocole')
-  }
   let corps: unknown
   try {
     corps = JSON.parse(e.brut)
   } catch {
     return refusHttp(400, -32700, 'JSON illisible.', 'json illisible')
+  }
+  // (23/10) initialize negocie la version dans son corps (versionNegociee) : un en-tete plus recent que les
+  // notres ne le bloque pas. ChatGPT envoyait 2026-07-28 et n'aboutissait qu'au 2e essai.
+  const estInitialize = (m: unknown) => !!m && typeof m === 'object' && (m as { method?: unknown }).method === 'initialize'
+  const initialise = Array.isArray(corps) ? corps.some(estInitialize) : estInitialize(corps)
+  if (versionEntete && !versionAcceptee(versionEntete) && !initialise) {
+    return refusHttp(400, -32600, `Version du protocole MCP non prise en charge : ${versionEntete.slice(0, 40)}. Versions : ${VERSIONS_PROTOCOLE.join(', ')}.`, 'version du protocole')
   }
 
   if (Array.isArray(corps)) {
