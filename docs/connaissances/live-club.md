@@ -2,8 +2,8 @@
 sujet: live-club
 titre: Le Live Club
 resume: L'abonnement de lives éducatifs animés par Mélanie et Brice, avec le groupe Telegram, les replays, les modules de formation et le Carnet Premium. 139 € par mois, sans engagement.
-mots: live club, lives, abonnement, telegram, groupe, replays, académie, pause, arrêt, bot, prix
-verifie: 2026-10-18
+mots: live club, lives, abonnement, telegram, groupe, replays, académie, pause, arrêt, bot, prix, meltrade, melaniechart
+verifie: 2026-10-23
 sources: sites/Aoknowledgecom/v3/src/pages/LiveClubPage.tsx ; sites/Aoknowledgecom/v3/src/pages/LiveClubCGVPage.tsx ; apps/journal-d-etude/src/lib/liveclub/config.ts (URLS_ABONNEMENT, URL_PORTAIL_CARTE, URL_FORMATION_LIVECLUB) ; src/lib/politique-information.ts ; src/lib/liveclub/accueil-groupe.ts
 ---
 
@@ -31,14 +31,14 @@ Pour les traders qui ont déjà les bases et veulent les mettre à l'épreuve du
 
 ## Comment y aller
 
-- S'abonner : https://aoknowledge.com/live-club ou https://melaniechart.com (deux portes pour la même offre)
+- S'abonner : https://aoknowledge.com/live-club ou https://melaniechart.com, le site de Mélanie (« meltrade » en haut de page) : deux portes pour la même offre
 - Le bot qui gère l'abonnement : https://t.me/aok_liveclub_bot
 - Changer sa carte bancaire : https://billing.stripe.com/p/login/bJecN48kK4Vc4vr70Sbsc00 (connexion avec l'email du paiement)
 
 ## Questions fréquentes
 
-### MelTrade et le Live Club, c'est différent ?
-Non. melaniechart.com (MelTrade) est le site de Mélanie : c'est une autre porte vers le même Live Club.
+### melaniechart.com, MelTrade et le Live Club : c'est la même chose ?
+Oui, c'est le même Live Club. melaniechart.com est le site de Mélanie, et « meltrade » est le nom affiché en haut de ce site. Que tu t'abonnes sur melaniechart.com ou sur aoknowledge.com/live-club, tu rejoins le même Live Club : les mêmes lives, le même groupe Telegram, le même abonnement.
 
 ### Les replays, je les trouve où ?
 Dans le Telegram du Live Club, dans le sujet Replay.

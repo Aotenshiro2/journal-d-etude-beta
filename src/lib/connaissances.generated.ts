@@ -389,9 +389,11 @@ export const CONNAISSANCES: readonly DocConnaissance[] = [
       "pause",
       "arrêt",
       "bot",
-      "prix"
+      "prix",
+      "meltrade",
+      "melaniechart"
     ],
-    "verifieLe": "2026-10-18",
+    "verifieLe": "2026-10-23",
     "sections": [
       {
         "titre": "Ce que c'est",
@@ -407,13 +409,13 @@ export const CONNAISSANCES: readonly DocConnaissance[] = [
       },
       {
         "titre": "Comment y aller",
-        "texte": "- S'abonner : https://aoknowledge.com/live-club ou https://melaniechart.com (deux portes pour la même offre)\n- Le bot qui gère l'abonnement : https://t.me/aok_liveclub_bot\n- Changer sa carte bancaire : https://billing.stripe.com/p/login/bJecN48kK4Vc4vr70Sbsc00 (connexion avec l'email du paiement)"
+        "texte": "- S'abonner : https://aoknowledge.com/live-club ou https://melaniechart.com, le site de Mélanie (« meltrade » en haut de page) : deux portes pour la même offre\n- Le bot qui gère l'abonnement : https://t.me/aok_liveclub_bot\n- Changer sa carte bancaire : https://billing.stripe.com/p/login/bJecN48kK4Vc4vr70Sbsc00 (connexion avec l'email du paiement)"
       }
     ],
     "questions": [
       {
-        "q": "MelTrade et le Live Club, c'est différent ?",
-        "r": "Non. melaniechart.com (MelTrade) est le site de Mélanie : c'est une autre porte vers le même Live Club."
+        "q": "melaniechart.com, MelTrade et le Live Club : c'est la même chose ?",
+        "r": "Oui, c'est le même Live Club. melaniechart.com est le site de Mélanie, et « meltrade » est le nom affiché en haut de ce site. Que tu t'abonnes sur melaniechart.com ou sur aoknowledge.com/live-club, tu rejoins le même Live Club : les mêmes lives, le même groupe Telegram, le même abonnement."
       },
       {
         "q": "Les replays, je les trouve où ?",
@@ -424,7 +426,7 @@ export const CONNAISSANCES: readonly DocConnaissance[] = [
         "r": "Non, c'est un abonnement à part. Le lien partenaire et le code LIVECLUB20 donnent 20 % de réduction sur Edgyx."
       }
     ],
-    "texte": "Le Live Club. L'abonnement de lives éducatifs animés par Mélanie et Brice, avec le groupe Telegram, les replays, les modules de formation et le Carnet Premium. 139 € par mois, sans engagement.\n\nCe que c'est :\nLe Live Club, c'est l'entraînement sur le marché réel, animé par Mélanie et Brice.\n- Deux à trois lives éducatifs chaque semaine, sur le marché en temps réel ou autour d'un thème, avec un temps de questions à la fin.\n- Les replays : chaque live est rangé dans le Telegram du Live Club, dans le sujet Replay, à revoir quand tu veux.\n- Les modules de l'Académie inclus : https://aoknowledge.com/academie (connecte-toi avec l'email de ton abonnement).\n- Le groupe Telegram du Live Club : l'entraide entre membres, les explications de charts, les projections hebdomadaires Nasdaq et S&P 500. Les messages épinglés du groupe expliquent comment il marche.\n- Le Carnet du Trader Premium inclus, et le Journal d'Études et Pilotage gratuits.\n\nPour qui :\nPour les traders qui ont déjà les bases et veulent les mettre à l'épreuve du marché du jour. Les lives supposent que les bases soient là.\n\nPrix et accès :\n- 139 € par mois, sans engagement, reconduit chaque mois jusqu'à l'arrêt.\n- L'arrêt prend effet à la fin de la période payée : le groupe reste ouvert jusque-là, puis plus rien n'est prélevé.\n- Une pause de 1 à 6 mois est possible : elle démarre à la fin de la période déjà payée et l'abonnement reprend tout seul ensuite.\n- L'abonnement se gère avec le bot Telegram du Live Club : pause, arrêt, accès au groupe, situation de l'abonnement.\n- Edgyx, le journal de trading recommandé, est un abonnement à part, pas compris dans le Live Club.\n- Les conditions : https://aoknowledge.com/live-club/conditions\n\nComment y aller :\n- S'abonner : https://aoknowledge.com/live-club ou https://melaniechart.com (deux portes pour la même offre)\n- Le bot qui gère l'abonnement : https://t.me/aok_liveclub_bot\n- Changer sa carte bancaire : https://billing.stripe.com/p/login/bJecN48kK4Vc4vr70Sbsc00 (connexion avec l'email du paiement)\n\nQuestions fréquentes :\nQ : MelTrade et le Live Club, c'est différent ?\nR : Non. melaniechart.com (MelTrade) est le site de Mélanie : c'est une autre porte vers le même Live Club.\nQ : Les replays, je les trouve où ?\nR : Dans le Telegram du Live Club, dans le sujet Replay.\nQ : Edgyx est compris dans l'abonnement ?\nR : Non, c'est un abonnement à part. Le lien partenaire et le code LIVECLUB20 donnent 20 % de réduction sur Edgyx."
+    "texte": "Le Live Club. L'abonnement de lives éducatifs animés par Mélanie et Brice, avec le groupe Telegram, les replays, les modules de formation et le Carnet Premium. 139 € par mois, sans engagement.\n\nCe que c'est :\nLe Live Club, c'est l'entraînement sur le marché réel, animé par Mélanie et Brice.\n- Deux à trois lives éducatifs chaque semaine, sur le marché en temps réel ou autour d'un thème, avec un temps de questions à la fin.\n- Les replays : chaque live est rangé dans le Telegram du Live Club, dans le sujet Replay, à revoir quand tu veux.\n- Les modules de l'Académie inclus : https://aoknowledge.com/academie (connecte-toi avec l'email de ton abonnement).\n- Le groupe Telegram du Live Club : l'entraide entre membres, les explications de charts, les projections hebdomadaires Nasdaq et S&P 500. Les messages épinglés du groupe expliquent comment il marche.\n- Le Carnet du Trader Premium inclus, et le Journal d'Études et Pilotage gratuits.\n\nPour qui :\nPour les traders qui ont déjà les bases et veulent les mettre à l'épreuve du marché du jour. Les lives supposent que les bases soient là.\n\nPrix et accès :\n- 139 € par mois, sans engagement, reconduit chaque mois jusqu'à l'arrêt.\n- L'arrêt prend effet à la fin de la période payée : le groupe reste ouvert jusque-là, puis plus rien n'est prélevé.\n- Une pause de 1 à 6 mois est possible : elle démarre à la fin de la période déjà payée et l'abonnement reprend tout seul ensuite.\n- L'abonnement se gère avec le bot Telegram du Live Club : pause, arrêt, accès au groupe, situation de l'abonnement.\n- Edgyx, le journal de trading recommandé, est un abonnement à part, pas compris dans le Live Club.\n- Les conditions : https://aoknowledge.com/live-club/conditions\n\nComment y aller :\n- S'abonner : https://aoknowledge.com/live-club ou https://melaniechart.com, le site de Mélanie (« meltrade » en haut de page) : deux portes pour la même offre\n- Le bot qui gère l'abonnement : https://t.me/aok_liveclub_bot\n- Changer sa carte bancaire : https://billing.stripe.com/p/login/bJecN48kK4Vc4vr70Sbsc00 (connexion avec l'email du paiement)\n\nQuestions fréquentes :\nQ : melaniechart.com, MelTrade et le Live Club : c'est la même chose ?\nR : Oui, c'est le même Live Club. melaniechart.com est le site de Mélanie, et « meltrade » est le nom affiché en haut de ce site. Que tu t'abonnes sur melaniechart.com ou sur aoknowledge.com/live-club, tu rejoins le même Live Club : les mêmes lives, le même groupe Telegram, le même abonnement.\nQ : Les replays, je les trouve où ?\nR : Dans le Telegram du Live Club, dans le sujet Replay.\nQ : Edgyx est compris dans l'abonnement ?\nR : Non, c'est un abonnement à part. Le lien partenaire et le code LIVECLUB20 donnent 20 % de réduction sur Edgyx."
   },
   {
     "sujet": "masterclass",
