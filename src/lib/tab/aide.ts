@@ -111,6 +111,7 @@ export function aide(): Record<string, unknown> {
         pour: 'Facultatif : sora, umi, sekai ou toutes (par défaut toutes). Chaque instance voit les notes qui lui sont adressées et celles pour toutes. Dans les notes que tu reçois, instance dit quelle instance de Claude t\'écrit (sora, umi ou sekai, vide quand c\'est Brice depuis le cockpit). Les notes d\'avant le 22/10 marquées les_deux visaient Sora et Umi.',
       },
       statuts: 'nouvelle, lue, traitee. Toi, tu marques lue (POST /notes/<id>/lu) ; Brice ou Claude passent en traitée.',
+      chatgpt: 'Depuis le 23/10/2026, ChatGPT (le Projet Belrive de Brice, par son propre connecteur) écrit aussi des notes du projet belrive : auteur gpt, pour toi ou pour une instance de Claude. Il lit les notes du projet belrive, pas les autres : pour qu\'il voie ta réponse, écris-la avec projet = belrive.',
       reveil: 'Une note de Claude pour toi déclenche un email à ton adresse (objet « Note de Claude (Sora) : <sujet> », « Note de Claude (Umi) : <sujet> » ou « Note de Claude (Sekai) : <sujet> »). Une note de toi pour Claude prévient Brice sur Telegram et s\'affiche au démarrage de la session suivante de Claude.',
       exemple: { sujet: 'Retours de Brice sur la sélection Opus', texte: 'Brice garde les rangs 13 et 19...', projet: 'aok', pour: 'toutes' },
     },

@@ -3,6 +3,39 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
+## Connecteur MCP de ChatGPT pour Belrive (23/10/2026, NON commite, NON deploye, migrations NON appliquees)
+
+ChatGPT (Projet Belrive de Brice) lit les documents et les notes du projet belrive et ecrit des notes, par
+`POST /api/mcp/<secret>` (MCP en HTTP sans etat, JSON, ecrit a la main : pas de SDK). Conseil de Tab valide par
+Brice : « un petit serveur MCP devant l'API du Cockpit, un jeton a lui, limite a lecture + notes ».
+- Code : `src/app/api/mcp/[secret]/route.ts` ; `src/lib/mcp-gpt/` : `pur.ts` (protocole, versions 2025-11-25,
+  2025-06-18, 2025-03-26, les six outils search, fetch, lister_documents, lister_notes, ecrire_note,
+  deposer_document, gardes), `requetes.ts` (TOUT le SQL, projet 'belrive' en dur), `serveur.ts` (prisma,
+  transactions READ ONLY, pings des notes de Tab reutilises). Middleware : `/api/mcp/` public, secret verifie dans
+  la route ; secret absent, inconnu ou coupe = la meme 404 neutre.
+- Cle : `cockpit_tab_cles`, portee `gpt_belrive` (empreinte sha256 prefixee `mcp-gpt-belrive:`, separee de Tab ;
+  `src/lib/tab/acces.ts` ne lit plus que la portee `tab`). 60 appels par minute, journal `cockpit_tab_acces`
+  (route `mcp/...`, jamais le secret, aucun texte long). Nouvelle cle : `node scripts/creer-cle-gpt.mjs <fichier
+  du coffre>` (URL complete dans le coffre, jamais affichee). Coupee depuis le cockpit, ecran Perso.
+- Donnees : `cockpit_perso_documents` (source disque = liste blanche poussee chaque heure par
+  `automations\pousser_docs_belrive.py`, source gpt = depots de ChatGPT sous Scenario/De-GPT/, une ligne par
+  version, contenu fige par trigger, rapatries sur le PC sans ecrasement). Notes : `auteur = 'gpt'`.
+- Sentry : `src/lib/sentry-masque.ts` masque `/api/mcp/<secret>` dans tout evenement (serveur et edge).
+- Migrations a appliquer, dans l'ordre : `20261023170000_cockpit_perso_documents.sql`,
+  `20261023171000_cockpit_tab_cles_portee.sql` (essayees dans une transaction annulee le 23/10 : RLS, droits,
+  requetes exactes, gestionnaire complet, tout bon). AVANT le deploiement : le journal deploye filtre
+  `portee = 'tab'`, colonne absente = API de Tab en panne.
+- Verifs : `node scripts/verifier-mcp-gpt.mjs` (pur, 33 blocs), `node scripts/verifier-perso-rls.mjs` (documents
+  compris une fois la migration appliquee). Mode d'emploi de Brice : README des automations, section « ChatGPT et
+  Belrive ».
+- Limite connue du secret dans l'URL : le chemin apparait dans les journaux de requetes de Vercel (Brice seul y a
+  acces). Plus tard, OAuth a la place : (1) un serveur d'autorisation OAuth 2.1 avec PKCE et enregistrement
+  dynamique (Supabase Auth n'en sert pas a des tiers : petit serveur dans le journal, /authorize sur la session de
+  Brice, /token, /register, ou un fournisseur) ; (2) `/.well-known/oauth-protected-resource` (RFC 9728) sur le
+  journal et une 401 `WWW-Authenticate: Bearer resource_metadata=...` sur `/api/mcp` ; (3) la route verifie
+  `Authorization: Bearer` (signature, audience = l'URL du connecteur, expiration, portee belrive) et le secret du
+  chemin disparait ; (4) les jetons restent coupables depuis le cockpit (revocation, meme bloc d'acces).
+
 ## Academie : les PDF payants passent sur Bunny CDN (23/10/2026, PUBLIE, variables BUNNY_PDF_HOTE et BUNNY_PDF_CLE_JETON posees en prod)
 
 Lot D:\6_Societe\Pilotage\Academie\lots\LOT-PDF-SUR-BUNNY.md (GO de Brice). But : sortir le trafic des PDF du quota Supabase.

@@ -118,7 +118,7 @@ export async function prevenirBrice(note: NotePerso): Promise<boolean> {
       `select telegram_id::text as telegram_id from public.cockpit_telegram_comptes where user_id = $1::uuid limit 1`, BRICE_USER_ID)
     if (!comptes[0]) return false
     const ok = await tgCockpit('sendMessage', {
-      chat_id: Number(comptes[0].telegram_id), text: messageBrice(note.sujet, note.instance), disable_web_page_preview: true,
+      chat_id: Number(comptes[0].telegram_id), text: messageBrice(note.sujet, note.instance, note.auteur), disable_web_page_preview: true,
     })
     if (ok) {
       await prisma.$executeRawUnsafe(

@@ -6,6 +6,9 @@
 // coupe sans redeploiement). La comparaison se fait en temps constant sur
 // toutes les cles actives. La limite de debit compte les appels de la cle
 // dans le journal (cockpit_tab_acces) sur la derniere minute.
+// Seules les cles de portee 'tab' ouvrent cette API (23/10/2026) : les cles
+// 'gpt_belrive' sont celles du connecteur MCP de ChatGPT (src/lib/mcp-gpt/),
+// avec une empreinte a part (empreinteCleGpt) qui ne passerait pas ici non plus.
 
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { prisma } from '@/lib/db'
@@ -30,7 +33,7 @@ export async function verifierCle(entete: string | null): Promise<VerdictCle> {
         (select count(*)::int from public.cockpit_tab_acces a
           where a.cle_id = c.cle_id and a.appele_le > now() - interval '1 minute') as appels
       from public.cockpit_tab_cles c
-      where c.coupee_le is null`
+      where c.coupee_le is null and c.portee = 'tab'`
   } catch (err) {
     console.error('[tab] cles illisibles', err instanceof Error ? err.message.split('\n').pop() : err)
     return { ok: false, status: 503, erreur: 'Base indisponible, réessaie dans un instant.', cleId: null }

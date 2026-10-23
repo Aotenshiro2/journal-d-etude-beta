@@ -15,7 +15,8 @@ export const STATUTS = ['nouvelle', 'lue', 'traitee'] as const
 export type Projet = (typeof PROJETS)[number]
 export type StatutNote = (typeof STATUTS)[number]
 export type Sens = 'vers_claude' | 'vers_tab'
-export type Auteur = 'tab' | 'claude' | 'brice'
+/** gpt (23/10/2026) : ChatGPT, par le connecteur MCP de Belrive (projet belrive seulement). */
+export type Auteur = 'tab' | 'claude' | 'brice' | 'gpt'
 /**
  * Les trois instances Claude Code de Brice (22/10/2026) : Umi (WSL), Sora (application de bureau
  * Windows) et Sekai (terminal Windows). toutes = les trois. les_deux = Sora et Umi : valeur des
@@ -23,7 +24,7 @@ export type Auteur = 'tab' | 'claude' | 'brice'
  */
 export type Instance = 'sora' | 'umi' | 'sekai' | 'toutes' | 'les_deux'
 export const NOM_INSTANCE: Record<Instance, string> = {
-  sora: 'Sora', umi: 'Umi', sekai: 'Sekai', toutes: 'Sora, Umi et Sekai', les_deux: 'Sora et Umi',
+  sora: 'Sora', umi: 'Yume', sekai: 'Sekai', toutes: 'Sora, Yume et Sekai', les_deux: 'Sora et Yume',
 }
 
 /** sora, umi, sekai, toutes (ou « tous », « les trois », et l'ancien les_deux). Vide = toutes. */
@@ -93,7 +94,7 @@ export function lireFiltreStatut(v: string | null): StatutNote | 'toutes' | stri
   return `statut inconnu : ${STATUTS.join(', ')} ou toutes.`
 }
 
-const NOM_AUTEUR: Record<Auteur, string> = { tab: 'Tab', claude: 'Claude', brice: 'Brice' }
+const NOM_AUTEUR: Record<Auteur, string> = { tab: 'Tab', claude: 'Claude', brice: 'Brice', gpt: 'ChatGPT' }
 
 function nomAuteur(a: Auteur, i: Instance | null): string {
   return a === 'claude' && (i === 'sora' || i === 'umi' || i === 'sekai') ? `Claude (${NOM_INSTANCE[i]})` : NOM_AUTEUR[a]
@@ -114,11 +115,13 @@ export function emailPing(n: { note_id: string; auteur: Auteur; instance: Instan
     `Lis-la aussi par GET ${base}/notes (identifiant ${n.note_id}),`,
     `puis marque-la lue : POST ${base}/notes/${n.note_id}/lu.`,
     `Pour répondre : POST ${base}/notes { sujet, texte, projet, pour } (pour = sora, umi, sekai ou toutes).`,
+    ...(n.auteur === 'gpt' ? ['ChatGPT (Projet Belrive de Brice) lit les notes du projet belrive : pour qu\'il voie ta réponse, écris-la avec projet = belrive.'] : []),
   ]
   return { objet: objet.slice(0, 250), texte: lignes.join('\n') }
 }
 
-/** Le message Telegram a Brice quand Tab laisse une note pour Claude. */
-export function messageBrice(sujet: string, instance: Instance | null = 'toutes'): string {
-  return `Tab a laissé une note pour ${NOM_INSTANCE[instance ?? 'toutes']} : ${sujet}\nhttps://cockpit.aoknowledge.com/?vue=perso`
+/** Le message Telegram a Brice quand Tab (ou ChatGPT, auteur gpt) laisse une note pour Claude. */
+export function messageBrice(sujet: string, instance: Instance | null = 'toutes', auteur: Auteur = 'tab'): string {
+  const qui = auteur === 'gpt' ? 'ChatGPT (Belrive)' : 'Tab'
+  return `${qui} a laissé une note pour ${NOM_INSTANCE[instance ?? 'toutes']} : ${sujet}\nhttps://cockpit.aoknowledge.com/?vue=perso`
 }
