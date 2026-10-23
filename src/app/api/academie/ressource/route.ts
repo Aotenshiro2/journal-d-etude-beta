@@ -9,7 +9,9 @@ import { messageErreur } from '@/lib/liveclub/pur'
 
 /**
  * POST /api/academie/ressource : ouvrir une piece jointe PROTEGEE d'une lecon
- * (PDF d'un module payant, bucket prive academie-ressources) pour un compte
+ * (PDF d'un module payant : Bunny CDN a jeton depuis le 23/10/2026, repli sur
+ * le bucket prive Supabase academie-ressources tant que BUNNY_PDF_* ne sont
+ * pas posees ; src/lib/academie/stockage.ts) pour un compte
  * qui a droit a la lecon. Meme authentification, meme CORS et meme regle que
  * /api/academie/lecture (droitsAcademie, ouvertureLecon) : le serveur decide,
  * jamais la page.
@@ -21,15 +23,16 @@ import { messageErreur } from '@/lib/liveclub/pur'
  * passent par ici ; une { titre, url } est publique et s'ouvre directement.
  *
  * Reponses :
- *   200 { ok: true, url, expire_le, titre }       URL signee de 5 min (Supabase Storage)
+ *   200 { ok: true, url, expire_le, titre }       URL signee de 5 min (Bunny CDN, ou Supabase en repli)
  *   400 { ok: false, erreur: 'demande' }           corps illisible
  *   401 { ok: false, erreur: 'jeton' }             pas de jeton, ou jeton refuse
  *   403 { ok: false, erreur: 'acces' }             compte sans droit sur cette lecon
  *   404 { ok: false, erreur: 'lecon' }             lecon inconnue, en brouillon ou archivee
  *   404 { ok: false, erreur: 'ressource' }         pas de piece jointe protegee a ce rang
- *   404 { ok: false, erreur: 'fichier' }           le fichier n'est pas (encore) dans le bucket
+ *   404 { ok: false, erreur: 'fichier' }           (repli Supabase) fichier pas dans le bucket ; (Bunny)
+ *                                                  chemin mal forme seulement : un absent repond 404 chez Bunny
  *   409 { ok: false, erreur: 'a_venir' }           lecon ou module annonce, pas encore ouvert
- *   503 { ok: false, erreur: 'config' }            cle de service absente
+ *   503 { ok: false, erreur: 'config' }            BUNNY_PDF_* a moitie posees, ou ni Bunny ni cle de service
  *   503 { ok: false, erreur: 'indisponible' }      base, Supabase Auth, Stripe ou Storage illisible
  *
  * L'ouverture est notee au journal des lectures (evenement 'ressource', avec
@@ -37,7 +40,7 @@ import { messageErreur } from '@/lib/liveclub/pur'
  * son document, elle est signalee.
  *
  * Logs : compte TRONQUE, lecon, rang. Jamais l'email, le jeton du compte, la
- * cle de service ni l'URL signee.
+ * cle de service, la cle de jeton Bunny ni l'URL signee.
  */
 
 export const maxDuration = 30
@@ -108,7 +111,7 @@ export async function POST(req: NextRequest) {
     if (signee.erreur === 'config') {
       if (!configAbsenteSignalee) {
         configAbsenteSignalee = true
-        console.warn('[academie/ressource] NEXT_PUBLIC_SUPABASE_URL ou SUPABASE_SERVICE_ROLE_KEY absente : aucune URL ne peut etre signee.')
+        console.warn(`[academie/ressource] ${signee.detail ?? 'configuration absente'} : aucune URL ne peut etre signee.`)
       }
       return refus('config', 503)
     }
@@ -127,7 +130,7 @@ export async function POST(req: NextRequest) {
     console.warn(`[academie/ressource] journal des lectures NON ecrit compte=${tronquer(userId)} lecon=${lecon.id} : ${messageErreur(err)}`)
   }
 
-  console.info(`[academie/ressource] url compte=${tronquer(userId)} lecon=${lecon.id} rang=${demande.index} raison=${resultat.raisons[0] ?? null}`)
+  console.info(`[academie/ressource] url compte=${tronquer(userId)} lecon=${lecon.id} rang=${demande.index} source=${signee.source} raison=${resultat.raisons[0] ?? null}`)
   return NextResponse.json(
     { ok: true, url: signee.url, expire_le: signee.expireLe, titre: ressource.titre },
     { headers },

@@ -3,6 +3,25 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
+## Academie : les PDF payants passent sur Bunny CDN (23/10/2026, PUBLIE, variables BUNNY_PDF_HOTE et BUNNY_PDF_CLE_JETON posees en prod)
+
+Lot D:\6_Societe\Pilotage\Academie\lots\LOT-PDF-SUR-BUNNY.md (GO de Brice). But : sortir le trafic des PDF du quota Supabase.
+- `src/lib/academie/pdf-bunny.ts` (node:crypto seul) : lien de la Pull Zone a jeton, 5 min. Jeton actuel de Bunny
+  (doc « Token Authentication - Advanced » et depot BunnyWay/BunnyCDN.TokenAuthentication) :
+  `HS256-` + base64url(HMAC-SHA256(cle, chemin + expires)), PAS l'ancien SHA256(cle + chemin + expires).
+- `stockage.ts` : variables `BUNNY_PDF_HOTE` (= pull_zone_hostname du coffre) et `BUNNY_PDF_CLE_JETON` (= token_auth_key).
+  Aucune des deux = REPLI Supabase (bucket academie-ressources, comme avant) ; une seule ou mal formee = 503 'config'.
+  Route inchangee sauf log (`source=bunny|supabase`). Avec Bunny, un fichier absent n'est plus vu par la route (404 chez Bunny).
+- Bascule faite le 23/10 : `node --env-file=.env.local scripts/migrer-ressources-vers-bunny.mjs --ecrire` = 43 objets
+  (135,5 Mo) copies au meme chemin et verifies taille + SHA256 ; relance a blanc = 43 deja la. Rien supprime dans Supabase.
+- Envoi : `node scripts/envoyer-ressources-academie.mjs <dossier> <prefixe> [--ecrire]` vise Bunny (coffre
+  bunny-storage.local.json, SHA256, plus de limite de 50 Mo). Outils communs : scripts/bunny-stockage.mjs.
+- Controle en ligne (lecture seule) : `node scripts/verifier-pdf-bunny.mjs [chemin]` : signe 200 + %PDF ; sans jeton,
+  expire, autre cle, jeton d'un autre fichier = 403 (OK le 23/10). Hors ligne : verifier-academie.mjs (vecteur officiel Bunny).
+- La zone contient aussi `sauvegarde/` (copie de 3_Pedagogie et 5_Bibliotheque, posee hors de ce lot, en cours d'envoi le 23/10) : ne pas y toucher.
+- A FAIRE (session principale) : poser les deux variables en prod, commit + push du journal, essai d'un PDF depuis le site ;
+  puis retirer le repli Supabase et vider le bucket apres essai.
+
 ## Academie : l'arbre du catalogue range depuis le cockpit (23/10/2026, PUBLIE, migration 20261023150000 appliquee)
 
 Lot D:\6_Societe\Pilotage\Academie\lots\LOT-ARBRE-CATALOGUE-COCKPIT.md (GO de Brice).

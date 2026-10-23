@@ -1,6 +1,7 @@
 // Verification de l'academie (15/10/2026) : la regle d'acces, le calcul du
 // suivi, la lecture des corps de requete (src/lib/academie/pur.ts), et les
-// liens signes Bunny par bibliotheque (src/lib/academie/bunny.ts). Node 22
+// liens signes Bunny par bibliotheque (src/lib/academie/bunny.ts), les liens
+// signes des PDF sur Bunny CDN (src/lib/academie/pdf-bunny.ts). Node 22
 // supprime les types tout seul : les .ts sont importes tels quels, les
 // fonctions testees sont celles des routes.
 //
@@ -34,6 +35,7 @@ import {
   autoriserEdition, champsModifies, estAdmin, fusionImport, lireCibleEdition, lireDemandeEdition, planEdition, LIMITES_EDITION,
 } from '../src/lib/academie/pur.ts'
 import { configBibliotheque, configBunny, jetonLecture, lienLecture, signerLecture, DUREE_LIEN_S } from '../src/lib/academie/bunny.ts'
+import { configPdfBunny, jetonPdf, lienPdf, signerPdf, DUREE_URL_PDF_S } from '../src/lib/academie/pdf-bunny.ts'
 import {
   autoriserArbre, conteneursDuModule, fichiersDesRessources, lireGesteArbre, planDeplacerLecons, planDeplacerModule,
   planDeplacerSection, planImportLecon, planImportModule, planImportSection, planStatut, renumeroter, slugLibre, statutTient,
@@ -625,6 +627,38 @@ bloc('bibliotheques : formation = variables de l essai, les autres par leur nom'
   assert.equal(configBibliotheque('inconnue', env), null)
   assert.equal(configBibliotheque('../x', env), null)
   assert.equal(configBibliotheque(null, env), null)
+})
+
+bloc('PDF sur Bunny CDN : jeton HS256 (vecteur officiel de Bunny), lien de 5 min, repli Supabase sans variables', () => {
+  // Vecteur « plain » du depot officiel BunnyWay/BunnyCDN.TokenAuthentication (e2e/vectors.json).
+  assert.equal(jetonPdf('SecurityKey', '/300kb.jpg', 1598024587), 'HS256-o10JRWlsAItyAsdKS6jJKjabHN4FrFsplDHPV1idcX4')
+  // Vecteur calcule a part (python3 : hmac.new(cle, chemin + expiration, sha256), base64 url sans « = »).
+  const chemin = 'formation-complete/ep-01-pourquoi-se-lancer.pdf'
+  const config = { hote: 'aok-academie-pdfs.b-cdn.net', cle: 'cle-de-test' }
+  const l = lienPdf(config, chemin, 1760000300)
+  assert.equal(l.url, `https://aok-academie-pdfs.b-cdn.net/${chemin}`
+    + '?token=HS256-lOpMCcVmI33oxQLmT3SrWmQSsA3o2dkArRqGZyi1mUE&expires=1760000300')
+  assert.equal(l.expireLe, new Date(1760000300 * 1000).toISOString())
+  assert.ok(!l.url.includes('cle-de-test'), 'la cle ne doit jamais apparaitre dans l URL')
+  // 5 minutes ; duree absurde = 5 minutes.
+  assert.equal(DUREE_URL_PDF_S, 300)
+  assert.equal(signerPdf(chemin, config, { maintenantMs: 1_760_000_000_900 }).expiration, 1760000300)
+  assert.equal(signerPdf(chemin, config, { maintenantMs: 1_760_000_000_000, dureeSecondes: -1 }).expiration, 1760000300)
+  // Les memes chemins que la route accepte (cheminFichierPropre) ; les autres ne sont jamais signes.
+  for (const c of [chemin, 'a.pdf', 'a/b/c.pdf', '', '/a.pdf', 'a//b.pdf', '../a.pdf', 'a/.x/b.pdf', 'a b.pdf', 'a?b.pdf', 'x'.repeat(301)]) {
+    assert.equal(lienPdf(config, c, 1) === null, cheminFichierPropre(c) === null, c.slice(0, 20))
+  }
+  // Configuration : rien = repli Supabase ; a moitie = 503 'config' ; hote normalise.
+  assert.equal(configPdfBunny({}), 'absente')
+  assert.equal(configPdfBunny({ BUNNY_PDF_HOTE: ' ', BUNNY_PDF_CLE_JETON: '' }), 'absente')
+  assert.equal(configPdfBunny({ BUNNY_PDF_HOTE: 'aok-academie-pdfs.b-cdn.net' }), 'mal_posee')
+  assert.equal(configPdfBunny({ BUNNY_PDF_CLE_JETON: 'une-cle-assez-longue' }), 'mal_posee')
+  assert.equal(configPdfBunny({ BUNNY_PDF_HOTE: 'pas un hote', BUNNY_PDF_CLE_JETON: 'une-cle-assez-longue' }), 'mal_posee')
+  assert.equal(configPdfBunny({ BUNNY_PDF_HOTE: 'b-cdn', BUNNY_PDF_CLE_JETON: 'une-cle-assez-longue' }), 'mal_posee')
+  assert.deepEqual(
+    configPdfBunny({ BUNNY_PDF_HOTE: ' https://AOK-academie-pdfs.b-cdn.net/ ', BUNNY_PDF_CLE_JETON: ' une-cle-assez-longue ' }),
+    { hote: 'aok-academie-pdfs.b-cdn.net', cle: 'une-cle-assez-longue' },
+  )
 })
 
 // ---------------------------------------------------------------------------
