@@ -7,8 +7,8 @@
 // D:\6_Societe\Pilotage\Academie\catalogue\modules\<slug>.json (un module par fichier, remplis jour
 // apres jour, plan section 12). Ce qui fait foi sur le contenu : D:\3_Pedagogie\CARTE-DES-FORMATIONS.md.
 //
-// Idempotent : le module se retrouve par son slug, une section par son ordre dans le module, une lecon
-// par (module, slug) ; relancer le meme fichier met a jour sans dupliquer. Le contenu d'une lecon ecrite
+// Idempotent : le module se retrouve par son slug, une section par son ordre dans le fichier (ordre_fichier,
+// depuis le 23/10), une lecon par (module, slug) puis par son origine ; relancer le meme fichier met a jour sans dupliquer. Le contenu d'une lecon ecrite
 // (ou le texte sous une video) peut venir d'un fichier Markdown (« contenu_fichier », chemin relatif au
 // fichier de donnees).
 //
@@ -32,6 +32,23 @@
 // --ecraser-editions, le fichier l'emporte, edite_le repasse a vide et academie_editions garde ce qui
 // a ete ecrase (origine 'import'). LA MIGRATION DOIT ETRE APPLIQUEE avant d'importer.
 //
+// Le rangement fait dans le cockpit (23/10/2026, arbre du catalogue, route /api/academie/arbre,
+// migration 20261023150000_academie_arbre.sql ; src/lib/academie/arbre.ts, planImport*) :
+// - une lecon se retrouve par (module, slug), PUIS par son origine (origine_module_id, origine_slug) :
+//   deplacee dans un AUTRE module, elle n'est ni ramenee ni recreee ici ; ses autres champs (video,
+//   texte non modifie, ressources...) suivent le fichier, sa place non (« garde : deplace dans le
+//   cockpit ») ;
+// - une lecon, une section ou un module reordonne dans le cockpit (deplace_le) garde sa place ; un
+//   statut change dans le cockpit (statut_le) est garde s'il tient encore (une video publiee dont le
+//   fichier retire la video repasse au statut du fichier : « attention ») ;
+// - une section se retrouve par ordre_fichier (son ordre dans le fichier), plus par son ordre : une
+//   section creee dans le cockpit (ordre_fichier vide) n'est jamais touchee ;
+// - une lecon arrivee d'un autre module qui porte le slug d'une lecon du fichier : l'import s'arrete
+//   (rien d'ecrit) et dit laquelle renommer ;
+// - --ecraser-editions remet aussi le fichier pour la place et le statut (la lecon revient dans son
+//   module d'origine), vide les marques et note ce qui est defait (academie_editions, origine import).
+// LA MIGRATION 20261023150000 DOIT ETRE APPLIQUEE avant d'importer.
+//
 // importerModule(tx, donnees, dossier, options) est exportee pour les scripts essayer-migration-*
 // (memes ordres, dans une transaction toujours annulee).
 import { readFileSync } from 'node:fs'
@@ -40,6 +57,13 @@ import { pathToFileURL } from 'node:url'
 import { PrismaClient } from '@prisma/client'
 import { fusionImport, lireOffresSections } from '../src/lib/academie/pur.ts'
 import { SQL_EDITION_HISTORIQUE_IMPORT } from '../src/lib/academie/requetes.ts'
+import { planImportLecon, planImportModule, planImportSection } from '../src/lib/academie/arbre.ts'
+
+// Une lecon telle qu'elle est en base, avec ses marques (edition, place, statut, origine).
+const SELECT_LECON = `select id::text as id, module_id::text as module_id, section_id::text as section_id, slug, ordre,
+  statut, titre, contenu, edite_le is not null as edite, deplace_le is not null as deplace,
+  statut_le is not null as statut_modifie, origine_module_id::text as origine_module_id, origine_slug
+  from public.academie_lecons`
 
 /**
  * Joue l'import d'un module dans la transaction tx. Rend le bilan. Jette sur une donnee invalide.
@@ -50,15 +74,29 @@ export async function importerModule(tx, donnees, dossier, { ecraserEditions = f
   const bilan = {
     module: m.slug, sections: 0, lecons: 0, offres: [], offres_retirees: 0, offres_sections: [], offres_sections_retirees: 0,
     gardees: [], editions_ecrasees: [],
+    // Le rangement du cockpit (arbre) : garde, defait par --ecraser-editions, ou abandonne (avertissement).
+    places_gardees: [], statuts_gardes: [], rangements_ecrases: [], avertissements: [],
+  }
+  // Ce que l'import defait du rangement du cockpit : dans l'historique, et dans le bilan si c'est force.
+  const noterRangement = async (cible, id, nom, plan) => {
+    if (plan.historique.length) await tx.$executeRawUnsafe(SQL_EDITION_HISTORIQUE_IMPORT, cible, id, JSON.stringify(plan.historique))
+    if (ecraserEditions && (plan.effacerPlace || plan.effacerStatut)) bilan.rangements_ecrases.push(nom)
   }
 
-  // Le module tel qu'il est en base (verrouille jusqu'a la fin de l'import) : une edition dans l'app ?
+  // Le module tel qu'il est en base (verrouille jusqu'a la fin de l'import) : une edition, un rangement dans l'app ?
   const [modBase] = await tx.$queryRawUnsafe(
-    `select id::text as id, titre, resume, edite_le is not null as edite from public.academie_modules where slug = $1 for update`,
+    `select id::text as id, titre, resume, ordre, statut, edite_le is not null as edite, deplace_le is not null as deplace,
+            statut_le is not null as statut_modifie
+       from public.academie_modules where slug = $1 for update`,
     m.slug)
   const fm = fusionImport(
     modBase ? { edite: modBase.edite, textes: { titre: modBase.titre, resume: modBase.resume } } : null,
     { titre: m.titre, resume: m.resume ?? null },
+    ecraserEditions,
+  )
+  const pm = planImportModule(
+    modBase ? { ordre: modBase.ordre, statut: modBase.statut, deplace: modBase.deplace, statut_modifie: modBase.statut_modifie } : null,
+    { ordre: m.ordre ?? 0, statut: m.statut ?? 'brouillon' },
     ecraserEditions,
   )
   const [mod] = await tx.$queryRawUnsafe(
@@ -68,10 +106,12 @@ export async function importerModule(tx, donnees, dossier, { ecraserEditions = f
        parcours = excluded.parcours, statut = excluded.statut, auteur = excluded.auteur, image = excluded.image,
        prix_eur = excluded.prix_eur,
        edite_le = case when $10::boolean then null else academie_modules.edite_le end,
-       edite_par = case when $10::boolean then null else academie_modules.edite_par end
+       edite_par = case when $10::boolean then null else academie_modules.edite_par end,
+       deplace_le = case when $11::boolean then null else academie_modules.deplace_le end,
+       statut_le = case when $12::boolean then null else academie_modules.statut_le end
      returning id::text as id`,
-    m.slug, fm.valeurs.titre, fm.valeurs.resume, m.ordre ?? 0, m.parcours ?? null, m.statut ?? 'brouillon',
-    m.auteur ?? null, m.image ?? null, m.prix_eur ?? null, fm.effacerEdition,
+    m.slug, fm.valeurs.titre, fm.valeurs.resume, pm.ordre, m.parcours ?? null, pm.statut,
+    m.auteur ?? null, m.image ?? null, m.prix_eur ?? null, fm.effacerEdition, pm.effacerPlace, pm.effacerStatut,
   )
   const moduleId = mod.id
   if (fm.garde) bilan.gardees.push(`module ${m.slug} (titre et resume)`)
@@ -79,18 +119,30 @@ export async function importerModule(tx, donnees, dossier, { ecraserEditions = f
     bilan.editions_ecrasees.push(`module ${m.slug}`)
     if (fm.historique.length) await tx.$executeRawUnsafe(SQL_EDITION_HISTORIQUE_IMPORT, 'module', moduleId, JSON.stringify(fm.historique))
   }
+  if (pm.gardePlace) bilan.places_gardees.push(`module ${m.slug} (ordre ${pm.ordre})`)
+  if (pm.gardeStatut) bilan.statuts_gardes.push(`module ${m.slug} (${pm.statut})`)
+  await noterRangement('module', moduleId, `module ${m.slug}`, pm)
 
+  // Une section se retrouve par ordre_fichier (son ordre dans le fichier) : reordonnee dans le
+  // cockpit, elle reste la meme ; creee dans le cockpit (ordre_fichier vide), elle n'est jamais touchee.
   const sectionParCle = new Map()
   for (const s of donnees.sections ?? []) {
-    const deja = await tx.$queryRawUnsafe(
-      `select id::text as id from public.academie_sections where module_id = $1::uuid and ordre = $2`, moduleId, s.ordre)
+    const [deja] = await tx.$queryRawUnsafe(
+      `select id::text as id, ordre, deplace_le is not null as deplace from public.academie_sections
+        where module_id = $1::uuid and ordre_fichier = $2 order by ordre, id limit 1 for update`, moduleId, s.ordre)
     let id
-    if (deja.length) {
-      id = deja[0].id
-      await tx.$executeRawUnsafe(`update public.academie_sections set titre = $2 where id = $1::uuid`, id, s.titre)
+    if (deja) {
+      id = deja.id
+      const ps = planImportSection({ ordre: deja.ordre, deplace: deja.deplace }, { ordre: s.ordre }, ecraserEditions)
+      await tx.$executeRawUnsafe(
+        `update public.academie_sections set titre = $2, ordre = $3,
+           deplace_le = case when $4::boolean then null else deplace_le end
+         where id = $1::uuid`, id, s.titre, ps.ordre, ps.effacerPlace)
+      if (ps.gardePlace) bilan.places_gardees.push(`section ${s.cle} (ordre ${ps.ordre})`)
+      await noterRangement('section', id, `section ${s.cle}`, { ...ps, effacerStatut: false })
     } else {
       const [n] = await tx.$queryRawUnsafe(
-        `insert into public.academie_sections (module_id, ordre, titre) values ($1::uuid, $2, $3) returning id::text as id`,
+        `insert into public.academie_sections (module_id, ordre, ordre_fichier, titre) values ($1::uuid, $2, $2, $3) returning id::text as id`,
         moduleId, s.ordre, s.titre)
       id = n.id
     }
@@ -103,33 +155,70 @@ export async function importerModule(tx, donnees, dossier, { ecraserEditions = f
     const sectionId = l.section ? sectionParCle.get(l.section) : null
     if (l.section && !sectionId) throw new Error(`section inconnue « ${l.section} » pour la lecon ${l.slug}`)
     const video = l.type === 'video'
-    const [leconBase] = await tx.$queryRawUnsafe(
-      `select id::text as id, titre, contenu, edite_le is not null as edite from public.academie_lecons
-        where module_id = $1::uuid and slug = $2 for update`, moduleId, l.slug)
+    const hebergeur = video ? (l.hebergeur ?? 'bunny') : null
+    const bunnyVideoId = video ? (l.bunny_video_id ?? null) : null
+    const wistiaId = video ? (l.wistia_id ?? null) : null
+    // Par (module, slug) d'abord ; une lecon ARRIVEE d'un autre module sous ce slug n'est pas celle du fichier.
+    let [leconBase] = await tx.$queryRawUnsafe(`${SELECT_LECON} where module_id = $1::uuid and slug = $2 for update`, moduleId, l.slug)
+    if (leconBase && leconBase.origine_module_id && leconBase.origine_module_id !== moduleId) {
+      throw new Error(`conflit de slug : la lecon « ${l.slug} » du fichier porte le slug d'une lecon arrivee d'un autre module `
+        + `dans le cockpit (« ${leconBase.titre} »). Change le slug dans le fichier, ou deplace cette lecon, puis relance.`)
+    }
+    // Puis par son origine : deplacee dans un autre module depuis le cockpit, elle n'est ni ramenee ni recreee.
+    if (!leconBase) {
+      [leconBase] = await tx.$queryRawUnsafe(`${SELECT_LECON} where origine_module_id = $1::uuid and origine_slug = $2 for update`, moduleId, l.slug)
+    }
     const fl = fusionImport(
       leconBase ? { edite: leconBase.edite, textes: { titre: leconBase.titre, contenu: leconBase.contenu } } : null,
       { titre: l.titre, contenu },
       ecraserEditions,
     )
-    await tx.$executeRawUnsafe(
-      `insert into public.academie_lecons (module_id, section_id, slug, ordre, titre, type, format, usage, hebergeur,
-         bunny_bibliotheque, bunny_video_id, wistia_id, duree_s, contenu, ressources, apercu, statut)
-       values ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb, $16, $17)
-       on conflict (module_id, slug) do update set section_id = excluded.section_id, ordre = excluded.ordre,
-         titre = excluded.titre, type = excluded.type, format = excluded.format, usage = excluded.usage,
-         hebergeur = excluded.hebergeur, bunny_bibliotheque = excluded.bunny_bibliotheque,
-         bunny_video_id = excluded.bunny_video_id, wistia_id = excluded.wistia_id, duree_s = excluded.duree_s,
-         contenu = excluded.contenu, ressources = excluded.ressources, apercu = excluded.apercu, statut = excluded.statut,
-         edite_le = case when $18::boolean then null else academie_lecons.edite_le end,
-         edite_par = case when $18::boolean then null else academie_lecons.edite_par end`,
-      moduleId, sectionId, l.slug, l.ordre, fl.valeurs.titre, l.type, l.format ?? 'cours', l.usage ?? 'interne',
-      video ? (l.hebergeur ?? 'bunny') : null,
-      video && (l.hebergeur ?? 'bunny') === 'bunny' ? (l.bunny_bibliotheque ?? 'formation') : null,
-      video ? (l.bunny_video_id ?? null) : null, video ? (l.wistia_id ?? null) : null,
-      l.duree_s ?? null, fl.valeurs.contenu, JSON.stringify(l.ressources ?? []), Boolean(l.apercu), l.statut ?? 'brouillon',
-      fl.effacerEdition,
+    const pl = planImportLecon(
+      leconBase ? {
+        id: leconBase.id, module_id: leconBase.module_id, section_id: leconBase.section_id, slug: leconBase.slug,
+        ordre: leconBase.ordre, statut: leconBase.statut, deplace: leconBase.deplace, statut_modifie: leconBase.statut_modifie,
+        origine_module_id: leconBase.origine_module_id, origine_slug: leconBase.origine_slug,
+      } : null,
+      {
+        module_id: moduleId, section_id: sectionId ?? null, slug: l.slug, ordre: l.ordre, statut: l.statut ?? 'brouillon',
+        type: l.type, heberge: Boolean(bunnyVideoId || wistiaId), contenu: fl.valeurs.contenu,
+      },
+      ecraserEditions,
     )
+    // Les champs qui suivent toujours le fichier (le texte et le titre : selon l'edition dans l'app).
+    const champs = [
+      l.type, l.format ?? 'cours', l.usage ?? 'interne', hebergeur,
+      video && hebergeur === 'bunny' ? (l.bunny_bibliotheque ?? 'formation') : null,
+      bunnyVideoId, wistiaId, l.duree_s ?? null, fl.valeurs.contenu, JSON.stringify(l.ressources ?? []), Boolean(l.apercu),
+    ]
+    if (leconBase) {
+      await tx.$executeRawUnsafe(
+        `update public.academie_lecons set module_id = $2::uuid, section_id = $3::uuid, slug = $4, ordre = $5, titre = $6,
+           type = $7, format = $8, usage = $9, hebergeur = $10, bunny_bibliotheque = $11, bunny_video_id = $12,
+           wistia_id = $13, duree_s = $14, contenu = $15, ressources = $16::jsonb, apercu = $17, statut = $18,
+           edite_le = case when $19::boolean then null else edite_le end,
+           edite_par = case when $19::boolean then null else edite_par end,
+           deplace_le = case when $20::boolean then null else deplace_le end,
+           origine_module_id = case when $20::boolean then null else origine_module_id end,
+           origine_slug = case when $20::boolean then null else origine_slug end,
+           statut_le = case when $21::boolean then null else statut_le end
+         where id = $1::uuid`,
+        leconBase.id, pl.module_id, pl.section_id, pl.slug, pl.ordre, fl.valeurs.titre, ...champs, pl.statut,
+        fl.effacerEdition, pl.effacerPlace, pl.effacerStatut,
+      )
+    } else {
+      await tx.$executeRawUnsafe(
+        `insert into public.academie_lecons (module_id, section_id, slug, ordre, titre, type, format, usage, hebergeur,
+           bunny_bibliotheque, bunny_video_id, wistia_id, duree_s, contenu, ressources, apercu, statut)
+         values ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb, $16, $17)`,
+        moduleId, sectionId ?? null, l.slug, l.ordre, fl.valeurs.titre, ...champs, pl.statut,
+      )
+    }
     if (fl.garde) bilan.gardees.push(`lecon ${l.slug} (titre et texte)`)
+    if (pl.gardePlace) bilan.places_gardees.push(`lecon ${l.slug}${pl.ailleurs ? ` (dans un autre module, slug ${pl.slug})` : ` (ordre ${pl.ordre})`}`)
+    if (pl.gardeStatut) bilan.statuts_gardes.push(`lecon ${l.slug} (${pl.statut})`)
+    if (pl.avertissement) bilan.avertissements.push(`lecon ${l.slug} : ${pl.avertissement}`)
+    if (leconBase) await noterRangement('lecon', leconBase.id, `lecon ${l.slug}`, pl)
     if (fl.effacerEdition) {
       bilan.editions_ecrasees.push(`lecon ${l.slug}`)
       if (fl.historique.length) await tx.$executeRawUnsafe(SQL_EDITION_HISTORIQUE_IMPORT, 'lecon', leconBase.id, JSON.stringify(fl.historique))
@@ -203,6 +292,10 @@ if (estLanceDirectement) {
   const dire = () => {
     for (const g of bilan.gardees ?? []) console.log(`garde : modifie dans l'app : ${g}`)
     for (const e of bilan.editions_ecrasees ?? []) console.log(`ecrase (--ecraser-editions) : ${e}, l'ancienne version est dans academie_editions`)
+    for (const g of bilan.places_gardees ?? []) console.log(`garde : deplace dans le cockpit : ${g}`)
+    for (const g of bilan.statuts_gardes ?? []) console.log(`garde : statut change dans le cockpit : ${g}`)
+    for (const e of bilan.rangements_ecrases ?? []) console.log(`ecrase (--ecraser-editions) : rangement du cockpit defait : ${e}, l'ancienne place est dans academie_editions`)
+    for (const a of bilan.avertissements ?? []) console.log(`attention : ${a}`)
   }
 
   try {

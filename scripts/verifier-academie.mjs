@@ -34,6 +34,11 @@ import {
   autoriserEdition, champsModifies, estAdmin, fusionImport, lireCibleEdition, lireDemandeEdition, planEdition, LIMITES_EDITION,
 } from '../src/lib/academie/pur.ts'
 import { configBibliotheque, configBunny, jetonLecture, lienLecture, signerLecture, DUREE_LIEN_S } from '../src/lib/academie/bunny.ts'
+import {
+  autoriserArbre, conteneursDuModule, fichiersDesRessources, lireGesteArbre, planDeplacerLecons, planDeplacerModule,
+  planDeplacerSection, planImportLecon, planImportModule, planImportSection, planStatut, renumeroter, slugLibre, statutTient,
+  MAX_LECONS_GESTE,
+} from '../src/lib/academie/arbre.ts'
 
 const args = process.argv.slice(2)
 const horsLigne = args.includes('--hors-ligne')
@@ -739,6 +744,222 @@ bloc('importeur : une edition de l app est gardee, --ecraser-editions la remplac
   })
   // Forcee sans edition : rien a effacer.
   assert.equal(fusionImport({ edite: false, textes: base }, fichier, true).effacerEdition, false)
+})
+
+// ---------------------------------------------------------------------------
+// 6. L'arbre du catalogue range depuis le cockpit (23/10/2026, route
+//    /api/academie/arbre, src/lib/academie/arbre.ts, importeur). Le SQL
+//    (ecriture, historique, importeur contre la base) :
+//    scripts/essayer-migration-arbre-academie.mjs.
+// ---------------------------------------------------------------------------
+
+// MA : LA0 hors section ; SA1 (LA1 texte, LA2) ; SA2 (LA3, LA4 video pas encore envoyee).
+// MB : SB1 (LB1 « un », comme LA1 ; LB2). MC : vide.
+const id = (n) => `a${String(n).padStart(7, '0')}-0000-4000-8000-000000000000`
+const [MA, MB, MC, SA1, SA2, SB1, LA0, LA1, LA2, LA3, LA4, LB1, LB2] = Array.from({ length: 13 }, (_, i) => id(i + 1))
+const mod = (i, slug, ordre, o = {}) => ({ id: i, slug, titre: slug, ordre, parcours: null, statut: 'publie', edite_le: null, deplace_le: null, statut_le: null, ...o })
+const sec = (i, module_id, ordre, titre) => ({ id: i, module_id, ordre, titre, ordre_fichier: ordre, deplace_le: null })
+const lec = (i, module_id, section_id, slug, ordre, o = {}) => ({
+  id: i, module_id, section_id, slug, ordre, titre: slug, type: 'video', hebergeur: 'bunny', bunny_bibliotheque: 'formation',
+  bunny_video_id: null, wistia_id: null, duree_s: null, statut: 'publie', apercu: false, a_contenu: false, fichiers: [],
+  edite_le: null, deplace_le: null, statut_le: null, origine_module_id: null, origine_slug: null, ...o,
+})
+const ARBRE = {
+  modules: [mod(MA, 'module-a', 1), mod(MB, 'module-b', 2), mod(MC, 'module-c', 10, { statut: 'brouillon' })],
+  sections: [sec(SA1, MA, 1, 'Partie 1'), sec(SA2, MA, 2, 'Partie 2'), sec(SB1, MB, 1, 'Intro B')],
+  lecons: [
+    lec(LA0, MA, null, 'accueil', 1),
+    lec(LA1, MA, SA1, 'un', 2, { type: 'texte', hebergeur: null, bunny_bibliotheque: null, a_contenu: true, statut: 'brouillon' }),
+    lec(LA2, MA, SA1, 'deux', 3),
+    lec(LA3, MA, SA2, 'trois', 4),
+    lec(LA4, MA, SA2, 'quatre', 5, { hebergeur: null, bunny_bibliotheque: null, statut: 'brouillon' }),
+    lec(LB1, MB, SB1, 'un', 1),
+    lec(LB2, MB, SB1, 'autre', 2),
+  ],
+}
+/** L'arbre apres un plan (ce que l'ecriture SQL fait). */
+function appliquer(arbre, plan) {
+  const parId = (liste) => new Map(liste.map(x => [x.id, x]))
+  const l = parId(plan.lecons); const s = parId(plan.sections); const m = parId(plan.modules)
+  const sl = parId(plan.statutsLecons); const sm = parId(plan.statutsModules)
+  return {
+    modules: arbre.modules.map(x => ({ ...x, ...(m.has(x.id) ? { ordre: m.get(x.id).ordre, deplace_le: 'x' } : {}), ...(sm.has(x.id) ? { statut: sm.get(x.id).statut } : {}) })),
+    sections: arbre.sections.map(x => (s.has(x.id) ? { ...x, ordre: s.get(x.id).ordre, deplace_le: 'x' } : x)),
+    lecons: arbre.lecons.map(x => ({ ...x, ...(l.has(x.id) ? { ...l.get(x.id), deplace_le: 'x' } : {}), ...(sl.has(x.id) ? { statut: sl.get(x.id).statut } : {}) })),
+  }
+}
+/** Les lecons d'un module dans l'ordre d'affichage, et leurs ordres strictement croissants. */
+function ordreAffiche(arbre, moduleId) {
+  const suite = conteneursDuModule(arbre, moduleId).flatMap(c => c.lecons)
+  for (let i = 1; i < suite.length; i++) assert.ok(suite[i].ordre > suite[i - 1].ordre, `ordre non croissant dans ${moduleId}`)
+  return suite.map(x => x.id)
+}
+
+bloc('arbre, droits : seul l admin passe, le refus vient avant la lecture de la demande', () => {
+  const bonne = { action: 'statut', cible: 'lecon', ids: [LA1], statut: 'publie' }
+  for (const role of [null, undefined, '', 'membre', 'Admin', 'ADMIN']) {
+    assert.deepEqual(autoriserArbre(estAdmin(role), bonne), { ok: false, status: 403, erreur: 'droit' }, `role ${JSON.stringify(role)}`)
+    assert.deepEqual(autoriserArbre(estAdmin(role), 'n importe quoi'), { ok: false, status: 403, erreur: 'droit' })
+  }
+  const ok = autoriserArbre(estAdmin('admin'), bonne)
+  assert.equal(ok.ok, true)
+  assert.deepEqual(ok.geste, { action: 'statut', cible: 'lecon', ids: [LA1], statut: 'publie' })
+  assert.deepEqual(autoriserArbre(estAdmin('admin'), { action: 'statut', cible: 'lecon', ids: [LA1], statut: 'archive' }),
+    { ok: false, status: 400, erreur: 'demande' })
+})
+
+bloc('arbre, demande : actions, cles permises, uuid, plafond, titre de section', () => {
+  const lire = (c) => lireGesteArbre(c)
+  const d = lire({ action: 'deplacer_lecons', ids: [LA1.toUpperCase(), LA2, LA1], module: MB, section: SB1, avant: LB2 })
+  assert.deepEqual(d, { ok: true, geste: { action: 'deplacer_lecons', ids: [LA1, LA2], module: MB, section: SB1, avant: LB2 } })
+  assert.deepEqual(lire({ action: 'deplacer_lecons', ids: [LA1], module: MB }).geste, { action: 'deplacer_lecons', ids: [LA1], module: MB, section: null, avant: null })
+  for (const mauvais of [
+    null, [], 'x', { action: 'supprimer', id: LA1 }, { action: 'toString' },
+    { action: 'deplacer_lecons', ids: [LA1], module: MB, en_plus: 1 },
+    { action: 'deplacer_lecons', ids: [], module: MB },
+    { action: 'deplacer_lecons', ids: ['pas-un-uuid'], module: MB },
+    { action: 'deplacer_lecons', ids: [LA1], module: MB, avant: LA1 },
+    { action: 'deplacer_lecons', ids: [LA1], section: SB1 },
+    { action: 'deplacer_lecons', ids: Array.from({ length: MAX_LECONS_GESTE + 1 }, (_, i) => id(100 + i)), module: MB },
+    { action: 'deplacer_section', id: SA1, avant: SA1 },
+    { action: 'deplacer_module', id: 'x' },
+    { action: 'statut', cible: 'section', ids: [SA1], statut: 'publie' },
+    { action: 'creer_section', module: 'x', titre: 'T' },
+  ]) assert.deepEqual(lire(mauvais), { ok: false, erreur: 'demande' }, JSON.stringify(mauvais)?.slice(0, 80))
+  assert.deepEqual(lire({ action: 'creer_section', module: MA, titre: '  Bonus \n  final  ' }).geste, { action: 'creer_section', module: MA, titre: 'Bonus final' })
+  assert.deepEqual(lire({ action: 'creer_section', module: MA, titre: '   ' }), { ok: false, erreur: 'titre' })
+  assert.deepEqual(lire({ action: 'creer_section', module: MA, titre: 'x'.repeat(201) }), { ok: false, erreur: 'titre' })
+  assert.deepEqual(lire({ action: 'creer_section', module: MA }), { ok: false, erreur: 'titre' })
+})
+
+bloc('arbre, renumeroter : rien si deja croissant, les trous d abord, sinon 1..n ; seulement ce qui change', () => {
+  const s = (...p) => p.map(([i, ordre]) => ({ id: i, ordre }))
+  assert.deepEqual([...renumeroter(s(['a', 1], ['b', 5], ['c', 9]))], [])
+  assert.deepEqual([...renumeroter(s(['c', 3], ['a', 1], ['b', 2]))], [['c', 0]])
+  assert.deepEqual([...renumeroter(s(['a', 10], ['c', 30], ['b', 20]))], [['c', 15]])
+  assert.deepEqual([...renumeroter(s(['b', 2], ['c', 3], ['a', 1]))], [['a', 4]])
+  assert.deepEqual(Object.fromEntries(renumeroter(s(['a', 1], ['d', 4], ['b', 2], ['c', 3]))), { d: 2, b: 3, c: 4 })
+  // Ordres egaux : un seul est garde, les autres passent devant (un ordre peut devenir negatif).
+  assert.deepEqual(Object.fromEntries(renumeroter(s(['a', 1], ['b', 1], ['c', 1]))), { a: -1, b: 0 })
+  assert.deepEqual([...renumeroter([])], [])
+  assert.equal(slugLibre('un', new Set(['deux'])), 'un')
+  assert.equal(slugLibre('un', new Set(['un', 'un-2'])), 'un-3')
+  const long = slugLibre('a'.repeat(120), new Set(['a'.repeat(120)]))
+  assert.ok(long.length <= 120 && /^[a-z0-9]+(-[a-z0-9]+)*$/.test(long), long)
+})
+
+bloc('arbre : une lecon deplacee dans un AUTRE module (section choisie, slug libre, origine notee, ordre recalcule, historique)', () => {
+  const p = planDeplacerLecons(ARBRE, { action: 'deplacer_lecons', ids: [LA1], module: MB, section: SB1, avant: LB2 })
+  assert.equal(p.ok, true)
+  assert.deepEqual(p.plan.lecons, [
+    { id: LA1, module_id: MB, section_id: SB1, ordre: 2, slug: 'un-2', origine_module_id: MA, origine_slug: 'un' },
+    { id: LB2, module_id: MB, section_id: SB1, ordre: 3, slug: 'autre', origine_module_id: null, origine_slug: null },
+  ])
+  assert.deepEqual(p.plan.renommees, [{ id: LA1, avant: 'un', apres: 'un-2' }])
+  assert.equal(p.plan.historique.length, 2)
+  const h = p.plan.historique[0]
+  assert.deepEqual({ ...h, avant: JSON.parse(h.avant), apres: JSON.parse(h.apres) }, {
+    cible: 'lecon', cible_id: LA1, champ: 'position',
+    avant: { module: 'module-a', section: 'Partie 1', ordre: 2, slug: 'un', module_id: MA, section_id: SA1 },
+    apres: { module: 'module-b', section: 'Intro B', ordre: 2, slug: 'un-2', module_id: MB, section_id: SB1 },
+  })
+  const apres = appliquer(ARBRE, p.plan)
+  assert.deepEqual(ordreAffiche(apres, MB), [LB1, LA1, LB2])
+  assert.deepEqual(ordreAffiche(apres, MA), [LA0, LA2, LA3, LA4])
+
+  // Une autre lecon qui arrive dans MA ne prend pas « un » : il est reserve par l'origine de LA1.
+  const q = planDeplacerLecons(apres, { action: 'deplacer_lecons', ids: [LB1], module: MA, section: null, avant: null })
+  assert.equal(q.plan.lecons.find(x => x.id === LB1).slug, 'un-2')
+  // LA1 revient chez elle : slug d'origine repris, origine effacee.
+  const r = planDeplacerLecons(apres, { action: 'deplacer_lecons', ids: [LA1], module: MA, section: SA1, avant: LA2 })
+  assert.deepEqual(r.plan.lecons.find(x => x.id === LA1), { id: LA1, module_id: MA, section_id: SA1, ordre: 2, slug: 'un', origine_module_id: null, origine_slug: null })
+  // Deux deplacements de suite : l'origine reste la premiere.
+  const t = planDeplacerLecons(apres, { action: 'deplacer_lecons', ids: [LA1], module: MC, section: null, avant: null })
+  assert.deepEqual(t.plan.lecons.find(x => x.id === LA1), { id: LA1, module_id: MC, section_id: null, ordre: 2, slug: 'un-2', origine_module_id: MA, origine_slug: 'un' })
+})
+
+bloc('arbre : reordonner, plusieurs lecons d un coup, sections ; l ordre du module suit l affichage', () => {
+  // LA3 (Partie 2) passe devant LA1 (Partie 1) : pas de trou entre 1 et 2, le module est renumerote.
+  const p = planDeplacerLecons(ARBRE, { action: 'deplacer_lecons', ids: [LA3], module: MA, section: SA1, avant: LA1 })
+  assert.deepEqual(ordreAffiche(appliquer(ARBRE, p.plan), MA), [LA0, LA3, LA1, LA2, LA4])
+  assert.deepEqual(p.plan.lecons.map(x => x.id).sort(), [LA1, LA2, LA3].sort(), 'LA0 et LA4 ne bougent pas')
+  // Selection multiple, dans l'ordre donne, a la fin de la section.
+  const m = planDeplacerLecons(ARBRE, { action: 'deplacer_lecons', ids: [LA4, LA0], module: MA, section: SA1, avant: null })
+  const am = appliquer(ARBRE, m.plan)
+  assert.deepEqual(ordreAffiche(am, MA), [LA1, LA2, LA4, LA0, LA3])
+  assert.equal(am.lecons.find(x => x.id === LA0).section_id, SA1)
+  // Deposee au meme endroit : rien a ecrire.
+  const rien = planDeplacerLecons(ARBRE, { action: 'deplacer_lecons', ids: [LA2], module: MA, section: SA1, avant: null })
+  assert.deepEqual(rien.plan.lecons, [])
+  assert.deepEqual(rien.plan.historique, [])
+  // Les sections : Partie 2 devant Partie 1, les lecons suivent.
+  const s = planDeplacerSection(ARBRE, { action: 'deplacer_section', id: SA2, avant: SA1 })
+  assert.deepEqual(s.plan.sections, [{ id: SA2, ordre: 0 }])
+  const as = appliquer(ARBRE, s.plan)
+  assert.deepEqual(ordreAffiche(as, MA), [LA0, LA3, LA4, LA1, LA2])
+  assert.ok(s.plan.historique.some(h => h.cible === 'section' && h.cible_id === SA2 && h.champ === 'position'))
+  // Les modules : C devant A.
+  const mo = planDeplacerModule(ARBRE, { action: 'deplacer_module', id: MC, avant: MA })
+  assert.deepEqual(mo.plan.modules, [{ id: MC, ordre: 0 }])
+  // Refus : section d'un autre module, « avant » hors du conteneur, lecon inconnue.
+  assert.deepEqual(planDeplacerLecons(ARBRE, { action: 'deplacer_lecons', ids: [LA1], module: MA, section: SB1, avant: null }), { ok: false, erreur: 'cible' })
+  assert.deepEqual(planDeplacerLecons(ARBRE, { action: 'deplacer_lecons', ids: [LA1], module: MA, section: SA2, avant: LA2 }), { ok: false, erreur: 'cible' })
+  assert.deepEqual(planDeplacerLecons(ARBRE, { action: 'deplacer_lecons', ids: [id(99)], module: MA, section: null, avant: null }), { ok: false, erreur: 'introuvable' })
+  assert.deepEqual(planDeplacerSection(ARBRE, { action: 'deplacer_section', id: SA1, avant: SB1 }), { ok: false, erreur: 'cible' })
+})
+
+bloc('arbre, statut : publier ou cacher ; video pas envoyee et texte vide refuses, le reste passe ; historique', () => {
+  const p = planStatut(ARBRE, { action: 'statut', cible: 'lecon', ids: [LA1, LA4, LA2], statut: 'publie' })
+  assert.deepEqual(p.plan.statutsLecons, [{ id: LA1, statut: 'publie' }])
+  assert.deepEqual(p.plan.refusees, [{ id: LA4, titre: 'quatre', raison: 'video' }])
+  assert.deepEqual(p.plan.historique, [{ cible: 'lecon', cible_id: LA1, champ: 'statut', avant: 'brouillon', apres: 'publie' }])
+  const vide = { ...ARBRE, lecons: ARBRE.lecons.map(x => (x.id === LA1 ? { ...x, a_contenu: false } : x)) }
+  assert.deepEqual(planStatut(vide, { action: 'statut', cible: 'lecon', ids: [LA1], statut: 'publie' }).plan.refusees, [{ id: LA1, titre: 'un', raison: 'texte' }])
+  const c = planStatut(ARBRE, { action: 'statut', cible: 'lecon', ids: [LA2, LA4], statut: 'brouillon' })
+  assert.deepEqual(c.plan.statutsLecons, [{ id: LA2, statut: 'brouillon' }])
+  const m = planStatut(ARBRE, { action: 'statut', cible: 'module', ids: [MC], statut: 'publie' })
+  assert.deepEqual(m.plan.historique, [{ cible: 'module', cible_id: MC, champ: 'statut', avant: 'brouillon', apres: 'publie' }])
+  assert.deepEqual(planStatut(ARBRE, { action: 'statut', cible: 'module', ids: [id(99)], statut: 'publie' }), { ok: false, erreur: 'introuvable' })
+  assert.equal(statutTient('publie', { type: 'video', heberge: false, contenu: null }), false)
+  assert.equal(statutTient('brouillon', { type: 'video', heberge: false, contenu: null }), true)
+  assert.deepEqual(fichiersDesRessources([{ titre: 'Plan PDF', fichier: 'formation/plan%20v2.pdf' }, { titre: 'Lien', url: 'https://x.com/a/b.pdf?x=1' }, 3]),
+    ['Plan PDF', 'plan v2.pdf', 'Lien', 'b.pdf'])
+})
+
+bloc('importeur : un deplacement du cockpit est respecte (ni ramene, ni recree), --ecraser-editions le defait', () => {
+  const fichier = { module_id: MA, section_id: SA1, slug: 'un', ordre: 2, statut: 'publie', type: 'texte', heberge: false, contenu: 'Texte.' }
+  // Retrouvee par son origine : elle vit dans MB.
+  const base = { id: LA1, module_id: MB, section_id: SB1, slug: 'un-2', ordre: 2, statut: 'publie', deplace: true, statut_modifie: false,
+    origine_module_id: MA, origine_slug: 'un' }
+  const g = planImportLecon(base, fichier, false)
+  assert.deepEqual({ module: g.module_id, section: g.section_id, slug: g.slug, ordre: g.ordre, ailleurs: g.ailleurs, garde: g.gardePlace, effacer: g.effacerPlace },
+    { module: MB, section: SB1, slug: 'un-2', ordre: 2, ailleurs: true, garde: true, effacer: false })
+  assert.deepEqual(g.historique, [])
+  const e = planImportLecon(base, fichier, true)
+  assert.deepEqual({ module: e.module_id, section: e.section_id, slug: e.slug, ordre: e.ordre, effacer: e.effacerPlace },
+    { module: MA, section: SA1, slug: 'un', ordre: 2, effacer: true })
+  assert.equal(e.historique.length, 1)
+  assert.equal(JSON.parse(e.historique[0].avant).module_id, MB)
+  // Reordonnee dans son module : ordre et section gardes. Jamais rangee : le fichier.
+  const reord = { ...base, module_id: MA, section_id: SA2, slug: 'un', ordre: 7, origine_module_id: null, origine_slug: null }
+  assert.deepEqual([planImportLecon(reord, fichier, false).ordre, planImportLecon(reord, fichier, false).section_id], [7, SA2])
+  assert.deepEqual([planImportLecon({ ...reord, deplace: false }, fichier, false).ordre, planImportLecon({ ...reord, deplace: false }, fichier, false).section_id], [2, SA1])
+  // Passee en brouillon dans le cockpit : gardee. Publiee dans le cockpit mais le fichier n'a plus la video : le fichier, avec avertissement.
+  const cachee = planImportLecon({ ...reord, deplace: false, statut: 'brouillon', statut_modifie: true }, fichier, false)
+  assert.deepEqual([cachee.statut, cachee.gardeStatut, cachee.avertissement], ['brouillon', true, null])
+  const plusDeVideo = planImportLecon({ ...reord, deplace: false, statut: 'publie', statut_modifie: true },
+    { ...fichier, type: 'video', heberge: false, statut: 'brouillon' }, false)
+  assert.deepEqual([plusDeVideo.statut, plusDeVideo.effacerStatut, Boolean(plusDeVideo.avertissement)], ['brouillon', true, true])
+  assert.deepEqual(plusDeVideo.historique, [{ champ: 'statut', avant: 'publie', apres: 'brouillon' }])
+  // Nouvelle lecon : le fichier.
+  assert.deepEqual(planImportLecon(null, fichier, false).module_id, MA)
+  // Module et section reordonnes ou caches dans le cockpit.
+  const pm = planImportModule({ ordre: 0, statut: 'brouillon', deplace: true, statut_modifie: true }, { ordre: 3, statut: 'publie' }, false)
+  assert.deepEqual([pm.ordre, pm.statut, pm.gardePlace, pm.gardeStatut], [0, 'brouillon', true, true])
+  const pmE = planImportModule({ ordre: 0, statut: 'brouillon', deplace: true, statut_modifie: true }, { ordre: 3, statut: 'publie' }, true)
+  assert.deepEqual([pmE.ordre, pmE.statut, pmE.effacerPlace, pmE.historique.length], [3, 'publie', true, 2])
+  assert.deepEqual(planImportSection({ ordre: 5, deplace: true }, { ordre: 1 }, false).ordre, 5)
+  assert.deepEqual(planImportSection({ ordre: 5, deplace: false }, { ordre: 1 }, false).ordre, 1)
 })
 
 console.log(`${blocs} blocs hors ligne passes.`)

@@ -37,8 +37,9 @@ export const maxDuration = 15
 
 const METHODES = 'GET, PATCH, OPTIONS'
 
+// Route admin : le cockpit peut aussi l'appeler (CORS admin, 23/10/2026).
 export function OPTIONS(req: NextRequest) {
-  return new NextResponse(null, { status: 204, headers: corsAcademie(req, METHODES) })
+  return new NextResponse(null, { status: 204, headers: corsAcademie(req, METHODES, true) })
 }
 
 type Porte = { userId: string; role: string | null } | NextResponse
@@ -62,7 +63,7 @@ async function porte(req: NextRequest, headers: Record<string, string>): Promise
 }
 
 export async function GET(req: NextRequest) {
-  const headers = entetesAcademie(req, METHODES)
+  const headers = entetesAcademie(req, METHODES, true)
   const p = await porte(req, headers)
   if (p instanceof NextResponse) return p
   if (!estAdmin(p.role)) {
@@ -84,7 +85,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const headers = entetesAcademie(req, METHODES)
+  const headers = entetesAcademie(req, METHODES, true)
   const p = await porte(req, headers)
   if (p instanceof NextResponse) return p
 

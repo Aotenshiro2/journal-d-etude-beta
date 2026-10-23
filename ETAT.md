@@ -3,6 +3,31 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
+## Academie : l'arbre du catalogue range depuis le cockpit (23/10/2026, PUBLIE, migration 20261023150000 appliquee)
+
+Lot D:\6_Societe\Pilotage\Academie\lots\LOT-ARBRE-CATALOGUE-COCKPIT.md (GO de Brice).
+- Route `GET|POST /api/academie/arbre` (src/app/api/academie/arbre/route.ts) : Bearer + `roleAcademie`/`estAdmin`
+  comme l'edition, 403 avant de lire le corps. GET = tout le catalogue (brouillons, ids video, noms de PJ, marques).
+  POST = deplacer_lecons (autre section ou AUTRE module, plusieurs d'un coup, slug-2 si le slug est pris),
+  deplacer_section, deplacer_module, statut (publie/brouillon ; video sans hebergeur ou texte vide refuses un par
+  un), creer_section. Transaction qui verrouille tous les modules ; historique `academie_editions` (cible section,
+  champs position/statut/creation) ; cache du catalogue vide ; l'arbre frais dans la reponse.
+- `src/lib/academie/arbre.ts` (aucun import, expres : les scripts Node l'importent) : validation, plans purs,
+  `renumeroter` (l'ordre d'une lecon est celui du MODULE entier, comme le site ; touche le moins de lignes possible),
+  SQL, `executerGeste(tx, ...)`, `planImport*` pour l'importeur.
+- CORS admin : `corsAcademie(req, methodes, true)` ajoute https://cockpit.aoknowledge.com (edition et arbre seulement).
+- Importeur : lecon retrouvee par (module, slug) puis par origine (`origine_module_id`, `origine_slug`) : deplacee
+  ailleurs = ni ramenee ni recreee ; `deplace_le` / `statut_le` gardes (bilan « garde : deplace dans le cockpit ») ;
+  section retrouvee par `ordre_fichier` (plus par son ordre) ; slug d'une lecon arrivee d'ailleurs = arret net ;
+  `--ecraser-editions` remet tout et note dans l'historique (origine import).
+- Migration sites/Aoknowledgecom/supabase/migrations/20261023150000_academie_arbre.sql, jouee en transaction annulee
+  contre la prod : `node --env-file=.env.local scripts/essayer-migration-arbre-academie.mjs` OK (13 etapes) le 23/10.
+- Verifs : verifier-academie.mjs 44 blocs hors ligne (7 nouveaux), tsc, eslint, next build OK.
+- ORDRE DE PUBLICATION : migration, puis journal, puis cockpit. Le prochain import exige la migration.
+- Limites V1 : une section ne change pas de module ; pas de statut de section (ses lecons a la place) ; une lecon
+  qui change de module change d'adresse (pas de redirection) ; apres un rangement, les lecons nouvelles du fichier
+  prennent l'ordre du fichier (peut se melanger : ranger a nouveau).
+
 ## Academie : l'admin modifie les textes dans l'app (23/10/2026, PUBLIE, migration 20261023120000 appliquee)
 
 Lot D:\6_Societe\Pilotage\Academie\lots\LOT-EDITION-IN-APP-ADMIN.md (GO de Brice). V1 : titre et texte (Markdown) d'une

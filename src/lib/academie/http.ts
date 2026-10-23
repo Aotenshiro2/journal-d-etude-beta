@@ -15,9 +15,15 @@ const ORIGINES = new Set([
   'http://localhost:5173',
 ])
 
-export function corsAcademie(req: NextRequest, methodes = 'POST, OPTIONS'): Record<string, string> {
+// Le cockpit (23/10/2026, arbre du catalogue) : seulement sur les routes ADMIN
+// (edition, arbre), jamais sur celles des eleves. Son dev local tourne aussi
+// sur le port 5173, deja dans la liste.
+const ORIGINES_ADMIN = new Set([...ORIGINES, 'https://cockpit.aoknowledge.com'])
+
+/** admin : la route est reservee a l'admin (edition, arbre) ; le cockpit peut alors lire sa reponse. */
+export function corsAcademie(req: NextRequest, methodes = 'POST, OPTIONS', admin = false): Record<string, string> {
   const origin = req.headers.get('origin')
-  if (!origin || !ORIGINES.has(origin)) return {}
+  if (!origin || !(admin ? ORIGINES_ADMIN : ORIGINES).has(origin)) return {}
   return {
     'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Methods': methodes,
@@ -28,8 +34,8 @@ export function corsAcademie(req: NextRequest, methodes = 'POST, OPTIONS'): Reco
 }
 
 /** Les en-tetes de toute reponse : CORS et jamais de cache (reponse personnelle). */
-export function entetesAcademie(req: NextRequest, methodes?: string): Record<string, string> {
-  return { ...corsAcademie(req, methodes), 'Cache-Control': 'no-store' }
+export function entetesAcademie(req: NextRequest, methodes?: string, admin = false): Record<string, string> {
+  return { ...corsAcademie(req, methodes, admin), 'Cache-Control': 'no-store' }
 }
 
 /** { ok: false, erreur } avec le statut et les en-tetes donnes. */
