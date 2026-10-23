@@ -31,6 +31,7 @@ import {
   leconVue, lireCsvAcces, lireDemandeLecture, lireDemandeRessource, lireOffresSections, lireSignal, lireUuid, liveClubUtile,
   ouvertureLecon, ouvertureModule, ouvertureSection, preparerDroits, progressionDuModule, ressourcesPropres, trierRaisons,
   ECART_MIN_S, MAX_RESSOURCES, SEUIL_VU,
+  autoriserEdition, champsModifies, estAdmin, fusionImport, lireCibleEdition, lireDemandeEdition, planEdition, LIMITES_EDITION,
 } from '../src/lib/academie/pur.ts'
 import { configBibliotheque, configBunny, jetonLecture, lienLecture, signerLecture, DUREE_LIEN_S } from '../src/lib/academie/bunny.ts'
 
@@ -619,6 +620,125 @@ bloc('bibliotheques : formation = variables de l essai, les autres par leur nom'
   assert.equal(configBibliotheque('inconnue', env), null)
   assert.equal(configBibliotheque('../x', env), null)
   assert.equal(configBibliotheque(null, env), null)
+})
+
+// ---------------------------------------------------------------------------
+// 5. Edition des textes dans l'app par l'admin (23/10/2026, route
+//    /api/academie/edition, importeur). Le SQL (historique ecrit, verrou de
+//    version, importeur contre la base) : scripts/essayer-migration-edition-academie.mjs.
+// ---------------------------------------------------------------------------
+
+const LECON_ED = 'B03789D3-F998-44EC-8C3C-5D8C5977008C'
+const VERSION_ED = '2026-10-23 08:12:45.123456+00'
+
+bloc('edition, droits : seul l admin passe, le refus vient avant la lecture de la demande', () => {
+  const bonne = { cible: 'lecon', id: LECON_ED, titre: 'Nouveau titre' }
+  for (const role of [null, undefined, '', 'member', 'membre', 'equipe', 'Admin', 'ADMIN', ' admin']) {
+    assert.deepEqual(autoriserEdition(role, bonne), { ok: false, status: 403, erreur: 'droit' }, `role ${JSON.stringify(role)}`)
+    // Une demande illisible d'un non-admin : 403 aussi (rien n'est dit de ce qui manque).
+    assert.deepEqual(autoriserEdition(role, { n: 1 }), { ok: false, status: 403, erreur: 'droit' })
+  }
+  assert.equal(estAdmin('admin'), true)
+  // La meme regle que droitsAcademie (preparerDroits ouvre tout a l'admin).
+  assert.equal(preparerDroits({ admin: estAdmin('admin'), etm: false, liveClub: 'non_lu', secoursEssai: false, lignes: [] }).admin, true)
+  const ok = autoriserEdition('admin', bonne)
+  assert.equal(ok.ok, true)
+  assert.deepEqual(ok.demande, { cible: 'lecon', id: LECON_ED.toLowerCase(), version: null, champs: { titre: 'Nouveau titre' } })
+  assert.deepEqual(autoriserEdition('admin', { cible: 'lecon', id: LECON_ED }), { ok: false, status: 400, erreur: 'vide' })
+})
+
+bloc('edition, demande : champs permis, longueurs, normalisation, version', () => {
+  const lire = (c) => lireDemandeEdition(c)
+  // Lecon : titre sur une ligne, texte sans \r, texte blanc = null.
+  const l = lire({ cible: 'lecon', id: LECON_ED, version: VERSION_ED, titre: '  Le  plan\n du jour ', contenu: '# Titre\r\n\r\nTexte **gras**.\r\n' })
+  assert.deepEqual(l, { ok: true, demande: {
+    cible: 'lecon', id: LECON_ED.toLowerCase(), version: VERSION_ED,
+    champs: { titre: 'Le plan du jour', contenu: '# Titre\n\nTexte **gras**.\n' },
+  } })
+  assert.deepEqual(lire({ cible: 'lecon', id: LECON_ED, contenu: ' \n\t ' }).demande.champs, { contenu: null })
+  assert.deepEqual(lire({ cible: 'lecon', id: LECON_ED, contenu: null }).demande.champs, { contenu: null })
+  // Module : titre et resume.
+  assert.deepEqual(lire({ cible: 'module', id: LECON_ED, resume: 'Un resume.' }).demande.champs, { resume: 'Un resume.' })
+  // Refus : cle inconnue ou d'une autre cible (V1 : ni video, ni ressources, ni ordre), cible, id, version.
+  for (const [nom, c, erreur] of [
+    ['resume sur une lecon', { cible: 'lecon', id: LECON_ED, resume: 'x' }, 'demande'],
+    ['contenu sur un module', { cible: 'module', id: LECON_ED, contenu: 'x' }, 'demande'],
+    ['video', { cible: 'lecon', id: LECON_ED, titre: 'x', bunny_video_id: 'y' }, 'demande'],
+    ['ordre', { cible: 'lecon', id: LECON_ED, titre: 'x', ordre: 3 }, 'demande'],
+    ['ressources', { cible: 'lecon', id: LECON_ED, ressources: [] }, 'demande'],
+    ['statut', { cible: 'module', id: LECON_ED, statut: 'publie' }, 'demande'],
+    ['cible inconnue', { cible: 'section', id: LECON_ED, titre: 'x' }, 'demande'],
+    ['id', { cible: 'lecon', id: 'l1', titre: 'x' }, 'demande'],
+    ['version libre', { cible: 'lecon', id: LECON_ED, titre: 'x', version: 'now()' }, 'demande'],
+    ['version nombre', { cible: 'lecon', id: LECON_ED, titre: 'x', version: 12 }, 'demande'],
+    ['tableau', [], 'demande'],
+    ['rien', null, 'demande'],
+    ['titre vide', { cible: 'lecon', id: LECON_ED, titre: ' \n ' }, 'titre'],
+    ['titre nombre', { cible: 'lecon', id: LECON_ED, titre: 3 }, 'titre'],
+    ['titre de lecon trop long', { cible: 'lecon', id: LECON_ED, titre: 'a'.repeat(LIMITES_EDITION.lecon.titre + 1) }, 'titre'],
+    ['titre de module trop long', { cible: 'module', id: LECON_ED, titre: 'a'.repeat(LIMITES_EDITION.module.titre + 1) }, 'titre'],
+    ['contenu trop long', { cible: 'lecon', id: LECON_ED, contenu: 'a'.repeat(LIMITES_EDITION.lecon.contenu + 1) }, 'contenu'],
+    ['contenu objet', { cible: 'lecon', id: LECON_ED, contenu: { a: 1 } }, 'contenu'],
+    ['resume trop long', { cible: 'module', id: LECON_ED, resume: 'a'.repeat(LIMITES_EDITION.module.resume + 1) }, 'resume'],
+    ['sans champ', { cible: 'module', id: LECON_ED, version: VERSION_ED }, 'vide'],
+  ]) {
+    assert.deepEqual(lire(c), { ok: false, erreur }, nom)
+  }
+  // Aux limites : ca passe.
+  assert.equal(lire({ cible: 'lecon', id: LECON_ED, titre: 'a'.repeat(LIMITES_EDITION.lecon.titre) }).ok, true)
+  assert.equal(lire({ cible: 'module', id: LECON_ED, resume: 'a'.repeat(LIMITES_EDITION.module.resume) }).ok, true)
+  assert.deepEqual(lireCibleEdition('module', LECON_ED), { cible: 'module', id: LECON_ED.toLowerCase() })
+  assert.equal(lireCibleEdition('lecons', LECON_ED), null)
+  assert.equal(lireCibleEdition('lecon', null), null)
+})
+
+bloc('edition, historique : une ligne par champ qui change, avant et apres', () => {
+  const actuel = { textes: { titre: 'Ancien titre', contenu: 'Ancien texte.' }, type: 'texte', statut: 'publie' }
+  const p = planEdition(actuel, { champs: { titre: 'Nouveau titre', contenu: 'Ancien texte.' } })
+  assert.deepEqual(p, {
+    ok: true,
+    valeurs: { titre: 'Nouveau titre', contenu: 'Ancien texte.' },
+    historique: [{ champ: 'titre', avant: 'Ancien titre', apres: 'Nouveau titre' }],
+  })
+  // Seul le texte envoye : le titre reste celui de la base.
+  const q = planEdition(actuel, { champs: { contenu: 'Texte neuf.' } })
+  assert.deepEqual(q.valeurs, { titre: 'Ancien titre', contenu: 'Texte neuf.' })
+  assert.deepEqual(q.historique, [{ champ: 'contenu', avant: 'Ancien texte.', apres: 'Texte neuf.' }])
+  // Rien ne change : pas d'historique (la route n'ecrit rien).
+  assert.deepEqual(planEdition(actuel, { champs: { titre: 'Ancien titre' } }).historique, [])
+  // Une lecon ecrite publiee ne se vide pas ; une video, si (son texte sous le lecteur).
+  assert.deepEqual(planEdition(actuel, { champs: { contenu: null } }), { ok: false, erreur: 'contenu' })
+  const video = planEdition({ textes: { titre: 'V', contenu: 'Consignes.' }, type: 'video', statut: 'publie' }, { champs: { contenu: null } })
+  assert.deepEqual(video.historique, [{ champ: 'contenu', avant: 'Consignes.', apres: null }])
+  // Module : le resume vide passe a null, l'ancien est garde.
+  const m = planEdition({ textes: { titre: 'Module', resume: 'Resume.' } }, { champs: { resume: null, titre: 'Module 2' } })
+  assert.deepEqual(m.historique, [
+    { champ: 'titre', avant: 'Module', apres: 'Module 2' }, { champ: 'resume', avant: 'Resume.', apres: null },
+  ])
+  // Un champ d'une autre cible n'entre pas dans les valeurs.
+  assert.deepEqual(planEdition({ textes: { titre: 'M', resume: null } }, { champs: { contenu: 'x' } }).valeurs, { titre: 'M', resume: null })
+  assert.deepEqual(champsModifies({ resume: null }, { resume: undefined }), [])
+})
+
+bloc('importeur : une edition de l app est gardee, --ecraser-editions la remplace et la note', () => {
+  const fichier = { titre: 'Titre du fichier', contenu: 'Texte du fichier.' }
+  const base = { titre: 'Titre corrige dans l app', contenu: 'Texte corrige.' }
+  // Lecon nouvelle, ou jamais modifiee dans l'app : le fichier fait foi, sans historique.
+  assert.deepEqual(fusionImport(null, fichier, false), { valeurs: fichier, garde: false, effacerEdition: false, historique: [] })
+  assert.deepEqual(fusionImport({ edite: false, textes: base }, fichier, false),
+    { valeurs: fichier, garde: false, effacerEdition: false, historique: [] })
+  // Modifiee dans l'app : la base est gardee (bilan « garde : modifie dans l'app »).
+  assert.deepEqual(fusionImport({ edite: true, textes: base }, fichier, false),
+    { valeurs: base, garde: true, effacerEdition: false, historique: [] })
+  // Forcee : le fichier l'emporte, edite_le repasse a vide, l'ancienne version va a l'historique.
+  assert.deepEqual(fusionImport({ edite: true, textes: base }, fichier, true), {
+    valeurs: fichier, garde: false, effacerEdition: true,
+    historique: [
+      { champ: 'titre', avant: base.titre, apres: fichier.titre }, { champ: 'contenu', avant: base.contenu, apres: fichier.contenu },
+    ],
+  })
+  // Forcee sans edition : rien a effacer.
+  assert.equal(fusionImport({ edite: false, textes: base }, fichier, true).effacerEdition, false)
 })
 
 console.log(`${blocs} blocs hors ligne passes.`)

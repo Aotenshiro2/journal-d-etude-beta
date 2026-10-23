@@ -147,17 +147,35 @@ async function lireCatalogueEnBase(): Promise<Catalogue> {
   }
 }
 
+// Monte a chaque vidage : une lecture partie avant ne remet pas son catalogue en cache.
+let generation = 0
+
 /** Le catalogue visible (cache de 30 s). Jette sur une panne de base. */
 export async function lireCatalogue(): Promise<Catalogue> {
   if (cache && cache.expire > Date.now()) return cache.catalogue
   // Une seule lecture a la fois par instance : les appels simultanes l'attendent.
-  lectureEnCours ??= lireCatalogueEnBase()
-    .then(catalogue => {
-      cache = { catalogue, expire: Date.now() + DUREE_CACHE_MS }
-      return catalogue
-    })
-    .finally(() => { lectureEnCours = null })
+  if (!lectureEnCours) {
+    const gen = generation
+    const lecture: Promise<Catalogue> = lireCatalogueEnBase()
+      .then(catalogue => {
+        if (gen === generation) cache = { catalogue, expire: Date.now() + DUREE_CACHE_MS }
+        return catalogue
+      })
+      .finally(() => { if (lectureEnCours === lecture) lectureEnCours = null })
+    lectureEnCours = lecture
+  }
   return lectureEnCours
+}
+
+/**
+ * Vide le cache de CETTE instance (une edition de l'admin vient d'etre
+ * enregistree, 23/10/2026). Les autres instances suivent en 30 s au plus :
+ * la page montre deja la valeur que la route lui rend.
+ */
+export function viderCacheCatalogue(): void {
+  generation++
+  cache = null
+  lectureEnCours = null
 }
 
 function leconCompleteDeLigne(l: LigneLeconComplete): LeconComplete {

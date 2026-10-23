@@ -816,3 +816,165 @@ export function appareilCourt(ua: string | null): string | null {
             : 'autre'
   return `${forme} ${systeme} ${navigateur}`.slice(0, 60)
 }
+
+// ---------------------------------------------------------------------------
+// Edition des textes dans l'app par l'admin (23/10/2026, lot
+// LOT-EDITION-IN-APP-ADMIN ; route /api/academie/edition, edition.ts)
+// ---------------------------------------------------------------------------
+
+/** Le role metier de l'equipe (profiles.role) : la meme regle pour droitsAcademie et pour l'edition. */
+export const ROLE_ADMIN = 'admin'
+
+export function estAdmin(role: string | null | undefined): boolean {
+  return role === ROLE_ADMIN
+}
+
+export type CibleEdition = 'lecon' | 'module'
+
+/** Les longueurs maximales, celles des contraintes de la base (migration 20261015210000). */
+export const LIMITES_EDITION = {
+  lecon: { titre: 300, contenu: 500_000 },
+  module: { titre: 200, resume: 4000 },
+} as const
+
+/** Les champs modifiables de chaque cible (V1 : ni videos, ni ressources, ni ordre). */
+const CHAMPS_EDITION: Readonly<Record<CibleEdition, readonly ['titre', 'contenu' | 'resume']>> = {
+  lecon: ['titre', 'contenu'],
+  module: ['titre', 'resume'],
+}
+
+/** Les valeurs des champs texte d'une cible : { titre, contenu } ou { titre, resume }. */
+export type TextesEdition = Record<string, string | null>
+
+export type DemandeEdition = {
+  cible: CibleEdition
+  id: string
+  /** maj_le lue par l'editeur (GET), ou null : la route prend celle qu'elle vient de lire. */
+  version: string | null
+  /** Les champs envoyes, deja normalises (titre sur une ligne, texte sans \r, vide = null). */
+  champs: TextesEdition
+}
+
+export type ErreurDemandeEdition = 'demande' | 'titre' | 'contenu' | 'resume' | 'vide'
+
+// maj_le en texte (« 2026-10-23 08:12:45.123456+00 ») : rien d'autre ne passe.
+const VERSION_RE = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(\.\d{1,6})?([+-]\d{2}(:?\d{2})?|Z)?$/
+
+/** Un titre sur une ligne : blancs et retours a la ligne fondus en une espace. */
+function titrePropre(v: string): string {
+  return v.replace(/\s+/g, ' ').trim()
+}
+
+/** Un texte long : fins de ligne \n, rien que des blancs = null. */
+function textePropre(v: string): string | null {
+  const t = v.replace(/\r\n?/g, '\n')
+  return t.trim() ? t : null
+}
+
+/** GET /api/academie/edition?cible=lecon&id=<uuid> : la cible, ou null. */
+export function lireCibleEdition(cible: unknown, id: unknown): { cible: CibleEdition; id: string } | null {
+  if (cible !== 'lecon' && cible !== 'module') return null
+  const u = lireUuid(id)
+  return u ? { cible, id: u } : null
+}
+
+/**
+ * PATCH /api/academie/edition : { cible: 'lecon', id, version?, titre?, contenu? }
+ * ou { cible: 'module', id, version?, titre?, resume? }. Refuse toute autre cle,
+ * un titre vide ou trop long, un texte trop long, et une demande sans champ.
+ */
+export function lireDemandeEdition(corps: unknown): { ok: true; demande: DemandeEdition } | { ok: false; erreur: ErreurDemandeEdition } {
+  if (!corps || typeof corps !== 'object' || Array.isArray(corps)) return { ok: false, erreur: 'demande' }
+  const c = corps as Record<string, unknown>
+  const cible = lireCibleEdition(c.cible, c.id)
+  if (!cible) return { ok: false, erreur: 'demande' }
+  const permis = CHAMPS_EDITION[cible.cible]
+  for (const cle of Object.keys(c)) {
+    if (cle !== 'cible' && cle !== 'id' && cle !== 'version' && !(permis as readonly string[]).includes(cle)) {
+      return { ok: false, erreur: 'demande' }
+    }
+  }
+  let version: string | null = null
+  if (c.version !== undefined && c.version !== null) {
+    if (typeof c.version !== 'string' || c.version.length > 40 || !VERSION_RE.test(c.version)) return { ok: false, erreur: 'demande' }
+    version = c.version
+  }
+  const limites: Record<string, number> = LIMITES_EDITION[cible.cible]
+  const champs: TextesEdition = {}
+  if (c.titre !== undefined) {
+    if (typeof c.titre !== 'string') return { ok: false, erreur: 'titre' }
+    const t = titrePropre(c.titre)
+    if (!t || t.length > limites.titre) return { ok: false, erreur: 'titre' }
+    champs.titre = t
+  }
+  const long = permis[1]
+  if (c[long] !== undefined) {
+    const v = c[long]
+    if (v !== null && typeof v !== 'string') return { ok: false, erreur: long }
+    const t = v === null ? null : textePropre(v)
+    if (t !== null && t.length > limites[long]) return { ok: false, erreur: long }
+    champs[long] = t
+  }
+  if (!Object.keys(champs).length) return { ok: false, erreur: 'vide' }
+  return { ok: true, demande: { cible: cible.cible, id: cible.id, version, champs } }
+}
+
+/**
+ * La porte de la route : le role d'abord (un non-admin est refuse avant meme
+ * de lire sa demande : 403 'droit'), puis la demande (400).
+ */
+export function autoriserEdition(role: string | null | undefined, corps: unknown):
+  | { ok: true; demande: DemandeEdition }
+  | { ok: false; status: 403 | 400; erreur: 'droit' | ErreurDemandeEdition } {
+  if (!estAdmin(role)) return { ok: false, status: 403, erreur: 'droit' }
+  const lu = lireDemandeEdition(corps)
+  return lu.ok ? lu : { ok: false, status: 400, erreur: lu.erreur }
+}
+
+export type LigneHistoriqueEdition = { champ: string; avant: string | null; apres: string | null }
+
+/** L'historique : une ligne par champ qui change vraiment (null et absent sont pareils). */
+export function champsModifies(avant: TextesEdition, apres: TextesEdition): LigneHistoriqueEdition[] {
+  const lignes: LigneHistoriqueEdition[] = []
+  for (const champ of Object.keys(apres)) {
+    const a = avant[champ] ?? null
+    const b = apres[champ] ?? null
+    if (a !== b) lignes.push({ champ, avant: a, apres: b })
+  }
+  return lignes
+}
+
+/**
+ * Ce qu'un enregistrement ecrit : les valeurs actuelles, remplacees par les
+ * champs demandes, et l'historique des champs qui changent. Une lecon ecrite
+ * publiee garde un texte (contrainte de la base) : 'contenu' sinon.
+ */
+export function planEdition(
+  actuel: { textes: TextesEdition; type?: string | null; statut?: string | null },
+  demande: Pick<DemandeEdition, 'champs'>,
+): { ok: true; valeurs: TextesEdition; historique: LigneHistoriqueEdition[] } | { ok: false; erreur: 'contenu' } {
+  const valeurs: TextesEdition = { ...actuel.textes }
+  for (const [champ, v] of Object.entries(demande.champs)) {
+    if (champ in valeurs) valeurs[champ] = v
+  }
+  if ('contenu' in valeurs && valeurs.contenu === null && actuel.type === 'texte' && actuel.statut === 'publie') {
+    return { ok: false, erreur: 'contenu' }
+  }
+  return { ok: true, valeurs, historique: champsModifies(actuel.textes, valeurs) }
+}
+
+/**
+ * L'importeur du catalogue face a une edition dans l'app : tant que edite_le
+ * est rempli en base, il GARDE les textes de la base (garde) ; avec
+ * --ecraser-editions (ecraser), il pose ceux du fichier, remet edite_le a vide
+ * (effacerEdition) et l'historique note ce qui est ecrase.
+ */
+export function fusionImport(
+  base: { edite: boolean; textes: TextesEdition } | null,
+  fichier: TextesEdition,
+  ecraser: boolean,
+): { valeurs: TextesEdition; garde: boolean; effacerEdition: boolean; historique: LigneHistoriqueEdition[] } {
+  if (!base || !base.edite) return { valeurs: { ...fichier }, garde: false, effacerEdition: false, historique: [] }
+  if (!ecraser) return { valeurs: { ...base.textes }, garde: true, effacerEdition: false, historique: [] }
+  return { valeurs: { ...fichier }, garde: false, effacerEdition: true, historique: champsModifies(base.textes, fichier) }
+}

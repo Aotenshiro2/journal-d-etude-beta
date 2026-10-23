@@ -442,3 +442,79 @@ union
 select pe.profile_id::text from public.profile_emails pe
  where lower(btrim(pe.email)) = $1::text and pe.verified = true
 `
+
+// ---------------------------------------------------------------------------
+// Edition dans l'app par l'admin (edition.ts, route /api/academie/edition ;
+// migration 20261023120000_academie_editions.sql, 23/10/2026)
+// ---------------------------------------------------------------------------
+//
+// version = maj_le en texte : le verrou optimiste. L'ecriture ne passe que si
+// la ligne n'a pas bouge depuis la lecture (importeur, autre onglet) ; sinon
+// elle ne rend aucune ligne et la route repond 409.
+
+/** $1 = id de la lecon. Ce que l'editeur modifie, et sa version. */
+export const SQL_EDITION_LIRE_LECON = `
+select l.id::text as id, l.titre, l.contenu, l.type, l.statut, l.edite_le, l.maj_le::text as version
+  from public.academie_lecons l
+ where l.id = $1::uuid
+`
+
+/** $1 = id du module. Ce que l'editeur modifie, et sa version. */
+export const SQL_EDITION_LIRE_MODULE = `
+select m.id::text as id, m.titre, m.resume, m.edite_le, m.maj_le::text as version
+  from public.academie_modules m
+ where m.id = $1::uuid
+`
+
+/**
+ * $1 = id de la lecon, $2 = version lue, $3 = titre, $4 = contenu (ou null),
+ * $5 = compte admin, $6 = historique (jsonb : [{ champ, avant, apres }], les
+ * champs qui changent). Une ligne (la lecon a jour, historique = lignes
+ * ecrites), ou aucune si la lecon a change depuis la lecture.
+ */
+export const SQL_EDITION_ECRIRE_LECON = `
+with maj as (
+  update public.academie_lecons l
+     set titre = $3::text, contenu = $4::text, edite_le = now(), edite_par = $5::uuid
+   where l.id = $1::uuid and l.maj_le = $2::timestamptz
+  returning l.id, l.titre, l.contenu, l.edite_le, l.maj_le
+), historique as (
+  insert into public.academie_editions (cible, cible_id, champ, avant, apres, par, origine)
+  select 'lecon', m.id, h.champ, h.avant, h.apres, $5::uuid, 'app'
+    from maj m
+   cross join jsonb_to_recordset($6::jsonb) as h(champ text, avant text, apres text)
+  returning 1
+)
+select m.id::text as id, m.titre, m.contenu, m.edite_le, m.maj_le::text as version,
+       (select count(*)::int from historique) as historique
+  from maj m
+`
+
+/** Comme SQL_EDITION_ECRIRE_LECON, pour un module : $3 = titre, $4 = resume (ou null). */
+export const SQL_EDITION_ECRIRE_MODULE = `
+with maj as (
+  update public.academie_modules m
+     set titre = $3::text, resume = $4::text, edite_le = now(), edite_par = $5::uuid
+   where m.id = $1::uuid and m.maj_le = $2::timestamptz
+  returning m.id, m.titre, m.resume, m.edite_le, m.maj_le
+), historique as (
+  insert into public.academie_editions (cible, cible_id, champ, avant, apres, par, origine)
+  select 'module', x.id, h.champ, h.avant, h.apres, $5::uuid, 'app'
+    from maj x
+   cross join jsonb_to_recordset($6::jsonb) as h(champ text, avant text, apres text)
+  returning 1
+)
+select x.id::text as id, x.titre, x.resume, x.edite_le, x.maj_le::text as version,
+       (select count(*)::int from historique) as historique
+  from maj x
+`
+
+/**
+ * L'importeur force (--ecraser-editions) : $1 = cible, $2 = id, $3 = historique
+ * (jsonb, comme ci-dessus). origine 'import', sans auteur.
+ */
+export const SQL_EDITION_HISTORIQUE_IMPORT = `
+insert into public.academie_editions (cible, cible_id, champ, avant, apres, par, origine)
+select $1::text, $2::uuid, h.champ, h.avant, h.apres, null, 'import'
+  from jsonb_to_recordset($3::jsonb) as h(champ text, avant text, apres text)
+`

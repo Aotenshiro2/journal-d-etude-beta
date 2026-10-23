@@ -3,6 +3,27 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
+## Academie : l'admin modifie les textes dans l'app (23/10/2026, PUBLIE, migration 20261023120000 appliquee)
+
+Lot D:\6_Societe\Pilotage\Academie\lots\LOT-EDITION-IN-APP-ADMIN.md (GO de Brice). V1 : titre et texte (Markdown) d'une
+lecon, titre et resume d'un module ; ni videos, ni ressources, ni ordre.
+- Route `GET|PATCH /api/academie/edition` (src/app/api/academie/edition/route.ts, src/lib/academie/edition.ts) : meme
+  Bearer et CORS que les autres routes ; droit verifie dans la route (`roleAcademie` + `estAdmin`, la regle admin de
+  droitsAcademie), non-admin = 403 avant toute lecture du corps. Validation : `lireDemandeEdition` (pur.ts : cles
+  permises seulement, longueurs de la base). Verrou optimiste : version = maj_le lue par GET, 409 si la ligne a bouge.
+  Chaque champ change = une ligne `academie_editions` (avant, apres, par, le) ; `edite_le`, `edite_par` poses ; cache du
+  catalogue vide (`viderCacheCatalogue`, les autres instances suivent en 30 s, la page montre deja la reponse).
+- Importeur : garde titre et texte d'une lecon (titre et resume d'un module) si `edite_le` est rempli, bilan
+  « garde : modifie dans l'app » ; `--ecraser-editions` force le fichier, vide edite_le, note l'ancien texte (origine import).
+- Migration `20261023120000_academie_editions.sql` (sites/Aoknowledgecom/supabase/migrations) : colonnes edite_le,
+  edite_par ; table academie_editions (RLS forcee, service_role lecture + ajout). Jouee en transaction annulee :
+  `node --env-file=.env.local scripts/essayer-migration-edition-academie.mjs` OK (13 etapes) le 23/10.
+- ORDRE DE PUBLICATION : migration d'abord (l'importeur en a besoin), puis journal, puis site. Avant la migration la
+  route repond 503.
+- Site : src/academie/Edition.tsx (crayon + fenetre ShadCN Dialog, barre Markdown, apercu TexteLecon), branche dans
+  AcademieLeconPage et AcademieModulePage, api.ts (lireTexteEditable, enregistrerTexte, majTexteLocal).
+- Verifs : verifier-academie.mjs 37 blocs hors ligne (4 nouveaux : droits, demande, historique, importeur).
+
 ## Bot des membres : messages autour de l'equipe selon l'ETAT du fil (22/10/2026, en prod avec le cockpit ; aucune migration)
 
 Cas reel de Christine (22/10) et regle de Brice : les messages du bot autour de l'equipe ne supposent plus

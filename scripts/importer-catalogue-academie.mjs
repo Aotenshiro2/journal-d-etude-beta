@@ -25,32 +25,60 @@
 // ou { "titre", "fichier" } protegee (chemin dans le bucket prive academie-ressources, envoye par
 // scripts/envoyer-ressources-academie.mjs).
 //
-// importerModule(tx, donnees, dossier) est exportee pour scripts/essayer-migration-ressources-academie.mjs
+// Les modifications faites dans l'app par l'admin (23/10/2026, route /api/academie/edition, migration
+// 20261023120000_academie_editions.sql) : tant que edite_le est rempli, l'import GARDE le titre et le
+// texte de la lecon (le titre et le resume du module) de la base, et le dit dans son bilan
+// (« garde : modifie dans l'app »). Le reste (ordre, statut, video...) suit le fichier. Avec
+// --ecraser-editions, le fichier l'emporte, edite_le repasse a vide et academie_editions garde ce qui
+// a ete ecrase (origine 'import'). LA MIGRATION DOIT ETRE APPLIQUEE avant d'importer.
+//
+// importerModule(tx, donnees, dossier, options) est exportee pour les scripts essayer-migration-*
 // (memes ordres, dans une transaction toujours annulee).
 import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { PrismaClient } from '@prisma/client'
-import { lireOffresSections } from '../src/lib/academie/pur.ts'
+import { fusionImport, lireOffresSections } from '../src/lib/academie/pur.ts'
+import { SQL_EDITION_HISTORIQUE_IMPORT } from '../src/lib/academie/requetes.ts'
 
-/** Joue l'import d'un module dans la transaction tx. Rend le bilan. Jette sur une donnee invalide. */
-export async function importerModule(tx, donnees, dossier) {
+/**
+ * Joue l'import d'un module dans la transaction tx. Rend le bilan. Jette sur une donnee invalide.
+ * options.ecraserEditions : le fichier remplace aussi les textes modifies dans l'app.
+ */
+export async function importerModule(tx, donnees, dossier, { ecraserEditions = false } = {}) {
   const m = donnees.module
   const bilan = {
     module: m.slug, sections: 0, lecons: 0, offres: [], offres_retirees: 0, offres_sections: [], offres_sections_retirees: 0,
+    gardees: [], editions_ecrasees: [],
   }
 
+  // Le module tel qu'il est en base (verrouille jusqu'a la fin de l'import) : une edition dans l'app ?
+  const [modBase] = await tx.$queryRawUnsafe(
+    `select id::text as id, titre, resume, edite_le is not null as edite from public.academie_modules where slug = $1 for update`,
+    m.slug)
+  const fm = fusionImport(
+    modBase ? { edite: modBase.edite, textes: { titre: modBase.titre, resume: modBase.resume } } : null,
+    { titre: m.titre, resume: m.resume ?? null },
+    ecraserEditions,
+  )
   const [mod] = await tx.$queryRawUnsafe(
     `insert into public.academie_modules (slug, titre, resume, ordre, parcours, statut, auteur, image, prix_eur)
      values ($1, $2, $3, $4, $5, $6, $7, $8, $9::numeric)
      on conflict (slug) do update set titre = excluded.titre, resume = excluded.resume, ordre = excluded.ordre,
        parcours = excluded.parcours, statut = excluded.statut, auteur = excluded.auteur, image = excluded.image,
-       prix_eur = excluded.prix_eur
+       prix_eur = excluded.prix_eur,
+       edite_le = case when $10::boolean then null else academie_modules.edite_le end,
+       edite_par = case when $10::boolean then null else academie_modules.edite_par end
      returning id::text as id`,
-    m.slug, m.titre, m.resume ?? null, m.ordre ?? 0, m.parcours ?? null, m.statut ?? 'brouillon',
-    m.auteur ?? null, m.image ?? null, m.prix_eur ?? null,
+    m.slug, fm.valeurs.titre, fm.valeurs.resume, m.ordre ?? 0, m.parcours ?? null, m.statut ?? 'brouillon',
+    m.auteur ?? null, m.image ?? null, m.prix_eur ?? null, fm.effacerEdition,
   )
   const moduleId = mod.id
+  if (fm.garde) bilan.gardees.push(`module ${m.slug} (titre et resume)`)
+  if (fm.effacerEdition) {
+    bilan.editions_ecrasees.push(`module ${m.slug}`)
+    if (fm.historique.length) await tx.$executeRawUnsafe(SQL_EDITION_HISTORIQUE_IMPORT, 'module', moduleId, JSON.stringify(fm.historique))
+  }
 
   const sectionParCle = new Map()
   for (const s of donnees.sections ?? []) {
@@ -75,6 +103,14 @@ export async function importerModule(tx, donnees, dossier) {
     const sectionId = l.section ? sectionParCle.get(l.section) : null
     if (l.section && !sectionId) throw new Error(`section inconnue « ${l.section} » pour la lecon ${l.slug}`)
     const video = l.type === 'video'
+    const [leconBase] = await tx.$queryRawUnsafe(
+      `select id::text as id, titre, contenu, edite_le is not null as edite from public.academie_lecons
+        where module_id = $1::uuid and slug = $2 for update`, moduleId, l.slug)
+    const fl = fusionImport(
+      leconBase ? { edite: leconBase.edite, textes: { titre: leconBase.titre, contenu: leconBase.contenu } } : null,
+      { titre: l.titre, contenu },
+      ecraserEditions,
+    )
     await tx.$executeRawUnsafe(
       `insert into public.academie_lecons (module_id, section_id, slug, ordre, titre, type, format, usage, hebergeur,
          bunny_bibliotheque, bunny_video_id, wistia_id, duree_s, contenu, ressources, apercu, statut)
@@ -83,13 +119,21 @@ export async function importerModule(tx, donnees, dossier) {
          titre = excluded.titre, type = excluded.type, format = excluded.format, usage = excluded.usage,
          hebergeur = excluded.hebergeur, bunny_bibliotheque = excluded.bunny_bibliotheque,
          bunny_video_id = excluded.bunny_video_id, wistia_id = excluded.wistia_id, duree_s = excluded.duree_s,
-         contenu = excluded.contenu, ressources = excluded.ressources, apercu = excluded.apercu, statut = excluded.statut`,
-      moduleId, sectionId, l.slug, l.ordre, l.titre, l.type, l.format ?? 'cours', l.usage ?? 'interne',
+         contenu = excluded.contenu, ressources = excluded.ressources, apercu = excluded.apercu, statut = excluded.statut,
+         edite_le = case when $18::boolean then null else academie_lecons.edite_le end,
+         edite_par = case when $18::boolean then null else academie_lecons.edite_par end`,
+      moduleId, sectionId, l.slug, l.ordre, fl.valeurs.titre, l.type, l.format ?? 'cours', l.usage ?? 'interne',
       video ? (l.hebergeur ?? 'bunny') : null,
       video && (l.hebergeur ?? 'bunny') === 'bunny' ? (l.bunny_bibliotheque ?? 'formation') : null,
       video ? (l.bunny_video_id ?? null) : null, video ? (l.wistia_id ?? null) : null,
-      l.duree_s ?? null, contenu, JSON.stringify(l.ressources ?? []), Boolean(l.apercu), l.statut ?? 'brouillon',
+      l.duree_s ?? null, fl.valeurs.contenu, JSON.stringify(l.ressources ?? []), Boolean(l.apercu), l.statut ?? 'brouillon',
+      fl.effacerEdition,
     )
+    if (fl.garde) bilan.gardees.push(`lecon ${l.slug} (titre et texte)`)
+    if (fl.effacerEdition) {
+      bilan.editions_ecrasees.push(`lecon ${l.slug}`)
+      if (fl.historique.length) await tx.$executeRawUnsafe(SQL_EDITION_HISTORIQUE_IMPORT, 'lecon', leconBase.id, JSON.stringify(fl.historique))
+    }
     bilan.lecons++
   }
 
@@ -139,26 +183,37 @@ export async function importerModule(tx, donnees, dossier) {
 const estLanceDirectement = process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href
 
 if (estLanceDirectement) {
-  const [chemin, option] = process.argv.slice(2)
-  if (!chemin) {
-    console.error('Usage : node scripts/importer-catalogue-academie.mjs <module.json> [--ecrire]')
+  const args = process.argv.slice(2)
+  const OPTIONS = new Set(['--ecrire', '--ecraser-editions'])
+  const chemin = args.find(a => !a.startsWith('--'))
+  const inconnues = args.filter(a => a.startsWith('--') && !OPTIONS.has(a))
+  if (!chemin || inconnues.length) {
+    if (inconnues.length) console.error(`Option inconnue : ${inconnues.join(' ')}`)
+    console.error('Usage : node scripts/importer-catalogue-academie.mjs <module.json> [--ecrire] [--ecraser-editions]')
     process.exit(2)
   }
-  const ecrire = option === '--ecrire'
+  const ecrire = args.includes('--ecrire')
+  const ecraserEditions = args.includes('--ecraser-editions')
   const donnees = JSON.parse(readFileSync(chemin, 'utf8'))
   const dossier = dirname(resolve(chemin))
   const prisma = new PrismaClient()
   class Annulation extends Error {}
   let bilan = { module: donnees.module?.slug }
+  // Ce que l'import a garde (modifie dans l'app) ou ecrase (--ecraser-editions), ligne par ligne.
+  const dire = () => {
+    for (const g of bilan.gardees ?? []) console.log(`garde : modifie dans l'app : ${g}`)
+    for (const e of bilan.editions_ecrasees ?? []) console.log(`ecrase (--ecraser-editions) : ${e}, l'ancienne version est dans academie_editions`)
+  }
 
   try {
     await prisma.$transaction(async tx => {
-      bilan = await importerModule(tx, donnees, dossier)
+      bilan = await importerModule(tx, donnees, dossier, { ecraserEditions })
       if (!ecrire) throw new Annulation()
     }, { timeout: 120_000, maxWait: 20_000 })
     console.log('ECRIT :', JSON.stringify(bilan))
+    dire()
   } catch (e) {
-    if (e instanceof Annulation) console.log('ESSAI A BLANC (rien ecrit) :', JSON.stringify(bilan))
+    if (e instanceof Annulation) { console.log('ESSAI A BLANC (rien ecrit) :', JSON.stringify(bilan)); dire() }
     else { console.error('ECHEC, rien ecrit :', e.message); process.exitCode = 1 }
   } finally {
     await prisma.$disconnect()
