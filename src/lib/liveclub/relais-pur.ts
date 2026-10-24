@@ -382,3 +382,232 @@ export function clavierApresFait(clavier: unknown, data: string): { text: string
   }
   return change ? sortie : null
 }
+
+// ---------------------------------------------------------------------------
+// Les @ a verifier (Brice, 24/10 : « Alex peut aussi recevoir les ecarts, il
+// nous les remonte plus vite et propose le correctif apres avoir contacte le
+// membre »)
+// ---------------------------------------------------------------------------
+//
+// Un ECART : la fiche du cockpit porte un @ valide (meme regle que
+// pseudoPropre et pseudoCroise) different, sans tenir compte de la casse, du
+// @ du compte Telegram rattache par lequel le relais peut joindre le membre
+// (compteAJoindre : memes exclusions que la liste, equipe, exemptes, admins,
+// relais, hors groupe). Tous motifs confondus : un ecart n'a rien a voir avec
+// les fenetres accueil et silence. Le relais ne recoit QUE le nom de la
+// fiche, le nom Telegram et les deux @ : un EcartRelais n'a pas d'autre
+// champ. Un ecart (membre, @fiche, @compte) ne part qu'une fois a un relais.
+
+/** Un membre dont la fiche porte un champ Telegram, et ses comptes rattaches actifs. */
+export type CandidatEcart = {
+  membreId: string
+  nomFiche: string | null
+  /** cockpit_membres.telegram, tel quel (« @x », ou un nom saisi au paiement). */
+  pseudoFiche: string | null
+  comptes: readonly CompteDuMembre[]
+}
+
+/** Ce qu'un relais recoit d'un ecart. Aucun email, montant, motif ni abonnement. */
+export type EcartRelais = {
+  membreId: string
+  nom: string
+  nomTelegram: string | null
+  pseudoFiche: string
+  pseudoCompte: string
+  telegramId: number
+}
+
+/** La cle de memoire d'un ecart : le meme couple de @ (sans casse) ne repart pas. */
+export const cleEcartRelais = (membreId: string, pseudoFiche: string, pseudoCompte: string) =>
+  `${membreId}::${pseudoFiche.toLowerCase()}::${pseudoCompte.toLowerCase()}`
+
+/** Les deux @ s'ils sont valides tous les deux et differents (sans casse), sinon null. */
+export function ecartDePseudo(fiche: unknown, compte: unknown): { fiche: string; compte: string } | null {
+  const f = pseudoPropre(nomPropre(fiche, 40))
+  const c = pseudoPropre(nomPropre(compte, 40))
+  return f && c && f.toLowerCase() !== c.toLowerCase() ? { fiche: f, compte: c } : null
+}
+
+/**
+ * Les ecarts a transmettre a CE relais : compte joignable (compteAJoindre,
+ * le relais lui-meme compris dans les exclusions), deux @ valides et
+ * differents, pas deja envoyes. Un par membre, ranges par nom.
+ */
+export function ecartsPourRelais(
+  candidats: readonly CandidatEcart[],
+  relais: Pick<RelaisLu, 'telegramId'>,
+  excl: ExclusionsRelais,
+  o: { dejaEnvoyes: ReadonlySet<string> },
+): EcartRelais[] {
+  const exclusions: ExclusionsRelais = { ...excl, relais: new Set([...excl.relais, relais.telegramId]) }
+  const vus = new Set<string>()
+  const sortie: EcartRelais[] = []
+  for (const c of candidats) {
+    if (vus.has(c.membreId)) continue
+    const compte = compteAJoindre(c.comptes, exclusions)
+    if (!compte) continue
+    const e = ecartDePseudo(c.pseudoFiche, compte.pseudo)
+    if (!e || o.dejaEnvoyes.has(cleEcartRelais(c.membreId, e.fiche, e.compte))) continue
+    vus.add(c.membreId)
+    const nomFiche = nomPropre(c.nomFiche)
+    const nomTg = nomPropre(compte.nomAffiche)
+    sortie.push({
+      membreId: c.membreId,
+      nom: nomFiche ?? nomTg ?? 'Membre sans nom',
+      nomTelegram: nomFiche && nomTg && comparable(nomTg) !== comparable(nomFiche) ? nomTg : null,
+      pseudoFiche: e.fiche,
+      pseudoCompte: e.compte,
+      telegramId: compte.telegramId,
+    })
+  }
+  return sortie.sort((a, b) => a.nom.localeCompare(b.nom, 'fr'))
+}
+
+/** Au-dessus de la liste des ecarts (Brice, 24/10). */
+export const TITRE_ECARTS = '@ à vérifier : demande-leur lequel est le bon, puis dis-le-moi ici.'
+
+/** « 1. Rafik Fouchane (Rafik F) : @rrafick ou @rafick7 ? » en HTML Telegram. */
+export function ligneEcartHtml(e: Pick<EcartRelais, 'nom' | 'nomTelegram' | 'pseudoFiche' | 'pseudoCompte'>, numero: number): string {
+  const tg = e.nomTelegram ? ` (${echapperHtml(e.nomTelegram)})` : ''
+  return `${numero}. ${echapperHtml(e.nom)}${tg} : @${e.pseudoFiche} ou @${e.pseudoCompte} ?`
+}
+
+export type MessageEcarts = { texte: string; ecarts: number[] }
+
+/**
+ * Les messages d'ecarts d'un relais, APRES la liste du jour : le titre, puis
+ * une liste numerotee, 10 lignes par message, sans bouton (le relais repond
+ * en texte a l'agent, qui appelle proposer_correction_pseudo). Rien = aucun
+ * message. `presentation` : seulement si le relais n'a encore rien recu.
+ */
+export function messagesEcarts(
+  ecarts: readonly (EcartRelais & { ecartId: number })[],
+  o: { presentation: string | null } = { presentation: null },
+): MessageEcarts[] {
+  const messages: MessageEcarts[] = []
+  for (let debut = 0; debut < ecarts.length; debut += LIGNES_PAR_MESSAGE) {
+    const paquet = ecarts.slice(debut, debut + LIGNES_PAR_MESSAGE)
+    const liste = paquet.map((e, i) => ligneEcartHtml(e, debut + i + 1)).join('\n')
+    const blocs: string[] = []
+    if (debut === 0 && o.presentation) blocs.push(o.presentation)
+    blocs.push(debut === 0 ? `${TITRE_ECARTS}\n${liste}` : liste)
+    messages.push({ texte: blocs.join('\n\n'), ecarts: paquet.map(e => e.ecartId) })
+  }
+  return messages
+}
+
+// ---------------------------------------------------------------------------
+// La proposition du relais, puis la validation de l'equipe
+// ---------------------------------------------------------------------------
+
+/** Un membre transmis a un relais (episode ou ecart parti), tel que l'outil le cherche. */
+export type MembreTransmis = {
+  membreId: string
+  nom: string | null
+  nomTelegram: string | null
+  /** Le @ de la fiche, s'il est valide (sans @). */
+  pseudoFiche: string | null
+  /** Le @ du compte rattache principal, s'il est valide (sans @). */
+  pseudoCompte: string | null
+}
+
+/** Une recherche tapee par le relais : sans accents, sans @, sans casse, espaces simples. */
+export function normaliserRecherche(s: unknown): string {
+  return typeof s === 'string'
+    ? s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(INVISIBLES, ' ').replace(/@/g, '').replace(/\s+/g, ' ').trim().toLowerCase()
+    : ''
+}
+
+export type MembreTrouve =
+  | { genre: 'un'; membre: MembreTransmis }
+  | { genre: 'aucun' }
+  | { genre: 'plusieurs'; noms: string[] }
+
+/**
+ * Le membre que le relais designe, parmi SES membres transmis seulement.
+ * Egalite exacte d'abord (nom de la fiche, nom Telegram, un des deux @), puis
+ * inclusion (3 caracteres au moins). Deux candidats = on demande de preciser.
+ */
+export function trouverMembreTransmis(liste: readonly MembreTransmis[], recherche: unknown): MembreTrouve {
+  const r = normaliserRecherche(recherche)
+  if (r.length < 3) return { genre: 'aucun' }
+  const valeurs = (m: MembreTransmis) => [m.nom, m.nomTelegram, m.pseudoFiche, m.pseudoCompte].map(normaliserRecherche).filter(Boolean)
+  let trouves = liste.filter(m => valeurs(m).includes(r))
+  if (trouves.length === 0) trouves = liste.filter(m => valeurs(m).some(v => v.length >= 3 && (v.includes(r) || r.includes(v))))
+  const uniques = [...new Map(trouves.map(m => [m.membreId, m])).values()]
+  if (uniques.length === 0) return { genre: 'aucun' }
+  if (uniques.length > 1) return { genre: 'plusieurs', noms: uniques.slice(0, 5).map(m => nomPropre(m.nom) ?? nomPropre(m.nomTelegram) ?? 'Membre sans nom') }
+  return { genre: 'un', membre: uniques[0] }
+}
+
+/** Au plus, propositions en attente pour un meme membre (le relais ne peut pas noyer l'equipe). */
+export const MAX_PROPOSITIONS_EN_ATTENTE = 3
+
+export const REPONSE_PROPOSITION_TRANSMISE = 'Transmis à Brice et Mel : ils valident, puis la fiche est corrigée.'
+export const REPONSE_PROPOSITION_DEJA = 'Déjà transmis à Brice et Mel, en attente de leur validation.'
+
+/**
+ * Le message a l'equipe, en texte simple (pas de HTML : les noms sont tapes
+ * par des tiers) : « Alex propose : Rafik Fouchane = @rafick7 (fiche
+ * @rrafick, compte rattaché @rafick7) ».
+ */
+export function texteProposition(p: { relais: string; nom: string | null; pseudo: string; pseudoFiche: string | null; pseudoCompte: string | null; aUnCompte: boolean }): string {
+  const fiche = p.pseudoFiche ? `fiche @${p.pseudoFiche}` : 'fiche sans @'
+  const compte = p.pseudoCompte ? `compte rattaché @${p.pseudoCompte}` : p.aUnCompte ? 'compte rattaché sans @' : 'aucun compte rattaché'
+  return `${nomPropre(p.relais, 30) ?? 'Le relais'} propose : ${nomPropre(p.nom) ?? 'Membre sans nom'} = @${p.pseudo} (${fiche}, ${compte})`
+}
+
+export const PREFIXE_BOUTON_CORRECTION = 'ps:'
+export type VerbeCorrection = 'valider' | 'refuser'
+
+/** callback_data des boutons Valider (ps:v:<id>) et Refuser (ps:r:<id>). */
+export const dataBoutonCorrection = (id: number, verbe: VerbeCorrection) =>
+  `${PREFIXE_BOUTON_CORRECTION}${verbe === 'valider' ? 'v' : 'r'}:${Math.trunc(id)}`
+
+export function lireBoutonCorrection(data: unknown): { id: number; verbe: VerbeCorrection } | null {
+  const m = typeof data === 'string' ? /^ps:([vr]):(\d{1,15})$/.exec(data) : null
+  if (!m) return null
+  const id = Number(m[2])
+  return Number.isSafeInteger(id) && id > 0 ? { id, verbe: m[1] === 'v' ? 'valider' : 'refuser' } : null
+}
+
+export function clavierCorrection(id: number): { text: string; callback_data: string }[][] {
+  return [[
+    { text: 'Valider', callback_data: dataBoutonCorrection(id, 'valider') },
+    { text: 'Refuser', callback_data: dataBoutonCorrection(id, 'refuser') },
+  ]]
+}
+
+export type StatutCorrection = 'proposee' | 'validee' | 'refusee' | 'remplacee'
+export type DecisionCorrection = 'introuvable' | 'deja' | VerbeCorrection
+
+/** Seule une proposition en attente se decide : tout le reste est deja traite. */
+export function decisionBoutonCorrection(statut: string | null | undefined, verbe: VerbeCorrection): DecisionCorrection {
+  if (!statut) return 'introuvable'
+  return statut === 'proposee' ? verbe : 'deja'
+}
+
+const STATUT_EN_CLAIR: Record<string, string> = { validee: 'validée', refusee: 'refusée', remplacee: 'remplacée par une autre' }
+
+export function texteDejaTraite(statut: string | null | undefined): string {
+  const s = statut ? STATUT_EN_CLAIR[statut] : null
+  return s ? `Déjà traité : proposition ${s}.` : 'Cette proposition est introuvable.'
+}
+
+/**
+ * Le message apres un clic. Valider : si le @ retenu differe du compte
+ * rattache, on le dit (aucun rattachement n'est change automatiquement).
+ */
+export function texteApresDecision(d: {
+  verbe: VerbeCorrection; par: string | null; nom: string | null; pseudo: string; pseudoFicheAvant: string | null; pseudoCompte: string | null
+}): string {
+  const qui = nomPropre(d.nom) ?? 'ce membre'
+  const par = nomPropre(d.par, 30)
+  if (d.verbe === 'refuser') {
+    return `Refusé${par ? ` par ${par}` : ''} : la fiche de ${qui} ${d.pseudoFicheAvant ? `garde @${d.pseudoFicheAvant}` : 'reste sans @'}.`
+  }
+  const base = `Validé${par ? ` par ${par}` : ''} : la fiche de ${qui} porte maintenant @${d.pseudo}, protégé contre le prochain import des paiements.`
+  return d.pseudoCompte && d.pseudoCompte.toLowerCase() !== d.pseudo.toLowerCase()
+    ? `${base} Le compte rattaché porte @${d.pseudoCompte} : vérifier le rattachement.`
+    : base
+}

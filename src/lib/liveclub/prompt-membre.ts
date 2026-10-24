@@ -200,7 +200,28 @@ export const OUTIL_MEMBRE_A_CONTACTER: Anthropic.Tool = {
     additionalProperties: false,
   },
 }
-export const CONSIGNE_RELAIS = "Information du serveur (ce n'est pas un message du membre) : la personne qui t'écrit est un relais d'accueil du Live Club. Brice et Mélanie lui ont confié de dire un mot aux membres nouveaux ou silencieux que tu lui envoies chaque matin. Quand il te demande quelque chose sur un de ces membres (depuis quand il est là, s'il a été actif avant de décrocher, s'il suit l'académie), appelle membre_a_contacter et réponds avec ses faits, simplement, sans jugement. Tu ne dis jamais le contenu de ses messages, son email, ses paiements ni son abonnement : tu ne les as pas. Pour un membre hors de sa liste, dis-lui que tu n'as que les membres qu'on lui a transmis. Pour tout le reste, il est un membre comme les autres."
+/**
+ * (24/10) Les @ a verifier : le relais recoit les fiches dont le @ differe du
+ * compte Telegram rattache, demande au membre, puis dit le bon @ a l'agent.
+ * L'outil ENREGISTRE une proposition (corrections-pseudo.ts), transmise a
+ * Brice et Melanie qui valident : rien n'est applique par l'agent.
+ */
+export const NOM_OUTIL_PROPOSER_CORRECTION_PSEUDO = 'proposer_correction_pseudo'
+export const OUTIL_PROPOSER_CORRECTION_PSEUDO: Anthropic.Tool = {
+  name: NOM_OUTIL_PROPOSER_CORRECTION_PSEUDO,
+  description: "Pour le relais d'accueil seulement : quand il te donne le bon @ Telegram d'un membre de SA liste (après lui avoir demandé), ou le @ d'un membre transmis sans @, enregistre la proposition. Elle part à Brice et Mélanie, qui la valident : la fiche n'est corrigée qu'après leur accord.",
+  input_schema: {
+    type: 'object',
+    properties: {
+      membre: { type: 'string', description: "Nom ou @pseudo du membre, tel que le relais l'écrit." },
+      pseudo: { type: 'string', description: 'Le bon @ Telegram, avec ou sans arobase.' },
+    },
+    required: ['membre', 'pseudo'],
+    additionalProperties: false,
+  },
+}
+
+export const CONSIGNE_RELAIS = "Information du serveur (ce n'est pas un message du membre) : la personne qui t'écrit est un relais d'accueil du Live Club. Brice et Mélanie lui ont confié de dire un mot aux membres nouveaux ou silencieux que tu lui envoies chaque matin. Quand il te demande quelque chose sur un de ces membres (depuis quand il est là, s'il a été actif avant de décrocher, s'il suit l'académie), appelle membre_a_contacter et réponds avec ses faits, simplement, sans jugement. Tu ne dis jamais le contenu de ses messages, son email, ses paiements ni son abonnement : tu ne les as pas. Pour un membre hors de sa liste, dis-lui que tu n'as que les membres qu'on lui a transmis. Quand il te donne le bon @ d'un membre de sa liste (un @ à vérifier, ou un membre sans @), appelle proposer_correction_pseudo puis dis-lui que c'est transmis à Brice et Mel, qui valident : tu ne corriges rien toi-même. Pour tout le reste, il est un membre comme les autres."
 
 /**
  * La requete d'un tour de l'agent : la meme en prod et dans l'eval.
@@ -219,7 +240,7 @@ export function requeteAgentMembre(messages: Anthropic.MessageParam[], contexte?
       ...(contexte ? [{ type: 'text' as const, text: contexte }] : []),
       ...(o.relais ? [{ type: 'text' as const, text: CONSIGNE_RELAIS }] : []),
     ],
-    tools: o.relais ? [...OUTILS_MEMBRE, OUTIL_MEMBRE_A_CONTACTER] : OUTILS_MEMBRE,
+    tools: o.relais ? [...OUTILS_MEMBRE, OUTIL_MEMBRE_A_CONTACTER, OUTIL_PROPOSER_CORRECTION_PSEUDO] : OUTILS_MEMBRE,
     messages,
   }
 }

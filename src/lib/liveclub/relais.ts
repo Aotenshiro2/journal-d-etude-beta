@@ -36,6 +36,12 @@
 // reannonce pas. Le bouton n'entre ni au fil Support ni a l'historique de
 // l'agent des membres : l'agent IA ne connait pas cette liste.
 //
+// LES @ A VERIFIER (Brice, 24/10, migration 20261024150000) : apres la liste,
+// meme garde du jour, un message separe liste les fiches dont le @ differe du
+// compte rattache joignable (ecartsPourRelais), une fois par couple de @
+// (cockpit_liveclub_relais_ecarts). Le relais repond a l'agent, qui
+// enregistre une proposition (corrections-pseudo.ts), validee par l'equipe.
+//
 // INTERRUPTEUR : LIVECLUB_RELAIS=0 coupe l'envoi (rien n'est lu ni ecrit). Le
 // bouton marche toujours.
 //
@@ -48,10 +54,10 @@ import { appelTelegram, envoyer, repondreBouton, statutDansLeGroupe } from './te
 import { jourParis } from './passage-regles'
 import { messageErreur, relationAbsente } from './pur'
 import {
-  cleEpisodeRelais, clavierApresFait, decisionBoutonRelais, lignesPourRelais, lireBoutonRelais, messagesRelais,
-  motifsDuRelais, noteMarqueRelais, textePresentation,
+  cleEcartRelais, cleEpisodeRelais, clavierApresFait, decisionBoutonRelais, ecartsPourRelais, lignesPourRelais, lireBoutonRelais,
+  messagesEcarts, messagesRelais, motifsDuRelais, noteMarqueRelais, textePresentation,
   TEXTE_BOUTON_DEJA, TEXTE_BOUTON_MARQUE, TEXTE_BOUTON_PANNE, TEXTE_BOUTON_REFUSE,
-  type CandidatRelais, type CompteDuMembre, type ExclusionsRelais, type LigneRelais, type RelaisLu,
+  type CandidatEcart, type CandidatRelais, type CompteDuMembre, type EcartRelais, type ExclusionsRelais, type LigneRelais, type RelaisLu,
 } from './relais-pur'
 
 export type EtatRelais =
@@ -63,6 +69,8 @@ export type BilanRelais = {
   relais: number
   /** Membres transmis (ou a transmettre, en apercu). */
   lignes: number
+  /** (24/10) Ecarts de @ transmis (ou a transmettre, en apercu). */
+  ecarts: number
   /** Relais qui ont tout recu. */
   livres: number
   messages: number
@@ -71,7 +79,7 @@ export type BilanRelais = {
 }
 
 const bilan = (etat: EtatRelais, extra: Partial<BilanRelais> = {}): BilanRelais =>
-  ({ etat, relais: 0, lignes: 0, livres: 0, messages: 0, ...extra })
+  ({ etat, relais: 0, lignes: 0, ecarts: 0, livres: 0, messages: 0, ...extra })
 
 /** LIVECLUB_RELAIS=0 coupe l'envoi au relais. Absent ou autre valeur : il tourne. */
 export function relaisActif(): boolean {
@@ -97,6 +105,53 @@ type Donnees = {
   traitees: Set<string>
   /** Episodes deja transmis (ou en cours d'envoi), par relais. */
   transmis: Map<number, Set<string>>
+  /** (24/10) Les fiches qui portent un champ Telegram et un compte rattache : les ecarts possibles. */
+  candidatsEcarts: CandidatEcart[]
+  /** Ecarts deja envoyes (ou en cours d'envoi), par relais (cleEcartRelais). */
+  ecartsEnvoyes: Map<number, Set<string>>
+}
+
+/**
+ * (24/10) Les @ a verifier : fiches avec un champ Telegram et au moins un
+ * compte rattache actif, et la memoire des ecarts deja envoyes. Table des
+ * ecarts absente (migration 20261024150000 pas encore appliquee) : aucun
+ * ecart, la liste du jour part quand meme.
+ */
+async function lireEcarts(db: Client, relaisIds: number[], o: { avecReserves: boolean }): Promise<Pick<Donnees, 'candidatsEcarts' | 'ecartsEnvoyes'>> {
+  try {
+    const envoyes = await db.$queryRaw<{ relais_id: bigint; membre_id: string; pseudo_fiche: string; pseudo_compte: string }[]>`
+      select relais_id, membre_id::text as membre_id, pseudo_fiche, pseudo_compte from public.cockpit_liveclub_relais_ecarts
+      where relais_id::text = any(${relaisIds.map(String)}::text[])
+        and (envoye_le is not null or ${o.avecReserves})`
+    const lignes = await db.$queryRaw<{
+      membre_id: string; nom: string | null; telegram: string | null
+      telegram_id: bigint; pseudo: string | null; nom_affiche: string | null; present: boolean | null; statut_tg: string | null
+    }[]>`
+      select m.membre_id::text as membre_id, m.nom, m.telegram,
+        r.telegram_id, tm.pseudo, tm.nom_affiche, tm.present, tm.statut_tg
+      from public.cockpit_membres m
+      join public.cockpit_liveclub_rattachements r on r.membre_id = m.membre_id and r.retire_le is null
+      left join public.cockpit_telegram_membres tm on tm.telegram_id = r.telegram_id
+      where nullif(btrim(m.telegram), '') is not null
+      order by m.membre_id, r.lie_le desc`
+    const parMembre = new Map<string, { membreId: string; nomFiche: string | null; pseudoFiche: string | null; comptes: CompteDuMembre[] }>()
+    for (const l of lignes) {
+      const c = parMembre.get(l.membre_id) ?? { membreId: l.membre_id, nomFiche: l.nom, pseudoFiche: l.telegram, comptes: [] }
+      c.comptes.push({ telegramId: Number(l.telegram_id), pseudo: l.pseudo, nomAffiche: l.nom_affiche, present: l.present === true, statutTg: l.statut_tg })
+      parMembre.set(l.membre_id, c)
+    }
+    const ecartsEnvoyes = new Map<number, Set<string>>()
+    for (const e of envoyes) {
+      const id = Number(e.relais_id)
+      const s = ecartsEnvoyes.get(id) ?? new Set<string>()
+      s.add(cleEcartRelais(e.membre_id, e.pseudo_fiche, e.pseudo_compte))
+      ecartsEnvoyes.set(id, s)
+    }
+    return { candidatsEcarts: [...parMembre.values()], ecartsEnvoyes }
+  } catch (err) {
+    if (!relationAbsente(err)) throw err
+    return { candidatsEcarts: [], ecartsEnvoyes: new Map() }
+  }
 }
 
 async function lireDonnees(db: Client, o: { avecReserves: boolean }): Promise<Donnees> {
@@ -107,7 +162,7 @@ async function lireDonnees(db: Client, o: { avecReserves: boolean }): Promise<Do
     .map(r => ({ telegramId: Number(r.telegram_id), nom: r.nom, motifs: motifsDuRelais(r.motifs), presenteLe: r.presente_le?.toISOString() ?? null }))
     .filter(r => Number.isSafeInteger(r.telegramId) && r.telegramId > 0 && r.motifs.length > 0)
   if (relais.length === 0) {
-    return { relais, candidats: [], equipe: new Set(), exemptes: new Set(), traitees: new Set(), transmis: new Map() }
+    return { relais, candidats: [], equipe: new Set(), exemptes: new Set(), traitees: new Set(), transmis: new Map(), candidatsEcarts: [], ecartsEnvoyes: new Map() }
   }
 
   // Les deux fenetres du relais, et elles seules : echec et prelevement ne sont jamais lus ici.
@@ -166,6 +221,7 @@ async function lireDonnees(db: Client, o: { avecReserves: boolean }): Promise<Do
     exemptes: new Set(exemptes.map(e => Number(e.telegram_id))),
     traitees: new Set(traitees.map(t => cleEpisodeRelais(t.membre_id, t.motif))),
     transmis,
+    ...(await lireEcarts(db, relais.map(r => r.telegramId), o)),
   }
 }
 
@@ -174,14 +230,25 @@ async function lireDonnees(db: Client, o: { avecReserves: boolean }): Promise<Do
  * transmettre (un admin, ou un compte sorti depuis la derniere collecte, est
  * ecarte). Statut illisible : le registre decide.
  */
-async function lignesParRelais(d: Donnees, o: { enDirect: boolean }): Promise<Map<number, LigneRelais[]>> {
+type ParRelais = { lignes: Map<number, LigneRelais[]>; ecarts: Map<number, EcartRelais[]> }
+
+async function lignesParRelais(d: Donnees, o: { enDirect: boolean }): Promise<ParRelais> {
   const excl: ExclusionsRelais = { equipe: d.equipe, exemptes: d.exemptes, relais: new Set(d.relais.map(r => r.telegramId)) }
-  const calculer = (e: ExclusionsRelais) => new Map(d.relais.map(r => [r.telegramId, lignesPourRelais(d.candidats, r, e, {
-    traitees: d.traitees, dejaTransmis: d.transmis.get(r.telegramId) ?? new Set(),
-  })]))
+  const calculer = (e: ExclusionsRelais): ParRelais => ({
+    lignes: new Map(d.relais.map(r => [r.telegramId, lignesPourRelais(d.candidats, r, e, {
+      traitees: d.traitees, dejaTransmis: d.transmis.get(r.telegramId) ?? new Set(),
+    })])),
+    // (24/10) Les @ a verifier, memes exclusions et meme statut direct.
+    ecarts: new Map(d.relais.map(r => [r.telegramId, ecartsPourRelais(d.candidatsEcarts, r, e, {
+      dejaEnvoyes: d.ecartsEnvoyes.get(r.telegramId) ?? new Set(),
+    })])),
+  })
   const premier = calculer(excl)
   if (!o.enDirect) return premier
-  const aVerifier = [...new Set([...premier.values()].flat().map(l => l.telegramId))].slice(0, MAX_STATUTS_DIRECTS)
+  const aVerifier = [...new Set([
+    ...[...premier.lignes.values()].flat().map(l => l.telegramId),
+    ...[...premier.ecarts.values()].flat().map(e => e.telegramId),
+  ])].slice(0, MAX_STATUTS_DIRECTS)
   if (aVerifier.length === 0) return premier
   const statutsDirects = new Map<number, string | null>()
   for (const id of aVerifier) statutsDirects.set(id, await statutDansLeGroupe(id))
@@ -192,16 +259,90 @@ async function lignesParRelais(d: Donnees, o: { enDirect: boolean }): Promise<Ma
 // L'envoi du jour
 // ---------------------------------------------------------------------------
 
-type IssueRelais = { etat: 'rien' | 'deja_fait' | 'envoye' | 'echec'; lignes: number; messages: number }
+type IssueRelais = { etat: 'rien' | 'deja_fait' | 'envoye' | 'echec'; lignes: number; messages: number; ecarts: number }
 
-async function envoyerAuRelais(r: RelaisLu, lignes: LigneRelais[], jour: string): Promise<IssueRelais> {
-  if (lignes.length === 0) return { etat: 'rien', lignes: 0, messages: 0 }
+async function envoyerAuRelais(r: RelaisLu, lignes: LigneRelais[], ecarts: EcartRelais[], jour: string): Promise<IssueRelais> {
+  if (lignes.length === 0 && ecarts.length === 0) return { etat: 'rien', lignes: 0, messages: 0, ecarts: 0 }
 
   // 1. Le jour, reserve AVANT tout envoi : un rejeu ou un second passage ne renvoie rien.
   const reserve = await prisma.$executeRaw`
     update public.cockpit_liveclub_relais set dernier_envoi_jour = ${jour}::date
     where telegram_id = ${r.telegramId} and actif and dernier_envoi_jour is distinct from ${jour}::date`
-  if (reserve === 0) return { etat: 'deja_fait', lignes: 0, messages: 0 }
+  if (reserve === 0) return { etat: 'deja_fait', lignes: 0, messages: 0, ecarts: 0 }
+
+  const liste = await envoyerListe(r, lignes)
+  // (24/10) Les @ a verifier, en message separe APRES la liste. Une liste
+  // refusee (bot bloque) : pas d'ecarts non plus, tout repart le lendemain.
+  const presente = !!r.presenteLe || liste.messages > 0
+  const ec = liste.etat === 'echec' ? { etat: 'rien' as const, ecarts: 0, messages: 0 } : await envoyerEcarts(r, ecarts, { presente })
+  const messages = liste.messages + ec.messages
+  const etat = liste.etat === 'echec' || ec.etat === 'echec' ? 'echec' : messages > 0 ? 'envoye' : 'rien'
+  return { etat, lignes: liste.lignes, messages, ecarts: ec.ecarts }
+}
+
+/** La pose de presente_le, au premier message parti. */
+async function marquerPresente(r: RelaisLu): Promise<void> {
+  await prisma.$executeRaw`
+    update public.cockpit_liveclub_relais set presente_le = now()
+    where telegram_id = ${r.telegramId} and presente_le is null`
+}
+
+/**
+ * (24/10) Les ecarts de @ : reserves (une ligne par relais, membre et couple
+ * de @), envoyes, puis marques partis. Un message refuse retire ses lignes.
+ */
+async function envoyerEcarts(r: RelaisLu, ecarts: EcartRelais[], o: { presente: boolean }): Promise<{ etat: 'rien' | 'envoye' | 'echec'; ecarts: number; messages: number }> {
+  if (ecarts.length === 0) return { etat: 'rien', ecarts: 0, messages: 0 }
+  let inseres: { ecart_id: bigint; membre_id: string }[]
+  try {
+    inseres = await prisma.$queryRaw<{ ecart_id: bigint; membre_id: string }[]>`
+      insert into public.cockpit_liveclub_relais_ecarts (relais_id, membre_id, pseudo_fiche, pseudo_compte)
+      select ${r.telegramId}, x.membre_id::uuid, x.fiche, x.compte
+      from unnest(${ecarts.map(e => e.membreId)}::text[], ${ecarts.map(e => e.pseudoFiche)}::text[], ${ecarts.map(e => e.pseudoCompte)}::text[])
+        as x(membre_id, fiche, compte)
+      on conflict (relais_id, membre_id, lower(pseudo_fiche), lower(pseudo_compte)) do nothing
+      returning ecart_id, membre_id::text as membre_id`
+  } catch (err) {
+    if (relationAbsente(err)) return { etat: 'rien', ecarts: 0, messages: 0 }
+    throw err
+  }
+  const idParMembre = new Map(inseres.map(i => [i.membre_id, Number(i.ecart_id)]))
+  const aEnvoyer = ecarts.flatMap(e => {
+    const ecartId = idParMembre.get(e.membreId)
+    return ecartId ? [{ ...e, ecartId }] : []
+  })
+  if (aEnvoyer.length === 0) return { etat: 'rien', ecarts: 0, messages: 0 }
+
+  const messages = messagesEcarts(aEnvoyer, { presentation: o.presente ? null : textePresentation(r.nom) })
+  let partis = 0
+  let ecartsPartis = 0
+  for (const [i, m] of messages.entries()) {
+    const envoi = await envoyer(r.telegramId, m.texte, undefined, { html: true })
+    if (!envoi.ok) {
+      console.warn(`[liveclub/relais] ecarts : message ${i + 1}/${messages.length} refuse (code ${envoi.code ?? '?'})`)
+      const restants = messages.slice(i).flatMap(x => x.ecarts)
+      try {
+        await prisma.$executeRaw`
+          delete from public.cockpit_liveclub_relais_ecarts
+          where ecart_id = any(${restants}::bigint[]) and envoye_le is null`
+      } catch (err) {
+        console.warn(`[liveclub/relais] ecarts non partis pas retires : ${messageErreur(err).slice(0, 160)}`)
+      }
+      break
+    }
+    partis++
+    ecartsPartis += m.ecarts.length
+    await prisma.$executeRaw`
+      update public.cockpit_liveclub_relais_ecarts set envoye_le = now()
+      where ecart_id = any(${m.ecarts}::bigint[])`
+    if (i === 0 && !o.presente) await marquerPresente(r)
+  }
+  return { etat: partis === messages.length ? 'envoye' : 'echec', ecarts: ecartsPartis, messages: partis }
+}
+
+/** La liste du jour (accueil et silence), avec ses boutons « C'est fait ». */
+async function envoyerListe(r: RelaisLu, lignes: LigneRelais[]): Promise<{ etat: 'rien' | 'envoye' | 'echec'; lignes: number; messages: number }> {
+  if (lignes.length === 0) return { etat: 'rien', lignes: 0, messages: 0 }
 
   // 2. Les episodes, reserves aussi : seules les lignes inserees ici partent.
   const inseres = await prisma.$queryRaw<{ episode_id: bigint; membre_id: string; cle_episode: string }[]>`
@@ -299,9 +440,9 @@ export async function relaisDuMatin(o: { maintenant?: Date; apercu?: boolean; en
   }
   if (donnees.relais.length === 0) return bilan('sans_relais')
 
-  let lignes: Map<number, LigneRelais[]>
+  let tri: ParRelais
   try {
-    lignes = await lignesParRelais(donnees, { enDirect })
+    tri = await lignesParRelais(donnees, { enDirect })
   } catch (err) {
     console.warn(`[liveclub/relais] tri impossible, aucun envoi : ${messageErreur(err).slice(0, 200)}`)
     return bilan('panne', { relais: donnees.relais.length })
@@ -310,10 +451,10 @@ export async function relaisDuMatin(o: { maintenant?: Date; apercu?: boolean; en
   const issues: IssueRelais[] = []
   for (const r of donnees.relais) {
     try {
-      issues.push(await envoyerAuRelais(r, lignes.get(r.telegramId) ?? [], jour))
+      issues.push(await envoyerAuRelais(r, tri.lignes.get(r.telegramId) ?? [], tri.ecarts.get(r.telegramId) ?? [], jour))
     } catch (err) {
       console.warn(`[liveclub/relais] envoi a un relais impossible : ${messageErreur(err).slice(0, 200)}`)
-      issues.push({ etat: 'echec', lignes: 0, messages: 0 })
+      issues.push({ etat: 'echec', lignes: 0, messages: 0, ecarts: 0 })
     }
   }
   const etat: EtatRelais = issues.some(i => i.etat === 'envoye') ? 'envoye'
@@ -322,10 +463,11 @@ export async function relaisDuMatin(o: { maintenant?: Date; apercu?: boolean; en
   const b = bilan(etat, {
     relais: donnees.relais.length,
     lignes: issues.reduce((n, i) => n + i.lignes, 0),
+    ecarts: issues.reduce((n, i) => n + i.ecarts, 0),
     livres: issues.filter(i => i.etat === 'envoye').length,
     messages: issues.reduce((n, i) => n + i.messages, 0),
   })
-  console.log(`[liveclub/relais] ${etat} : ${b.lignes} membre(s), ${b.messages} message(s), ${b.livres}/${b.relais} relais`)
+  console.log(`[liveclub/relais] ${etat} : ${b.lignes} membre(s), ${b.ecarts} @ a verifier, ${b.messages} message(s), ${b.livres}/${b.relais} relais`)
   return b
 }
 
@@ -339,15 +481,25 @@ export async function relaisDuMatin(o: { maintenant?: Date; apercu?: boolean; en
 export async function apercuRelais(db: Client, o: { enDirect?: boolean } = {}): Promise<BilanRelais> {
   const donnees = await lireDonnees(db, { avecReserves: false })
   if (donnees.relais.length === 0) return bilan('sans_relais')
-  const lignes = await lignesParRelais(donnees, { enDirect: o.enDirect !== false })
+  const tri = await lignesParRelais(donnees, { enDirect: o.enDirect !== false })
   const apercus = donnees.relais.map(r => {
-    const siennes = (lignes.get(r.telegramId) ?? []).map((l, i) => ({ ...l, episodeId: i + 1 }))
+    const siennes = (tri.lignes.get(r.telegramId) ?? []).map((l, i) => ({ ...l, episodeId: i + 1 }))
     const messages = messagesRelais(siennes, { presentation: r.presenteLe ? null : textePresentation(r.nom) })
-    return { relais: r.nom, messages: messages.map(m => ({ texte: m.texte, boutons: m.boutons.flat().map(b => b.texte) })) }
+    const ecarts = (tri.ecarts.get(r.telegramId) ?? []).map((e, i) => ({ ...e, ecartId: i + 1 }))
+    const presente = !!r.presenteLe || messages.length > 0
+    const messagesEc = messagesEcarts(ecarts, { presentation: presente ? null : textePresentation(r.nom) })
+    return {
+      relais: r.nom,
+      messages: [
+        ...messages.map(m => ({ texte: m.texte, boutons: m.boutons.flat().map(b => b.texte) })),
+        ...messagesEc.map(m => ({ texte: m.texte, boutons: [] as string[] })),
+      ],
+    }
   })
   return bilan('apercu', {
     relais: donnees.relais.length,
-    lignes: [...lignes.values()].reduce((n, l) => n + l.length, 0),
+    lignes: [...tri.lignes.values()].reduce((n, l) => n + l.length, 0),
+    ecarts: [...tri.ecarts.values()].reduce((n, l) => n + l.length, 0),
     messages: apercus.reduce((n, a) => n + a.messages.length, 0),
     apercus,
   })

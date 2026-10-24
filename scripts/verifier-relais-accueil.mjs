@@ -9,10 +9,15 @@ function serveurFiche() {
 }
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { register } from 'node:module'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import path from 'node:path'
 import {
   clavierApresFait, compteAJoindre, dataBoutonRelais, decisionBoutonRelais, estBoutonRelais, LIGNES_PAR_MESSAGE,
   lignesPourRelais, lireBoutonRelais, messagesRelais, motifEnClair, motifsDuRelais, NOTE_BOT_MEMBRES, NOTE_SANS_PSEUDO, noteMarqueRelais,
   pseudoPropre, textePresentation, TITRE_RETARD,
+  cleEcartRelais, clavierCorrection, dataBoutonCorrection, decisionBoutonCorrection, ecartDePseudo, ecartsPourRelais, ligneEcartHtml,
+  lireBoutonCorrection, messagesEcarts, texteApresDecision, texteDejaTraite, texteProposition, TITRE_ECARTS, trouverMembreTransmis,
 } from '../src/lib/liveclub/relais-pur.ts'
 import {
   cleAnnonce, composerResume, detailAContacter, detailAvecRelais, episodesAAnnoncer, pseudoCroise, relaisParEpisode,
@@ -135,7 +140,7 @@ bloc('bouton « C\'est fait » : reserve au relais de l\'episode', () => {
   assert.match(agent, /const relais = await estRelaisActif\(telegramId\)/)
   assert.match(agent, /relais \? await ficheMembrePourRelais\(telegramId, bloc\.input\) : \{ erreur/)
   const prompt = readFileSync(new URL('../src/lib/liveclub/prompt-membre.ts', import.meta.url), 'utf8')
-  assert.match(prompt, /tools: o\.relais \? \[\.\.\.OUTILS_MEMBRE, OUTIL_MEMBRE_A_CONTACTER\] : OUTILS_MEMBRE/)
+  assert.match(prompt, /tools: o\.relais \? \[\.\.\.OUTILS_MEMBRE, OUTIL_MEMBRE_A_CONTACTER, OUTIL_PROPOSER_CORRECTION_PSEUDO\] : OUTILS_MEMBRE/)
   const fiche = serveurFiche()
   assert.match(fiche, /where e\.relais_id = \$\{relaisId\} and e\.envoye_le is not null/)
   assert.ok(!/\btexte\b|email\s*[,:]|montant|abonnement_|statut_abonnement|stripe/i.test(fiche.replace(/lower\(u\.email\) = lower\(r\.email\)|r\.email is not null|ni email|un email|jamais l'email|l'email du rattachement/g, '')), 'la fiche ne lit ni texte de message, ni email rendu, ni paiement')
@@ -246,6 +251,167 @@ bloc('le serveur ne logue ni nom ni identifiant, et passe avant le resume', () =
   const passage = readFileSync(new URL('../src/lib/liveclub/passage.ts', import.meta.url), 'utf8')
   const relais = passage.indexOf("await etape('relais'")
   assert.ok(relais > 0 && relais < passage.indexOf("await etape('resume'"))
+})
+
+// ---------------------------------------------------------------------------
+// (24/10) Les @ a verifier : ecarts, proposition du relais, validation de l'equipe
+// ---------------------------------------------------------------------------
+
+const ARGENT = /(€|\beur\b|montant|paiement|pr[eé]l[eè]vement|abonnement|stripe|factur|rembours|tarif|\d+[.,]\d{2})/i
+const EMAIL = /[a-z0-9._-]+@[a-z0-9-]+\.[a-z]{2,}/i
+
+bloc('ecarts : deux @ valides et differents sur un compte joignable, une fois par couple', () => {
+  assert.deepEqual(ecartDePseudo('@rrafick', 'rafick7'), { fiche: 'rrafick', compte: 'rafick7' })
+  assert.equal(ecartDePseudo('@Lea_M', 'lea_m'), null, 'la casse ne fait pas un ecart')
+  assert.equal(ecartDePseudo('Christophe chapelier', 'Chrissssstoooo'), null, 'un nom saisi au paiement n est pas un @')
+  assert.equal(ecartDePseudo(null, 'rafick7'), null)
+  assert.equal(ecartDePseudo('@rrafick', null), null)
+  assert.deepEqual(ecartDePseudo('@Ginger', 'Koralieee'), { fiche: 'Ginger', compte: 'Koralieee' })
+  const c = (id, fiche, pseudo, extra = {}) => ({
+    membreId: `m${id}`, nomFiche: `Fiche ${id}`, pseudoFiche: fiche, comptes: [compte(id, { pseudo, nomAffiche: `Fiche ${id}`, ...extra })],
+  })
+  const tous = [
+    c(1, '@rrafick', 'rafick7'), // ecart
+    c(2, '@Lea_M', 'lea_m'), // meme @
+    c(3, 'Ginger Gautier', 'koralieee'), // pas un @ sur la fiche
+    c(4, '@ancien', 'nouveau', { statutTg: 'administrator' }), // admin
+    c(5, '@ancien5', 'nouveau5', { present: false, statutTg: 'left' }), // hors groupe
+    c(6, '@ancien6', 'nouveau6'), // equipe
+    c(7, '@ancien7', 'nouveau7'), // exempte
+    { membreId: 'm8', nomFiche: 'Alex Auger', pseudoFiche: '@autre', comptes: [compte(ALEX, { pseudo: 'Alex17310' })] }, // le relais lui-meme
+  ]
+  const excl = { equipe: new Set([6]), exemptes: new Set([7]), relais: new Set([ALEX]) }
+  const ecarts = ecartsPourRelais(tous, alex, excl, { dejaEnvoyes: new Set() })
+  assert.deepEqual(ecarts.map(e => [e.membreId, e.pseudoFiche, e.pseudoCompte]), [['m1', 'rrafick', 'rafick7']])
+  // Uniquement les noms et les deux @ : aucun autre champ.
+  assert.deepEqual(Object.keys(ecarts[0]).sort(), ['membreId', 'nom', 'nomTelegram', 'pseudoCompte', 'pseudoFiche', 'telegramId'])
+  // Memoire : le meme couple ne repart pas (sans casse), un nouveau couple repart.
+  assert.deepEqual(ecartsPourRelais(tous, alex, excl, { dejaEnvoyes: new Set([cleEcartRelais('m1', 'RRAFICK', 'Rafick7')]) }), [])
+  assert.equal(ecartsPourRelais(tous, alex, excl, { dejaEnvoyes: new Set([cleEcartRelais('m1', 'rrafick', 'autre_pseudo')]) }).length, 1)
+  // Le statut direct prime : sorti du groupe depuis la collecte = ecarte.
+  assert.deepEqual(ecartsPourRelais(tous, alex, { ...excl, statutsDirects: new Map([[1, 'left']]) }, { dejaEnvoyes: new Set() }), [])
+})
+
+bloc('ecarts : le message d Alex, apres la liste, sans argent ni email', () => {
+  assert.equal(TITRE_ECARTS, '@ à vérifier : demande-leur lequel est le bon, puis dis-le-moi ici.')
+  assert.equal(ligneEcartHtml({ nom: 'Rafik Fouchane', nomTelegram: null, pseudoFiche: 'rrafick', pseudoCompte: 'rafick7' }, 1),
+    '1. Rafik Fouchane : @rrafick ou @rafick7 ?')
+  assert.equal(ligneEcartHtml({ nom: 'Léa <b>', nomTelegram: 'Lea & co', pseudoFiche: 'lea_a', pseudoCompte: 'lea_b' }, 2),
+    '2. Léa &lt;b&gt; (Lea &amp; co) : @lea_a ou @lea_b ?')
+  const ecarts = Array.from({ length: 12 }, (_, i) => ({
+    membreId: `m${i}`, nom: `Membre ${i}`, nomTelegram: null, pseudoFiche: `fiche_${i}x`, pseudoCompte: `compte_${i}x`, telegramId: 100 + i, ecartId: 900 + i,
+  }))
+  const ms = messagesEcarts(ecarts)
+  assert.equal(ms.length, 2)
+  assert.ok(ms[0].texte.startsWith(`${TITRE_ECARTS}\n1. Membre 0 : @fiche_0x ou @compte_0x ?`))
+  assert.ok(ms[1].texte.startsWith('11. ') && !ms[1].texte.includes(TITRE_ECARTS))
+  assert.deepEqual(ms.flatMap(m => m.ecarts), ecarts.map(e => e.ecartId))
+  for (const m of ms) { assert.ok(!ARGENT.test(m.texte) && !EMAIL.test(m.texte), m.texte); assert.ok(m.texte.length < 4096) }
+  assert.deepEqual(messagesEcarts([]), [])
+  // Un relais jamais presente : la presentation en tete.
+  assert.ok(messagesEcarts(ecarts.slice(0, 1), { presentation: textePresentation('Alex') })[0].texte.startsWith('Salut Alex'))
+  // Le serveur : un message separe APRES la liste, garde du jour commune, memoire en base.
+  const source = readFileSync(new URL('../src/lib/liveclub/relais.ts', import.meta.url), 'utf8')
+  const envoi = source.slice(source.indexOf('async function envoyerAuRelais'), source.indexOf('/** La pose de presente_le'))
+  assert.ok(envoi.indexOf('dernier_envoi_jour') < envoi.indexOf('envoyerListe(') && envoi.indexOf('envoyerListe(') < envoi.indexOf('envoyerEcarts('))
+  assert.match(source, /on conflict \(relais_id, membre_id, lower\(pseudo_fiche\), lower\(pseudo_compte\)\) do nothing/)
+})
+
+bloc('proposition : seulement un membre transmis a ce relais, @ au bon format, texte a l equipe', () => {
+  const liste = [
+    { membreId: 'a', nom: 'Rafik Fouchane', nomTelegram: 'Rafik F', pseudoFiche: 'rrafick', pseudoCompte: 'rafick7' },
+    { membreId: 'b', nom: 'Koralie Gautier', nomTelegram: null, pseudoFiche: 'Ginger', pseudoCompte: 'Koralieee' },
+    { membreId: 'c', nom: 'Julien Martin', nomTelegram: null, pseudoFiche: null, pseudoCompte: null },
+    { membreId: 'd', nom: 'Julien Morel', nomTelegram: null, pseudoFiche: null, pseudoCompte: null },
+  ]
+  assert.equal(trouverMembreTransmis(liste, 'Rafik Fouchane').membre?.membreId, 'a')
+  assert.equal(trouverMembreTransmis(liste, '@rafick7').membre?.membreId, 'a')
+  assert.equal(trouverMembreTransmis(liste, 'koralie').membre?.membreId, 'b')
+  assert.equal(trouverMembreTransmis(liste, 'Julien Martin').membre?.membreId, 'c', 'membre transmis sans @')
+  assert.deepEqual(trouverMembreTransmis(liste, 'julien'), { genre: 'plusieurs', noms: ['Julien Martin', 'Julien Morel'] })
+  assert.deepEqual(trouverMembreTransmis(liste, 'Mouhamadou Sakho'), { genre: 'aucun' }, 'hors liste = refuse')
+  assert.deepEqual(trouverMembreTransmis(liste, 'ra'), { genre: 'aucun' })
+  assert.deepEqual(trouverMembreTransmis([], 'Rafik'), { genre: 'aucun' })
+  assert.equal(pseudoPropre('@rafick7'), 'rafick7')
+  for (const faux of ['raf', '7rafick', 'rafick 7', 'rafick-7', 'a'.repeat(33), '', null]) assert.equal(pseudoPropre(faux), null, String(faux))
+  assert.equal(texteProposition({ relais: 'Alex', nom: 'Rafik Fouchane', pseudo: 'rafick7', pseudoFiche: 'rrafick', pseudoCompte: 'rafick7', aUnCompte: true }),
+    'Alex propose : Rafik Fouchane = @rafick7 (fiche @rrafick, compte rattaché @rafick7)')
+  assert.equal(texteProposition({ relais: 'Alex', nom: 'Julien Martin', pseudo: 'julien_m', pseudoFiche: null, pseudoCompte: null, aUnCompte: true }),
+    'Alex propose : Julien Martin = @julien_m (fiche sans @, compte rattaché sans @)')
+  // Le serveur : relais actif verifie, membres transmis (episodes OU ecarts partis), jamais d'update de la fiche.
+  const s = readFileSync(new URL('../src/lib/liveclub/corrections-pseudo.ts', import.meta.url), 'utf8')
+  const propose = s.slice(s.indexOf('export async function proposerCorrectionPseudo'), s.indexOf('type IssueDecision'))
+  assert.match(propose, /estRelaisActif\(relaisId, db\)/)
+  assert.ok(!/update public\.cockpit_membres/.test(propose), 'la proposition n applique rien')
+  assert.match(s, /from public\.cockpit_liveclub_relais_episodes where relais_id = \$\{relaisId\} and envoye_le is not null\s+union\s+select membre_id from public\.cockpit_liveclub_relais_ecarts where relais_id = \$\{relaisId\} and envoye_le is not null/)
+  for (const ligne of s.split('\n').filter(l => /console\.(log|warn|error)/.test(l))) {
+    assert.ok(!/\$\{(?!messageErreur|issue\.genre)/.test(ligne), `log suspect : ${ligne.trim()}`)
+  }
+})
+
+// L'outil de l'agent : la vraie requete (prompt-membre.ts), chargee avec les alias du projet.
+const RACINE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const SRC = pathToFileURL(path.join(RACINE, 'src') + path.sep).href
+register('data:text/javascript,' + encodeURIComponent(`
+const SRC = ${JSON.stringify(SRC)};
+export async function resolve(spec, ctx, next) {
+  try { return await next(spec, ctx) } catch (err) {
+    let base = null
+    if (spec.startsWith('@/')) base = new URL(spec.slice(2), SRC).href
+    else if ((spec.startsWith('./') || spec.startsWith('../')) && ctx.parentURL) base = new URL(spec, ctx.parentURL).href
+    if (!base) throw err
+    for (const c of [base + '.ts', base + '/index.ts']) { try { return await next(c, ctx) } catch {} }
+    throw err
+  }
+}`))
+const prompt = await import('../src/lib/liveclub/prompt-membre.ts')
+
+bloc('outil proposer_correction_pseudo : relais seulement, consigne a jour, serveur gate', () => {
+  const noms = (r) => r.tools.map(t => t.name)
+  const membre = prompt.requeteAgentMembre([{ role: 'user', content: 'salut' }])
+  const relais = prompt.requeteAgentMembre([{ role: 'user', content: 'salut' }], undefined, { relais: true })
+  assert.ok(!noms(membre).includes('proposer_correction_pseudo') && !noms(membre).includes('membre_a_contacter'))
+  assert.ok(noms(relais).includes('proposer_correction_pseudo') && noms(relais).includes('membre_a_contacter'))
+  assert.deepEqual(prompt.OUTIL_PROPOSER_CORRECTION_PSEUDO.input_schema.required, ['membre', 'pseudo'])
+  assert.match(prompt.CONSIGNE_RELAIS, /proposer_correction_pseudo/)
+  assert.match(prompt.CONSIGNE_RELAIS, /Brice et Mel/)
+  assert.ok(relais.system.some(b => b.text === prompt.CONSIGNE_RELAIS))
+  assert.ok(!membre.system.some(b => b.text === prompt.CONSIGNE_RELAIS))
+  const agent = readFileSync(new URL('../src/lib/liveclub/agent-membre.ts', import.meta.url), 'utf8')
+  assert.match(agent, /NOM_OUTIL_PROPOSER_CORRECTION_PSEUDO\) \{\s+const contenu = relais \? await proposerCorrectionPseudo\(telegramId, bloc\.input\) : \{ erreur: 'Outil inconnu\.' \}/)
+})
+
+bloc('boutons Valider / Refuser : equipe seulement, une seule decision, aucun rattachement touche', () => {
+  assert.equal(dataBoutonCorrection(42, 'valider'), 'ps:v:42')
+  assert.equal(dataBoutonCorrection(42, 'refuser'), 'ps:r:42')
+  assert.deepEqual(lireBoutonCorrection('ps:v:42'), { id: 42, verbe: 'valider' })
+  assert.deepEqual(lireBoutonCorrection('ps:r:7'), { id: 7, verbe: 'refuser' })
+  for (const faux of ['ps:x:1', 'ps:v:', 'ps:v:0', 'ps:v:-1', 'ps:v:1:2', 'rl:1', 'ok:abc', 42, null]) assert.equal(lireBoutonCorrection(faux), null, String(faux))
+  assert.ok(!estBoutonRelais('ps:v:1'))
+  assert.deepEqual(clavierCorrection(5), [[{ text: 'Valider', callback_data: 'ps:v:5' }, { text: 'Refuser', callback_data: 'ps:r:5' }]])
+  assert.equal(decisionBoutonCorrection('proposee', 'valider'), 'valider')
+  assert.equal(decisionBoutonCorrection('proposee', 'refuser'), 'refuser')
+  for (const s of ['validee', 'refusee', 'remplacee']) for (const v of ['valider', 'refuser']) assert.equal(decisionBoutonCorrection(s, v), 'deja')
+  assert.equal(decisionBoutonCorrection(null, 'valider'), 'introuvable')
+  assert.equal(texteDejaTraite('validee'), 'Déjà traité : proposition validée.')
+  assert.equal(texteApresDecision({ verbe: 'valider', par: 'Brice', nom: 'Rafik Fouchane', pseudo: 'rafick7', pseudoFicheAvant: 'rrafick', pseudoCompte: 'rafick7' }),
+    'Validé par Brice : la fiche de Rafik Fouchane porte maintenant @rafick7, protégé contre le prochain import des paiements.')
+  assert.match(texteApresDecision({ verbe: 'valider', par: 'Brice', nom: 'Rafik Fouchane', pseudo: 'rrafick', pseudoFicheAvant: 'rrafick', pseudoCompte: 'rafick7' }),
+    / Le compte rattaché porte @rafick7 : vérifier le rattachement\.$/)
+  assert.equal(texteApresDecision({ verbe: 'refuser', par: 'Mélanie', nom: 'Rafik Fouchane', pseudo: 'rafick7', pseudoFicheAvant: 'rrafick', pseudoCompte: 'rafick7' }),
+    'Refusé par Mélanie : la fiche de Rafik Fouchane garde @rrafick.')
+  // Le clic passe APRES le verrou du compte de l'equipe, et ne touche jamais un rattachement.
+  const tg = readFileSync(new URL('../src/lib/agent-cockpit-telegram.ts', import.meta.url), 'utf8')
+  const clic = tg.slice(tg.indexOf('export async function traiterClicAgentTelegram'))
+  assert.ok(clic.indexOf('compteCockpitTelegram(telegramId)') < clic.indexOf('lireBoutonCorrection(donnee)'))
+  const s = readFileSync(new URL('../src/lib/liveclub/corrections-pseudo.ts', import.meta.url), 'utf8')
+  assert.ok(!/(update|insert into|delete from) public\.cockpit_liveclub_rattachements/.test(s))
+  assert.match(s, /for update of c/)
+  // La migration : la correction validee est reimposee a la fiche avant chaque mise a jour (push des paiements).
+  const mig = readFileSync(new URL('../../../sites/Aoknowledgecom/supabase/migrations/20261024150000_cockpit_liveclub_pseudos.sql', import.meta.url), 'utf8')
+  assert.match(mig, /before update on public\.cockpit_membres\s+for each row execute function public\.cockpit_membres_pseudo_corrige\(\)/)
+  assert.match(mig, /on public\.cockpit_liveclub_corrections_pseudo \(membre_id\) where statut = 'validee'/)
+  for (const l of mig.split('\n').filter(l => l.trim().startsWith('--'))) assert.ok(!l.includes(';'), `point-virgule en commentaire : ${l}`)
 })
 
 console.log(`\n${n} blocs verifies, tout est bon.`)

@@ -12,6 +12,7 @@ import {
 import { telechargerFichierTelegram, type BotTelegram } from '@/lib/liveclub/telegram'
 import { dernierePieceHistorique, phraseMainRendue, type PieceAgent } from '@/lib/liveclub/support-pont-pur'
 import { lireDonneeRendreLaMain, referenceFil } from '@/lib/alerte-equipe-telegram-pur'
+import { lireBoutonCorrection } from '@/lib/liveclub/relais-pur'
 
 // Le TRAITEMENT du canal Telegram de l'agent cockpit (« Agent AOK »), sorti de
 // la route /api/cockpit/agent/telegram le 08/10 pour servir a deux portes :
@@ -232,6 +233,17 @@ export async function traiterClicAgentTelegram(cq: ClicAgentTelegram): Promise<v
   const compte = Number.isSafeInteger(telegramId) ? await compteCockpitTelegram(telegramId) : null
   if (!compte || !chatId) {
     await acquitter('Accès réservé.')
+    return
+  }
+
+  // (24/10) Valider / Refuser une correction de @ proposee par un relais
+  // d'accueil (liveclub/corrections-pseudo.ts). Apres le verrou 2 : seuls les
+  // comptes de cockpit_telegram_comptes arrivent ici. Import a la demande,
+  // comme rendreLaMain (corrections-pseudo importe ce module).
+  const correction = lireBoutonCorrection(donnee)
+  if (correction) {
+    const { traiterBoutonCorrection } = await import('@/lib/liveclub/corrections-pseudo')
+    await traiterBoutonCorrection(cq, chatId, telegramId, compte, correction)
     return
   }
 

@@ -43,8 +43,10 @@ import { montantsDuMembre, preparerAction, situationDuMembre } from './actions-m
 import type { ActionMembre, MessageConserve } from './conversations'
 import { messageErreur, pauseDejaProposee } from './pur'
 import { estRelaisActif, ficheMembrePourRelais } from './relais'
+import { proposerCorrectionPseudo } from './corrections-pseudo'
 import {
-  CONSIGNE_ACCES_OFFERT, CONSIGNE_EQUIPE_TRANSMISE, CONSIGNE_MONTANTS, MODELE_LIVECLUB, NOM_OUTIL_MEMBRE_A_CONTACTER, RESULTAT_DEMANDER_UN_HUMAIN, requeteAgentMembre,
+  CONSIGNE_ACCES_OFFERT, CONSIGNE_EQUIPE_TRANSMISE, CONSIGNE_MONTANTS, MODELE_LIVECLUB, NOM_OUTIL_MEMBRE_A_CONTACTER,
+  NOM_OUTIL_PROPOSER_CORRECTION_PSEUDO, RESULTAT_DEMANDER_UN_HUMAIN, requeteAgentMembre,
   resultatConnaissances,
 } from './prompt-membre'
 
@@ -224,6 +226,14 @@ export async function repondreAuMembre(
       // Les faits sur un membre transmis a CE relais (24/10). Le serveur revérifie le relais.
       if (bloc.name === NOM_OUTIL_MEMBRE_A_CONTACTER) {
         const contenu = relais ? await ficheMembrePourRelais(telegramId, bloc.input) : { erreur: 'Outil inconnu.' }
+        resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify(contenu) })
+        continue
+      }
+
+      // (24/10) Le bon @ d'un membre transmis a CE relais : une proposition
+      // enregistree et transmise a l'equipe, jamais appliquee ici.
+      if (bloc.name === NOM_OUTIL_PROPOSER_CORRECTION_PSEUDO) {
+        const contenu = relais ? await proposerCorrectionPseudo(telegramId, bloc.input) : { erreur: 'Outil inconnu.' }
         resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify(contenu) })
         continue
       }
