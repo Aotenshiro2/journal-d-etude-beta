@@ -15,7 +15,8 @@
 //   (cockpit_telegram_comptes), admins et createur, comptes exemptes, et
 //   jamais un relais (lui-meme compris) : un seul compte ecarte suffit a
 //   ecarter le membre ;
-// - par membre : le nom Telegram, le @pseudo s'il existe (sinon un lien
+// - par membre : le prenom et le nom de la fiche (Brice, 24/10), le nom
+//   Telegram s'il differe, le @pseudo s'il existe (sinon un lien
 //   tg://user?id=..., qui ouvre son profil), le motif en mots simples. Jamais
 //   d'email, de montant, d'etat d'abonnement ni de paiement : rien de tout ca
 //   n'entre dans une LigneRelais ;
@@ -118,7 +119,10 @@ export type LigneRelais = {
   motif: MotifRelais
   telegramId: number
   pseudo: string | null
+  /** Prenom et nom de la fiche du cockpit, sinon le nom Telegram. */
   nom: string
+  /** Le nom affiche sur Telegram, s'il differe de `nom` (pour le retrouver dans le groupe). */
+  nomTelegram?: string | null
   /** Accueil : jours depuis l'arrivee. Silence : jours sans message. */
   jours: number | null
 }
@@ -184,13 +188,16 @@ export function lignesPourRelais(
     const compte = compteAJoindre(c.comptes, exclusions)
     if (!compte) continue
     vus.add(c.membreId)
+    const nomFiche = nomPropre(c.nomFiche)
+    const nomTg = nomPropre(compte.nomAffiche)
     lignes.push({
       membreId: c.membreId,
       cleEpisode: c.cleEpisode,
       motif,
       telegramId: compte.telegramId,
       pseudo: pseudoPropre(compte.pseudo),
-      nom: nomPropre(compte.nomAffiche) ?? nomPropre(c.nomFiche) ?? 'Membre sans nom',
+      nom: nomFiche ?? nomTg ?? 'Membre sans nom',
+      nomTelegram: nomFiche && nomTg && comparable(nomTg) !== comparable(nomFiche) ? nomTg : null,
       jours: motif === 'accueil' ? c.joursAnciennete : c.joursSilence,
     })
   }
@@ -212,10 +219,23 @@ export function motifEnClair(l: Pick<LigneRelais, 'motif' | 'jours'>): string {
   return `plus de message depuis ${n ?? 14} jours`
 }
 
-/** « 3. <a href="tg://user?id=...">Nom</a> : motif » ou « 3. Nom (@pseudo) : motif », en HTML Telegram. */
+/** Deux noms compares sans casse, accents, emojis ni ponctuation. */
+function comparable(s: string): string {
+  return s.normalize('NFD').replace(/[^A-Za-z0-9]+/g, '').toLowerCase()
+}
+
+/**
+ * En HTML Telegram : « 3. Prenom Nom (Nom Telegram, @pseudo) : motif ». Sans
+ * @pseudo, le lien tg://user?id=... porte le nom Telegram (ou le nom tout
+ * court s'il n'y en a qu'un).
+ */
 export function ligneHtml(l: LigneRelais, numero: number): string {
   const nom = echapperHtml(l.nom)
-  const qui = l.pseudo ? `${nom} (@${l.pseudo})` : `<a href="tg://user?id=${Math.trunc(l.telegramId)}">${nom}</a>`
+  const tg = l.nomTelegram ? echapperHtml(l.nomTelegram) : null
+  const lien = (texte: string) => `<a href="tg://user?id=${Math.trunc(l.telegramId)}">${texte}</a>`
+  let qui: string
+  if (l.pseudo) qui = `${nom} (${tg ? `${tg}, ` : ''}@${l.pseudo})`
+  else qui = tg ? `${nom} (${lien(tg)})` : lien(nom)
   return `${numero}. ${qui} : ${motifEnClair(l)}`
 }
 
@@ -228,6 +248,13 @@ export function textePresentation(prenom: string): string {
 
 /** Sous une liste ou un membre n'a pas de @pseudo. */
 export const NOTE_SANS_PSEUDO = 'Sans @pseudo : touche son nom pour ouvrir son profil, ou retrouve-le dans le groupe.'
+
+/**
+ * Sous chaque liste, la mission en plus du mot d'accueil (Brice, 24/10) : le
+ * bot connait le dossier du membre et repond a ses questions. Aucun mot
+ * d'argent ici (verifier-relais-accueil.mjs le controle).
+ */
+export const NOTE_BOT_MEMBRES = "S'ils ont des questions (accès, replays, académie), invite-les à écrire au bot @aok_liveclub_bot : il les connaît et leur répond."
 
 export const PREFIXE_BOUTON_RELAIS = 'rl:'
 const DEBUT_A_FAIRE = "C'est fait : "
@@ -284,6 +311,7 @@ export function messagesRelais(
     const liste = paquet.map((l, i) => ligneHtml(l, debut + i + 1)).join('\n')
     blocs.push(debut === 0 && o.presentation ? `${TITRE_RETARD}\n${liste}` : liste)
     if (paquet.some(l => !l.pseudo)) blocs.push(NOTE_SANS_PSEUDO)
+    blocs.push(NOTE_BOT_MEMBRES)
     messages.push({
       texte: blocs.join('\n\n'),
       boutons: paquet.map((l, i) => [{ texte: libelleBoutonRelais(l, debut + i + 1), data: dataBoutonRelais(l.episodeId) }]),

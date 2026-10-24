@@ -11,7 +11,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import {
   clavierApresFait, compteAJoindre, dataBoutonRelais, decisionBoutonRelais, estBoutonRelais, LIGNES_PAR_MESSAGE,
-  lignesPourRelais, lireBoutonRelais, messagesRelais, motifEnClair, motifsDuRelais, NOTE_SANS_PSEUDO, noteMarqueRelais,
+  lignesPourRelais, lireBoutonRelais, messagesRelais, motifEnClair, motifsDuRelais, NOTE_BOT_MEMBRES, NOTE_SANS_PSEUDO, noteMarqueRelais,
   pseudoPropre, textePresentation, TITRE_RETARD,
 } from '../src/lib/liveclub/relais-pur.ts'
 import {
@@ -144,7 +144,7 @@ bloc('bouton « C\'est fait » : reserve au relais de l\'episode', () => {
   assert.match(serveur, /for update of e/)
 })
 
-bloc('textes : nom, @pseudo ou lien, motif ; jamais email, montant, abonnement', () => {
+bloc('textes : prenom nom, nom Telegram, @pseudo ou lien, motif ; jamais email, montant, abonnement', () => {
   const fuite = {
     email: 'secret@exemple.fr', email_principal: 'secret@exemple.fr', montant: 139, produits: 'Live Club mensuel',
     prochain_prelevement: '2026-11-02', en_echec: true,
@@ -152,15 +152,19 @@ bloc('textes : nom, @pseudo ou lien, motif ; jamais email, montant, abonnement',
   const avec = candidat(40, 'accueil', { ...fuite, joursAnciennete: 5, comptes: [compte(40, { pseudo: '@julien_tr', nomAffiche: 'Julien <b>T</b> & co' })] })
   const sansPseudo = candidat(41, 'silence', { ...fuite, joursSilence: 14, comptes: [compte(41, { pseudo: null, nomAffiche: 'Marc' })] })
   const sansNom = candidat(42, 'silence', { ...fuite, nomFiche: null, comptes: [compte(42, { pseudo: 'x', nomAffiche: null })] })
-  const lignes = lignesPourRelais([avec, sansPseudo, sansNom], alex, vide, sans)
-  for (const l of lignes) assert.deepEqual(Object.keys(l).sort(), ['cleEpisode', 'jours', 'membreId', 'motif', 'nom', 'pseudo', 'telegramId'])
+  const memeNom = candidat(43, 'silence', { ...fuite, joursSilence: 20, nomFiche: 'Léa Martin', comptes: [compte(43, { pseudo: 'lea_m', nomAffiche: 'Lea MARTIN 🙏' })] })
+  const lignes = lignesPourRelais([avec, sansPseudo, sansNom, memeNom], alex, vide, sans)
+  for (const l of lignes) assert.deepEqual(Object.keys(l).sort(), ['cleEpisode', 'jours', 'membreId', 'motif', 'nom', 'nomTelegram', 'pseudo', 'telegramId'])
   const [m] = messagesRelais(lignes.map((l, i) => ({ ...l, episodeId: i + 1 })), { presentation: null })
   assert.equal(m.texte, [
-    '1. Julien &lt;b&gt;T&lt;/b&gt; &amp; co (@julien_tr) : arrivé il y a 5 jours, n\'a pas encore écrit',
-    '2. <a href="tg://user?id=41">Marc</a> : plus de message depuis 14 jours',
+    '1. Fiche 40 (Julien &lt;b&gt;T&lt;/b&gt; &amp; co, @julien_tr) : arrivé il y a 5 jours, n\'a pas encore écrit',
+    '2. Fiche 41 (<a href="tg://user?id=41">Marc</a>) : plus de message depuis 14 jours',
     '3. <a href="tg://user?id=42">Membre sans nom</a> : plus de message depuis 16 jours',
+    '4. Léa Martin (@lea_m) : plus de message depuis 20 jours',
     '',
     NOTE_SANS_PSEUDO,
+    '',
+    NOTE_BOT_MEMBRES,
   ].join('\n'))
   for (const interdit of [/secret@/, /€/, /139/, /abonnement/i, /prélèvement/i, /paiement/i, /Live Club mensuel/, /2026-11-02/]) {
     assert.ok(!interdit.test(m.texte), `${interdit} dans le texte`)

@@ -403,7 +403,7 @@ export async function ficheMembrePourRelais(relaisId: number, entree: unknown, d
       return { ...t, comptes: cs, nomTg: principal?.nom_affiche ?? t.nom ?? 'Membre sans nom', pseudo: principal?.pseudo ?? null }
     })
     if (!recherche) {
-      return { membres_transmis: fiches.map(f => ({ nom: f.nomTg, pseudo: f.pseudo ? `@${f.pseudo}` : null, deja_fait: f.fait })) }
+      return { membres_transmis: fiches.map(f => ({ prenom_nom: f.nom, nom_telegram: f.nomTg, pseudo: f.pseudo ? `@${f.pseudo}` : null, deja_fait: f.fait })) }
     }
     const trouves = fiches.filter(f => [f.nomTg, f.pseudo, f.nom].some(v => normaliser(v) && (normaliser(v).includes(recherche) || recherche.includes(normaliser(v))))).slice(0, 3)
     if (trouves.length === 0) return { resultat: "Ce membre n'est pas dans ta liste : je n'ai que les membres qu'on t'a transmis.", membres_transmis: fiches.map(f => f.nomTg) }
@@ -426,7 +426,8 @@ export async function ficheMembrePourRelais(relaisId: number, entree: unknown, d
           where r.membre_id = ${f.membre_id}::uuid and r.email is not null)`
       const entreGroupe = f.comptes.map(c => c.entre_le).filter((d): d is Date => !!d).sort((a, b) => a.getTime() - b.getTime())[0] ?? null
       sortie.push({
-        nom: f.nomTg,
+        prenom_nom: f.nom,
+        nom_telegram: f.nomTg,
         pseudo: f.pseudo ? `@${f.pseudo}` : null,
         membre_du_live_club_depuis: jourFr(f.date_entree),
         arrive_dans_le_groupe_telegram: jourFr(entreGroupe),
