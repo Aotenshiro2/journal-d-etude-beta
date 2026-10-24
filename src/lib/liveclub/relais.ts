@@ -287,7 +287,7 @@ export async function relaisDuMatin(o: { maintenant?: Date; apercu?: boolean; en
     // Les reservations d'un passage coupe net, jamais parties : oubliees.
     await prisma.$executeRaw`
       delete from public.cockpit_liveclub_relais_episodes
-      where envoye_le is null and annonce_le < now() - make_interval(mins => ${RESERVATION_PERIMEE_MIN})`
+      where envoye_le is null and annonce_le < now() - make_interval(mins => ${RESERVATION_PERIMEE_MIN}::int)`
     donnees = await lireDonnees(prisma, { avecReserves: true })
   } catch (err) {
     if (relationAbsente(err)) {
