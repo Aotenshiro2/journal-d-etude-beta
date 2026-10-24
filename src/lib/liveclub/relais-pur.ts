@@ -95,6 +95,8 @@ export type CandidatRelais = {
   entree: string | null
   /** Le nom de la fiche du cockpit, si le compte Telegram n'a pas de nom affiche. */
   nomFiche: string | null
+  /** Le champ Telegram de la fiche : le @ quand le compte du groupe n'en a pas (Brice, 24/10 : lire les deux). */
+  pseudoFiche?: string | null
   comptes: readonly CompteDuMembre[]
 }
 
@@ -195,7 +197,7 @@ export function lignesPourRelais(
       cleEpisode: c.cleEpisode,
       motif,
       telegramId: compte.telegramId,
-      pseudo: pseudoPropre(compte.pseudo),
+      pseudo: pseudoPropre(compte.pseudo) ?? pseudoPropre(c.pseudoFiche),
       nom: nomFiche ?? nomTg ?? 'Membre sans nom',
       nomTelegram: nomFiche && nomTg && comparable(nomTg) !== comparable(nomFiche) ? nomTg : null,
       jours: motif === 'accueil' ? c.joursAnciennete : c.joursSilence,

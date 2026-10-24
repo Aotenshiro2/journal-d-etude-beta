@@ -112,10 +112,10 @@ async function lireDonnees(db: Client, o: { avecReserves: boolean }): Promise<Do
 
   // Les deux fenetres du relais, et elles seules : echec et prelevement ne sont jamais lus ici.
   const risque = await db.$queryRaw<{
-    membre_id: string; cle_episode: string; motif: string; nom: string | null
+    membre_id: string; cle_episode: string; motif: string; nom: string | null; telegram: string | null
     jours_silence: number | null; jours_anciennete: number | null; entree: string | null
   }[]>`
-    select membre_id::text as membre_id, cle_episode, motif, nom, jours_silence, jours_anciennete, entree::text as entree
+    select membre_id::text as membre_id, cle_episode, motif, nom, telegram, jours_silence, jours_anciennete, entree::text as entree
     from public.cockpit_membres_risque
     where motif in ('accueil', 'silence')`
   const ids = [...new Set(risque.map(r => r.membre_id))]
@@ -137,7 +137,7 @@ async function lireDonnees(db: Client, o: { avecReserves: boolean }): Promise<Do
     membreId: r.membre_id, cleEpisode: r.cle_episode, motif: r.motif,
     joursSilence: r.jours_silence === null ? null : Number(r.jours_silence),
     joursAnciennete: r.jours_anciennete === null ? null : Number(r.jours_anciennete),
-    entree: r.entree, nomFiche: r.nom, comptes: comptesParMembre.get(r.membre_id) ?? [],
+    entree: r.entree, nomFiche: r.nom, pseudoFiche: r.telegram, comptes: comptesParMembre.get(r.membre_id) ?? [],
   }))
 
   const equipe = await db.$queryRaw<{ telegram_id: bigint }[]>`select telegram_id from public.cockpit_telegram_comptes`

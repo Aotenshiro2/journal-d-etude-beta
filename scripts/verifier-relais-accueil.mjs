@@ -15,7 +15,7 @@ import {
   pseudoPropre, textePresentation, TITRE_RETARD,
 } from '../src/lib/liveclub/relais-pur.ts'
 import {
-  cleAnnonce, composerResume, detailAContacter, detailAvecRelais, episodesAAnnoncer, relaisParEpisode,
+  cleAnnonce, composerResume, detailAContacter, detailAvecRelais, episodesAAnnoncer, pseudoCroise, relaisParEpisode,
 } from '../src/lib/liveclub/resume-pur.ts'
 
 let n = 0
@@ -154,6 +154,9 @@ bloc('textes : prenom nom, nom Telegram, @pseudo ou lien, motif ; jamais email, 
   const sansNom = candidat(42, 'silence', { ...fuite, nomFiche: null, comptes: [compte(42, { pseudo: 'x', nomAffiche: null })] })
   const memeNom = candidat(43, 'silence', { ...fuite, joursSilence: 20, nomFiche: 'Léa Martin', comptes: [compte(43, { pseudo: 'lea_m', nomAffiche: 'Lea MARTIN 🙏' })] })
   const lignes = lignesPourRelais([avec, sansPseudo, sansNom, memeNom], alex, vide, sans)
+  // Le @ de la fiche comble un compte sans @ ; un nom dans ce champ ne compte pas.
+  assert.equal(lignesPourRelais([candidat(44, 'silence', { pseudoFiche: '@rudy_s', comptes: [compte(44, { pseudo: null })] })], alex, vide, sans)[0].pseudo, 'rudy_s')
+  assert.equal(lignesPourRelais([candidat(45, 'silence', { pseudoFiche: 'Rudy S', comptes: [compte(45, { pseudo: null })] })], alex, vide, sans)[0].pseudo, null)
   for (const l of lignes) assert.deepEqual(Object.keys(l).sort(), ['cleEpisode', 'jours', 'membreId', 'motif', 'nom', 'nomTelegram', 'pseudo', 'telegramId'])
   const [m] = messagesRelais(lignes.map((l, i) => ({ ...l, episodeId: i + 1 })), { presentation: null })
   assert.equal(m.texte, [
@@ -204,6 +207,16 @@ bloc('resume de Brice et Mel : « (Alex s\'en occupe) », puis la ligne sort une
   assert.equal(detailAvecRelais('silencieux depuis 15 jours', ['Alex']), "silencieux depuis 15 jours (Alex s'en occupe)")
   assert.equal(detailAvecRelais('silencieux depuis 15 jours', ['Alex', 'Sam', 'Alex']), "silencieux depuis 15 jours (Alex et Sam s'en occupent)")
   assert.equal(detailAvecRelais('silencieux depuis 15 jours', []), 'silencieux depuis 15 jours')
+  // Le @ lu aux deux sources : l'une comble l'autre, deux @ differents remontent.
+  assert.deepEqual(pseudoCroise(null, 'Milene76'), { pseudo: 'Milene76', alerte: null })
+  assert.deepEqual(pseudoCroise('@mathetrader', null), { pseudo: 'mathetrader', alerte: null })
+  assert.deepEqual(pseudoCroise('@Lea_M', 'lea_m'), { pseudo: 'lea_m', alerte: null })
+  assert.deepEqual(pseudoCroise('ancien', 'nouveau'),
+    { pseudo: 'nouveau', alerte: 'deux @ différents, @ancien sur la fiche et @nouveau sur le compte rattaché, à vérifier' })
+  assert.deepEqual(pseudoCroise('', null), { pseudo: null, alerte: null })
+  assert.deepEqual(pseudoCroise('Christophe chapelier', 'Chrissssstoooo'), { pseudo: 'Chrissssstoooo', alerte: null })
+  assert.deepEqual(pseudoCroise('Ginger', null), { pseudo: 'Ginger', alerte: null })
+  assert.deepEqual(pseudoCroise('Laura Mancini', null), { pseudo: null, alerte: null })
   const par = relaisParEpisode([
     { membre_id: 'a', cle_episode: 'a_risque:silence:2026-10-02', nom: 'Alex' },
     { membre_id: 'a', cle_episode: 'a_risque:silence:2026-10-02', nom: 'Alex' },

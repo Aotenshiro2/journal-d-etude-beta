@@ -513,6 +513,26 @@ export function detailAvecRelais(detail: string, noms: readonly string[]): strin
   return `${detail} (${propres.slice(0, -1).join(', ')} et ${propres[propres.length - 1]} s'en occupent)`
 }
 
+/**
+ * Le @pseudo d'un membre lu aux deux sources (Brice, 24/10) : le champ
+ * Telegram de sa fiche et le compte rattache (registre du groupe). L'une
+ * comble l'autre ; deux @ differents remontent en alerte, a verifier par
+ * l'equipe. Le compte rattache passe devant : c'est celui du groupe.
+ */
+export function pseudoCroise(fiche: string | null | undefined, rattache: string | null | undefined): { pseudo: string | null; alerte: string | null } {
+  // Un vrai @ seulement : le champ de la fiche porte parfois un nom (« Christophe chapelier », « Ginger »).
+  const propre = (s: string | null | undefined) => {
+    const t = texteSur(s, 40)?.replace(/^@+/, '').trim() ?? ''
+    return /^[A-Za-z][A-Za-z0-9_]{3,31}$/.test(t) ? t : null
+  }
+  const f = propre(fiche)
+  const r = propre(rattache)
+  const alerte = f && r && f.toLowerCase() !== r.toLowerCase()
+    ? `deux @ différents, @${f} sur la fiche et @${r} sur le compte rattaché, à vérifier`
+    : null
+  return { pseudo: r ?? f, alerte }
+}
+
 /** La ligne « Bientôt », ou rien. Elle ne fait jamais partir le resume a elle seule (composerResume). */
 export function ligneBientot(n: number): string | null {
   if (!Number.isFinite(n) || n <= 0) return null

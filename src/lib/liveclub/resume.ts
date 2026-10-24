@@ -65,7 +65,7 @@ import {
   attentesHorsEquipe, changementsAbonnements, changementsHorsDuBot, cleAnnonce, cleGeste, composerResume, decouperResume,
   detailAccesBroker, detailAContacter, detailAttenteHumain, detailAvecRelais, detailDemande, detailExemption,
   detailNouvelAbonnement, detailRepriseBot, detailTarifReserve, entreesHistoriqueResume, episodesAAnnoncer,
-  estNouvelAbonnement, evenementDeChangement, evenementDeGeste, instantaneAbonnements, memoireAnnonces, relaisParEpisode,
+  estNouvelAbonnement, evenementDeChangement, evenementDeGeste, instantaneAbonnements, memoireAnnonces, pseudoCroise, relaisParEpisode,
   texteSur,
   type EvenementResume, type GesteResume, type MembreAContacter, type MotifContact, type Personne,
 } from './resume-pur'
@@ -547,8 +547,8 @@ export async function resumeDuMatin(o: { maintenant?: Date; apercu?: boolean } =
       where r.actif and e.envoye_le is not null and e.fait_le is null
       order by e.annonce_le`)
     const relaisDe = relaisParEpisode(relayes)
-    // (24/10) Le @pseudo du compte Telegram rattache, quand la fiche n'en porte
-    // pas (Milene : rattachee, @ connu du registre, absent de sa fiche).
+    // (24/10) Le @pseudo lu aux deux sources, fiche et compte rattache
+    // (pseudoCroise) : Milene etait rattachee avec son @, absent de sa fiche.
     const idsAnnonces = [...new Set(aAnnoncer.map(m => m.membreId))]
     const pseudosRattaches = idsAnnonces.length === 0 ? [] : await facultatif('pseudos_rattaches', erreurs, () => prisma.$queryRaw<{ membre_id: string; pseudo: string }[]>`
       select distinct on (r.membre_id) r.membre_id::text as membre_id, tm.pseudo
@@ -559,10 +559,12 @@ export async function resumeDuMatin(o: { maintenant?: Date; apercu?: boolean } =
     const pseudoRattache = new Map(pseudosRattaches.map(p => [p.membre_id, p.pseudo]))
     for (const m of aAnnoncer) {
       const r = fiche.get(m.membreId)
-      const detail = detailAvecRelais(detailAContacter(m, jour), relaisDe.get(cleAnnonce(m.membreId, m.cleEpisode)) ?? [])
+      const { pseudo, alerte } = pseudoCroise(r?.telegram, pseudoRattache.get(m.membreId))
+      const base = detailAvecRelais(detailAContacter(m, jour), relaisDe.get(cleAnnonce(m.membreId, m.cleEpisode)) ?? [])
+      const detail = alerte ? `${base} ; ${alerte}` : base
       // Un meme instant pour tous : le tri (stable) de composerResume garde l'ordre des fenetres.
       ajouter({ rubrique: 'contacter', qui: `m${m.membreId}`, quand: jusqua.toISOString(), detail },
-        { nom: r?.nom ?? null, email: r?.email ?? null, pseudo: r?.telegram ?? pseudoRattache.get(m.membreId) ?? null })
+        { nom: r?.nom ?? null, email: r?.email ?? null, pseudo })
     }
     const annonces = risqueLu
       ? memoireAnnonces(membresRisque.map(m => cleAnnonce(m.membreId, m.cleEpisode)), repere?.annonces ?? null, jour)
