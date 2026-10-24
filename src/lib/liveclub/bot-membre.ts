@@ -81,6 +81,11 @@
 //   (repondreEnAttente) ; reponse de l'agent retenue si l'equipe a ecrit
 //   pendant le calcul. Les textes fixes du bot entrent au fil avec
 //   auteur 'bot' (« Bot » au cockpit), ceux de l'agent avec 'ia'.
+// - (24/10, Brice) le bouton « C'est fait » du RELAIS D'ACCUEIL (rl:<id>,
+//   relais.ts) est traite a part, avant tout le reste : il ne vaut que pour
+//   le compte relais de l'episode, et n'entre ni au fil Support ni a
+//   l'historique de l'agent. Le texte libre d'un relais garde le parcours
+//   d'un membre.
 
 import { journaliserGesteLiveClub } from '@/lib/stripe-actions'
 import { prisma } from '@/lib/db'
@@ -130,6 +135,8 @@ import {
 import { lienDeLaReserve, poserTelegramSurReserve, reserveOuvertePourCompte, type ReserveLue } from './reserves'
 import { CODE_ENVOIS_HEURE, CODE_VALIDITE_MINUTES, intentionNonRattache, masquerCodes } from './verification-pur'
 import { noterNomTelegram } from './noms'
+import { traiterBoutonRelais } from './relais'
+import { estBoutonRelais } from './relais-pur'
 import {
   REGLE_RAISON_SORTIE, jetonBienForme, libelleBouton, messageErreur, normaliserEmail, pauseDejaProposee, relationAbsente,
   sortieAExpliquer, texteDette, texteTarifReserve, type GesteDate,
@@ -1748,6 +1755,14 @@ export async function traiterBouton(bouton: BoutonTg, updateId: number): Promise
     return
   }
   const data = bouton.data ?? ''
+
+  // (24/10) « C'est fait » du relais d'accueil (relais.ts) : avant tout le
+  // reste, ni fil Support ni historique de l'agent (l'agent IA ne connait pas
+  // cette liste). Le serveur verifie que l'appui vient du relais de l'episode.
+  if (estBoutonRelais(data)) {
+    await traiterBoutonRelais(bouton)
+    return
+  }
 
   const r = await rattachementOuNull(u.id)
   const identite = r && r !== 'illisible' ? r : null

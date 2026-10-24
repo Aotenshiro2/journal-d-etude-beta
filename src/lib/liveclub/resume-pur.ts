@@ -485,6 +485,34 @@ export function detailAContacter(m: MembreAContacter, aujourdhui: string): strin
   }
 }
 
+// (24/10) Le relais d'accueil (relais.ts, relais-pur.ts) : un episode
+// transmis a un relais actif reste dans « À contacter », marque « (Alex s'en
+// occupe) », pour ne pas faire doublon. Une fois que le relais a appuye sur
+// « C'est fait », l'episode est marque dans cockpit_actions_traitees et sort
+// de la liste comme tout episode traite.
+
+/** Les noms des relais par episode (membre_id::cle_episode), sans doublon, dans l'ordre lu. */
+export function relaisParEpisode(lignes: readonly { membre_id: string; cle_episode: string; nom: string | null }[]): Map<string, string[]> {
+  const sortie = new Map<string, string[]>()
+  for (const l of lignes) {
+    const nom = texteSur(l.nom, 30)
+    if (!nom) continue
+    const cle = cleAnnonce(l.membre_id, l.cle_episode)
+    const noms = sortie.get(cle) ?? []
+    if (!noms.includes(nom)) noms.push(nom)
+    sortie.set(cle, noms)
+  }
+  return sortie
+}
+
+/** « silencieux depuis 15 jours (Alex s'en occupe) » ; deux relais : « (Alex et Sam s'en occupent) ». */
+export function detailAvecRelais(detail: string, noms: readonly string[]): string {
+  const propres = [...new Set(noms.map(n => texteSur(n, 30)).filter((n): n is string => !!n))]
+  if (propres.length === 0) return detail
+  if (propres.length === 1) return `${detail} (${propres[0]} s'en occupe)`
+  return `${detail} (${propres.slice(0, -1).join(', ')} et ${propres[propres.length - 1]} s'en occupent)`
+}
+
 /** La ligne « Bientôt », ou rien. Elle ne fait jamais partir le resume a elle seule (composerResume). */
 export function ligneBientot(n: number): string | null {
   if (!Number.isFinite(n) || n <= 0) return null

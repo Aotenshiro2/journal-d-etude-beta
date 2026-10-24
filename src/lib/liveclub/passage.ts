@@ -41,6 +41,10 @@
 //       envoie en prive a l'equipe (cockpit_telegram_comptes) ce qui a bouge
 //       depuis le dernier resume, avec les noms ; rien s'il ne s'est rien
 //       passe ; une fois par jour ; LIVECLUB_DIGEST=0 le coupe.
+//   (n) RELAIS D'ACCUEIL (Brice, 24/10, relais.ts) : juste avant le resume,
+//       le bot des membres envoie en prive a chaque relais (Alex) les membres
+//       a qui dire un mot (accueil et silence seulement) ; rien de nouveau =
+//       rien ; une fois par jour ; LIVECLUB_RELAIS=0 le coupe.
 //
 // A CHAQUE SORTIE REELLE (pause, fin d'acces broker, desabonne quand les
 // sorties sont actives, fin d'exemption), le membre recoit un message :
@@ -89,6 +93,7 @@ import { annulerReservationEmail, creerJeton, jetonExistant } from './jetons'
 import { preparerBienvenue } from './bienvenue'
 import { rapprocherTarifsReserves } from './reserves'
 import { resumeDuMatin } from './resume'
+import { relaisDuMatin } from './relais'
 import { appelTelegram, envoyer, lienDemandeAdhesion } from './telegram'
 import { tracerGeste, tracerMessageBot } from './support-pont'
 import {
@@ -123,6 +128,8 @@ const BUDGET_MS = 240_000
 const MAX_RESOLUTIONS_EMAIL = 300
 /** Le resume du matin ne part plus apres 4 min 25 (il lui faut quelques secondes, la route en a 300). */
 const BUDGET_RESUME_MS = 265_000
+/** Le relais d'accueil (24/10) passe avant le resume : il lui laisse au moins 10 s. */
+const BUDGET_RELAIS_MS = 255_000
 
 export type SynthesePassage = {
   ok: boolean
@@ -193,6 +200,12 @@ export type SynthesePassage = {
    * destinataires qui l'ont recu. Jamais un nom.
    */
   resume: { etat: string; lignes: number; livres: number }
+  /**
+   * (n) Relais d'accueil (24/10, relais.ts) : son etat (envoye, rien,
+   * deja_fait, sans_relais, coupe, table_absente...), les membres transmis
+   * et les relais qui ont tout recu. Jamais un nom.
+   */
+  relais: { etat: string; lignes: number; livres: number }
   /** Lignes de journal perdues (table ou contrainte pas encore migree). */
   journal_echecs: number
   /** Messages qui n'ont pu partir ni en prive ni par email. */
@@ -2729,6 +2742,7 @@ function nouveauContexte(maintenant: Date): Contexte {
       purge: { conversations: 0 },
       tarifs_reserves: { payees: 0, en_attente: 0, illisibles: 0 },
       resume: { etat: 'pas_lance', lignes: 0, livres: 0 },
+      relais: { etat: 'pas_lance', lignes: 0, livres: 0 },
       journal_echecs: 0,
       messages_perdus: 0,
       erreurs: [],
@@ -2871,6 +2885,25 @@ export async function passageQuotidien(maintenant: Date = new Date()): Promise<S
     if (ctx.s.tarifs_reserves.illisibles > 0) erreur(ctx, 'tarifs_reserves_illisibles')
   })
   await etape('purge', () => tachePurge(ctx))
+
+  // (n) Le relais d'accueil (24/10, relais.ts) : apres les taches du passage,
+  // JUSTE AVANT le resume. Pourquoi ici : (1) il ne depend pas du resume, qui
+  // ne part que s'il y a du mouvement et peut etre coupe (LIVECLUB_DIGEST=0)
+  // ou reporte ; (2) le resume lit ce qui vient d'etre transmis et marque ces
+  // lignes « (Alex s'en occupe) » ; (3) son etape a son propre filet, et
+  // relaisDuMatin ne jette pas : une panne d'envoi a Alex ne casse ni le
+  // passage ni le resume. Une fois par jour (relais.ts), LIVECLUB_RELAIS=0
+  // le coupe. Trop tard dans le budget : reporte au lendemain.
+  await etape('relais', async () => {
+    if (Date.now() - ctx.debut > BUDGET_RELAIS_MS) {
+      ctx.s.relais.etat = 'reporte'
+      erreur(ctx, 'relais_reporte')
+      return
+    }
+    const b = await relaisDuMatin()
+    ctx.s.relais = { etat: b.etat, lignes: b.lignes, livres: b.livres }
+    if (b.etat === 'panne' || b.etat === 'echec') erreur(ctx, `relais_${b.etat}`)
+  })
 
   // (m) Le resume du matin (15/10), APRES tout le reste : il dit ce que ce
   // passage vient de faire. Une fois par jour (resume.ts), LIVECLUB_DIGEST=0

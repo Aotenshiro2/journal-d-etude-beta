@@ -42,8 +42,9 @@ import { TEXTE_PAUSE_AVANT_ARRET } from './config'
 import { montantsDuMembre, preparerAction, situationDuMembre } from './actions-membre'
 import type { ActionMembre, MessageConserve } from './conversations'
 import { messageErreur, pauseDejaProposee } from './pur'
+import { estRelaisActif, ficheMembrePourRelais } from './relais'
 import {
-  CONSIGNE_ACCES_OFFERT, CONSIGNE_EQUIPE_TRANSMISE, CONSIGNE_MONTANTS, MODELE_LIVECLUB, RESULTAT_DEMANDER_UN_HUMAIN, requeteAgentMembre,
+  CONSIGNE_ACCES_OFFERT, CONSIGNE_EQUIPE_TRANSMISE, CONSIGNE_MONTANTS, MODELE_LIVECLUB, NOM_OUTIL_MEMBRE_A_CONTACTER, RESULTAT_DEMANDER_UN_HUMAIN, requeteAgentMembre,
   resultatConnaissances,
 } from './prompt-membre'
 
@@ -179,8 +180,10 @@ export async function repondreAuMembre(
 
   // Un message du membre = un echange (ecran Depense IA du cockpit).
   const echange = randomUUID()
+  // Relais d'accueil (24/10) : l'outil membre_a_contacter et sa consigne, pour un relais actif seulement.
+  const relais = await estRelaisActif(telegramId)
   for (let tour = 0; tour < MAX_TOURS; tour++) {
-    const response = await client.messages.create(requeteAgentMembre(messages, o.contexte))
+    const response = await client.messages.create(requeteAgentMembre(messages, o.contexte, { relais }))
     await tracerUsage(telegramId, response.usage, echange)
 
     if (response.stop_reason !== 'tool_use') {
@@ -215,6 +218,13 @@ export async function repondreAuMembre(
       // lecture en direct des lecons publiees, aucune donnee de membre.
       if (bloc.name === NOM_OUTIL_TROUVER_COURS) {
         resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify(await trouverCours(bloc.input, 'liveclub', { telegramId })) })
+        continue
+      }
+
+      // Les faits sur un membre transmis a CE relais (24/10). Le serveur revérifie le relais.
+      if (bloc.name === NOM_OUTIL_MEMBRE_A_CONTACTER) {
+        const contenu = relais ? await ficheMembrePourRelais(telegramId, bloc.input) : { erreur: 'Outil inconnu.' }
+        resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify(contenu) })
         continue
       }
 

@@ -184,20 +184,42 @@ export function contexteAccesOffert(situation: string): string {
 }
 
 /**
+ * Le RELAIS D'ACCUEIL (Brice, 24/10) : pour un compte relais actif SEULEMENT
+ * (Alex), un outil de plus et une consigne, en dernier bloc system (le cache
+ * du prompt commun reste valable). Un membre ordinaire n'a ni l'outil ni la
+ * consigne : il ne peut rien apprendre d'un autre membre. Le serveur, lui,
+ * ne repond que sur les membres deja transmis a CE relais (relais.ts).
+ */
+export const NOM_OUTIL_MEMBRE_A_CONTACTER = 'membre_a_contacter'
+export const OUTIL_MEMBRE_A_CONTACTER: Anthropic.Tool = {
+  name: NOM_OUTIL_MEMBRE_A_CONTACTER,
+  description: "Pour le relais d'accueil seulement : les faits utiles sur un membre de SA liste « à contacter » (arrivée dans le groupe, nombre de messages dans le groupe, premier et dernier message, activité dans l'académie). recherche = son nom ou son @pseudo, tel que le relais l'écrit. Recherche vide : la liste des membres qu'on lui a transmis.",
+  input_schema: {
+    type: 'object',
+    properties: { recherche: { type: 'string', description: 'Nom ou @pseudo du membre, vide pour la liste.' } },
+    additionalProperties: false,
+  },
+}
+export const CONSIGNE_RELAIS = "Information du serveur (ce n'est pas un message du membre) : la personne qui t'écrit est un relais d'accueil du Live Club. Brice et Mélanie lui ont confié de dire un mot aux membres nouveaux ou silencieux que tu lui envoies chaque matin. Quand il te demande quelque chose sur un de ces membres (depuis quand il est là, s'il a été actif avant de décrocher, s'il suit l'académie), appelle membre_a_contacter et réponds avec ses faits, simplement, sans jugement. Tu ne dis jamais le contenu de ses messages, son email, ses paiements ni son abonnement : tu ne les as pas. Pour un membre hors de sa liste, dis-lui que tu n'as que les membres qu'on lui a transmis. Pour tout le reste, il est un membre comme les autres."
+
+/**
  * La requete d'un tour de l'agent : la meme en prod et dans l'eval.
  * contexte (06/10) : un second bloc system, APRES le prompt mis en cache (le
  * cache du prompt et des outils reste valable), pour un acces offert sans
  * rattachement seulement (contexteAccesOffert). Absent pour tous les autres.
+ * relais (24/10) : l'outil membre_a_contacter et CONSIGNE_RELAIS, pour un
+ * compte relais actif seulement.
  */
-export function requeteAgentMembre(messages: Anthropic.MessageParam[], contexte?: string): Anthropic.MessageCreateParamsNonStreaming {
+export function requeteAgentMembre(messages: Anthropic.MessageParam[], contexte?: string, o: { relais?: boolean } = {}): Anthropic.MessageCreateParamsNonStreaming {
   return {
     model: MODELE_LIVECLUB,
     max_tokens: 1024,
     system: [
       { type: 'text', text: SYSTEM_PROMPT_MEMBRE, cache_control: { type: 'ephemeral' } },
       ...(contexte ? [{ type: 'text' as const, text: contexte }] : []),
+      ...(o.relais ? [{ type: 'text' as const, text: CONSIGNE_RELAIS }] : []),
     ],
-    tools: OUTILS_MEMBRE,
+    tools: o.relais ? [...OUTILS_MEMBRE, OUTIL_MEMBRE_A_CONTACTER] : OUTILS_MEMBRE,
     messages,
   }
 }

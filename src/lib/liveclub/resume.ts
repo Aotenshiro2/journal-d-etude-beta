@@ -30,6 +30,9 @@
 //   (cockpit_actions_traitees) n'est pas annonce. Ce bloc suffit a faire
 //   partir le resume. En pied, le nombre de ceux qui entrent dans une fenetre
 //   sous 7 jours (cockpit_membres_a_venir), jamais envoye pour lui seul.
+//   (24/10) Un episode deja transmis a un relais d'accueil (relais.ts) reste
+//   dans la liste, marque « (Alex s'en occupe) » ; son « C'est fait » le
+//   marque dans cockpit_actions_traitees comme l'ecran du cockpit.
 //
 // UNE FOIS PAR JOUR : table cockpit_liveclub_resumes (migration
 // 20261015120000), une ligne par jour de Paris (cle primaire), reservee AVANT
@@ -60,9 +63,10 @@ function idsListe(v: unknown): string[] {
 }
 import {
   attentesHorsEquipe, changementsAbonnements, changementsHorsDuBot, cleAnnonce, cleGeste, composerResume, decouperResume,
-  detailAccesBroker, detailAContacter, detailAttenteHumain, detailDemande, detailExemption, detailNouvelAbonnement,
-  detailRepriseBot, detailTarifReserve, entreesHistoriqueResume, episodesAAnnoncer, estNouvelAbonnement,
-  evenementDeChangement, evenementDeGeste, instantaneAbonnements, memoireAnnonces, texteSur,
+  detailAccesBroker, detailAContacter, detailAttenteHumain, detailAvecRelais, detailDemande, detailExemption,
+  detailNouvelAbonnement, detailRepriseBot, detailTarifReserve, entreesHistoriqueResume, episodesAAnnoncer,
+  estNouvelAbonnement, evenementDeChangement, evenementDeGeste, instantaneAbonnements, memoireAnnonces, relaisParEpisode,
+  texteSur,
   type EvenementResume, type GesteResume, type MembreAContacter, type MotifContact, type Personne,
 } from './resume-pur'
 import { repriseAutomatique } from './support-pont-pur'
@@ -533,10 +537,21 @@ export async function resumeDuMatin(o: { maintenant?: Date; apercu?: boolean } =
       depuisJour: jourParis(depuis.toISOString()),
     }) : []
     const fiche = new Map(risque.map(r => [r.membre_id, r]))
+    // (24/10) Les episodes transmis a un relais d'accueil actif (relais.ts, qui
+    // passe juste avant dans le passage) : la ligne reste, marquee « (Alex
+    // s'en occupe) ». Table absente ou illisible : aucune marque.
+    const relayes = aAnnoncer.length === 0 ? [] : await facultatif('relais', erreurs, () => prisma.$queryRaw<{ membre_id: string; cle_episode: string; nom: string }[]>`
+      select e.membre_id::text as membre_id, e.cle_episode, r.nom
+      from public.cockpit_liveclub_relais_episodes e
+      join public.cockpit_liveclub_relais r on r.telegram_id = e.relais_id
+      where r.actif and e.envoye_le is not null and e.fait_le is null
+      order by e.annonce_le`)
+    const relaisDe = relaisParEpisode(relayes)
     for (const m of aAnnoncer) {
       const r = fiche.get(m.membreId)
+      const detail = detailAvecRelais(detailAContacter(m, jour), relaisDe.get(cleAnnonce(m.membreId, m.cleEpisode)) ?? [])
       // Un meme instant pour tous : le tri (stable) de composerResume garde l'ordre des fenetres.
-      ajouter({ rubrique: 'contacter', qui: `m${m.membreId}`, quand: jusqua.toISOString(), detail: detailAContacter(m, jour) },
+      ajouter({ rubrique: 'contacter', qui: `m${m.membreId}`, quand: jusqua.toISOString(), detail },
         { nom: r?.nom ?? null, email: r?.email ?? null, pseudo: r?.telegram ?? null })
     }
     const annonces = risqueLu
