@@ -547,12 +547,22 @@ export async function resumeDuMatin(o: { maintenant?: Date; apercu?: boolean } =
       where r.actif and e.envoye_le is not null and e.fait_le is null
       order by e.annonce_le`)
     const relaisDe = relaisParEpisode(relayes)
+    // (24/10) Le @pseudo du compte Telegram rattache, quand la fiche n'en porte
+    // pas (Milene : rattachee, @ connu du registre, absent de sa fiche).
+    const idsAnnonces = [...new Set(aAnnoncer.map(m => m.membreId))]
+    const pseudosRattaches = idsAnnonces.length === 0 ? [] : await facultatif('pseudos_rattaches', erreurs, () => prisma.$queryRaw<{ membre_id: string; pseudo: string }[]>`
+      select distinct on (r.membre_id) r.membre_id::text as membre_id, tm.pseudo
+      from public.cockpit_liveclub_rattachements r
+      join public.cockpit_telegram_membres tm on tm.telegram_id = r.telegram_id
+      where r.retire_le is null and tm.pseudo is not null and r.membre_id::text = any(${idsAnnonces}::text[])
+      order by r.membre_id, tm.present desc nulls last, r.lie_le desc`)
+    const pseudoRattache = new Map(pseudosRattaches.map(p => [p.membre_id, p.pseudo]))
     for (const m of aAnnoncer) {
       const r = fiche.get(m.membreId)
       const detail = detailAvecRelais(detailAContacter(m, jour), relaisDe.get(cleAnnonce(m.membreId, m.cleEpisode)) ?? [])
       // Un meme instant pour tous : le tri (stable) de composerResume garde l'ordre des fenetres.
       ajouter({ rubrique: 'contacter', qui: `m${m.membreId}`, quand: jusqua.toISOString(), detail },
-        { nom: r?.nom ?? null, email: r?.email ?? null, pseudo: r?.telegram ?? null })
+        { nom: r?.nom ?? null, email: r?.email ?? null, pseudo: r?.telegram ?? pseudoRattache.get(m.membreId) ?? null })
     }
     const annonces = risqueLu
       ? memoireAnnonces(membresRisque.map(m => cleAnnonce(m.membreId, m.cleEpisode)), repere?.annonces ?? null, jour)
