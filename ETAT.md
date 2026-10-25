@@ -3,6 +3,22 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
+## Connecteur MCP de Belrive : les IMAGES (25/10/2026, commite NON pousse, migration 20261025120000 APPLIQUEE)
+
+ChatGPT disait ne pas pouvoir deposer d'images. Outil `deposer_image` (titre, role, nom_fichier, image) :
+- Le fichier passe par `_meta["openai/fileParams"]: ["image"]` (doc Apps SDK : ChatGPT met
+  `{ download_url, file_id, mime_type?, file_name? }`) ; repli `url` https, puis `donnees_base64` (600 Ko).
+- Regles pures `src/lib/mcp-gpt/images-pur.ts` (octets magiques png/jpeg/webp/gif, 8 Mo, noms assainis,
+  anti-SSRF) ; telechargement `telechargement.ts` (adresse verifiee a la connexion par lookup, redirections
+  reverifiees, 15 s) ; bucket prive `stockage-images.ts` (chemin = empreinte sha256, sans upsert).
+- Table `cockpit_perso_images` (figee sauf rapatrie_le, RLS forcee, lecture is_cockpit_perso), bucket `belrive-images`.
+- `lister_documents` montre les images (ids `img:...`) ; Tab : `/images-belrive`, `/images-belrive/<id>/url` (5 min).
+- PC : `pousser_docs_belrive.py` les range dans `Scenario\De-GPT\images\`.
+- Verifs : `node scripts/verifier-images-belrive.mjs` (15), `node scripts/verifier-mcp-gpt.mjs` (33),
+  `node scripts/essayer-images-belrive.mjs --migration | --bout-en-bout` (vraie base, rien ne reste).
+- Limite : le passage d'une image GENEREE dans la conversation par fileParams n'est pas garanti (forum OpenAI,
+  avis contraires) ; le message de refus d'un chemin /mnt/data dit a ChatGPT quoi faire. A essayer en vrai.
+
 ## Connecteur MCP de ChatGPT pour Belrive (23/10/2026, NON commite, NON deploye, migrations NON appliquees)
 
 ChatGPT (Projet Belrive de Brice) lit les documents et les notes du projet belrive et ecrit des notes, par

@@ -5,8 +5,9 @@
 // l'execution : scripts/essayer-migration-gpt-belrive.mjs joue EXACTEMENT ces
 // requetes contre la vraie base, dans une transaction toujours annulee.
 //
-// PERIMETRE (controle par scripts/verifier-mcp-gpt.mjs) : quatre tables, pas
-// une de plus.
+// PERIMETRE (controle par scripts/verifier-mcp-gpt.mjs) : cinq tables, pas
+// une de plus (cockpit_perso_images depuis le 25/10/2026 : les images de
+// ChatGPT, projet 'belrive' en dur, insertion seulement).
 // - cockpit_perso_documents et cockpit_perso_notes, TOUJOURS avec
 //   projet = 'belrive' ecrit en dur dans le texte. Les notes ecrites portent
 //   auteur 'gpt' et projet 'belrive' en dur, les documents deposes source
@@ -18,7 +19,7 @@
 // 20261023171000_cockpit_tab_cles_portee.sql.
 
 import type {
-  DepotGpt, Document, DocumentResume, FiltreStatut, NoteBelrive, NoteGpt, Recherche, StatutNote, Trouvaille,
+  DepotGpt, Document, DocumentResume, FiltreStatut, ImageAEnregistrer, ImageBelrive, NoteBelrive, NoteGpt, Recherche, StatutNote, Trouvaille,
 } from './pur'
 
 /** Ce qu'il faut d'un client Prisma (ou d'une transaction) pour ces requetes. */
@@ -186,6 +187,44 @@ returning note_id::text as note_id, sens, auteur, sujet, texte, projet, liens, s
   cree_le, lu_le, traite_le, ping_envoye_le, instance, lue_par`
 
 // ---------------------------------------------------------------------------
+// Les images de Belrive (25/10/2026, migration 20261025120000)
+// ---------------------------------------------------------------------------
+
+const COLONNES_IMAGE = `i.image_id::text as image_id, i.titre, i.role, i.nom_fichier, i.chemin, i.mime, i.taille, i.empreinte, i.origine, i.depose_le`
+
+/** $1 = empreinte sha256 des octets. */
+export const SQL_IMAGE_PAR_EMPREINTE = `
+select ${COLONNES_IMAGE}
+from public.cockpit_perso_images i
+where i.empreinte = $1::text and i.projet = 'belrive'`
+
+/** $1 = uuid. */
+export const SQL_LIRE_IMAGE = `
+select ${COLONNES_IMAGE}
+from public.cockpit_perso_images i
+where i.image_id = $1::uuid and i.projet = 'belrive'`
+
+/** $1 = limite. Les plus recentes d'abord. */
+export const SQL_LISTER_IMAGES = `
+select ${COLONNES_IMAGE}
+from public.cockpit_perso_images i
+where i.projet = 'belrive'
+order by i.depose_le desc
+limit $1::int`
+
+/**
+ * Le depot : $1 = titre, $2 = role, $3 = nom de fichier, $4 = chemin dans le
+ * bucket, $5 = type, $6 = taille, $7 = empreinte, $8 = origine. Projet
+ * belrive et auteur gpt en dur. Meme empreinte deja la : rien n'est ecrit
+ * (on relit la ligne existante).
+ */
+export const SQL_INSERER_IMAGE = `
+insert into public.cockpit_perso_images (projet, titre, role, nom_fichier, chemin, mime, taille, empreinte, origine, depose_par)
+values ('belrive', $1::text, $2::text, $3::text, $4::text, $5::text, $6::int, $7::text, $8::text, 'gpt')
+on conflict (projet, empreinte) do nothing
+returning image_id::text as image_id, titre, role, nom_fichier, chemin, mime, taille, empreinte, origine, depose_le`
+
+// ---------------------------------------------------------------------------
 // Les fonctions (une requete chacune, ou deux pour chercher)
 // ---------------------------------------------------------------------------
 
@@ -276,6 +315,34 @@ export async function ecrireNote(db: Executeur, n: NoteGpt): Promise<LigneNoteEc
   const l = await db.$queryRawUnsafe<LigneNoteEcrite[]>(
     SQL_ECRIRE_NOTE, n.destinataire.sens, n.sujet, n.texte, n.liens, n.destinataire.instance)
   return l[0]
+}
+
+type LigneImage = Omit<ImageBelrive, 'depose_le'> & { depose_le: Quand }
+
+export function versImage(l: LigneImage): ImageBelrive {
+  return { ...l, taille: Number(l.taille), depose_le: iso(l.depose_le) }
+}
+
+export async function imageParEmpreinte(db: Executeur, empreinte: string): Promise<ImageBelrive | null> {
+  const l = await db.$queryRawUnsafe<LigneImage[]>(SQL_IMAGE_PAR_EMPREINTE, empreinte)
+  return l[0] ? versImage(l[0]) : null
+}
+
+export async function lireImage(db: Executeur, id: string): Promise<ImageBelrive | null> {
+  const l = await db.$queryRawUnsafe<LigneImage[]>(SQL_LIRE_IMAGE, id)
+  return l[0] ? versImage(l[0]) : null
+}
+
+export async function listerImages(db: Executeur, limite: number): Promise<ImageBelrive[]> {
+  const l = await db.$queryRawUnsafe<LigneImage[]>(SQL_LISTER_IMAGES, limite)
+  return l.map(versImage)
+}
+
+/** null = la meme empreinte est deja en base (depot concurrent) : relire par imageParEmpreinte. */
+export async function insererImage(db: Executeur, i: ImageAEnregistrer): Promise<ImageBelrive | null> {
+  const l = await db.$queryRawUnsafe<LigneImage[]>(
+    SQL_INSERER_IMAGE, i.titre, i.role, i.nomFichier, i.chemin, i.mime, i.octets.length, i.empreinte, i.origine)
+  return l[0] ? versImage(l[0]) : null
 }
 
 export async function deposerDocument(db: Executeur, d: DepotGpt): Promise<DocumentResume | null> {

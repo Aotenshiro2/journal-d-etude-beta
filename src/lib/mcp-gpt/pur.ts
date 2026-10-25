@@ -9,7 +9,10 @@
 // - deux ECRITURES : une note pour Sora, Yume, Sekai ou Tab (auteur gpt,
 //   projet belrive, memes pings que les notes de Tab), et un document a lui
 //   (source gpt, une ligne par version, range sous Scenario/De-GPT/, jamais a
-//   la place d'un document du disque).
+//   la place d'un document du disque) ;
+// - depuis le 25/10/2026, une troisieme : une IMAGE (deposer_image, regles dans
+//   images-pur.ts, telechargement sur dans telechargement.ts, bucket prive
+//   belrive-images et table cockpit_perso_images), montree par lister_documents.
 // Rien d'autre : ni membres, ni paiements, ni Telegram, ni autres projets, ni
 // les notes qui ne sont pas du projet belrive.
 //
@@ -20,12 +23,16 @@
 // SEPAREE de celle des cles de Tab (prefixe « mcp-gpt-belrive: ») : une cle
 // de l'un ne passe jamais chez l'autre, meme si le filtre de portee manquait.
 //
-// Ce fichier n'importe que node:crypto : scripts/verifier-mcp-gpt.mjs et
+// Ce fichier n'importe que node:crypto et ./images-pur (node:crypto, node:net) : scripts/verifier-mcp-gpt.mjs et
 // scripts/essayer-migration-gpt-belrive.mjs le chargent tel quel (Node 22
 // retire les types). Le cote serveur (base, pings) : serveur.ts ; le SQL :
 // requetes.ts ; la route : src/app/api/mcp/[secret]/route.ts.
 
 import { createHash, timingSafeEqual } from 'node:crypto'
+import {
+  assainirNomFichier, cheminStockage, empreinteOctets, lireSourceImage, nomDansUrl, ROLE_MAX, TITRE_IMAGE_MAX, validerOctets, verifierUrl,
+  type TypeImage,
+} from './images-pur'
 
 // ---------------------------------------------------------------------------
 // Constantes
@@ -118,6 +125,31 @@ export type Recherche = { brute: string; normalisee: string; motif: string; mots
 export type NoteGpt = { destinataire: Destinataire; sujet: string; texte: string; liens: string[] }
 export type DepotGpt = { titre: string; contenu: string; famille: string; empreinte: string }
 
+/** Une image de Belrive deposee par ChatGPT (cockpit_perso_images). */
+export type ImageBelrive = {
+  image_id: string
+  titre: string
+  role: string
+  nom_fichier: string
+  chemin: string
+  mime: string
+  taille: number
+  empreinte: string
+  origine: 'fichier' | 'url' | 'base64'
+  depose_le: string
+}
+export type ImageAEnregistrer = {
+  titre: string
+  role: string
+  nomFichier: string
+  chemin: string
+  mime: TypeImage['mime']
+  octets: Buffer
+  empreinte: string
+  origine: ImageBelrive['origine']
+}
+export type TelechargementImage = { ok: true; octets: Buffer } | { ok: false; raison: string }
+
 /** Tout ce que le connecteur peut faire en base. Rien d'autre n'existe pour lui. */
 export type Base = {
   chercher: (r: Recherche) => Promise<Trouvaille[]>
@@ -128,6 +160,11 @@ export type Base = {
   listerNotes: (statut: FiltreStatut, limite: number) => Promise<NoteBelrive[]>
   ecrireNote: (n: NoteGpt) => Promise<{ note: NoteBelrive; prevenu: string }>
   deposerDocument: (d: DepotGpt) => Promise<DocumentResume | null>
+  /** Telecharge une image par https (gardes anti-SSRF, 8 Mo) : src/lib/mcp-gpt/telechargement.ts. */
+  telechargerImage: (url: string) => Promise<TelechargementImage>
+  /** Range l'image (bucket prive puis ligne de suivi). deja = la meme empreinte etait deja deposee. */
+  enregistrerImage: (i: ImageAEnregistrer) => Promise<{ image: ImageBelrive; deja: boolean }>
+  listerImages: () => Promise<ImageBelrive[]>
 }
 
 export type VerdictCle =
@@ -227,7 +264,9 @@ export function resumeArgs(a: Record<string, unknown>): Record<string, unknown> 
   const r: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(a).slice(0, 12)) {
     const cle = k.slice(0, 40)
-    if (typeof v === 'string') r[cle] = v.length <= 120 ? v : `[${v.length} caractères]`
+    // Une adresse sans sa requete (un lien signe y porte son jeton).
+    if (typeof v === 'string' && /^https?:\/\//i.test(v)) r[cle] = v.split(/[?#]/)[0].slice(0, 120) + (/[?#]/.test(v) ? '?[...]' : '')
+    else if (typeof v === 'string') r[cle] = v.length <= 120 ? v : `[${v.length} caractères]`
     else if (Array.isArray(v)) r[cle] = `[${v.length} élément(s)]`
     else if (typeof v === 'number' || typeof v === 'boolean' || v === null) r[cle] = v
     else r[cle] = '[objet]'
@@ -273,6 +312,7 @@ export const INSTRUCTIONS = [
   'L\'histoire décrit aussi ce qui n\'est pas encore codé : avant d\'affirmer qu\'une chose existe dans le jeu (personnage, quête, lieu, mécanique), vérifie dans ETAT.md (l\'état réel du code) et dans la file des lots (FILE-DES-LOTS.md).',
   'Écris tes décisions, consignes et questions en note avec ecrire_note : les instances Claude Code de Brice (Sora, Yume, Sekai) les lisent au démarrage de leur session, Tab (l\'assistant de Brice) les reçoit par email.',
   'Pour une version complète d\'un texte, utilise deposer_document : elle est rangée à part et ne remplace jamais un document existant.',
+  'Pour une image (visuel, décor, leurre, personnage), utilise deposer_image en joignant le fichier dans le champ image : elle est rangée à part, puis cite son id (img:...) dans ta note pour dire à quoi elle sert. lister_documents montre aussi les images déposées.',
 ].join(' ')
 
 export const OUTILS = [
@@ -309,7 +349,7 @@ export const OUTILS = [
   {
     name: 'lister_documents',
     title: 'Lister les documents de Belrive',
-    description: 'Liste les documents de Belrive disponibles : id, titre, chemin, taille en octets, source (disque = fichiers de Brice, synchronisés chaque heure ; gpt = documents déposés par ChatGPT), version et date de mise à jour. ETAT.md dit ce qui existe vraiment dans le jeu.',
+    description: 'Liste les documents de Belrive disponibles : id, titre, chemin, taille en octets, source (disque = fichiers de Brice, synchronisés chaque heure ; gpt = documents déposés par ChatGPT), version et date de mise à jour. ETAT.md dit ce qui existe vraiment dans le jeu. Liste aussi les images déposées avec deposer_image (id img:..., titre, rôle, nom de fichier, type, taille, date).',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     annotations: { title: 'Lister les documents de Belrive', ...LECTURE },
   },
@@ -358,6 +398,37 @@ export const OUTILS = [
       additionalProperties: false,
     },
     annotations: { title: 'Déposer un document', ...ECRITURE },
+  },
+  {
+    name: 'deposer_image',
+    title: 'Déposer une image',
+    description: 'Dépose une image pour Belrive (un visuel, un décor, un leurre, un personnage), générée dans la conversation ou envoyée par Brice. Joins le fichier dans le champ image : c\'est la voie normale. À défaut, url (une adresse https publique de l\'image), ou donnees_base64 pour une petite image (600 000 octets au plus). png, jpeg, webp ou gif, 8 Mo au plus. L\'image est rangée à part (rapatriée sur le PC de Brice dans l\'heure, dans Scenario/De-GPT/images/), ne remplace jamais rien, et la même image déposée deux fois n\'en fait qu\'une. Rend son id (img:...) : cite-le dans ta note (ecrire_note) avec ce qu\'elle représente et à quoi elle sert.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        titre: { type: 'string', maxLength: TITRE_IMAGE_MAX, description: 'Le titre de l\'image (200 caractères au plus), par exemple « Leurre 1, Arc 07 ».' },
+        role: { type: 'string', maxLength: ROLE_MAX, description: 'Son rôle ou sa légende, courte (300 caractères au plus), par exemple « leurre 1 : hirondelle au poignet droit ».' },
+        image: {
+          type: 'object',
+          description: 'Le fichier image de la conversation (généré ou envoyé). ChatGPT le transmet avec un lien de téléchargement temporaire.',
+          properties: {
+            download_url: { type: 'string' },
+            file_id: { type: 'string' },
+            mime_type: { type: 'string' },
+            file_name: { type: 'string' },
+          },
+          required: ['download_url', 'file_id'],
+        },
+        nom_fichier: { type: 'string', maxLength: 120, description: 'Facultatif : le nom de fichier souhaité (par exemple leurre-1-hirondelle). Il est nettoyé, l\'extension suit le vrai type de l\'image.' },
+        url: { type: 'string', description: 'Facultatif, à défaut du champ image : une adresse https publique de l\'image.' },
+        donnees_base64: { type: 'string', description: 'Facultatif, en dernier recours : l\'image en base64 (600 000 octets décodés au plus).' },
+      },
+      required: ['titre', 'role'],
+      additionalProperties: false,
+    },
+    // OpenAI Apps SDK : ChatGPT remplace le fichier de la conversation par { download_url, file_id, mime_type?, file_name? }.
+    _meta: { 'openai/fileParams': ['image'] },
+    annotations: { title: 'Déposer une image', ...ECRITURE },
   },
 ]
 
@@ -441,6 +512,7 @@ async function fetchOutil(a: Record<string, unknown>, base: Base): Promise<Resul
   const introuvable = refus(`Rien trouvé pour « ${id.slice(0, 120)} ». Les ids viennent de search, lister_documents ou lister_notes.`)
   let doc: Document | null = null
   let note: NoteBelrive | null = null
+  if (/^img:/i.test(id)) return refus('Une image ne se lit pas avec fetch : ses informations (titre, rôle, nom de fichier, type, taille) sont dans lister_documents, rubrique images.')
   const m = /^(doc|note):(.+)$/i.exec(id)
   if (m) {
     if (!UUID.test(m[2])) return introuvable
@@ -486,12 +558,62 @@ async function fetchOutil(a: Record<string, unknown>, base: Base): Promise<Resul
 
 async function listerDocumentsOutil(_a: Record<string, unknown>, base: Base): Promise<ResultatOutil> {
   const docs = await base.listerDocuments()
+  const images = await base.listerImages()
   return ok({
     documents: docs.map((d) => ({
       id: `doc:${d.document_id}`, titre: d.titre, chemin: d.chemin, taille_octets: d.taille,
       source: d.source, version: d.version, maj_le: d.maj_le,
     })),
-  }, docs.length)
+    images: images.map(imageEnClair),
+  }, docs.length + images.length)
+}
+
+function imageEnClair(i: ImageBelrive) {
+  return {
+    id: `img:${i.image_id}`, titre: i.titre, role: i.role, nom_fichier: i.nom_fichier, type: i.mime,
+    taille_octets: i.taille, depose_le: i.depose_le,
+  }
+}
+
+async function deposerImageOutil(a: Record<string, unknown>, base: Base): Promise<ResultatOutil> {
+  const titre = (chaine(a, 'titre', 'title') ?? '').replace(/\s+/g, ' ').trim()
+  const role = (chaine(a, 'role', 'legende', 'légende', 'caption') ?? '').replace(/\s+/g, ' ').trim()
+  if (!titre) return refus('titre manquant.')
+  if (titre.length > TITRE_IMAGE_MAX) return refus(`titre trop long : ${TITRE_IMAGE_MAX} caractères au plus.`)
+  if (!role) return refus('role manquant : une légende courte qui dit ce que montre l\'image et à quoi elle sert.')
+  if (role.length > ROLE_MAX) return refus(`role trop long : ${ROLE_MAX} caractères au plus.`)
+  const nomSouhaite = chaine(a, 'nom_fichier', 'nom')
+  if (nomSouhaite !== undefined && nomSouhaite.length > 120) return refus('nom_fichier trop long : 120 caractères au plus.')
+
+  const s = lireSourceImage(a)
+  if (!s.ok) return refus(s.raison)
+  const source = s.source
+  let octets: Buffer
+  if (source.genre === 'base64') {
+    octets = source.octets
+  } else {
+    const v = verifierUrl(source.url)
+    if (!v.ok) return refus(`${source.genre === 'fichier' ? 'image' : 'url'} : ${v.raison}`)
+    const t = await base.telechargerImage(source.url)
+    if (!t.ok) return refus(`Téléchargement de l'image impossible : ${t.raison}`)
+    octets = t.octets
+  }
+  const v = validerOctets(octets)
+  if (!v.ok) return refus(v.raison)
+
+  const empreinte = empreinteOctets(octets)
+  const nomFichier = assainirNomFichier([nomSouhaite, source.nom, source.genre === 'url' ? nomDansUrl(source.url) : null, titre], v.type.ext)
+  const r = await base.enregistrerImage({
+    titre, role, nomFichier, chemin: cheminStockage(empreinte, v.type.ext), mime: v.type.mime, octets, empreinte, origine: source.genre,
+  })
+  return ok({
+    ok: true,
+    ...imageEnClair(r.image),
+    deja_deposee: r.deja,
+    note: r.deja
+      ? 'Cette image (mêmes octets) était déjà déposée : rien de neuf n\'est écrit, voici son id. Cite-le dans ta note.'
+      : 'Rangée à part, rapatriée sur le PC de Brice dans l\'heure (Scenario/De-GPT/images/). Cite son id dans ta note (ecrire_note) avec ce qu\'elle représente.',
+  }, 1)
 }
 
 async function listerNotesOutil(a: Record<string, unknown>, base: Base): Promise<ResultatOutil> {
@@ -562,6 +684,7 @@ const EXECUTION: Record<string, (a: Record<string, unknown>, base: Base) => Prom
   lister_notes: listerNotesOutil,
   ecrire_note: ecrireNoteOutil,
   deposer_document: deposerDocumentOutil,
+  deposer_image: deposerImageOutil,
 }
 
 // ---------------------------------------------------------------------------

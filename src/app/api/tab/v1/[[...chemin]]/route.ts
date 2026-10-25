@@ -12,6 +12,8 @@ import { lireDemandeGeneration } from '@/lib/generation-pur'
 import { genererPost } from '@/lib/generation'
 import { estUuid, lireFiltreStatut, lireNoteEntrante } from '@/lib/tab/notes-pur'
 import { creerNote, listerNotes, marquerLueParTab, prevenirBrice } from '@/lib/tab/notes'
+import { lireImage as lireImageBelrive, listerImages as listerImagesBelrive, type Executeur } from '@/lib/mcp-gpt/requetes'
+import { urlSigneeImage } from '@/lib/mcp-gpt/stockage-images'
 
 /**
  * L'API DE TAB (20/10/2026) : /api/tab/v1/... , JSON, LECTURE SEULE.
@@ -113,6 +115,52 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ chemin?: st
     } catch (err) {
       const raison = err instanceof Error ? err.message.split('\n').filter(Boolean).pop() ?? '' : String(err)
       return fin({ ok: false, ...enTete, erreur: 'Lecture des notes impossible pour l\'instant.' }, 502, null, raison)
+    }
+  }
+  // Les images de Belrive deposees par ChatGPT (25/10/2026) : la liste, et une URL signee de 5 minutes.
+  if (nom === 'images-belrive') {
+    const id = chemin[1]?.replace(/^img:/i, '').toLowerCase()
+    if (!(chemin.length === 1 || (chemin.length === 3 && chemin[2] === 'url' && id && estUuid(id)))) {
+      return fin({ ok: false, ...enTete, erreur: 'Routes : /images-belrive (la liste) ou /images-belrive/<image_id>/url (une URL signée de 5 minutes).' }, 404, null, 'route inconnue')
+    }
+    const lire = <T,>(f: (db: Executeur) => Promise<T>) => prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe('set transaction read only')
+      await tx.$executeRawUnsafe(`set local statement_timeout = '8000ms'`)
+      return f(tx)
+    }, { maxWait: 8000, timeout: 20000 })
+    try {
+      if (chemin.length === 1) {
+        const limite = Math.min(Math.max(Number(url.searchParams.get('limite')) || 50, 1), 200)
+        const images = await lire((db) => listerImagesBelrive(db, limite))
+        return fin({
+          ok: true, ...enTete,
+          libelle: 'Images de Belrive déposées par ChatGPT (les plus récentes d\'abord)',
+          sources: ['cockpit_perso_images (bucket privé belrive-images)'],
+          donnees: {
+            images: images.map((i) => ({
+              id: `img:${i.image_id}`, titre: i.titre, role: i.role, nom_fichier: i.nom_fichier, type: i.mime,
+              taille_octets: i.taille, origine: i.origine, depose_le: i.depose_le,
+            })),
+          },
+          notes: ['Pour voir une image : GET /images-belrive/<image_id>/url (URL signée, 5 minutes). ChatGPT cite ces ids (img:...) dans ses notes du projet belrive.'],
+        }, 200, images.length)
+      }
+      const image = await lire((db) => lireImageBelrive(db, id!))
+      if (!image) return fin({ ok: false, ...enTete, erreur: 'Image introuvable.' }, 404, null, 'image introuvable')
+      const signee = await urlSigneeImage(image.chemin, image.nom_fichier)
+      if (!signee) return fin({ ok: false, ...enTete, erreur: 'Fichier introuvable dans le stockage.' }, 404, null, 'objet absent')
+      return fin({
+        ok: true, ...enTete,
+        libelle: `Image : ${image.titre}`,
+        donnees: {
+          id: `img:${image.image_id}`, titre: image.titre, role: image.role, nom_fichier: image.nom_fichier, type: image.mime,
+          taille_octets: image.taille, depose_le: image.depose_le, url: signee.url, expire_le: signee.expire_le,
+        },
+        notes: ['L\'URL expire dans 5 minutes : redemande-la plutôt que de la garder.'],
+      }, 200, 1)
+    } catch (err) {
+      const raison = err instanceof Error ? err.message.split('\n').filter(Boolean).pop() ?? '' : String(err)
+      return fin({ ok: false, ...enTete, erreur: 'Lecture des images impossible pour l\'instant.' }, 502, null, raison.slice(0, 300))
     }
   }
   if (nom === 'generer-post') {

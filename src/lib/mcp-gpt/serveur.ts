@@ -17,6 +17,8 @@ import { pingerTab, prevenirBrice } from '@/lib/tab/notes'
 import type { NotePerso } from '@/lib/tab/notes-pur'
 import { choisirCle, DEBIT_PAR_MINUTE_GPT, type Base, type VerdictCle } from '@/lib/mcp-gpt/pur'
 import * as R from '@/lib/mcp-gpt/requetes'
+import { envoyerImage, retirerImage } from '@/lib/mcp-gpt/stockage-images'
+import { telechargerImage } from '@/lib/mcp-gpt/telechargement'
 
 function raison(err: unknown): string {
   return err instanceof Error ? (err.message.split('\n').filter(Boolean).pop() ?? '') : String(err)
@@ -79,6 +81,29 @@ export const base: Base = {
   listerDocuments: () => lecture((db) => R.listerDocuments(db)),
   listerNotes: (statut, limite) => lecture((db) => R.listerNotes(db, statut, limite)),
   deposerDocument: (d) => ecriture((db) => R.deposerDocument(db, d)),
+  // Les images (25/10/2026) : telechargement sur, puis bucket prive, puis ligne de suivi.
+  telechargerImage: async (url) => {
+    const t = await telechargerImage(url)
+    return t.ok ? { ok: true, octets: t.octets } : t
+  },
+  listerImages: () => lecture((db) => R.listerImages(db, 200)),
+  enregistrerImage: async (i) => {
+    const existante = await lecture((db) => R.imageParEmpreinte(db, i.empreinte))
+    if (existante) return { image: existante, deja: true }
+    const envoi = await envoyerImage(i.chemin, i.octets, i.mime)
+    let ligne: Awaited<ReturnType<typeof R.insererImage>>
+    try {
+      ligne = await ecriture((db) => R.insererImage(db, i))
+    } catch (err) {
+      if (envoi === 'envoye') await retirerImage(i.chemin)
+      throw err
+    }
+    if (ligne) return { image: ligne, deja: false }
+    // Depot concurrent des memes octets : la ligne existe, on la rend.
+    const autre = await lecture((db) => R.imageParEmpreinte(db, i.empreinte))
+    if (!autre) throw new Error('image : ni inseree ni trouvee')
+    return { image: autre, deja: true }
+  },
   ecrireNote: async (n) => {
     const ligne = await ecriture((db) => R.ecrireNote(db, n))
     const note = versNotePerso(ligne)

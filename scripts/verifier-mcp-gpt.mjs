@@ -13,10 +13,12 @@
 
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import * as P from '../src/lib/mcp-gpt/pur.ts'
-import * as R from '../src/lib/mcp-gpt/requetes.ts'
-import { masquerSecretMcp } from '../src/lib/sentry-masque.ts'
-import { emailPing, messageBrice } from '../src/lib/tab/notes-pur.ts'
+// pur.ts importe ./images-pur sans extension (25/10/2026) : le crochet de resolution d'abord.
+import './resoudre-ts.mjs'
+const P = await import('../src/lib/mcp-gpt/pur.ts')
+const R = await import('../src/lib/mcp-gpt/requetes.ts')
+const { masquerSecretMcp } = await import('../src/lib/sentry-masque.ts')
+const { emailPing, messageBrice } = await import('../src/lib/tab/notes-pur.ts')
 
 const lire = (chemin) => readFileSync(new URL(chemin, import.meta.url), 'utf8')
 let n = 0
@@ -61,6 +63,9 @@ function baseFactice(journal = []) {
         prevenu: 'prevenu (factice)',
       }
     },
+    async listerImages() { return [] },
+    async telechargerImage() { return { ok: false, raison: 'pas de reseau (factice)' } },
+    async enregistrerImage() { throw new Error('enregistrerImage : voir verifier-images-belrive.mjs') },
     async deposerDocument(d) {
       journal.push(['deposerDocument', d])
       return { document_id: '55555555-5555-4555-8555-555555555555', titre: d.titre, chemin: `Scenario/De-GPT/${d.famille}-v1.md`, taille: Buffer.byteLength(d.contenu), source: 'gpt', version: 1, maj_le: '2026-10-23T11:00:00.000Z' }
@@ -249,10 +254,10 @@ await cas('lot : reponses des requetes seulement, 202 si que des notifications, 
 // Les outils
 // ---------------------------------------------------------------------------
 
-await cas('tools/list : six outils, descriptions en francais, annotations justes', async () => {
+await cas('tools/list : sept outils, descriptions en francais, annotations justes', async () => {
   const r = await post(rpc(1, 'tools/list'))
   const outils = r.corps.result.tools
-  assert.deepEqual(outils.map((o) => o.name), ['search', 'fetch', 'lister_documents', 'lister_notes', 'ecrire_note', 'deposer_document'])
+  assert.deepEqual(outils.map((o) => o.name), ['search', 'fetch', 'lister_documents', 'lister_notes', 'ecrire_note', 'deposer_document', 'deposer_image'])
   for (const o of outils) {
     assert.equal(o.inputSchema.type, 'object')
     assert.ok(o.description.length > 80, `${o.name} : description trop courte`)
@@ -422,14 +427,17 @@ await cas('resumeArgs : rien de long au journal', async () => {
 // Le perimetre : le texte du SQL, la route, le middleware, Sentry
 // ---------------------------------------------------------------------------
 
-await cas('perimetre du SQL : quatre tables, projet belrive en dur, aucun update ni delete', async () => {
+await cas('perimetre du SQL : cinq tables, projet belrive en dur, aucun update ni delete', async () => {
   const source = lire('../src/lib/mcp-gpt/requetes.ts')
   const tables = new Set([...source.matchAll(/public\.([a-z_]+)/g)].map((m) => m[1]))
-  assert.deepEqual([...tables].sort(), ['cockpit_perso_documents', 'cockpit_perso_notes', 'cockpit_tab_acces', 'cockpit_tab_cles'])
+  assert.deepEqual([...tables].sort(), ['cockpit_perso_documents', 'cockpit_perso_images', 'cockpit_perso_notes', 'cockpit_tab_acces', 'cockpit_tab_cles'])
   const sql = Object.entries(R).filter(([k, v]) => k.startsWith('SQL_') && typeof v === 'string')
   assert.ok(sql.length >= 12)
   for (const [nom, texte] of sql) {
     assert.ok(!/\b(update|delete|truncate|drop|alter|grant)\b/i.test(texte), `${nom} : ecriture interdite`)
+    if (/cockpit_perso_images/.test(texte)) {
+      for (const m of texte.matchAll(/from public\.cockpit_perso_images (\w+)/g)) assert.ok(texte.includes(`${m[1]}.projet = 'belrive'`), `${nom} : images sans projet`)
+    }
     if (/cockpit_perso_(documents|notes)/.test(texte)) {
       assert.ok(/projet = 'belrive'|'belrive'/.test(texte), `${nom} : projet belrive absent`)
       // Chaque lecture de ces tables filtre sur projet = 'belrive' (alias d0, d, x, n0, n).
