@@ -10,15 +10,20 @@
 //     externe_compte ou externe_libre, les lecons d'apercu ;
 //   - les acces actifs (academie_acces) par user_id OU par un email VERIFIE
 //     du compte (email confirme de auth.users, profile_emails verified) ;
-//   - le Live Club EN DIRECT : acces broker actif ou acces manuel du cockpit
-//     (lus en base), sinon abonnement chez Stripe MelTrade par email
+//   - le Live Club EN DIRECT : acces broker actif, acces manuel du cockpit
+//     ou exemption active du Live Club (lus en base), sinon abonnement chez
+//     Stripe MelTrade par email
 //     (abonnementsLiveClubParEmail, memes statuts que droitLiveClub :
 //     meilleurAbonnement). Actif, il ouvre l'offre « live club » (le paquet
 //     du moment) et les acces de source liveclub (paquet d'entree) ; arrete,
 //     ces lignes restent en base, suspendues, et reviennent avec lui.
-//     Les EXEMPTIONS du Live Club ne comptent pas encore : elles sont posees
-//     sur un compte Telegram, et un compte du site n'est pas encore lie a
-//     Telegram (bouton « lier mon Telegram », plan 4.5). A brancher alors.
+//     Les EXEMPTIONS du Live Club (fondateur, equipe, favorise : aucun
+//     abonnement Stripe) comptent depuis le 26/10/2026 : posees sur un compte
+//     Telegram, elles rejoignent un compte du site par leur colonne email
+//     (migration 20261026100000) ou par l'email de leur membre_id
+//     (cockpit_membre_emails), compare aux emails verifies du compte. Une
+//     exemption sans l'un ni l'autre ne compte pas (le bouton « lier mon
+//     Telegram », plan 4.5, la brancherait sans email).
 //   - le secours de la page d'essai (decision B du 06/10, voir pur.ts,
 //     FaitsCompte.secoursEssai) : rang Skool vip ou premium, abonnement vu
 //     par le cockpit, acces mentorat manuel. N'ouvre que le module « essai »,
@@ -121,7 +126,8 @@ async function liveClubParEmail(email: string): Promise<'oui' | 'non' | 'inconnu
 
 type LigneIdentite = { role: string | null; emails: string[] | null }
 type LigneCockpit = {
-  etm: boolean; broker_jusquau: string | null; manuel_jusquau: string | null; secours_essai: boolean
+  etm: boolean; broker_jusquau: string | null; manuel_jusquau: string | null; exempte: boolean
+  secours_essai: boolean
 }
 type LigneAccesSql = {
   origine: 'acces' | 'base' | 'essai'; source: string | null; slug: string | null; ouvre_tout: boolean
@@ -160,7 +166,8 @@ export async function droitsAcademie(userId: string): Promise<DroitsAcademie> {
   const erreurs: string[] = []
   let liveClub: EtatLiveClub = 'non_lu'
   if (liveClubUtile(faits)) {
-    const brokerOuManuel = Boolean(c?.broker_jusquau || c?.manuel_jusquau)
+    // Broker, manuel ou exemption active : Live Club actif sans Stripe.
+    const brokerOuManuel = Boolean(c?.broker_jusquau || c?.manuel_jusquau || c?.exempte === true)
     const stripe = brokerOuManuel ? [] : await Promise.all(emails.map(liveClubParEmail))
     liveClub = conclureLiveClub({ brokerOuManuel, stripe })
     if (liveClub === 'inconnu') erreurs.push('liveclub: stripe illisible')

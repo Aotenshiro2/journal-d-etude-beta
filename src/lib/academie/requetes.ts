@@ -48,6 +48,10 @@ select
  *   meme filtre que droitLiveClub) ;
  * - manuel_jusquau : date d'acces posee a la main sur le membre
  *   (cockpit_acces_manuel), que droitLiveClub compte aussi comme Live Club ;
+ * - exempte : exemption ACTIVE du Live Club (cockpit_liveclub_exemptions,
+ *   retire_le vide, jusquau vide ou pas depasse) rattachee a un de ces emails,
+ *   par sa colonne email ou par l'email d'un membre (membre_id), migration
+ *   20261026100000. Compte comme Live Club actif, comme broker et manuel ;
  * - secours_essai : la decision B de la page d'essai sans Stripe (rang Skool
  *   vip ou premium, abonnement en cours vu par le cockpit, acces mentorat
  *   manuel MentoratGrant).
@@ -69,6 +73,17 @@ select
       join public.cockpit_membre_emails me on me.membre_id = am.membre_id
      where am.acces_jusquau >= current_date and lower(me.email) = any($1::text[])
   ) as manuel_jusquau,
+  exists (
+    select 1 from public.cockpit_liveclub_exemptions x
+     where x.retire_le is null and (x.jusquau is null or x.jusquau >= current_date)
+       and (
+         lower(x.email) = any($1::text[])
+         or exists (
+           select 1 from public.cockpit_membre_emails me
+            where me.membre_id = x.membre_id and lower(me.email) = any($1::text[])
+         )
+       )
+  ) as exempte,
   (
     exists (
       select 1 from public.cockpit_membre_emails me

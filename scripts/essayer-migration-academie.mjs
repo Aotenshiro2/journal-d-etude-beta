@@ -188,7 +188,7 @@ try {
 
     assert.deepEqual(await tx.$queryRawUnsafe(R.SQL_IDENTITE, U1), [{ role: null, emails: [] }])
     assert.deepEqual(await tx.$queryRawUnsafe(R.SQL_FAITS_COCKPIT, [EMAIL_VERIFIE]),
-      [{ etm: false, broker_jusquau: null, manuel_jusquau: null, secours_essai: false }])
+      [{ etm: false, broker_jusquau: null, manuel_jusquau: null, exempte: false, secours_essai: false }])
     ok('SQL_IDENTITE et SQL_FAITS_COCKPIT s executent (compte et email inconnus : rien)')
 
     const offreTest = (await tx.$queryRawUnsafe(`
