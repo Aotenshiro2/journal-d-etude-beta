@@ -21,6 +21,9 @@ import { messageErreur, relationAbsente } from '@/lib/liveclub/pur'
  *     continuer: { lecon, module, reprise_s, derniere_vue_le, acces, etat } | null,   la derniere lecon ouverte
  *     modules: [{ id, slug, titre, resume, parcours, ordre, statut, auteur, image,
  *                 prix_eur,                 prix du module vendu seul, null = pas vendu seul
+ *                 lien_externe,             https vers un autre site (Masterclass) ou null ; rempli =
+ *                                           ni lecons ni offres, acces 'entier' sans raison (pas de cadenas),
+ *                                           progression a zero : le site fait de la carte un lien
  *                 offres: [{ slug, titre, type, prix_eur, portee }],   ce qui l'ouvre (portee : module,
  *                                           sections = une partie, tout = l'offre ouvre tout, ETM)
  *                 acces: entier | partiel | ferme | inconnu, raisons,

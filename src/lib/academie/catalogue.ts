@@ -33,6 +33,11 @@ export type ModuleCatalogue = {
   image: string | null
   /** Prix du module vendu seul (vide = pas vendu seul). */
   prixEur: number | null
+  /**
+   * Lien vers un autre site de l'ecosysteme (migration 20261026140000) : rempli =
+   * module sans lecons, la carte du site envoie vers ce lien, ni cadenas ni pourcentage.
+   */
+  lienExterne: string | null
 }
 
 /** Une offre qui ouvre quelque chose d'un module (cadenas des ecrans). */
@@ -89,6 +94,7 @@ let lectureEnCours: Promise<Catalogue> | null = null
 type LigneModule = {
   id: string; slug: string; titre: string; resume: string | null; ordre: number; parcours: string | null
   statut: StatutContenu; auteur: string | null; image: string | null; prix_eur: number | null
+  lien_externe: string | null
 }
 type LigneOffre = {
   module_id: string | null; slug: string; titre: string; type: string; prix_eur: number | null
@@ -140,7 +146,7 @@ async function lireCatalogueEnBase(): Promise<Catalogue> {
   }
 
   return {
-    modules: modules.map(({ prix_eur, ...m }) => ({ ...m, prixEur: prix_eur })),
+    modules: modules.map(({ prix_eur, lien_externe, ...m }) => ({ ...m, prixEur: prix_eur, lienExterne: lien_externe })),
     sections: sections.map(s => ({ id: s.id, moduleId: s.module_id, ordre: s.ordre, titre: s.titre })),
     lecons: lecons.map(leconDeLigne),
     offresParModule,

@@ -132,7 +132,7 @@ select 'essai'::text, null::text, m.slug, false, m.id::text, null::text
 /** Les modules visibles (publies ou a venir), dans l'ordre. prix_eur vide = pas vendu seul. */
 export const SQL_MODULES_VISIBLES = `
 select m.id::text as id, m.slug, m.titre, m.resume, m.ordre, m.parcours, m.statut, m.auteur, m.image,
-       m.prix_eur::float8 as prix_eur
+       m.prix_eur::float8 as prix_eur, m.lien_externe
   from public.academie_modules m
  where m.statut in ('publie', 'a_venir')
  order by m.ordre, m.titre

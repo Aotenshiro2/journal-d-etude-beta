@@ -43,6 +43,29 @@ export function construire(catalogue: Catalogue, droits: Droits, progression: Ma
   const resultats = new Map<string, Resultat>()
 
   const modules = catalogue.modules.map(m => {
+    // Module a lien externe (Masterclass, 26/10/2026) : une carte qui envoie vers un autre site de
+    // l'ecosysteme. Pas de lecons, pas de cadenas (l'acces se gere la-bas), compte dans aucun pourcentage.
+    if (m.lienExterne) {
+      return {
+        id: m.id,
+        slug: m.slug,
+        titre: m.titre,
+        resume: m.resume,
+        parcours: m.parcours,
+        ordre: m.ordre,
+        statut: m.statut,
+        auteur: m.auteur,
+        image: m.image,
+        prix_eur: null,
+        lien_externe: m.lienExterne,
+        offres: [],
+        acces: 'entier' as const,
+        raisons: [],
+        progression: progressionDuModule([]),
+        sections: [],
+        lecons: [],
+      }
+    }
     const lecons = leconsParModule.get(m.id) ?? []
     const jugees = lecons.map(l => {
       const r = ouvertureLecon(droits, l)
@@ -66,6 +89,7 @@ export function construire(catalogue: Catalogue, droits: Droits, progression: Ma
       auteur: m.auteur,
       image: m.image,
       prix_eur: m.prixEur,
+      lien_externe: null,
       offres: (catalogue.offresParModule.get(m.id) ?? []).map(o => ({
         slug: o.slug, titre: o.titre, type: o.type, prix_eur: o.prixEur, portee: o.portee,
       })),
