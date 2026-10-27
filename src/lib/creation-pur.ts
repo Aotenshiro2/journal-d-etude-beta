@@ -44,13 +44,17 @@ export type Noeud = {
 
 export type Statut = 'a_redecouper' | 'trou' | 'mure' | 'brut'
 
-export type Geste = 'assiste' | 'genere' | 'titre' | 'phrase'
+export type Geste = 'assiste' | 'genere' | 'titre' | 'phrase' | 'idee' | 'idees'
 
 export type Demande =
   | { geste: 'assiste'; decoupage_id: string; cible: string | null; matiere_collee?: string }
   | { geste: 'genere'; decoupage_id: string; cible: string | null; matiere_collee?: string }
   /** Une phrase pour expliquer UN noeud : la cible est obligatoire. */
   | { geste: 'phrase'; decoupage_id: string; cible: string; matiere_collee?: string }
+  /** La grande idee d'UN noeud (son nom court) : la cible est obligatoire. */
+  | { geste: 'idee'; decoupage_id: string; cible: string; matiere_collee?: string }
+  /** Un nom pour chaque noeud sans nom du decoupage, en un appel : pas de cible (le serveur les choisit). */
+  | { geste: 'idees'; decoupage_id: string; cible: null; matiere_collee?: string }
   | { geste: 'titre'; titre: string }
 
 export type Action = 'garder' | 'remplacer' | 'deplacer' | 'ajouter'
@@ -85,6 +89,20 @@ export type ContenuGenere = { decoupages: Array<{ nom: string; angle: string; pi
 export type ContenuPhrase = { phrases: string[] }
 export const MAX_PHRASES = 3
 export const MAX_PHRASE = 400
+
+/**
+ * Le geste « idee » (27/10/2026, Brice : une bulle qui n'a qu'une phrase se
+ * resume par une grande idee, « Non-respect de la prop firm », qui devient
+ * son nom ; la phrase reste dessous). Trois noms au plus, au choix de l'auteur.
+ */
+export type ContenuIdee = { noms: string[] }
+export const MAX_NOMS = 3
+/** Un nom court : 1 a 5 mots. Au-dela, c'est une phrase : il tombe. */
+export const MAX_MOTS_NOM = 5
+/** Le geste « idees » : les noms de chaque noeud sans nom, en un appel. */
+export type ContenuIdees = { noeuds: Array<{ ref: string; noms: string[] }> }
+/** Noeuds sans nom envoyes au plus dans un lot (les suivants attendent le lot d'apres). */
+export const MAX_LOT_IDEES = 40
 
 export type Verdict = 'tient' | 'depasse' | 'trahit'
 export const VERDICTS: readonly Verdict[] = ['tient', 'depasse', 'trahit']
@@ -135,7 +153,9 @@ export function lireDemande(brut: unknown): Demande | string {
     if (!titre) return 'titre requis.'
     return { geste, titre }
   }
-  if (geste !== 'assiste' && geste !== 'genere' && geste !== 'phrase') return 'geste attendu : assiste, genere, phrase ou titre.'
+  if (geste !== 'assiste' && geste !== 'genere' && geste !== 'phrase' && geste !== 'idee' && geste !== 'idees') {
+    return 'geste attendu : assiste, genere, phrase, idee, idees ou titre.'
+  }
   const decoupageId = typeof brut.decoupage_id === 'string' ? brut.decoupage_id.trim() : ''
   if (!UUID.test(decoupageId)) return 'decoupage_id invalide.'
   let cible: string | null = null
@@ -147,10 +167,14 @@ export function lireDemande(brut: unknown): Demande | string {
   const matiere = typeof brut.matiere_collee === 'string' && brut.matiere_collee.trim()
     ? brut.matiere_collee.slice(0, MAX_MATIERE_COLLEE)
     : null
-  if (geste === 'phrase') {
-    // Une phrase explique UN noeud : jamais l'aieul (il a deja son intention).
-    if (cible === null) return 'cible requise pour une phrase.'
+  if (geste === 'phrase' || geste === 'idee') {
+    // Une phrase explique UN noeud, une grande idee nomme UN noeud : jamais l'aieul (il a son titre).
+    if (cible === null) return geste === 'phrase' ? 'cible requise pour une phrase.' : 'cible requise pour un nom.'
     return matiere ? { geste, decoupage_id, cible, matiere_collee: matiere } : { geste, decoupage_id, cible }
+  }
+  if (geste === 'idees') {
+    // Le lot vise tous les noeuds sans nom : une cible n'a pas de sens, elle est ignoree.
+    return matiere ? { geste, decoupage_id, cible: null, matiere_collee: matiere } : { geste, decoupage_id, cible: null }
   }
   return matiere ? { geste, decoupage_id, cible, matiere_collee: matiere } : { geste, decoupage_id, cible }
 }
@@ -262,6 +286,17 @@ export function numeroter(noeuds: Noeud[]): Map<string, string> {
   return new Map(parcourir(noeuds).map((l) => [l.noeud.id, l.num]))
 }
 
+/**
+ * Les noeuds sans nom (`idee` absent), dans l'ordre de lecture de l'arbre, au
+ * plus `max` (le lot du geste idees). Un noeud au texte vide n'a rien a nommer.
+ */
+export function noeudsSansNom(noeuds: Noeud[], max = MAX_LOT_IDEES): Noeud[] {
+  return parcourir(noeuds)
+    .map((l) => l.noeud)
+    .filter((n) => !n.idee?.trim() && n.texte.trim() !== '')
+    .slice(0, max)
+}
+
 /** Les descendants d'un noeud (lui exclu). */
 export function descendants(noeuds: Noeud[], id: string): Set<string> {
   const groupes = enfantsParParent(noeuds)
@@ -326,9 +361,9 @@ export type LigneDecoupage = {
   noeuds: Noeud[]
 }
 
-/** Le message de l'utilisateur pour le Prompt 1 (gestes assiste, genere et phrase). */
+/** Le message de l'utilisateur pour le Prompt 1 (gestes assiste, genere, phrase, idee et idees). */
 export function entreesPrompt1(p: {
-  geste: 'assiste' | 'genere' | 'phrase'
+  geste: 'assiste' | 'genere' | 'phrase' | 'idee' | 'idees'
   auteur: string
   ligne: LigneDecoupage
   cible: string | null
@@ -358,11 +393,19 @@ export function entreesPrompt1(p: {
     ? 'Juge les pièces SOUS la cible (garder, remplacer, deplacer) et propose ce qui manque sous elle. Le reste de l\'arbre est là pour le contexte.'
     : geste === 'phrase'
       ? 'Propose la phrase qui explique ce nœud, et rien d\'autre. Sa lignée et ses enfants sont dans le tableau, pour le contexte.'
-      : 'Propose trois découpages de la cible : ses pièces, et si besoin un niveau d\'enfants. Ce qui existe déjà sous elle ne t\'est pas montré, c\'est voulu (page blanche). Le reste de l\'arbre est là pour le contexte.'
-  // Geste phrase : la lignee dite en clair, du plus large au noeud.
-  const lignee = geste === 'phrase' && noeudCible
-    ? [...ancetres(ligne.noeuds, noeudCible.id)].reverse().concat(noeudCible).map((n) => cellule(texteTableau(n), 200)).join(' > ')
-    : null
+      : geste === 'idee'
+        ? 'Propose le nom court de ce nœud (la grande idée que son texte illustre), et rien d\'autre. Sa lignée et ses enfants sont dans le tableau, pour le contexte.'
+        : geste === 'idees'
+          ? 'Propose un nom court pour chacun des NŒUDS À NOMMER ci-dessous, et rien d\'autre. Le reste de l\'arbre est là pour le contexte.'
+          : 'Propose trois découpages de la cible : ses pièces, et si besoin un niveau d\'enfants. Ce qui existe déjà sous elle ne t\'est pas montré, c\'est voulu (page blanche). Le reste de l\'arbre est là pour le contexte.'
+  // Gestes phrase et idee : la lignee dite en clair, du plus large au noeud.
+  const ligneeDe = (n: Noeud) =>
+    [...ancetres(ligne.noeuds, n.id)].reverse().concat(n).map((x) => cellule(texteTableau(x), 200)).join(' > ')
+  const lignee = (geste === 'phrase' || geste === 'idee') && noeudCible ? ligneeDe(noeudCible) : null
+  // Geste idees : les noeuds a nommer, chacun avec sa ref et sa lignee.
+  const aNommer = geste === 'idees'
+    ? noeudsSansNom(ligne.noeuds).map((n) => `  - ref ${n.id} (num ${nums.get(n.id) ?? '?'}) : ${ligneeDe(n)}`)
+    : []
 
   const sources: string[] = []
   if (p.matiereAuteur) sources.push('les extraits de MANIFESTE.md, idees-du-moment.md et banque-contenus.md fournis dans le système')
@@ -398,6 +441,7 @@ export function entreesPrompt1(p: {
     `- CIBLE : ${laCible}. ${consigneCible}`,
     geste === 'genere' ? `- NIVEAU DES PIÈCES À RENDRE : ${consigneNiveau(profondeurDe(ligne.noeuds, noeudCible?.id ?? null) + 1)}` : null,
     lignee ? `- LIGNÉE DU NŒUD (du plus large au nœud) : ${objet} > ${lignee}` : null,
+    aNommer.length ? `- NŒUDS À NOMMER (${aNommer.length}, chacun avec sa lignée du plus large au nœud) :\n${aNommer.join('\n')}` : null,
     "- CE QUE L'AUTEUR A DÉJÀ DIT (une ligne par pièce) :",
     arbre,
     `- MATIERE : ${matiere}`,
@@ -495,6 +539,32 @@ export const CONSIGNE_PHRASE = [
   'La phrase ne ferme rien : le nœud garde ses enfants et peut encore se creuser. Ne propose ni enfants ni découpage.',
 ].join('\n')
 
+/**
+ * La regle d'un NOM, commune aux gestes idee et idees (27/10/2026, Brice :
+ * « Florent prenait sur la prop firm des trades qu'il n'aurait jamais pris sur
+ * son compte propre » se resume par « Non-respect de la prop firm »).
+ */
+export const REGLE_DU_NOM = [
+  'UN NOM, PAS UNE PHRASE. Un nom fait 1 à 5 mots : une idée, un concept ou une raison (« Le tilt », « Le FOMO », « Non-respect de la prop firm », « La revanche sur le marché »). Jamais une phrase, jamais un verbe conjugué, pas de point final, aucun tiret long.',
+  'Le nom dit ce que le texte du nœud ILLUSTRE, pas ce qu\'il raconte : tu nommes la grande idée dont la phrase est un exemple, tu ne la résumes pas mot à mot. Exemple : « Florent prenait sur la prop firm des trades qu\'il n\'aurait jamais pris sur son compte propre » se nomme « Non-respect de la prop firm » (ou « Le compte des autres »), jamais « Florent et ses trades sur la prop firm ».',
+  'Pas de prénom ni de cas particulier dans le nom : le nom tient pour tous les cas que le nœud pourrait illustrer.',
+  'Appuie-toi sur la LIGNÉE (le nom doit tenir sous son parent, sans le répéter), sur ses enfants s\'il en a, et sur la matière fournie. Si la matière de l\'auteur nomme déjà cette idée, reprends son mot.',
+  'Ne touche jamais au texte du nœud : seul le nom est demandé. Ne propose ni enfants, ni découpage, ni phrase.',
+].join('\n')
+
+/** Le geste « idee » : trois noms pour UN noeud. Un appel court. */
+export const CONSIGNE_IDEE = [
+  'LE NOM DU NŒUD CIBLE. Rends trois noms au plus, au choix de l\'auteur, qui prennent trois angles différents (l\'idée, le concept, la raison), jamais trois tournures du même.',
+  REGLE_DU_NOM,
+].join('\n')
+
+/** Le geste « idees » : trois noms pour chacun des noeuds sans nom, en un appel. */
+export const CONSIGNE_IDEES = [
+  'LES NOMS DES NŒUDS À NOMMER. Pour CHAQUE nœud de la liste NŒUDS À NOMMER, et seulement pour eux : sa ref telle qu\'elle figure dans la liste, et trois noms au plus, au choix de l\'auteur, qui prennent des angles différents.',
+  'Deux nœuds frères ne reçoivent pas le même nom : s\'ils disent la même idée, dis-le par deux noms qui marquent la différence.',
+  REGLE_DU_NOM,
+].join('\n')
+
 // --- Le systeme ---------------------------------------------------------------
 
 const CONSIGNES_COMMUNES = [
@@ -516,6 +586,8 @@ const CONSIGNES_GESTE: Record<Geste, string> = {
     'Une pièce sans matière : marque q, et la question à poser à l\'auteur dans question.',
   ].join('\n'),
   phrase: CONSIGNE_PHRASE,
+  idee: CONSIGNE_IDEE,
+  idees: CONSIGNE_IDEES,
   titre: [
     'candidates : les feuilles qui tiennent la promesse du titre, de la meilleure à la moins bonne, avec decoupage_id et ref tels qu\'ils figurent dans les ARBRES, le verdict (tient, depasse, trahit) et la raison en une ligne.',
     'Si rien ne tient : manque = la pièce d\'arbre qui manque et les questions à poser à Brice pour la construire. Sinon manque = null.',
@@ -736,6 +808,11 @@ const PIECE_ENFANT = {
   },
   required: ['idee', 'texte', 'mure', 'marque', 'source'],
 }
+/** Un nom court (gestes idee et idees). */
+const NOM = {
+  type: 'string',
+  description: 'Un nom de 1 à 5 mots : une idée, un concept ou une raison. Jamais une phrase, pas de verbe conjugué, pas de point final.',
+}
 
 export const OUTILS: Record<Geste, Outil> = {
   assiste: {
@@ -819,6 +896,44 @@ export const OUTILS: Record<Geste, Outil> = {
         },
       },
       required: ['phrases'],
+    },
+  },
+  idee: {
+    name: 'rendre_noms',
+    description: 'Rend trois noms courts au plus pour le nœud cible (la grande idée que son texte illustre), au choix de l\'auteur.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        noms: {
+          type: 'array',
+          minItems: 1,
+          maxItems: MAX_NOMS,
+          items: NOM,
+        },
+      },
+      required: ['noms'],
+    },
+  },
+  idees: {
+    name: 'rendre_noms_du_lot',
+    description: 'Rend, pour chaque nœud à nommer, sa ref et trois noms courts au plus.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        noeuds: {
+          type: 'array',
+          maxItems: MAX_LOT_IDEES,
+          items: {
+            type: 'object',
+            properties: {
+              ref: { type: 'string', description: 'La ref du nœud, telle qu\'elle figure dans la liste NŒUDS À NOMMER.' },
+              noms: { type: 'array', minItems: 1, maxItems: MAX_NOMS, items: NOM },
+            },
+            required: ['ref', 'noms'],
+          },
+        },
+      },
+      required: ['noeuds'],
     },
   },
   titre: {
@@ -955,6 +1070,65 @@ export function validerPhrase(brut: unknown): ContenuPhrase {
     if (phrases.length >= MAX_PHRASES) break
   }
   return { phrases }
+}
+
+/**
+ * Un nom court propre, ou null : guillemets et ponctuation finale retires,
+ * aucun tiret long, et plus de MAX_MOTS_NOM mots = une phrase, qui tombe.
+ */
+export function lireNom(x: unknown): string | null {
+  const t = texte(x, MAX_IDEE)
+  if (!t) return null
+  const nom = t
+    .replace(/^[\s«"“'‘]+|[\s»"”'’]+$/g, '')
+    .replace(/[\s.!?…;:,]+$/u, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!nom) return null
+  if (nom.split(' ').filter((m) => /[\p{L}\p{N}]/u.test(m)).length > MAX_MOTS_NOM) return null
+  return nom
+}
+
+/** Des noms : 3 au plus, propres, sans doublon (casse et espaces ignores). */
+function lireNoms(x: unknown): string[] {
+  const vus = new Set<string>()
+  const noms: string[] = []
+  for (const brut of liste(x)) {
+    const nom = lireNom(brut)
+    if (!nom) continue
+    const cle = nom.toLowerCase()
+    if (vus.has(cle)) continue
+    vus.add(cle)
+    noms.push(nom)
+    if (noms.length >= MAX_NOMS) break
+  }
+  return noms
+}
+
+/** La sortie du geste idee : 3 noms courts au plus. */
+export function validerIdee(brut: unknown): ContenuIdee {
+  const b = estObjet(brut) ? brut : {}
+  return { noms: lireNoms(b.noms) }
+}
+
+/**
+ * La sortie du geste idees : seuls les noeuds DEMANDES (`aNommer`, les refs
+ * envoyees) passent, une fois chacun, dans l'ordre de l'arbre ; un noeud sans
+ * nom exploitable tombe.
+ */
+export function validerIdees(brut: unknown, noeuds: Noeud[], aNommer: string[]): ContenuIdees {
+  const b = estObjet(brut) ? brut : {}
+  const resoudre = resolveur(noeuds)
+  const permis = new Set(aNommer)
+  const parRef = new Map<string, string[]>()
+  for (const x of liste(b.noeuds).slice(0, MAX_LOT_IDEES * 2)) {
+    if (!estObjet(x)) continue
+    const ref = resoudre(x.ref)
+    if (typeof ref !== 'string' || !permis.has(ref) || parRef.has(ref)) continue
+    const noms = lireNoms(x.noms)
+    if (noms.length) parRef.set(ref, noms)
+  }
+  return { noeuds: aNommer.filter((r) => parRef.has(r)).map((ref) => ({ ref, noms: parRef.get(ref)! })) }
 }
 
 export function validerGenere(brut: unknown): ContenuGenere {

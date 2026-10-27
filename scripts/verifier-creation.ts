@@ -8,8 +8,9 @@
 //   npx -y tsx scripts/verifier-creation.ts
 // Sort en code 1 s'il y a un ecart.
 import {
-  OUTILS, consigneNiveau, entreesPrompt1, lireDemande, lireNoeuds, profondeurDe, serialiserArbre, texteSysteme,
-  validerGenere, validerPhrase,
+  MAX_LOT_IDEES, MAX_NOMS,
+  OUTILS, consigneNiveau, entreesPrompt1, lireDemande, lireNom, lireNoeuds, noeudsSansNom, profondeurDe, serialiserArbre, texteSysteme,
+  validerGenere, validerIdee, validerIdees, validerPhrase,
   type LigneDecoupage,
 } from '../src/lib/creation-pur'
 
@@ -69,6 +70,8 @@ verifier('aucun niveau ne demande de phrase', [1, 2, 3, 4].every((p) => consigne
 const ligne: LigneDecoupage = { id: '00000000-0000-4000-8000-000000000001', titre: 'Pourquoi tu crames tes comptes et comment arrêter ?', phrase: null, usage: 'savoir', noeuds }
 const entree = (geste: 'genere' | 'assiste' | 'phrase', cible: string | null) =>
   entreesPrompt1({ geste, auteur: 'Brice', ligne, cible, matiereAuteur: false, matiereCollee: null, outil: OUTILS[geste].name })
+const entree2 = (geste: 'idee', cible: string) =>
+  entreesPrompt1({ geste, auteur: 'Brice', ligne, cible, matiereAuteur: false, matiereCollee: null, outil: OUTILS[geste].name })
 verifier('genere, cible = aieul : profondeur 1', entree('genere', null).includes('- NIVEAU DES PIÈCES À RENDRE : profondeur 1'))
 verifier('genere, cible = le tilt : profondeur 3', entree('genere', 'bbbbbbbb').includes('profondeur 3'))
 verifier('assiste : pas de ligne de niveau', !entree('assiste', null).includes('NIVEAU DES PIÈCES'))
@@ -121,6 +124,65 @@ verifier('sortie : un noeud a creuser n\'est pas mure', d.pieces[0].mure === und
 verifier('sortie : « fondation » avec enfants = se creuse', d.pieces[2].mure === undefined && d.pieces[2].enfants?.length === 1)
 verifier('sortie : aucun tiret long', !JSON.stringify(sortie).includes('—'))
 verifier('sortie : le trou garde sa question', d.pieces[1].marque === 'q' && d.pieces[1].question === 'Un cas vécu ?')
+
+// --- 6. Le geste idee (la grande idee d'une bulle) et le lot idees -------------
+const sysIdee = texteSysteme('PROMPT 1 DE LA METHODE', 'idee')
+verifier('idee : consigne propre au geste', sysIdee.includes('LE NOM DU NŒUD CIBLE') && !sysIdee.includes('DU GÉNÉRAL AU PARTICULIER') && !sysIdee.includes('UNE PHRASE POUR EXPLIQUER'))
+verifier('idee : un nom, pas une phrase (1 a 5 mots, pas de verbe conjugue, pas de point final)', sysIdee.includes('UN NOM, PAS UNE PHRASE') && /1 à 5 mots/.test(sysIdee) && /jamais un verbe conjugué, pas de point final/.test(sysIdee))
+verifier('idee : nommer ce que la phrase ILLUSTRE, pas la resumer', /ILLUSTRE, pas ce qu'il raconte/.test(sysIdee) && /tu ne la résumes pas mot à mot/.test(sysIdee))
+verifier('idee : l\'exemple de Brice (Florent, Non-respect de la prop firm)', sysIdee.includes('« Non-respect de la prop firm »') && sysIdee.includes('Florent prenait sur la prop firm'))
+verifier('idee : le texte du noeud ne change jamais', /Ne touche jamais au texte du nœud/.test(sysIdee))
+verifier('idee : trois noms au plus, angles differents', /trois noms au plus/.test(sysIdee) && /jamais trois tournures du même/.test(sysIdee))
+verifier('idee : outil rendre_noms, 3 au plus', OUTILS.idee.name === 'rendre_noms'
+  && (OUTILS.idee.input_schema.properties.noms as { maxItems?: number }).maxItems === MAX_NOMS && MAX_NOMS === 3)
+verifier('idee : le schema du nom dit « jamais une phrase »', /Jamais une phrase/.test(JSON.stringify(OUTILS.idee.input_schema)))
+const eIdee = entree2('idee', 'cccccccc')
+verifier('idee : lignee dite et MODE idee', eIdee.includes('- MODE : idee') && eIdee.includes('- LIGNÉE DU NŒUD') && eIdee.includes('rendre_noms'))
+const demIdee = lireDemande({ geste: 'idee', decoupage_id: ligne.id, cible: 'cccccccc' })
+verifier('demande idee lue', typeof demIdee !== 'string' && demIdee.geste === 'idee' && demIdee.cible === 'cccccccc')
+verifier('demande idee sans cible refusee', lireDemande({ geste: 'idee', decoupage_id: ligne.id }) === 'cible requise pour un nom.')
+const nomsIdee = validerIdee({ noms: ['  Non-respect de la prop firm.  ', 'non-respect de la prop firm', '« Le compte des autres »', 'Florent prenait des trades qu\'il n\'aurait jamais pris', 'La revanche — tout de suite', 'Quatrième'] })
+verifier('sortie idee : point final, guillemets, doublon et phrase tombent, 3 au plus', JSON.stringify(nomsIdee.noms) === JSON.stringify(['Non-respect de la prop firm', 'Le compte des autres', 'La revanche - tout de suite']), JSON.stringify(nomsIdee))
+verifier('sortie idee : plus de 5 mots = une phrase, refusee', lireNom('Florent prenait sur la prop firm des trades') === null && lireNom('Non-respect de la prop firm') === 'Non-respect de la prop firm')
+verifier('sortie idee illisible = aucun nom', validerIdee(null).noms.length === 0)
+
+// Le lot : les noeuds sans nom, en un appel.
+const noeudsLot = lireNoeuds([
+  { id: 'n1', parent: null, ordre: 0, texte: 'ce qui se passe dans la tete', idee: 'La psychologie' },
+  { id: 'n2', parent: 'n1', ordre: 0, texte: 'Florent prenait sur la prop firm des trades qu\'il n\'aurait jamais pris sur son compte propre' },
+  { id: 'n3', parent: 'n1', ordre: 1, texte: 'Tu coupes tes gains trop tot parce que tu as peur de les rendre.' },
+  { id: 'n4', parent: null, ordre: 1, texte: '   ' },
+  { id: 'n5', parent: null, ordre: 2, texte: 'Tu rejoues le trade perdu pour te refaire.' },
+])
+const sansNom = noeudsSansNom(noeudsLot).map((n) => n.id)
+verifier('lot : les noeuds sans nom, dans l\'ordre de l\'arbre (nomme et vide exclus)', sansNom.join() === 'n2,n3,n5', sansNom.join())
+const beaucoup = lireNoeuds(Array.from({ length: 60 }, (_, i) => ({ id: `x${i}`, parent: null, ordre: i, texte: `Bulle ${i}` })))
+verifier('lot : plafond de 40 noeuds', noeudsSansNom(beaucoup).length === MAX_LOT_IDEES && MAX_LOT_IDEES === 40)
+const ligneLot: LigneDecoupage = { ...ligne, noeuds: noeudsLot }
+const eLot = entreesPrompt1({ geste: 'idees', auteur: 'Brice', ligne: ligneLot, cible: null, matiereAuteur: false, matiereCollee: null, outil: OUTILS.idees.name })
+verifier('lot : la liste NŒUDS À NOMMER donne les refs et la lignee', eLot.includes('- NŒUDS À NOMMER (3,') && eLot.includes('ref n2 (num 1.1)') && /ref n2 .*La psychologie : .* > Florent prenait/.test(eLot) && !eLot.includes('ref n1 (num'))
+verifier('lot : MODE idees et outil nomme', eLot.includes('- MODE : idees') && eLot.includes('rendre_noms_du_lot'))
+const sysLot = texteSysteme('PROMPT 1 DE LA METHODE', 'idees')
+verifier('lot : consigne propre, meme regle du nom', sysLot.includes('LES NOMS DES NŒUDS À NOMMER') && sysLot.includes('UN NOM, PAS UNE PHRASE') && /Deux nœuds frères ne reçoivent pas le même nom/.test(sysLot))
+const schemaLot = OUTILS.idees.input_schema.properties.noeuds as { maxItems?: number; items: { required: string[]; properties: { noms: { maxItems?: number } } } }
+verifier('lot : schema (ref + 3 noms, 40 noeuds au plus)', OUTILS.idees.name === 'rendre_noms_du_lot' && schemaLot.maxItems === 40 && schemaLot.items.required.join() === 'ref,noms' && schemaLot.items.properties.noms.maxItems === 3)
+const demLot = lireDemande({ geste: 'idees', decoupage_id: ligne.id, cible: 'n2' })
+verifier('demande idees lue, cible ignoree', typeof demLot !== 'string' && demLot.geste === 'idees' && demLot.cible === null)
+const lot = validerIdees({
+  noeuds: [
+    { ref: 'n5', noms: ['La revanche', 'Se refaire.'] },
+    { ref: 'n2', noms: ['Non-respect de la prop firm', 'Le compte des autres'] },
+    { ref: 'n2', noms: ['Doublon de ref'] },
+    { ref: 'n1', noms: ['Deja nomme, pas demande'] },
+    { ref: 'inconnu', noms: ['Hors arbre'] },
+    { ref: '1.2', noms: ['Couper trop tot'] },
+    { ref: 'n4', noms: ['Pas demande'] },
+  ],
+}, noeudsLot, sansNom)
+verifier('sortie lot : seuls les noeuds demandes, une fois, dans l\'ordre de l\'arbre', lot.noeuds.map((x) => x.ref).join() === 'n2,n3,n5', JSON.stringify(lot))
+verifier('sortie lot : un num rendu a la place d\'une ref est ramene a sa ref', lot.noeuds[1]?.noms[0] === 'Couper trop tot')
+verifier('sortie lot : les noms sont nettoyes (point final)', lot.noeuds[2]?.noms.join('|') === 'La revanche|Se refaire')
+verifier('sortie lot illisible = aucun noeud', validerIdees(null, noeudsLot, sansNom).noeuds.length === 0)
 
 console.log(ecarts ? `\n${ecarts} ecart(s)` : '\nTout est conforme.')
 process.exit(ecarts ? 1 : 0)

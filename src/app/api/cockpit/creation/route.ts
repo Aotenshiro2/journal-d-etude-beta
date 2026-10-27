@@ -14,6 +14,7 @@ import {
   lireDemande,
   lireNoeuds,
   motsDuDecoupage,
+  noeudsSansNom,
   requeteTsquery,
   texteMatiere,
   texteMatierePdf,
@@ -22,10 +23,14 @@ import {
   tiersReference,
   validerAssiste,
   validerGenere,
+  validerIdee,
+  validerIdees,
   validerPhrase,
   validerTitre,
   type ContenuAssiste,
   type ContenuGenere,
+  type ContenuIdee,
+  type ContenuIdees,
   type ContenuPhrase,
   type ContenuTitre,
   type LigneDecoupage,
@@ -48,6 +53,13 @@ import {
  *   matière que les deux premiers, appel court. Tant que la migration
  *   20261027140000 (le geste dans le check de la table) n'est pas appliquée,
  *   la proposition n'est pas gardée en base mais la réponse part quand même.
+ * - idee    : (27/10/2026) trois noms courts au plus pour UN nœud (la grande
+ *   idée que son texte illustre), au choix de l'auteur ; l'écran pose le nom
+ *   choisi dans `idee`, le `texte` ne change jamais. Appel court.
+ * - idees   : un nom (trois propositions) pour chaque nœud SANS nom du
+ *   découpage, MAX_LOT_IDEES au plus, en un appel ; l'écran les fait valider
+ *   un par un. Pour ces deux gestes, la migration 20261027150000 ouvre le
+ *   check ; sans elle, même repli que pour phrase.
  *
  * Les prompts et la matière ne sont pas dans le code : ils viennent de
  * cockpit_methode_textes (npm run pousser:methodes, apps/cockpit), et pour
@@ -144,6 +156,8 @@ export async function POST(req: NextRequest) {
   let cible: string | null = null
   let arbresTitre: LigneDecoupage[] = []
   let noeudsDecoupage: LigneDecoupage['noeuds'] = []
+  /** Geste idees : les refs envoyees a nommer (les seules acceptees en sortie). */
+  let aNommer: string[] = []
   let stockee: Record<string, unknown>
 
   if (demande.geste === 'titre') {
@@ -188,6 +202,13 @@ export async function POST(req: NextRequest) {
     decoupageId = ligne.id
     cible = demande.cible
     noeudsDecoupage = noeuds
+    // Le lot : les noeuds sans nom, dans l'ordre de l'arbre. Rien a nommer = rien a demander.
+    if (demande.geste === 'idees') {
+      aNommer = noeudsSansNom(noeuds).map((n) => n.id)
+      if (aNommer.length === 0) {
+        return NextResponse.json({ error: 'Toutes les bulles ont déjà un nom.' }, { status: 400, headers })
+      }
+    }
 
     // La matière de Brice ne part que pour un découpage de Brice. La matière
     // collée part dans les deux cas.
@@ -286,6 +307,7 @@ export async function POST(req: NextRequest) {
       matiere_collee: matiereCollee ? matiereCollee.slice(0, 2000) : null,
       matiere_collee_car: matiereCollee ? matiereCollee.length : 0,
       noeuds_lus: noeuds.length,
+      ...(demande.geste === 'idees' ? { a_nommer: aNommer } : {}),
     }
   }
 
@@ -296,8 +318,9 @@ export async function POST(req: NextRequest) {
     const client = aiClient('cockpit')
     reponse = await client.messages.create({
       model,
-      // Le geste phrase est un appel court : trois phrases.
-      max_tokens: geste === 'phrase' ? 1500 : 16000,
+      // Les gestes phrase et idee sont des appels courts (trois phrases, trois noms) ;
+      // le lot idees : trois noms par noeud, 40 noeuds au plus.
+      max_tokens: geste === 'phrase' ? 1500 : geste === 'idee' ? 600 : geste === 'idees' ? 6000 : 16000,
       system: systeme,
       tools: [outil],
       tool_choice: { type: 'tool', name: outil.name },
@@ -326,13 +349,21 @@ export async function POST(req: NextRequest) {
   }
 
   // --- 4. Validation, puis en base en attente d'une décision humaine ---------
-  let contenu: ContenuAssiste | ContenuGenere | ContenuTitre | ContenuPhrase
+  let contenu: ContenuAssiste | ContenuGenere | ContenuTitre | ContenuPhrase | ContenuIdee | ContenuIdees
   if (geste === 'assiste') contenu = validerAssiste(bloc.input, noeudsDecoupage)
   else if (geste === 'genere') contenu = validerGenere(bloc.input)
   else if (geste === 'phrase') contenu = validerPhrase(bloc.input)
+  else if (geste === 'idee') contenu = validerIdee(bloc.input)
+  else if (geste === 'idees') contenu = validerIdees(bloc.input, noeudsDecoupage, aNommer)
   else contenu = validerTitre(bloc.input, arbresTitre)
   if (geste === 'phrase' && (contenu as ContenuPhrase).phrases.length === 0) {
     return NextResponse.json({ error: "L'IA n'a rendu aucune phrase exploitable, réessaie." }, { status: 502, headers })
+  }
+  if (geste === 'idee' && (contenu as ContenuIdee).noms.length === 0) {
+    return NextResponse.json({ error: "L'IA n'a rendu aucun nom exploitable, réessaie." }, { status: 502, headers })
+  }
+  if (geste === 'idees' && (contenu as ContenuIdees).noeuds.length === 0) {
+    return NextResponse.json({ error: "L'IA n'a rendu aucun nom exploitable, réessaie." }, { status: 502, headers })
   }
 
   stockee.modele = model
@@ -346,11 +377,13 @@ export async function POST(req: NextRequest) {
       returning id::text as id`
     propositionId = ligne.id
   } catch (err) {
-    // Geste phrase et check de la table pas encore etendu (migration
-    // 20261027140000 non appliquee) : les phrases partent quand meme, l'ecran
-    // les range sur le noeud ; seule la trace en base manque.
-    if (geste === 'phrase' && /23514|check constraint|geste_check/i.test(err instanceof Error ? err.message : String(err))) {
-      console.warn('[cockpit/creation] geste phrase non garde en base (migration 20261027140000 a appliquer)')
+    // Gestes phrase, idee, idees et check de la table pas encore etendu
+    // (migrations 20261027140000 et 20261027150000 non appliquees) : les
+    // propositions partent quand meme, l'ecran les range sur le noeud ; seule
+    // la trace en base manque (et la file du lot ne se reprend pas).
+    const gesteNouveau = geste === 'phrase' || geste === 'idee' || geste === 'idees'
+    if (gesteNouveau && /23514|check constraint|geste_check/i.test(err instanceof Error ? err.message : String(err))) {
+      console.warn(`[cockpit/creation] geste ${geste} non garde en base (migration ${geste === 'phrase' ? '20261027140000' : '20261027150000'} a appliquer)`)
       return NextResponse.json({ ok: true, proposition_id: null, contenu }, { headers })
     }
     console.error('[cockpit/creation] proposition non enregistrée', err)
