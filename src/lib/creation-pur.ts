@@ -414,25 +414,23 @@ export function profondeurDe(noeuds: Noeud[], id: string | null): number {
 
 /** La regle de forme des pieces rendues a la profondeur `p` (1 = sous l'aieul), enfants compris. */
 export function consigneNiveau(p: number): string {
+  const test = 'Avant toute phrase, le test : ce concept contient-il encore au moins deux concepts distincts ? '
+    + 'Si oui, il reste un concept (`idee` court, `texte` = ce qu\'il couvre) et il reçoit ses concepts enfants. '
+    + 'Si non, c\'est le plus petit concept de sa branche : alors seulement, sa phrase (`texte` = la phrase, `idee` = null).'
   if (p <= 1) {
     return 'profondeur 1, sous l\'aïeul : des GRANDES IDÉES. Chaque pièce a un `idee` (un nom de catégorie de 1 à 4 mots, '
       + 'ex. « La psychologie », « Le détachement émotionnel ») et un `texte` d\'une ligne qui dit ce qu\'elle couvre, '
-      + 'jamais une phrase punchline. Leurs enfants (profondeur 2) sont des sous-idées : `idee` court aussi, `texte` = ce '
-      + 'qu\'elle couvre. Aucune phrase punchline à ces deux profondeurs.'
+      + 'jamais une phrase punchline. Leurs enfants sont des concepts plus petits, eux aussi nommés (`idee` court). ' + test
   }
-  if (p === 2) {
-    return 'profondeur 2 : des SOUS-IDÉES. Chaque pièce a un `idee` court (2 à 6 mots) et un `texte` qui dit ce qu\'elle couvre. '
-      + 'Leurs enfants (profondeur 3) sont les feuilles : `texte` = la phrase, une idée (la punchline arrive ici), `idee` = null.'
-  }
-  return `profondeur ${p} : des FEUILLES. \`texte\` = une phrase, une idée (la punchline arrive ici), \`idee\` = null. `
-    + 'Seule une pièce qui ne tient pas en une phrase garde un `idee` court et reçoit des enfants.'
+  return `profondeur ${p} : des CONCEPTS plus petits que leur parent, nommés (\`idee\` court, 2 à 6 mots). ` + test
+    + ' La profondeur ne décide rien : une branche peut avoir besoin de deux niveaux de concepts, une autre de quatre.'
 }
 
 export const CONSIGNE_DU_GENERAL_AU_PARTICULIER = [
-  'DU GÉNÉRAL AU PARTICULIER. On commence par de grandes idées, puis des sous-idées ; les phrases (punchlines, thèses en une phrase) n\'arrivent qu\'aux feuilles, quand une idée est mûre. La ligne NIVEAU DES PIÈCES À RENDRE dit la forme attendue : elle prime sur toute consigne du prompt qui demanderait des pièces d\'une phrase plus haut.',
+  'DU GÉNÉRAL AU PARTICULIER. On découpe en CONCEPTS, et chaque concept sert d\'ancrage aux concepts plus petits qu\'il contient : de grandes idées, puis les concepts qui les composent, et ainsi de suite tant qu\'un concept en contient encore plusieurs. La question « est-ce que je peux le dire en une phrase ? » ne se pose qu\'au plus petit concept, celui qu\'on ne peut plus découper : c\'est là seulement qu\'arrive la phrase (punchline, thèse en une phrase). Ne pas sauter d\'un concept large directement à une phrase. La ligne NIVEAU DES PIÈCES À RENDRE dit la forme attendue : elle prime sur toute consigne du prompt qui demanderait des pièces d\'une phrase plus haut.',
   'Une grande idée est une catégorie d\'un à quatre mots, du type des étiquettes d\'un programme de lives (« Gestion du risque », « Psychologie », « Discipline », « Résultats » ; ou « Organisation », « Adaptation », « Performance ») : jamais une phrase, jamais un verbe conjugué. Si la phrase de l\'objet, son titre ou la matière collée portent déjà de telles étiquettes, elles sont la première base du niveau 1 (garde-les, complète ou fusionne, et dis-le dans l\'angle).',
   'Champs : `idee` = le nom court de la catégorie (null pour une feuille), `texte` = ce qu\'elle couvre en une ligne pour une idée, la phrase pour une feuille.',
-  'Donne un niveau d\'enfants sous chaque grande idée quand tu as de quoi : une grande idée n\'est jamais mûre.',
+  'Donne un niveau d\'enfants sous chaque grande idée quand tu as de quoi : une grande idée n\'est jamais mûre. Un concept qui en contient encore plusieurs n\'est pas mûr non plus : il reçoit ses concepts enfants, pas une phrase.',
   'EXEMPLE DE FORME (pas de contenu à recopier). Objet : « Pourquoi tu crames tes comptes et comment arrêter ? ». Mauvais premier niveau : « Tu ne crames pas un compte sur un trade, tu le crames sur une tension psychologique que tu cherches à faire baisser » (une punchline, elle vit plus bas, dans « La conscience du corps »). Bon premier niveau, celui de l\'auteur en live : 1. idee « La conscience du corps », texte « le tilt se sent avant de se voir : signaux physiques, pause, bilan après la session » ; 2. « La nature des comptes » (challenge jetable contre compte propre, coûts cachés des validations) ; 3. « Le détachement » (les gains latents qui poussent à forcer, l\'objectif à long terme) ; 4. « La technique et les routines » (la rupture de routine comme alerte, un seul actif de référence) ; 5. « Les données » (exporter l\'historique avant de réinitialiser, l\'analyser). Les sous-idées de « La conscience du corps » : « Les signaux physiques du stress », « La pause dès les premiers signes », « Le bilan après chaque session », « L\'auto-sabotage ».',
 ].join('\n')
 

@@ -2,7 +2,7 @@
 // Aucun appel au modele, aucune base : la consigne envoyee pour le geste genere
 // et la lecture d'une sortie SIMULEE. Verifie surtout le retour de Brice du
 // 27/10 : le premier niveau genere = des GRANDES IDEES (un nom court + ce
-// qu'elle couvre), les phrases punchlines seulement aux feuilles.
+// qu'elle couvre), puis des concepts tant qu'un concept en contient plusieurs ; la phrase seulement au plus petit concept (Brice, 27/10).
 //   npx -y tsx scripts/verifier-creation.ts
 // Sort en code 1 au premier ecart.
 import {
@@ -20,7 +20,7 @@ function verifier(nom: string, ok: boolean, detail = '') {
 const systeme = texteSysteme('PROMPT 1 DE LA METHODE', 'genere')
 verifier('la consigne demande du general au particulier', systeme.includes('DU GÉNÉRAL AU PARTICULIER'))
 verifier('le premier niveau = des categories de 1 a 4 mots', /catégorie d.un à quatre mots/.test(systeme))
-verifier('les punchlines seulement aux feuilles', /n'arrivent qu'aux feuilles/.test(systeme))
+verifier('la phrase seulement au plus petit concept, pas de saut direct', /au plus petit concept/.test(systeme) && /Ne pas sauter d'un concept large directement à une phrase/.test(systeme))
 verifier('cinq par defaut, jamais de piece inventee', systeme.includes('cinq par défaut, jamais une pièce inventée'))
 verifier('ancienne regle « un niveau si pas en une phrase » retiree', !systeme.includes('si une pièce ne tient pas en une phrase.'))
 // L'exemple de reference : le decoupage reel de Brice en live, ses cinq noms courts.
@@ -55,13 +55,13 @@ verifier('lecture : noeud ancien sans idee', noeuds[3].idee === undefined)
 verifier('profondeurs 0/1/2/3', [profondeurDe(noeuds, null), profondeurDe(noeuds, 'aaaaaaaa'), profondeurDe(noeuds, 'bbbbbbbb'), profondeurDe(noeuds, 'cccccccc')].join() === '0,1,2,3')
 verifier('tableau : « idee : texte »', serialiserArbre(noeuds).includes('La psychologie : ce qui se passe dans la tete'))
 verifier('niveau 1 = GRANDES IDÉES', consigneNiveau(1).includes('GRANDES IDÉES'))
-verifier('niveau 2 = SOUS-IDÉES', consigneNiveau(2).includes('SOUS-IDÉES'))
-verifier('niveau 3 = FEUILLES, punchline', consigneNiveau(3).includes('FEUILLES') && consigneNiveau(3).includes('punchline'))
+verifier('niveau 2 = CONCEPTS, avec le test de divisibilite', consigneNiveau(2).includes('CONCEPTS') && consigneNiveau(2).includes('au moins deux concepts distincts'))
+verifier('niveau 3 : la profondeur ne force pas la phrase', consigneNiveau(3).includes('CONCEPTS') && consigneNiveau(3).includes('La profondeur ne décide rien') && !consigneNiveau(3).includes('FEUILLES'))
 
 const ligne: LigneDecoupage = { id: '00000000-0000-4000-8000-000000000001', titre: 'Pourquoi tu crames tes comptes et comment arrêter ?', phrase: null, usage: 'savoir', noeuds }
 const entree = (cible: string | null) => entreesPrompt1({ geste: 'genere', auteur: 'Brice', ligne, cible, matiereAuteur: false, matiereCollee: null, outil: 'rendre_decoupages' })
 verifier('entree, cible = aieul : grandes idees demandees', entree(null).includes('- NIVEAU DES PIÈCES À RENDRE : profondeur 1') && entree(null).includes('GRANDES IDÉES'))
-verifier('entree, cible = une grande idee : sous-idees', entree('aaaaaaaa').includes('profondeur 2') && entree('aaaaaaaa').includes('SOUS-IDÉES'))
+verifier('entree, cible = une grande idee : sous-idees', entree('aaaaaaaa').includes('profondeur 2') && entree('aaaaaaaa').includes('CONCEPTS'))
 verifier('entree, cible = une sous-idee : feuilles', entree('bbbbbbbb').includes('profondeur 3'))
 verifier('entree, cible affichee avec son idee', entree('aaaaaaaa').includes('« La psychologie : ce qui se passe dans la tete »'))
 verifier('geste assiste : pas de ligne de niveau', !entreesPrompt1({ geste: 'assiste', auteur: 'Brice', ligne, cible: null, matiereAuteur: false, matiereCollee: null, outil: 'x' }).includes('NIVEAU DES PIÈCES'))
