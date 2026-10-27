@@ -27,6 +27,13 @@ export type Noeud = {
   source: string | null
   question: string | null
   mure: boolean
+  /**
+   * Le nom court de l'idee (1 a 4 mots, « La psychologie ») quand le noeud est
+   * une CATEGORIE et pas encore une phrase (27/10/2026, retour de Brice : on
+   * commence par les grandes idees). Absent sur les noeuds ecrits avant :
+   * champ optionnel du jsonb, aucune migration. `texte` dit alors ce qu'elle couvre.
+   */
+  idee?: string | null
 }
 
 export type Statut = 'a_redecouper' | 'trou' | 'mure' | 'brut'
@@ -56,7 +63,11 @@ export type ContenuAssiste = {
   sans_vecu?: string[]
 }
 
-export type PieceEnfant = { texte: string; marque: Marque | null; source: string | null; question?: string | null }
+export type PieceEnfant = {
+  texte: string; marque: Marque | null; source: string | null; question?: string | null
+  /** Le nom court de la categorie (grande idee, sous-idee), null = une feuille, une phrase. */
+  idee?: string | null
+}
 export type PieceGeneree = PieceEnfant & { enfants?: PieceEnfant[] }
 export type ContenuGenere = { decoupages: Array<{ nom: string; angle: string; pieces: PieceGeneree[] }> }
 
@@ -70,6 +81,8 @@ export type ContenuTitre = {
 export const MAX_MATIERE_COLLEE = 40_000
 export const MAX_TITRE = 300
 export const MAX_DECOUPAGES_GENERES = 3
+/** Le nom court d'une idee : 1 a 4 mots demandes, 80 caracteres toleres. */
+export const MAX_IDEE = 80
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -143,7 +156,7 @@ export function lireNoeuds(brut: unknown): Noeud[] {
     const id = typeof x.id === 'string' ? x.id : ''
     if (!id || vus.has(id)) continue
     vus.add(id)
-    noeuds.push({
+    const n: Noeud = {
       id,
       parent: typeof x.parent === 'string' && x.parent !== '' ? x.parent : null,
       ordre: typeof x.ordre === 'number' && Number.isFinite(x.ordre) ? x.ordre : 0,
@@ -152,7 +165,9 @@ export function lireNoeuds(brut: unknown): Noeud[] {
       source: typeof x.source === 'string' && x.source.trim() ? x.source : null,
       question: typeof x.question === 'string' && x.question.trim() ? x.question : null,
       mure: x.mure === true,
-    })
+    }
+    if (typeof x.idee === 'string' && x.idee.trim()) n.idee = x.idee.trim()
+    noeuds.push(n)
   }
   return noeuds
 }
@@ -245,6 +260,12 @@ const cellule = (x: string | null, max = 600): string =>
 
 export const ENTETE_TABLEAU = 'num | ref | parent_ref | texte | marque | source | statut'
 
+/** Le texte d'un noeud dans un tableau : « La psychologie : ce qu'elle couvre » pour une idee. */
+export function texteTableau(n: Pick<Noeud, 'texte' | 'idee'>): string {
+  const idee = n.idee?.trim()
+  return idee ? `${idee} : ${n.texte}` : n.texte
+}
+
 /**
  * Le tableau `num | ref | parent_ref | texte | marque | source | statut`.
  * `exclure` : les refs a taire (mode genere : ce qui est deja sous la cible).
@@ -259,7 +280,7 @@ export function serialiserArbre(noeuds: Noeud[], exclure: Set<string> = new Set(
       nums.get(l.noeud.id) ?? l.num,
       l.noeud.id,
       l.parent ?? '-',
-      cellule(l.noeud.texte),
+      cellule(texteTableau(l.noeud)),
       l.noeud.marque ?? '-',
       cellule(l.noeud.source, 200),
       l.statut,
@@ -305,7 +326,7 @@ export function entreesPrompt1(p: {
 
   const objet = [ligne.titre.trim(), ligne.phrase?.trim()].filter(Boolean).join(' : ')
   const laCible = noeudCible
-    ? `ref ${noeudCible.id} (num ${nums.get(noeudCible.id) ?? '?'}) « ${cellule(noeudCible.texte)} »`
+    ? `ref ${noeudCible.id} (num ${nums.get(noeudCible.id) ?? '?'}) « ${cellule(texteTableau(noeudCible))} »`
     : "l'aïeul, c'est-à-dire l'objet lui-même"
   const consigneCible = geste === 'assiste'
     ? 'Juge les pièces SOUS la cible (garder, remplacer, deplacer) et propose ce qui manque sous elle. Le reste de l\'arbre est là pour le contexte.'
@@ -343,6 +364,7 @@ export function entreesPrompt1(p: {
     '- NIVEAU : arbre',
     `- MODE : ${geste}`,
     `- CIBLE : ${laCible}. ${consigneCible}`,
+    geste === 'genere' ? `- NIVEAU DES PIÈCES À RENDRE : ${consigneNiveau(profondeurDe(ligne.noeuds, noeudCible?.id ?? null) + 1)}` : null,
     "- CE QUE L'AUTEUR A DÉJÀ DIT (une ligne par pièce) :",
     arbre,
     `- MATIERE : ${matiere}`,
@@ -371,6 +393,49 @@ export function entreesPrompt2(titre: string, arbres: LigneDecoupage[], outil: s
   ].join('\n')
 }
 
+// --- Du general au particulier (27/10/2026) ------------------------------------
+//
+// Retour de Brice apres son premier vrai usage (live du 27/10, « Pourquoi tu
+// crames tes comptes et comment arreter ? ») : le geste genere rendait au premier
+// niveau des PHRASES punchlines (« Tu ne crames pas un compte sur un trade... »)
+// la ou il attend des GRANDES IDEES (« La psychologie », « Le detachement »), qui
+// se decoupent ensuite. Cause : la consigne demandait des pieces d'une phrase et
+// ne descendait que si une piece ne tenait pas en une phrase. D'ou une regle de
+// FORME par profondeur, et un champ `idee` (le nom court) distinct de `texte`.
+// L'exemple de reference est le decoupage reel de Brice pendant ce live, et les
+// etiquettes que Melanie a posees sur ce live dans le programme de la semaine :
+// c'est un exemple de FORME, jamais de contenu a recopier.
+
+/** La profondeur d'un noeud : 1 sous l'aieul, 2 en dessous... ; null (l'aieul) = 0. */
+export function profondeurDe(noeuds: Noeud[], id: string | null): number {
+  if (id === null || !noeuds.some((n) => n.id === id)) return 0
+  return ancetres(noeuds, id).length + 1
+}
+
+/** La regle de forme des pieces rendues a la profondeur `p` (1 = sous l'aieul), enfants compris. */
+export function consigneNiveau(p: number): string {
+  if (p <= 1) {
+    return 'profondeur 1, sous l\'aïeul : des GRANDES IDÉES. Chaque pièce a un `idee` (un nom de catégorie de 1 à 4 mots, '
+      + 'ex. « La psychologie », « Le détachement émotionnel ») et un `texte` d\'une ligne qui dit ce qu\'elle couvre, '
+      + 'jamais une phrase punchline. Leurs enfants (profondeur 2) sont des sous-idées : `idee` court aussi, `texte` = ce '
+      + 'qu\'elle couvre. Aucune phrase punchline à ces deux profondeurs.'
+  }
+  if (p === 2) {
+    return 'profondeur 2 : des SOUS-IDÉES. Chaque pièce a un `idee` court (2 à 6 mots) et un `texte` qui dit ce qu\'elle couvre. '
+      + 'Leurs enfants (profondeur 3) sont les feuilles : `texte` = la phrase, une idée (la punchline arrive ici), `idee` = null.'
+  }
+  return `profondeur ${p} : des FEUILLES. \`texte\` = une phrase, une idée (la punchline arrive ici), \`idee\` = null. `
+    + 'Seule une pièce qui ne tient pas en une phrase garde un `idee` court et reçoit des enfants.'
+}
+
+export const CONSIGNE_DU_GENERAL_AU_PARTICULIER = [
+  'DU GÉNÉRAL AU PARTICULIER. On commence par de grandes idées, puis des sous-idées ; les phrases (punchlines, thèses en une phrase) n\'arrivent qu\'aux feuilles, quand une idée est mûre. La ligne NIVEAU DES PIÈCES À RENDRE dit la forme attendue : elle prime sur toute consigne du prompt qui demanderait des pièces d\'une phrase plus haut.',
+  'Une grande idée est une catégorie d\'un à quatre mots, du type des étiquettes d\'un programme de lives (« Gestion du risque », « Psychologie », « Discipline », « Résultats » ; ou « Organisation », « Adaptation », « Performance ») : jamais une phrase, jamais un verbe conjugué. Si la phrase de l\'objet, son titre ou la matière collée portent déjà de telles étiquettes, elles sont la première base du niveau 1 (garde-les, complète ou fusionne, et dis-le dans l\'angle).',
+  'Champs : `idee` = le nom court de la catégorie (null pour une feuille), `texte` = ce qu\'elle couvre en une ligne pour une idée, la phrase pour une feuille.',
+  'Donne un niveau d\'enfants sous chaque grande idée quand tu as de quoi : une grande idée n\'est jamais mûre.',
+  'EXEMPLE DE FORME (pas de contenu à recopier). Objet : « Pourquoi tu crames tes comptes et comment arrêter ? ». Mauvais premier niveau : « Tu ne crames pas un compte sur un trade, tu le crames sur une tension psychologique que tu cherches à faire baisser » (une punchline, elle vit plus bas, dans « La conscience du corps »). Bon premier niveau, celui de l\'auteur en live : 1. idee « La conscience du corps », texte « le tilt se sent avant de se voir : signaux physiques, pause, bilan après la session » ; 2. « La nature des comptes » (challenge jetable contre compte propre, coûts cachés des validations) ; 3. « Le détachement » (les gains latents qui poussent à forcer, l\'objectif à long terme) ; 4. « La technique et les routines » (la rupture de routine comme alerte, un seul actif de référence) ; 5. « Les données » (exporter l\'historique avant de réinitialiser, l\'analyser). Les sous-idées de « La conscience du corps » : « Les signaux physiques du stress », « La pause dès les premiers signes », « Le bilan après chaque session », « L\'auto-sabotage ».',
+].join('\n')
+
 // --- Le systeme ---------------------------------------------------------------
 
 const CONSIGNES_COMMUNES = [
@@ -387,7 +452,8 @@ const CONSIGNES_GESTE: Record<Geste, string> = {
     'Usage savoir : sans_vecu = les refs des pièces sans aucune feuille v.',
   ].join('\n'),
   genere: [
-    `Trois découpages au plus, chacun avec un nom court (« Par le symptôme »), son angle en une phrase et ses pièces : cinq par défaut, jamais une pièce inventée pour atteindre cinq. Un niveau d'enfants si une pièce ne tient pas en une phrase.`,
+    `Trois découpages au plus, chacun avec un nom court (« Par le symptôme »), son angle en une phrase et ses pièces : cinq par défaut, jamais une pièce inventée pour atteindre cinq.`,
+    CONSIGNE_DU_GENERAL_AU_PARTICULIER,
     'Une pièce sans matière : marque q, et la question à poser à l\'auteur dans question.',
   ].join('\n'),
   titre: [
@@ -598,7 +664,11 @@ const MARQUE = { type: ['string', 'null'], enum: [...MARQUES, null] }
 const PIECE_ENFANT = {
   type: 'object',
   properties: {
-    texte: { type: 'string', description: 'Une phrase.' },
+    idee: {
+      type: ['string', 'null'],
+      description: 'Le nom court de la catégorie (1 à 4 mots, ex. « La psychologie ») pour une grande idée ou une sous-idée ; null pour une feuille.',
+    },
+    texte: { type: 'string', description: 'Une idée : ce qu\'elle couvre, en une ligne. Une feuille : la phrase.' },
     marque: MARQUE,
     source: { type: ['string', 'null'], description: 'Source exacte, ou null.' },
     question: { type: ['string', 'null'], description: 'Pour un trou (marque q) : la question à poser à l\'auteur.' },
@@ -779,6 +849,9 @@ function lirePiece(x: unknown, avecEnfants: boolean): PieceGeneree | null {
   if (!t) return null
   const piece: PieceGeneree = { texte: t, marque: normaliserMarque(x.marque), source: texte(x.source, 300) }
   if ('question' in x) piece.question = texte(x.question, 500)
+  // Le nom court d'une categorie : sans point final (ce n'est pas une phrase).
+  const idee = texte(x.idee, MAX_IDEE)?.replace(/[.\s]+$/, '')
+  if (idee) piece.idee = idee
   if (avecEnfants) {
     const enfants = liste(x.enfants).slice(0, 12)
       .map((e) => lirePiece(e, false))
