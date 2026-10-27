@@ -3,6 +3,39 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
+## Academie : le BILLET DU JOUR (27/10/2026, commite NON pousse, migration 20261027190000 APPLIQUEE en prod)
+
+Fonction validee par Brice le 27/10. Brice ecrit un billet dans le cockpit (espace Annonces, onglet « Billets ») :
+titre, texte Markdown, video facultative (guid Bunny, bibliotheque formation, ou lien YouTube), publication
+maintenant ou programmee. A la publication, tout compte CONNECTE a l'academie (gratuit compris) le voit une fois en
+pop-up, puis le lit librement 48 h (bandeau de l'accueil) ; ensuite il reste une lecon des Chroniques.
+- Conception : le billet EST des sa creation une lecon de la section « Billets » de chroniques-de-l-accelerateur
+  (academie_lecons, usage interne). La fenetre libre est une REGLE DE DROITS : `ouvertureLecon` (pur.ts) ajoute la
+  raison `billet` tant que maintenant < publie_le + 48 h (`FENETRE_LIBRE_BILLET_H`). La date vient d'une jointure
+  sur academie_billets dans SQL_LECONS_VISIBLES / SQL_LECON_PAR_ID / SQL_LECONS_PAR_VIDEO (`billet_publie_le`) :
+  lecture, pieces jointes, /moi et /catalogue appliquent la meme regle sans code a part. Rien ne bouge a 48 h.
+  `trouver_cours` (fonction SQL) ne connait pas la fenetre : un compte gratuit y voit le billet ferme.
+- Programme : la lecon reste en brouillon. Pas de pg_cron : `publierBilletsEchus` (billets.ts) la publie a la
+  premiere lecture qui suit (GET /api/academie/billet, appele par chaque page de l'academie, et la liste du
+  cockpit), une seule fois (`publication_faite_le`), et inscrit le pop-up dans cockpit_annonces_envoyees
+  (canal `popup-academie`, cible « membres connectés », source `billet:<id>`). Lecon cachee ensuite depuis
+  l'arbre = ni republiee, ni en pop-up. Un seul billet du jour : le plus recent dans sa fenetre.
+- Code : `src/lib/academie/billets.ts` (aucun import : saisie, slug, SQL, enregistrerBillet, listerBillets,
+  lireBilletDuJour, noterBilletVu) ; routes `GET|POST /api/academie/billet` (eleve, Bearer, CORS academie ;
+  POST { billet } = pop-up ferme, table academie_billets_vus, memorise par compte) et
+  `POST /api/cockpit/academie/billets` (allowlist du cockpit ; actions lister, enregistrer ; meme verrou que
+  l'arbre ; date figee une fois publie ; titre/texte dans academie_editions).
+- Migration `sites/Aoknowledgecom/supabase/migrations/20261027190000_academie_billets.sql` : tables academie_billets,
+  academie_billets_vus (serveur, RLS forcee, aucun grant), check du canal elargi. Appliquee le 27/10 par
+  appliquer-migration.sh, apres l'essai `node --env-file=.env.local scripts/essayer-migration-billets.mjs`
+  (12 etapes en transaction annulee : droits gratuit/payant fenetre ouverte/fermee, pop-up vu, programme,
+  edition, lecon cachee, contraintes).
+- Verifs : `node scripts/verifier-billets.mjs` (9 blocs hors ligne), `verifier-academie.mjs --hors-ligne` (45).
+- Site : `src/academie/Billet.tsx` (PopupBillet dans la Coquille, BandeauBillet sur l'accueil), api.ts
+  (useBilletDuJour), raison `billet` (n'ajoute pas les Chroniques a « Mes cours »), demo `?billet=texte|youtube|vu`.
+- A FAIRE au deploiement : pousser le journal AVANT le site (sinon le site appelle une route absente : rien ne
+  s'affiche, sans erreur) ; le cockpit dit « route pas en ligne » tant que le journal n'est pas deploye.
+
 ## Connecteur MCP de Belrive : les IMAGES (25/10/2026, commite NON pousse, migration 20261025120000 APPLIQUEE)
 
 ChatGPT disait ne pas pouvoir deposer d'images. Outil `deposer_image` (titre, role, nom_fichier, image) :

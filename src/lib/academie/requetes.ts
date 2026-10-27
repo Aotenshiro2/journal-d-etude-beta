@@ -167,11 +167,15 @@ select s.id::text as id, s.module_id::text as module_id, s.ordre, s.titre
 `
 
 /** Les lecons visibles (publiees ou a venir) des modules visibles. Sans identifiant d'hebergeur ni contenu. */
+// billet_publie_le (27/10/2026) : la date de publication si la lecon est un billet du jour
+// (academie_billets, non retire), pour la fenetre libre de 48 h (ouvertureLecon, pur.ts).
 export const SQL_LECONS_VISIBLES = `
 select l.id::text as id, l.module_id::text as module_id, l.section_id::text as section_id,
-       l.slug, l.ordre, l.titre, l.type, l.format, l.usage, l.duree_s, l.apercu, l.statut
+       l.slug, l.ordre, l.titre, l.type, l.format, l.usage, l.duree_s, l.apercu, l.statut,
+       b.publie_le as billet_publie_le
   from public.academie_lecons l
   join public.academie_modules m on m.id = l.module_id
+  left join public.academie_billets b on b.lecon_id = l.id and b.retire_le is null
  where m.statut in ('publie', 'a_venir') and l.statut in ('publie', 'a_venir')
  order by l.module_id, l.ordre, l.titre
 `
@@ -180,13 +184,15 @@ const COLONNES_LECON = `
   l.id::text as id, l.module_id::text as module_id, l.section_id::text as section_id,
   l.slug, l.ordre, l.titre, l.type, l.format, l.usage, l.hebergeur, l.bunny_bibliotheque, l.bunny_video_id,
   l.wistia_id, l.duree_s, l.contenu, l.ressources, l.apercu, l.statut,
-  m.statut as module_statut, m.slug as module_slug, m.titre as module_titre`
+  m.statut as module_statut, m.slug as module_slug, m.titre as module_titre,
+  b.publie_le as billet_publie_le`
 
 /** $1 = id de la lecon. Toute la lecon (identifiants d'hebergeur et contenu compris), quel que soit son statut. */
 export const SQL_LECON_PAR_ID = `
 select ${COLONNES_LECON}
   from public.academie_lecons l
   join public.academie_modules m on m.id = l.module_id
+  left join public.academie_billets b on b.lecon_id = l.id and b.retire_le is null
  where l.id = $1::uuid
 `
 
@@ -195,6 +201,7 @@ export const SQL_LECONS_PAR_VIDEO = `
 select ${COLONNES_LECON}
   from public.academie_lecons l
   join public.academie_modules m on m.id = l.module_id
+  left join public.academie_billets b on b.lecon_id = l.id and b.retire_le is null
  where l.bunny_video_id = $1 and l.statut = 'publie' and m.statut = 'publie'
  order by m.ordre, l.ordre
 `

@@ -65,6 +65,8 @@ export type LeconCatalogue = {
   dureeS: number | null
   apercu: boolean
   statut: StatutContenu
+  /** Billet du jour (academie_billets, 27/10/2026) : sa date de publication, pour la fenetre libre. Sinon null. */
+  billetPublieLe: Date | null
 }
 
 export type Catalogue = {
@@ -104,6 +106,7 @@ type LigneSection = { id: string; module_id: string; ordre: number; titre: strin
 type LigneLecon = {
   id: string; module_id: string; section_id: string | null; slug: string; ordre: number; titre: string
   type: TypeLecon; format: string; usage: string; duree_s: number | null; apercu: boolean; statut: StatutContenu
+  billet_publie_le: Date | null
 }
 type LigneLeconComplete = LigneLecon & {
   hebergeur: 'bunny' | 'wistia' | null; bunny_bibliotheque: string | null; bunny_video_id: string | null
@@ -125,6 +128,7 @@ function leconDeLigne(l: LigneLecon): LeconCatalogue {
     dureeS: l.duree_s,
     apercu: l.apercu,
     statut: l.statut,
+    billetPublieLe: l.billet_publie_le ?? null,
   }
 }
 

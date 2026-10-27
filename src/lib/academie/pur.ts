@@ -31,13 +31,37 @@ export type TypeLecon = 'video' | 'texte' | 'pdf'
  * l'equipe), liveclub (Live Club actif : paquet du moment ou paquet
  * d'entree), essai (secours de la decision B sur le module d'essai), compte
  * (tout compte : offre compte gratuit, usage externe_compte ou
- * externe_libre), apercu (lecon d'apercu).
+ * externe_libre), billet (billet du jour dans sa fenetre libre de 48 h,
+ * 27/10/2026), apercu (lecon d'apercu).
  */
-export type Raison = 'admin' | 'etm' | 'achat' | 'skool' | 'offert' | 'liveclub' | 'essai' | 'compte' | 'apercu'
+export type Raison = 'admin' | 'etm' | 'achat' | 'skool' | 'offert' | 'liveclub' | 'essai' | 'compte' | 'billet' | 'apercu'
 
 export const ORDRE_RAISONS: readonly Raison[] = [
-  'admin', 'etm', 'achat', 'skool', 'offert', 'liveclub', 'essai', 'compte', 'apercu',
+  'admin', 'etm', 'achat', 'skool', 'offert', 'liveclub', 'essai', 'compte', 'billet', 'apercu',
 ]
+
+/**
+ * Le billet du jour (27/10/2026, src/lib/academie/billets.ts) : une lecon de la
+ * section Billets des Chroniques, lisible par TOUT compte connecte pendant les
+ * 48 h qui suivent sa publication, puis avec l'acces normal du module. C'est
+ * une regle de droits, pas un deplacement de donnees : rien ne bouge a 48 h.
+ */
+export const FENETRE_LIBRE_BILLET_H = 48
+const FENETRE_LIBRE_BILLET_MS = FENETRE_LIBRE_BILLET_H * 3600 * 1000
+
+/** La fin de la fenetre libre d'un billet publie a publieLe, ou null (date absente ou illisible). */
+export function finFenetreLibre(publieLe: Date | string | null | undefined): Date | null {
+  if (publieLe === null || publieLe === undefined) return null
+  const t = (publieLe instanceof Date ? publieLe : new Date(publieLe)).getTime()
+  return Number.isFinite(t) ? new Date(t + FENETRE_LIBRE_BILLET_MS) : null
+}
+
+/** La fenetre libre est-elle ouverte a maintenantMs ? Ouverte de publieLe (inclus) a +48 h (exclu). */
+export function fenetreLibreOuverte(publieLe: Date | string | null | undefined, maintenantMs: number = Date.now()): boolean {
+  const fin = finFenetreLibre(publieLe)
+  if (!fin) return false
+  return maintenantMs >= fin.getTime() - FENETRE_LIBRE_BILLET_MS && maintenantMs < fin.getTime()
+}
 
 /**
  * Le droit Live Club du compte. 'non_lu' : pas demande, parce qu'il ne pouvait
@@ -189,17 +213,23 @@ function conclure(sures: Set<Raison>, possibles: Set<Raison>): Resultat {
   return { acces: 'ferme', raisons: [] }
 }
 
-export type LeconPourDroit = { moduleId: string; sectionId: string | null; usage: string; apercu: boolean }
+export type LeconPourDroit = {
+  moduleId: string; sectionId: string | null; usage: string; apercu: boolean
+  /** Date de publication si la lecon est un billet du jour (academie_billets), sinon absent ou null. */
+  billetPublieLe?: Date | string | null
+}
 
 /**
  * Une lecon est ouverte si son module ou sa section est ouvert, ou si elle
- * est d'usage externe (compte ou libre), ou d'apercu. 'inconnu' : seule une
- * source illisible (Live Club) pouvait l'ouvrir. Ne regarde PAS le statut
- * (publie, brouillon) : c'est le travail de la route.
+ * est d'usage externe (compte ou libre), ou d'apercu, ou si c'est un billet du
+ * jour dans sa fenetre libre (48 h apres sa publication, tout compte connecte).
+ * 'inconnu' : seule une source illisible (Live Club) pouvait l'ouvrir. Ne
+ * regarde PAS le statut (publie, brouillon) : c'est le travail de la route.
  */
-export function ouvertureLecon(d: Droits, l: LeconPourDroit): Resultat {
+export function ouvertureLecon(d: Droits, l: LeconPourDroit, maintenantMs: number = Date.now()): Resultat {
   const { sures, possibles } = evaluer(d, l.moduleId, l.sectionId, 'lecon')
   if (l.usage === 'externe_compte' || l.usage === 'externe_libre') sures.add('compte')
+  if (fenetreLibreOuverte(l.billetPublieLe, maintenantMs)) sures.add('billet')
   if (l.apercu) sures.add('apercu')
   return conclure(sures, possibles)
 }
