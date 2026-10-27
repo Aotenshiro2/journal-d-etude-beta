@@ -34,15 +34,23 @@ export type Noeud = {
    * champ optionnel du jsonb, aucune migration. `texte` dit alors ce qu'elle couvre.
    */
   idee?: string | null
+  /**
+   * La phrase qui explique le noeud, choisie par l'auteur (geste « phrase »,
+   * 27/10/2026). Champ optionnel du jsonb, aucune migration. Ne ferme rien :
+   * le noeud garde ses enfants et peut toujours se creuser.
+   */
+  phrase?: string | null
 }
 
 export type Statut = 'a_redecouper' | 'trou' | 'mure' | 'brut'
 
-export type Geste = 'assiste' | 'genere' | 'titre'
+export type Geste = 'assiste' | 'genere' | 'titre' | 'phrase'
 
 export type Demande =
   | { geste: 'assiste'; decoupage_id: string; cible: string | null; matiere_collee?: string }
   | { geste: 'genere'; decoupage_id: string; cible: string | null; matiere_collee?: string }
+  /** Une phrase pour expliquer UN noeud : la cible est obligatoire. */
+  | { geste: 'phrase'; decoupage_id: string; cible: string; matiere_collee?: string }
   | { geste: 'titre'; titre: string }
 
 export type Action = 'garder' | 'remplacer' | 'deplacer' | 'ajouter'
@@ -65,11 +73,18 @@ export type ContenuAssiste = {
 
 export type PieceEnfant = {
   texte: string; marque: Marque | null; source: string | null; question?: string | null
-  /** Le nom court de la categorie (grande idee, sous-idee), null = une feuille, une phrase. */
+  /** Le nom court du noeud (idee, concept, raison). Absent seulement dans une sortie d'avant le 27/10. */
   idee?: string | null
+  /** true = une fondation : ses enfants ne seraient que des reformulations (test des cinq enfants). */
+  mure?: boolean
 }
 export type PieceGeneree = PieceEnfant & { enfants?: PieceEnfant[] }
 export type ContenuGenere = { decoupages: Array<{ nom: string; angle: string; pieces: PieceGeneree[] }> }
+
+/** Le geste « phrase » : trois phrases au plus, au choix de l'auteur. */
+export type ContenuPhrase = { phrases: string[] }
+export const MAX_PHRASES = 3
+export const MAX_PHRASE = 400
 
 export type Verdict = 'tient' | 'depasse' | 'trahit'
 export const VERDICTS: readonly Verdict[] = ['tient', 'depasse', 'trahit']
@@ -120,7 +135,7 @@ export function lireDemande(brut: unknown): Demande | string {
     if (!titre) return 'titre requis.'
     return { geste, titre }
   }
-  if (geste !== 'assiste' && geste !== 'genere') return 'geste attendu : assiste, genere ou titre.'
+  if (geste !== 'assiste' && geste !== 'genere' && geste !== 'phrase') return 'geste attendu : assiste, genere, phrase ou titre.'
   const decoupageId = typeof brut.decoupage_id === 'string' ? brut.decoupage_id.trim() : ''
   if (!UUID.test(decoupageId)) return 'decoupage_id invalide.'
   let cible: string | null = null
@@ -132,6 +147,11 @@ export function lireDemande(brut: unknown): Demande | string {
   const matiere = typeof brut.matiere_collee === 'string' && brut.matiere_collee.trim()
     ? brut.matiere_collee.slice(0, MAX_MATIERE_COLLEE)
     : null
+  if (geste === 'phrase') {
+    // Une phrase explique UN noeud : jamais l'aieul (il a deja son intention).
+    if (cible === null) return 'cible requise pour une phrase.'
+    return matiere ? { geste, decoupage_id, cible, matiere_collee: matiere } : { geste, decoupage_id, cible }
+  }
   return matiere ? { geste, decoupage_id, cible, matiere_collee: matiere } : { geste, decoupage_id, cible }
 }
 
@@ -167,6 +187,7 @@ export function lireNoeuds(brut: unknown): Noeud[] {
       mure: x.mure === true,
     }
     if (typeof x.idee === 'string' && x.idee.trim()) n.idee = x.idee.trim()
+    if (typeof x.phrase === 'string' && x.phrase.trim()) n.phrase = x.phrase.trim()
     noeuds.push(n)
   }
   return noeuds
@@ -260,10 +281,15 @@ const cellule = (x: string | null, max = 600): string =>
 
 export const ENTETE_TABLEAU = 'num | ref | parent_ref | texte | marque | source | statut'
 
-/** Le texte d'un noeud dans un tableau : « La psychologie : ce qu'elle couvre » pour une idee. */
-export function texteTableau(n: Pick<Noeud, 'texte' | 'idee'>): string {
+/**
+ * Le texte d'un noeud dans un tableau : « La psychologie : ce qu'elle couvre »
+ * pour un noeud nomme, plus sa phrase quand l'auteur en a choisi une.
+ */
+export function texteTableau(n: Pick<Noeud, 'texte' | 'idee' | 'phrase'>): string {
   const idee = n.idee?.trim()
-  return idee ? `${idee} : ${n.texte}` : n.texte
+  const base = idee ? `${idee} : ${n.texte}` : n.texte
+  const phrase = n.phrase?.trim()
+  return phrase ? `${base} (phrase : « ${phrase} »)` : base
 }
 
 /**
@@ -300,9 +326,9 @@ export type LigneDecoupage = {
   noeuds: Noeud[]
 }
 
-/** Le message de l'utilisateur pour le Prompt 1 (gestes assiste et genere). */
+/** Le message de l'utilisateur pour le Prompt 1 (gestes assiste, genere et phrase). */
 export function entreesPrompt1(p: {
-  geste: 'assiste' | 'genere'
+  geste: 'assiste' | 'genere' | 'phrase'
   auteur: string
   ligne: LigneDecoupage
   cible: string | null
@@ -330,7 +356,13 @@ export function entreesPrompt1(p: {
     : "l'aïeul, c'est-à-dire l'objet lui-même"
   const consigneCible = geste === 'assiste'
     ? 'Juge les pièces SOUS la cible (garder, remplacer, deplacer) et propose ce qui manque sous elle. Le reste de l\'arbre est là pour le contexte.'
-    : 'Propose trois découpages de la cible : ses pièces, et si besoin un niveau d\'enfants. Ce qui existe déjà sous elle ne t\'est pas montré, c\'est voulu (page blanche). Le reste de l\'arbre est là pour le contexte.'
+    : geste === 'phrase'
+      ? 'Propose la phrase qui explique ce nœud, et rien d\'autre. Sa lignée et ses enfants sont dans le tableau, pour le contexte.'
+      : 'Propose trois découpages de la cible : ses pièces, et si besoin un niveau d\'enfants. Ce qui existe déjà sous elle ne t\'est pas montré, c\'est voulu (page blanche). Le reste de l\'arbre est là pour le contexte.'
+  // Geste phrase : la lignee dite en clair, du plus large au noeud.
+  const lignee = geste === 'phrase' && noeudCible
+    ? [...ancetres(ligne.noeuds, noeudCible.id)].reverse().concat(noeudCible).map((n) => cellule(texteTableau(n), 200)).join(' > ')
+    : null
 
   const sources: string[] = []
   if (p.matiereAuteur) sources.push('les extraits de MANIFESTE.md, idees-du-moment.md et banque-contenus.md fournis dans le système')
@@ -365,6 +397,7 @@ export function entreesPrompt1(p: {
     `- MODE : ${geste}`,
     `- CIBLE : ${laCible}. ${consigneCible}`,
     geste === 'genere' ? `- NIVEAU DES PIÈCES À RENDRE : ${consigneNiveau(profondeurDe(ligne.noeuds, noeudCible?.id ?? null) + 1)}` : null,
+    lignee ? `- LIGNÉE DU NŒUD (du plus large au nœud) : ${objet} > ${lignee}` : null,
     "- CE QUE L'AUTEUR A DÉJÀ DIT (une ligne par pièce) :",
     arbre,
     `- MATIERE : ${matiere}`,
@@ -393,18 +426,23 @@ export function entreesPrompt2(titre: string, arbres: LigneDecoupage[], outil: s
   ].join('\n')
 }
 
-// --- Du general au particulier (27/10/2026) ------------------------------------
+// --- Du general au particulier, en concepts (27/10/2026) ------------------------
 //
 // Retour de Brice apres son premier vrai usage (live du 27/10, « Pourquoi tu
 // crames tes comptes et comment arreter ? ») : le geste genere rendait au premier
-// niveau des PHRASES punchlines (« Tu ne crames pas un compte sur un trade... »)
-// la ou il attend des GRANDES IDEES (« La psychologie », « Le detachement »), qui
-// se decoupent ensuite. Cause : la consigne demandait des pieces d'une phrase et
-// ne descendait que si une piece ne tenait pas en une phrase. D'ou une regle de
-// FORME par profondeur, et un champ `idee` (le nom court) distinct de `texte`.
-// L'exemple de reference est le decoupage reel de Brice pendant ce live, et les
-// etiquettes que Melanie a posees sur ce live dans le programme de la semaine :
-// c'est un exemple de FORME, jamais de contenu a recopier.
+// niveau des PHRASES punchlines (« Tu ne crames pas un compte sur un trade... »).
+// Puis sa precision du meme jour, qui fait regle : un noeud est une IDEE, un
+// CONCEPT ou une RAISON (« le tilt est une raison de pourquoi ca arrive : il doit
+// avoir sa bulle, decomposee derriere en cinq raisons qui peuvent generer
+// l'etat de tilt »), toujours nomme (`idee` court) avec ce qu'il couvre (`texte`).
+// Le critere pour creuser n'est pas « tient en une phrase » mais le TEST DES
+// CINQ ENFANTS : cinq enfants vraiment distincts (causes, composantes,
+// raisonnements) = on creuse ; cinq reformulations de la meme idee = une
+// FONDATION de la pyramide (mure). La generation ne produit aucune punchline :
+// la phrase s'obtient a la demande, noeud par noeud (geste « phrase »), et
+// n'empeche pas de creuser. L'exemple de reference est le decoupage reel de
+// Brice pendant ce live et les etiquettes du programme de la semaine de
+// Melanie : un exemple de FORME, jamais de contenu a recopier.
 
 /** La profondeur d'un noeud : 1 sous l'aieul, 2 en dessous... ; null (l'aieul) = 0. */
 export function profondeurDe(noeuds: Noeud[], id: string | null): number {
@@ -412,33 +450,56 @@ export function profondeurDe(noeuds: Noeud[], id: string | null): number {
   return ancetres(noeuds, id).length + 1
 }
 
-/** La regle de forme des pieces rendues a la profondeur `p` (1 = sous l'aieul), enfants compris. */
+/** Le test qui decide si un noeud se creuse ou s'il est une fondation. */
+export const TEST_DES_CINQ_ENFANTS = 'LE TEST DES CINQ ENFANTS, pour chaque nœud : peux-tu lui trouver cinq enfants réellement distincts '
+  + '(des causes, des composantes, des raisonnements différents, pas la même idée redite) ? Si oui, il se creuse : il reçoit '
+  + 'ses enfants. Si les enfants possibles ne seraient que des tournures différentes de la même phrase, c\'est une FONDATION '
+  + 'de la pyramide : `mure` = true, aucun enfant. Un concept qu\'on sait déjà dire en une phrase peut très bien se creuser '
+  + 'encore (ses causes, ses raisonnements) : « ça tient en une phrase » ne décide jamais de l\'arrêt.'
+
+/** La forme des pieces rendues a la profondeur `p` (1 = sous l'aieul), enfants compris. */
 export function consigneNiveau(p: number): string {
-  const test = 'Avant toute phrase, le test : ce concept contient-il encore au moins deux concepts distincts ? '
-    + 'Si oui, il reste un concept (`idee` court, `texte` = ce qu\'il couvre) et il reçoit ses concepts enfants. '
-    + 'Si non, c\'est le plus petit concept de sa branche : alors seulement, sa phrase (`texte` = la phrase, `idee` = null).'
+  const forme = 'Chaque nœud est nommé : `idee` = son nom court (1 à 4 mots), `texte` = une ligne qui dit ce qu\'il couvre. '
+    + 'Jamais de phrase punchline.'
   if (p <= 1) {
-    return 'profondeur 1, sous l\'aïeul : des GRANDES IDÉES. Chaque pièce a un `idee` (un nom de catégorie de 1 à 4 mots, '
-      + 'ex. « La psychologie », « Le détachement émotionnel ») et un `texte` d\'une ligne qui dit ce qu\'elle couvre, '
-      + 'jamais une phrase punchline. Leurs enfants sont des concepts plus petits, eux aussi nommés (`idee` court). ' + test
+    return 'profondeur 1, sous l\'aïeul : des IDÉES, des CONCEPTS ou des RAISONS. Des catégories du type des étiquettes d\'un '
+      + 'programme de lives conviennent souvent (« La psychologie », « Le détachement émotionnel ») ; une raison est aussi un '
+      + 'bon nœud (« Le tilt », une raison de pourquoi ça arrive). ' + forme + ' Puis le test des cinq enfants sur chacun.'
   }
-  return `profondeur ${p} : des CONCEPTS plus petits que leur parent, nommés (\`idee\` court, 2 à 6 mots). ` + test
-    + ' La profondeur ne décide rien : une branche peut avoir besoin de deux niveaux de concepts, une autre de quatre.'
+  return `profondeur ${p} : des idées, concepts ou raisons plus petits que leur parent (ses causes, ses composantes, ses `
+    + `raisonnements). ${forme} Puis le test des cinq enfants sur chacun. La profondeur ne décide rien : une branche peut `
+    + 'avoir besoin de deux niveaux, une autre de quatre.'
 }
 
 export const CONSIGNE_DU_GENERAL_AU_PARTICULIER = [
-  'DU GÉNÉRAL AU PARTICULIER. On découpe en CONCEPTS, et chaque concept sert d\'ancrage aux concepts plus petits qu\'il contient : de grandes idées, puis les concepts qui les composent, et ainsi de suite tant qu\'un concept en contient encore plusieurs. La question « est-ce que je peux le dire en une phrase ? » ne se pose qu\'au plus petit concept, celui qu\'on ne peut plus découper : c\'est là seulement qu\'arrive la phrase (punchline, thèse en une phrase). Ne pas sauter d\'un concept large directement à une phrase. La ligne NIVEAU DES PIÈCES À RENDRE dit la forme attendue : elle prime sur toute consigne du prompt qui demanderait des pièces d\'une phrase plus haut.',
-  'Une grande idée est une catégorie d\'un à quatre mots, du type des étiquettes d\'un programme de lives (« Gestion du risque », « Psychologie », « Discipline », « Résultats » ; ou « Organisation », « Adaptation », « Performance ») : jamais une phrase, jamais un verbe conjugué. Si la phrase de l\'objet, son titre ou la matière collée portent déjà de telles étiquettes, elles sont la première base du niveau 1 (garde-les, complète ou fusionne, et dis-le dans l\'angle).',
-  'Champs : `idee` = le nom court de la catégorie (null pour une feuille), `texte` = ce qu\'elle couvre en une ligne pour une idée, la phrase pour une feuille.',
-  'Donne un niveau d\'enfants sous chaque grande idée quand tu as de quoi : une grande idée n\'est jamais mûre. Un concept qui en contient encore plusieurs n\'est pas mûr non plus : il reçoit ses concepts enfants, pas une phrase.',
-  'EXEMPLE DE FORME (pas de contenu à recopier). Objet : « Pourquoi tu crames tes comptes et comment arrêter ? ». Mauvais premier niveau : « Tu ne crames pas un compte sur un trade, tu le crames sur une tension psychologique que tu cherches à faire baisser » (une punchline, elle vit plus bas, dans « La conscience du corps »). Bon premier niveau, celui de l\'auteur en live : 1. idee « La conscience du corps », texte « le tilt se sent avant de se voir : signaux physiques, pause, bilan après la session » ; 2. « La nature des comptes » (challenge jetable contre compte propre, coûts cachés des validations) ; 3. « Le détachement » (les gains latents qui poussent à forcer, l\'objectif à long terme) ; 4. « La technique et les routines » (la rupture de routine comme alerte, un seul actif de référence) ; 5. « Les données » (exporter l\'historique avant de réinitialiser, l\'analyser). Les sous-idées de « La conscience du corps » : « Les signaux physiques du stress », « La pause dès les premiers signes », « Le bilan après chaque session », « L\'auto-sabotage ».',
+  'DU GÉNÉRAL AU PARTICULIER, EN CONCEPTS. Tu cherches des concepts, pas des phrases. Un nœud est une idée, un concept ou une raison (une cause), toujours nommé, et il sert d\'ancrage à ce qu\'il contient : ses causes, ses composantes, ses raisonnements. La ligne NIVEAU DES PIÈCES À RENDRE dit la forme attendue : elle prime sur toute consigne du prompt qui demanderait des pièces ou des feuilles d\'une phrase.',
+  TEST_DES_CINQ_ENFANTS,
+  'AUCUNE PUNCHLINE, nulle part, pas même aux fondations : une fondation garde son nom et sa ligne. La phrase qui explique un nœud se demande à part, nœud par nœud, et ne l\'empêche pas d\'être creusé.',
+  'Au niveau 1, une catégorie fait un ou quelques mots, du type des étiquettes d\'un programme de lives (« Gestion du risque », « Psychologie », « Discipline », « Résultats » ; ou « Organisation », « Adaptation », « Performance ») : jamais une phrase, jamais un verbe conjugué. Si la phrase de l\'objet, son titre ou la matière collée portent déjà de telles étiquettes, elles sont la première base du niveau 1 (garde-les, complète ou fusionne, et dis-le dans l\'angle).',
+  'Champs : `idee` = le nom court (toujours), `texte` = ce qu\'il couvre en une ligne (jamais une punchline), `mure` = true pour une fondation, false sinon.',
+  'Donne un niveau d\'enfants sous chaque nœud de profondeur 1 qui passe le test des cinq enfants, quand tu as de quoi.',
+  'EXEMPLE DE FORME (pas de contenu à recopier). Objet : « Pourquoi tu crames tes comptes et comment arrêter ? ». Mauvais premier niveau : « Tu ne crames pas un compte sur un trade, tu le crames sur une tension psychologique que tu cherches à faire baisser » (une punchline : elle ne se génère pas, l\'auteur la demandera sur le nœud qu\'elle explique). Bon premier niveau, celui de l\'auteur en live : 1. idee « La conscience du corps », texte « le tilt se sent avant de se voir : signaux physiques, pause, bilan après la session » ; 2. « La nature des comptes » (challenge jetable contre compte propre, coûts cachés des validations) ; 3. « Le détachement » (les gains latents qui poussent à forcer, l\'objectif à long terme) ; 4. « La technique et les routines » (la rupture de routine comme alerte, un seul actif de référence) ; 5. « Les données » (exporter l\'historique avant de réinitialiser, l\'analyser). Les enfants de « La conscience du corps » : « Les signaux physiques du stress », « La pause dès les premiers signes », « Le bilan après chaque session », « L\'auto-sabotage ».',
+  'EXEMPLE DE CHAÎNE (forme encore). « Le tilt » est une raison : il a sa bulle, et il se décompose en cinq raisons qui peuvent générer l\'état de tilt, dont « Le FOMO ». « Le FOMO » se creuse encore si on peut l\'expliquer de cinq façons réellement différentes (cinq causes ou raisonnements distincts) ; si ces cinq explications ne sont que des tournures de la même phrase, « Le FOMO » est une fondation (`mure` = true).',
+].join('\n')
+
+/**
+ * Le geste « phrase » (27/10/2026, Brice : « je dois avoir la possibilite, en
+ * cliquant sur un bouton, d'avoir une phrase pour expliquer ce concept, mais je
+ * dois pouvoir continuer de creuser la pyramide »). Un appel court, sur UN noeud.
+ */
+export const CONSIGNE_PHRASE = [
+  'UNE PHRASE POUR EXPLIQUER LE NŒUD CIBLE. Rends trois phrases au plus (une seule si le concept est simple et qu\'une deuxième ne serait qu\'une tournure de la première), au choix de l\'auteur.',
+  'Chaque phrase explique le concept (son nom et ce qu\'il couvre) à quelqu\'un qui ne le connaît pas : une seule phrase, dans la voix de l\'auteur (tutoiement, phrases courtes, mots simples, aucun tiret long).',
+  'Les trois phrases prennent trois angles différents (une cause, une image, une conséquence...), jamais trois tournures de la même.',
+  'Appuie-toi sur la LIGNÉE (ce que le nœud sert au-dessus de lui), sur ses enfants s\'il en a, et sur la matière fournie. N\'invente aucun vécu ni aucun chiffre. Une citation de la RÉFÉRENCE se formule comme elle le demande.',
+  'La phrase ne ferme rien : le nœud garde ses enfants et peut encore se creuser. Ne propose ni enfants ni découpage.',
 ].join('\n')
 
 // --- Le systeme ---------------------------------------------------------------
 
 const CONSIGNES_COMMUNES = [
   'Réponds en français, tutoiement, phrases courtes, aucun tiret long. Les `ref` que tu renvoies sont celles du tableau, jamais les num.',
-  'Dans les tableaux : num = la numérotation que l\'auteur voit, ref = l\'identifiant interne de la pièce, parent_ref = la ref de son parent (- = directement sous l\'aïeul), statut = a_redecouper (a des enfants), trou (marque q), mure (tient en une phrase), brut (pas encore jugé).',
+  'Dans les tableaux : num = la numérotation que l\'auteur voit, ref = l\'identifiant interne de la pièce, parent_ref = la ref de son parent (- = directement sous l\'aïeul), statut = a_redecouper (a des enfants), trou (marque q), mure (une fondation : ses enfants ne seraient que des reformulations), brut (pas encore jugé).',
   'Marques (tableaux et outil) : v = [V] vécu de l\'auteur, b = [B] cas ou passage de la matière fournie (banque-contenus, ou une page d\'un PDF de l\'auteur : source « PDF <fichier>, p. <n> »), i = [I] mention dans idees-du-moment, m = [M] thèse sans cas (y compris une citation de la RÉFÉRENCE, jamais b : ce n\'est pas la matière de l\'auteur), q = [?] rien encore (un trou, qui devient une question), fait = [fait], a_faire = [a faire]. Usage savoir : v, b, i, m, q. Usage production : fait, a_faire, q.',
 ].join('\n')
 
@@ -454,6 +515,7 @@ const CONSIGNES_GESTE: Record<Geste, string> = {
     CONSIGNE_DU_GENERAL_AU_PARTICULIER,
     'Une pièce sans matière : marque q, et la question à poser à l\'auteur dans question.',
   ].join('\n'),
+  phrase: CONSIGNE_PHRASE,
   titre: [
     'candidates : les feuilles qui tiennent la promesse du titre, de la meilleure à la moins bonne, avec decoupage_id et ref tels qu\'ils figurent dans les ARBRES, le verdict (tient, depasse, trahit) et la raison en une ligne.',
     'Si rien ne tient : manque = la pièce d\'arbre qui manque et les questions à poser à Brice pour la construire. Sinon manque = null.',
@@ -663,15 +725,16 @@ const PIECE_ENFANT = {
   type: 'object',
   properties: {
     idee: {
-      type: ['string', 'null'],
-      description: 'Le nom court de la catégorie (1 à 4 mots, ex. « La psychologie ») pour une grande idée ou une sous-idée ; null pour une feuille.',
+      type: 'string',
+      description: 'Le nom court du nœud, toujours : une idée, un concept ou une raison (1 à 4 mots, ex. « La psychologie », « Le tilt », « Le FOMO »).',
     },
-    texte: { type: 'string', description: 'Une idée : ce qu\'elle couvre, en une ligne. Une feuille : la phrase.' },
+    texte: { type: 'string', description: 'Ce que le nœud couvre, en une ligne. Jamais une punchline.' },
+    mure: { type: 'boolean', description: 'true = une fondation : ses enfants possibles ne seraient que des reformulations (test des cinq enfants).' },
     marque: MARQUE,
     source: { type: ['string', 'null'], description: 'Source exacte, ou null.' },
     question: { type: ['string', 'null'], description: 'Pour un trou (marque q) : la question à poser à l\'auteur.' },
   },
-  required: ['texte', 'marque', 'source'],
+  required: ['idee', 'texte', 'mure', 'marque', 'source'],
 }
 
 export const OUTILS: Record<Geste, Outil> = {
@@ -740,6 +803,22 @@ export const OUTILS: Record<Geste, Outil> = {
         },
       },
       required: ['decoupages'],
+    },
+  },
+  phrase: {
+    name: 'rendre_phrases',
+    description: 'Rend trois phrases au plus qui expliquent le nœud cible, au choix de l\'auteur.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        phrases: {
+          type: 'array',
+          minItems: 1,
+          maxItems: MAX_PHRASES,
+          items: { type: 'string', description: 'Une phrase, dans la voix de l\'auteur : tutoiement, phrases courtes, aucun tiret long.' },
+        },
+      },
+      required: ['phrases'],
     },
   },
   titre: {
@@ -856,7 +935,26 @@ function lirePiece(x: unknown, avecEnfants: boolean): PieceGeneree | null {
       .filter((e): e is PieceGeneree => e !== null)
     if (enfants.length) piece.enfants = enfants
   }
+  // Une fondation n'a pas d'enfants : si l'IA en donne quand meme, le noeud se creuse.
+  if (x.mure === true && !piece.enfants) piece.mure = true
   return piece
+}
+
+/** La sortie du geste phrase : 3 phrases au plus, non vides, sans doublon, sans tiret long. */
+export function validerPhrase(brut: unknown): ContenuPhrase {
+  const b = estObjet(brut) ? brut : {}
+  const vues = new Set<string>()
+  const phrases: string[] = []
+  for (const x of liste(b.phrases)) {
+    const p = texte(x, MAX_PHRASE)
+    if (!p) continue
+    const cle = p.toLowerCase().replace(/\s+/g, ' ')
+    if (vues.has(cle)) continue
+    vues.add(cle)
+    phrases.push(p)
+    if (phrases.length >= MAX_PHRASES) break
+  }
+  return { phrases }
 }
 
 export function validerGenere(brut: unknown): ContenuGenere {

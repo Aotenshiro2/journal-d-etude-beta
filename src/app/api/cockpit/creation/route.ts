@@ -22,9 +22,11 @@ import {
   tiersReference,
   validerAssiste,
   validerGenere,
+  validerPhrase,
   validerTitre,
   type ContenuAssiste,
   type ContenuGenere,
+  type ContenuPhrase,
   type ContenuTitre,
   type LigneDecoupage,
   type PageMatiere,
@@ -41,6 +43,11 @@ import {
  * - genere  : trois découpages de la cible, page blanche sous elle. Prompt 1.
  * - titre   : cherche dans tous les découpages les feuilles qui tiennent la
  *   promesse d'un titre déjà choisi. Prompt 2.
+ * - phrase  : (27/10/2026) trois phrases au plus qui expliquent UN nœud, au
+ *   choix de l'auteur, rangée ensuite SUR le nœud par l'écran. Prompt 1, même
+ *   matière que les deux premiers, appel court. Tant que la migration
+ *   20261027140000 (le geste dans le check de la table) n'est pas appliquée,
+ *   la proposition n'est pas gardée en base mais la réponse part quand même.
  *
  * Les prompts et la matière ne sont pas dans le code : ils viennent de
  * cockpit_methode_textes (npm run pousser:methodes, apps/cockpit), et pour
@@ -289,7 +296,8 @@ export async function POST(req: NextRequest) {
     const client = aiClient('cockpit')
     reponse = await client.messages.create({
       model,
-      max_tokens: 16000,
+      // Le geste phrase est un appel court : trois phrases.
+      max_tokens: geste === 'phrase' ? 1500 : 16000,
       system: systeme,
       tools: [outil],
       tool_choice: { type: 'tool', name: outil.name },
@@ -318,10 +326,14 @@ export async function POST(req: NextRequest) {
   }
 
   // --- 4. Validation, puis en base en attente d'une décision humaine ---------
-  let contenu: ContenuAssiste | ContenuGenere | ContenuTitre
+  let contenu: ContenuAssiste | ContenuGenere | ContenuTitre | ContenuPhrase
   if (geste === 'assiste') contenu = validerAssiste(bloc.input, noeudsDecoupage)
   else if (geste === 'genere') contenu = validerGenere(bloc.input)
+  else if (geste === 'phrase') contenu = validerPhrase(bloc.input)
   else contenu = validerTitre(bloc.input, arbresTitre)
+  if (geste === 'phrase' && (contenu as ContenuPhrase).phrases.length === 0) {
+    return NextResponse.json({ error: "L'IA n'a rendu aucune phrase exploitable, réessaie." }, { status: 502, headers })
+  }
 
   stockee.modele = model
   let propositionId: string
@@ -334,6 +346,13 @@ export async function POST(req: NextRequest) {
       returning id::text as id`
     propositionId = ligne.id
   } catch (err) {
+    // Geste phrase et check de la table pas encore etendu (migration
+    // 20261027140000 non appliquee) : les phrases partent quand meme, l'ecran
+    // les range sur le noeud ; seule la trace en base manque.
+    if (geste === 'phrase' && /23514|check constraint|geste_check/i.test(err instanceof Error ? err.message : String(err))) {
+      console.warn('[cockpit/creation] geste phrase non garde en base (migration 20261027140000 a appliquer)')
+      return NextResponse.json({ ok: true, proposition_id: null, contenu }, { headers })
+    }
     console.error('[cockpit/creation] proposition non enregistrée', err)
     return NextResponse.json(
       { error: "La proposition est faite mais n'a pas pu être enregistrée, réessaie." },
