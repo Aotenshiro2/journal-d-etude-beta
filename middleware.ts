@@ -36,7 +36,8 @@ export async function middleware(request: NextRequest) {
   // /api/tab/ : l'API de Tab, cle dediee verifiee dans la route (20/10/2026).
   // /api/liveclub/stripe : webhook Stripe du Live Club, signature verifiee dans la route, 503 sans son secret (22/10/2026).
   // /api/mcp/ : le connecteur MCP de ChatGPT pour Belrive, secret du chemin verifie dans la route (23/10/2026).
-  const publicPaths = ['/auth', '/api/health', '/guide', '/api/membres/photo', '/api/academie/achat', '/api/academie/catalogue', '/api/tab/', '/api/liveclub/stripe', '/api/mcp/']
+  // /api/club/paypal (+ /commande, /capturer) : le 10% Club paye par PayPal sans compte, commande relue chez PayPal (29/10/2026).
+  const publicPaths = ['/auth', '/api/health', '/guide', '/api/membres/photo', '/api/academie/achat', '/api/academie/catalogue', '/api/tab/', '/api/liveclub/stripe', '/api/mcp/', '/api/club/paypal']
   const isPublic = pathname === '/' || publicPaths.some(p => pathname.startsWith(p))
   if (isPublic) return supabaseResponse
 

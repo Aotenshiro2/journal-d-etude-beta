@@ -466,6 +466,39 @@ select pe.profile_id::text from public.profile_emails pe
 `
 
 // ---------------------------------------------------------------------------
+// Le 10% Club paye par PayPal (club-paypal.ts, 29/10/2026 ; index 20261029140000)
+// ---------------------------------------------------------------------------
+
+/** $1 = slug de l'offre (formation-complete). Son prix en base, en texte (numeric), ou null. */
+export const SQL_PRIX_OFFRE = `
+select o.prix_eur::text as prix from public.academie_offres o where o.slug = $1::text
+`
+
+/**
+ * L'acces d'un achat PayPal du 10% Club, une seule fois par commande (index
+ * academie_acces_paypal_reference_idx). $1 = user_id ou null, $2 = email ou
+ * null, $3 = slug de l'offre, $4 = id de la commande PayPal, $5 = montant EUR,
+ * $6 = renonciation a la retractation (create_time de la commande : la case
+ * est cochee avant sa creation), $7 = note, $8 = paiement_id (paypal:<capture>).
+ * A vie (fin vide), cote brice. Rend { offre_connue, cree } : cree = false si
+ * la commande etait deja notee.
+ */
+export const SQL_POSER_ACHAT_PAYPAL = `
+with o as (
+  select id from public.academie_offres where slug = $3::text
+),
+ins as (
+  insert into public.academie_acces (user_id, email, offre_id, source, reference, montant_eur, debut, fin,
+                                     renonciation_retractation_le, pose_par, note, paiement_id, cote)
+  select $1::uuid, $2::text, o.id, 'paypal', $4::text, $5::numeric, now(), null, $6::timestamptz, 'paypal', $7::text, $8::text, 'brice'
+    from o
+  on conflict (reference) where source = 'paypal' and reference is not null do nothing
+  returning id
+)
+select (select count(*)::int from o) as offre_connue, (select count(*)::int from ins) as cree
+`
+
+// ---------------------------------------------------------------------------
 // Edition dans l'app par l'admin (edition.ts, route /api/academie/edition ;
 // migration 20261023120000_academie_editions.sql, 23/10/2026)
 // ---------------------------------------------------------------------------

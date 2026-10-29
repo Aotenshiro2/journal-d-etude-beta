@@ -3,6 +3,34 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
+## 10% Club paye par PayPal : l'acces s'ouvre tout seul (29/10/2026, commite NON pousse, migration 20261029140000 APPLIQUEE)
+
+Plan de l'academie, section 6, point 6. On garde PayPal (4x, et PayPal avance l'argent ; Stripe n'est PAS une option).
+La page /club (site v3, src/academie/achat-club.ts + src/components/PaiementClub.tsx) charge le JS SDK et appelle :
+- `GET /api/club/paypal` : { client_id, ouvert } ; 503 'config' sans PAYPAL_CLIENT_ID ou PAYPAL_CLIENT_SECRET.
+- `POST /api/club/paypal/commande` { email?, renonciation: true, essai? } : commande Orders v2 (CAPTURE, EUR,
+  reference_id club-10 ou club-10-essai, custom_id u:<uuid> du jeton sinon e:<email>, application_context
+  AO Knowledge / NO_SHIPPING / PAY_NOW / fr-FR). Montant jamais lu dans le corps : 1 EUR en essai, sinon
+  academie_offres.prix_eur de formation-complete (1 999 a defaut). Vente fermee tant que CLUB_PAYPAL_PUBLIC != 1 :
+  seul l'essai d'un compte admin (profiles.role, estAdmin) passe ; ouverte, l'essai reste admin.
+- `POST /api/club/paypal/capturer` { order_id } : commande relue chez PayPal (nos commandes seulement, montant
+  verifie AVANT capture), capture (PayPal-Request-Id fixe par commande, ORDER_ALREADY_CAPTURED relu). COMPLETED :
+  academie_acces formation-complete (source paypal, reference = order id, paiement_id paypal:<capture>, fin vide,
+  cote brice, renonciation = create_time de la commande, note avec order, capture, montant, essai, payeur PayPal
+  s'il differe), puis email d'acces par Resend (RESEND_API_KEY_LIVECLUB, support@, une seule fois). PENDING :
+  { etat: 'en_attente' }, alerte Telegram a l'equipe (Agent AOK) avec la commande ; RAPPELER la route une fois le
+  paiement confirme ouvre l'acces. Routes publiques (middleware), Bearer facultatif (compte_lie).
+- Code : `src/lib/academie/club-paypal-pur.ts` (aucun import), `club-paypal.ts` (OAuth en memoire, Orders v2,
+  acces, email, alerte), SQL_PRIX_OFFRE et SQL_POSER_ACHAT_PAYPAL dans requetes.ts. Verifs :
+  `node scripts/verifier-club-paypal.mjs` (15 blocs), tsc, eslint ; SQL passe en EXPLAIN (arbitre = l'index).
+- Migration `20261029140000_academie_achat_paypal.sql` : index unique academie_acces_paypal_reference_idx
+  (reference where source = 'paypal'), appliquee le 29/10 (aucun acces paypal en base avant).
+- A FAIRE : variables Vercel PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET (app REST live de Brice), puis l'achat test
+  (aoknowledge.com/club?achat=essai, compte admin, 1 EUR, a rembourser chez PayPal : le remboursement ne retire
+  PAS l'acces, pas de webhook) ; ensuite CLUB_PAYPAL_PUBLIC=1 cote journal ET CLUB_PAYPAL_SERVEUR = true cote site.
+  Pousser le journal AVANT le site. Suite possible : webhook PayPal (PAYMENT.CAPTURE.COMPLETED / REFUNDED), non
+  fait car il modifie la config PayPal de Brice ; academie_offres.cockpit_offre_id de formation-complete est vide.
+
 ## Agent AOK : le fil de Melanie, la duree libre des acces broker, les demandes restees sans reponse (29/10/2026, DEPLOYE le 29/10 a 13:05, commit 1548eda, aucune migration)
 
 Bug reel du 28/10 (fil de Melanie, 12:53, 14:21, 22:03) : « Je vérifie... » puis plus rien. CAUSE PROUVEE (AiUsage,
