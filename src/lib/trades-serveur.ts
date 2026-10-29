@@ -1,8 +1,9 @@
 // Les trades importés côté base (brief A, 29/10/2026) : insertion, regroupement
-// en positions, rapprochement avec le Carnet, suppression. Les décisions sont
-// dans les modules purs (positions.ts, correspondances-carnet.ts) ; ici on lit
-// et on écrit, TOUJOURS borné au userId du jeton. La table est fermée (RLS +
-// revoke, 30/09) : le journal y accède en postgres.
+// en positions, rapprochement avec le Carnet, suppression ; le jugement du
+// Carnet sur les positions (brief A2, 30/10/2026). Les décisions sont dans les
+// modules purs (positions.ts, correspondances-carnet.ts, carnet-sur-positions.ts) ;
+// ici on lit et on écrit, TOUJOURS borné au userId du jeton. La table est
+// fermée (RLS + revoke, 30/09) : le journal y accède en postgres.
 //
 // Utilisé par /api/pilotage/trades/... (Pilotage) et /api/imports-trades
 // (l'écran du journal) : un import se regroupe et se rapproche pareil des deux côtés.
@@ -13,6 +14,7 @@ import { prisma } from '@/lib/db'
 import type { TradeNormalise } from '@/lib/imports-trades'
 import { liensAHarmoniser, positionDe, positionsRecalculees, vuePositions, type Execution, type VuePosition } from '@/lib/positions'
 import { proposerLiens, segmentsDesNotes, type SegmentCarnet } from '@/lib/correspondances-carnet'
+import { ajouterCarnet, compterSegmentsNonLies, type PeriodeCarnet } from '@/lib/carnet-sur-positions'
 
 const CHAMPS_EXECUTION = {
   id: true, compteId: true, symbole: true, direction: true, devise: true, entreLe: true, sortiLe: true,
@@ -34,6 +36,38 @@ export const dansLesPositions = (ids: string[]): Prisma.TradeImportWhereInput =>
 export async function segmentsDuMembre(userId: string): Promise<SegmentCarnet[]> {
   const notes = await prisma.note.findMany({ where: { userId, deletedAt: null }, select: { id: true, title: true, trades: true } })
   return segmentsDesNotes(notes)
+}
+
+/**
+ * Le Carnet sur les positions rendues à Pilotage (brief A2, 30/10/2026) :
+ * chaque position gagne `carnet` (dernier jugement, émotion au départ,
+ * cooldown du segment lié, null sans segment), et on compte les segments de
+ * la période qu'aucune position ne porte. Une requête Annotation, une lecture
+ * des notes du membre (non supprimées, comme segmentsDuMembre), le calcul dans
+ * carnet-sur-positions.ts. Borné au userId : un segmentRef ne lit jamais les
+ * jugements ni les notes d'un autre membre.
+ * @param executions TOUTES les exécutions du membre : un segment lié à une
+ *   position hors de la période (ou d'un autre compte) reste lié.
+ */
+export async function positionsAvecCarnet<P extends VuePosition>(
+  userId: string,
+  positions: P[],
+  executions: Pick<Execution, 'segmentRef'>[],
+  periode: PeriodeCarnet,
+) {
+  const refs = [...new Set(positions.map(p => p.segmentRef).filter((r): r is string => r !== null))]
+  const [notes, jugements] = await Promise.all([
+    prisma.note.findMany({ where: { userId, deletedAt: null }, select: { id: true, title: true, trades: true, warmups: true } }),
+    refs.length === 0 ? [] : prisma.annotation.findMany({
+      where: { userId, tradeRef: { in: refs } },
+      orderBy: { createdAt: 'asc' },
+      select: { tradeRef: true, grade: true, causeCategory: true, phrase: true, createdAt: true },
+    }),
+  ])
+  return {
+    positions: ajouterCarnet(positions, notes, jugements),
+    segmentsNonLies: compterSegmentsNonLies(notes, executions.map(e => e.segmentRef), periode),
+  }
 }
 
 interface Changements { positions: Map<string, string>; liens: Map<string, string | null> }

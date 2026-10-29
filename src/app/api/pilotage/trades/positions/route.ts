@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db'
 import { getUserId } from '@/lib/api-auth'
 import { corsHeaders, corsPreflight } from '@/lib/support-cors'
 import { liensAHarmoniser, planFusion, positionDe, totauxParCompte, vuePositions } from '@/lib/positions'
-import { dansLesPositions, executionsDuMembre, segmentsDuMembre } from '@/lib/trades-serveur'
+import { dansLesPositions, executionsDuMembre, positionsAvecCarnet, segmentsDuMembre } from '@/lib/trades-serveur'
 
 /**
  * Les positions du membre pour Pilotage (brief A, 29/10/2026). Tout est borné
@@ -18,6 +18,14 @@ import { dansLesPositions, executionsDuMembre, segmentsDuMembre } from '@/lib/tr
  * applique pas) : `{ compteId, n, pnl, frais, devise, premierLe, dernierLe }`,
  * premierLe / dernierLe = entrée de la première / dernière position. Un compte
  * en deux monnaies donne deux lignes : on n'additionne pas des dollars et des euros.
+ * Le Carnet (brief A2, 30/10/2026, pour la tuile « Le tri » de « Mon edge ») :
+ * chaque position porte `carnet`, null sans segmentRef ou si le segment
+ * n'existe plus, sinon `{ grade, cause, phrase, jugeLe, noteId, noteTitle,
+ * ordre, emotionDepart, erreur, lecon, outcome, r }` (dernier jugement tel
+ * qu'écrit, « B+ » ; pas de jugement = grade, cause, phrase, jugeLe à null ;
+ * emotionDepart = le warmup de la note juste avant le segment ; erreur et
+ * lecon = son cooldown). `segmentsNonLies` : les segments du Carnet du membre
+ * entrés dans la période (tous sans période) qu'aucune position ne porte.
  *
  * PATCH, une action, rend `{ positions }` (les positions concernées après coup) :
  * - { action: 'fusionner', ids: [positionId...] } : toutes au membre, même
@@ -62,12 +70,14 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const periode = vuePositions(await executionsDuMembre(userId)).filter(v => {
+    const executions = await executionsDuMembre(userId)
+    const periode = vuePositions(executions).filter(v => {
       const t = Date.parse(v.entreLe)
       return (depuis === null || t >= depuis) && (jusqu === null || t < jusqu)
     })
-    const positions = compteId ? periode.filter(v => v.compteId === compteId) : periode
-    return NextResponse.json({ positions, total: positions.length, parCompte: totauxParCompte(periode) }, { headers: cors })
+    const rendues = compteId ? periode.filter(v => v.compteId === compteId) : periode
+    const { positions, segmentsNonLies } = await positionsAvecCarnet(userId, rendues, executions, { depuis, jusqu })
+    return NextResponse.json({ positions, total: positions.length, parCompte: totauxParCompte(periode), segmentsNonLies }, { headers: cors })
   } catch (err) {
     console.error('[pilotage/trades/positions GET]', err)
     return NextResponse.json({ error: err instanceof Error ? err.message : 'Internal server error' }, { status: 500, headers: cors })

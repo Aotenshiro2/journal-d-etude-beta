@@ -1,7 +1,8 @@
 // Les trades qui restent (brief A, 29/10/2026) : les lecteurs (Tradovate,
 // TopstepX, CSV generique, Quantower refuse), le regroupement des executions
-// en positions, le rapprochement avec les segments du Carnet, et le bornage
-// des routes au membre. Fonctions pures, aucune base, aucun reseau ; fixtures
+// en positions, le rapprochement avec les segments du Carnet, le jugement du
+// Carnet sur chaque position (brief A2, 30/10/2026), et le bornage des routes
+// au membre. Fonctions pures, aucune base, aucun reseau ; fixtures
 // SYNTHETIQUES (memes en-tetes que les vrais exports, valeurs inventees).
 // node scripts/verifier-imports-trades.mjs
 import assert from 'node:assert/strict'
@@ -10,6 +11,7 @@ import { parserFichierTrades, proposerColonnes, separerNouveaux, lireColonnes } 
 import { liensAHarmoniser, planFusion, positionsRecalculees, regrouperEnPositions, totauxParCompte, vuePositions } from '../src/lib/positions.ts'
 import { candidatsPourPosition, proposerLiens, segmentsDesNotes, FENETRE_OUVERTE_MS } from '../src/lib/correspondances-carnet.ts'
 import { appliquerFuseau, decalageMs, fuseauDemande, instantDepuisHeureLocale, nomFuseau } from '../src/lib/fuseau.ts'
+import { ajouterCarnet, compterSegmentsNonLies, derniersJugements, emotionAuDepart } from '../src/lib/carnet-sur-positions.ts'
 
 let n = 0
 const bloc = (nom, f) => { f(); n++; console.log(`ok  ${nom}`) }
@@ -405,6 +407,152 @@ bloc('un candidat = lie ; deux = proposes ; aucun = rien ; deja pris = propose',
   const r = proposerLiens([pos('b', '13:20', '13:25'), pos('a', '13:05', '13:10')], segments, [])
   assert.deepEqual(r.liens, [{ positionId: 'a', segmentRef: 's2' }])
   assert.deepEqual(r.correspondances.map(c => c.positionId), ['b'])
+})
+
+// ── Le Carnet sur les positions (brief A2) ──────────────────────────────────
+
+const instantDu = (jj, hm) => new Date(`2026-10-${jj}T${hm}:00.000Z`)
+const notesCarnet = [
+  { id: 'n1', title: 'Seance NY', trades: [
+    { id: 'k1', startedAt: ms('10:00'), closedAt: ms('10:20'), outcome: 'gain', r: 1.5,
+      cooldown: { emotion: 'calme', error: ' entre trop tot ', lesson: 'attendre la cloture', doneAt: ms('10:30') } },
+    { id: 'k2', startedAt: ms('14:30'), outcome: 'perte', r: -1 },
+    { id: 'k3', startedAt: ms('08:00'), outcome: 'inconnu', r: 'abc', cooldown: { error: '   ' } },
+  ], warmups: [
+    { id: 'w1', startedAt: ms('09:00'), emotionLevel: 30 },
+    { id: 'w2', startedAt: ms('14:00'), emotionLevel: 70 },
+    { id: 'w3', startedAt: ms('15:00'), emotionLevel: 90 },
+  ] },
+  { id: 'n2', title: 'Sans warmup', trades: [{ id: 'k4', startedAt: ms('11:00') }], warmups: null },
+]
+const jugementsCarnet = [
+  { tradeRef: 'k1', grade: 'C-', causeCategory: 'emotionnel', phrase: 'premier avis', createdAt: instantDu('05', '11:00') },
+  { tradeRef: 'k1', grade: 'B+', causeCategory: 'technique', phrase: '  entree propre MAIS stop serre  ', createdAt: instantDu('06', '09:00') },
+  { tradeRef: 'k2', grade: 'A', causeCategory: null, phrase: 'plan suivi', createdAt: instantDu('05', '15:00') },
+  { tradeRef: null, grade: 'C', causeCategory: null, phrase: 'jugement de la note', createdAt: instantDu('07', '09:00') },
+]
+const vue = (positionId, segmentRef) => ({ positionId, entreLe: t('10:00').toISOString(), pnl: 10, segmentRef })
+
+bloc('Carnet : le dernier jugement gagne (quel que soit l ordre lu), nuance conservee, phrase et cooldown lus', () => {
+  assert.equal(derniersJugements(jugementsCarnet).get('k1').grade, 'B+')
+  assert.equal(derniersJugements([...jugementsCarnet].reverse()).get('k1').grade, 'B+')
+  const [p] = ajouterCarnet([vue('p1', 'k1')], notesCarnet, jugementsCarnet)
+  assert.deepEqual(p, {
+    positionId: 'p1', entreLe: '2026-10-05T10:00:00.000Z', pnl: 10, segmentRef: 'k1',
+    carnet: {
+      grade: 'B+', cause: 'technique', phrase: 'entree propre MAIS stop serre', jugeLe: '2026-10-06T09:00:00.000Z',
+      noteId: 'n1', noteTitle: 'Seance NY', ordre: 1, emotionDepart: 30,
+      erreur: 'entre trop tot', lecon: 'attendre la cloture', outcome: 'gain', r: 1.5,
+    },
+  })
+  // La nuance moins et le D (opt-in) restent tels qu'ecrits ; un jugement de note (sans tradeRef) ou illisible ne compte pas.
+  const nuances = derniersJugements([
+    { tradeRef: 'x', grade: 'C-', causeCategory: 'inventee', phrase: 'p', createdAt: instantDu('05', '09:00') },
+    { tradeRef: 'y', grade: 'D+', causeCategory: null, phrase: 'p', createdAt: instantDu('05', '09:00') },
+    { tradeRef: 'y', grade: 'Z', causeCategory: null, phrase: 'p', createdAt: instantDu('06', '09:00') },
+  ])
+  assert.deepEqual([...nuances].map(([ref, j]) => [ref, j.grade]), [['x', 'C-'], ['y', 'D+']])
+  assert.equal(derniersJugements(jugementsCarnet).size, 2)
+  // Une cause hors des trois categories ne sort pas.
+  const [x] = ajouterCarnet([vue('px', 'kx')], [{ id: 'nx', title: 'X', trades: [{ id: 'kx', startedAt: ms('10:00') }], warmups: [] }],
+    [{ tradeRef: 'kx', grade: 'C-', causeCategory: 'inventee', phrase: 'p', createdAt: instantDu('05', '09:00') }])
+  assert.deepEqual([x.carnet.grade, x.carnet.cause], ['C-', null])
+})
+
+bloc('Carnet : pas de jugement = grade, cause, phrase, jugeLe a null, le reste rempli', () => {
+  const [p] = ajouterCarnet([vue('p4', 'k4')], notesCarnet, jugementsCarnet)
+  assert.deepEqual(p.carnet, {
+    grade: null, cause: null, phrase: null, jugeLe: null, noteId: 'n2', noteTitle: 'Sans warmup', ordre: 1,
+    emotionDepart: null, erreur: null, lecon: null, outcome: null, r: null,
+  })
+  const [q] = ajouterCarnet([vue('p2', 'k2')], notesCarnet, jugementsCarnet)
+  assert.deepEqual(q.carnet, {
+    grade: 'A', cause: null, phrase: 'plan suivi', jugeLe: '2026-10-05T15:00:00.000Z', noteId: 'n1', noteTitle: 'Seance NY', ordre: 2,
+    emotionDepart: 70, erreur: null, lecon: null, outcome: 'perte', r: -1,
+  })
+  // Le meme segment sans aucun jugement lu : seuls les quatre champs du jugement tombent.
+  const [r] = ajouterCarnet([vue('p2', 'k2')], notesCarnet, [])
+  assert.deepEqual(r.carnet, { ...q.carnet, grade: null, cause: null, phrase: null, jugeLe: null })
+})
+
+bloc('Carnet : le warmup juste avant le segment, pas le suivant ; le premier s il n y en a aucun avant', () => {
+  const w = notesCarnet[0].warmups
+  assert.equal(emotionAuDepart(w, ms('10:00')), 30) // w1 (09:00), pas w2 (14:00)
+  assert.equal(emotionAuDepart(w, ms('14:30')), 70) // w2 (14:00), pas w3 (15:00)
+  assert.equal(emotionAuDepart(w, ms('14:00')), 70) // meme instant : compris
+  assert.equal(emotionAuDepart(w, ms('08:00')), 30) // aucun avant : le premier
+  assert.equal(emotionAuDepart([w[2], w[1]], ms('08:00')), 70) // le premier dans le temps, pas dans le tableau
+  // Le warmup unique d'avant les seances multiples (sans startedAt) s'affiche en haut de la note : il precede tout.
+  assert.equal(emotionAuDepart([w[2], { emotionLevel: 50 }], ms('08:00')), 50)
+  assert.equal(emotionAuDepart([{ emotionLevel: 50 }, w[0]], ms('10:00')), 30)
+  // Le warmup retenu sans niveau : null, on ne prend pas celui d'une autre seance.
+  assert.equal(emotionAuDepart([w[0], { startedAt: ms('09:30') }], ms('10:00')), null)
+  for (const rien of [null, undefined, [], { pas: 'un tableau' }, [null, 'x']]) assert.equal(emotionAuDepart(rien, ms('10:00')), null)
+  // Dans la vue : k3 (08:00) prend le premier warmup de sa note.
+  assert.equal(ajouterCarnet([vue('p3', 'k3')], notesCarnet, [])[0].carnet.emotionDepart, 30)
+})
+
+bloc('Carnet : cooldown, issue et R verifies ; sans lien ou segment disparu = carnet null, ordre des positions garde', () => {
+  const [k3] = ajouterCarnet([vue('p3', 'k3')], notesCarnet, jugementsCarnet)
+  assert.deepEqual([k3.carnet.ordre, k3.carnet.erreur, k3.carnet.lecon, k3.carnet.outcome, k3.carnet.r], [3, null, null, null, null])
+  const r = ajouterCarnet([vue('a', 'k2'), vue('b', null), vue('c', 'disparu'), vue('d', 'k1')], notesCarnet, jugementsCarnet)
+  assert.deepEqual(r.map(p => [p.positionId, p.carnet && p.carnet.grade]), [['a', 'A'], ['b', null], ['c', null], ['d', 'B+']])
+  assert.equal(r[1].carnet, null)
+  assert.equal(r[2].carnet, null)
+  // La note supprimee n'est pas lue (deletedAt filtre en base) : son segment a disparu, ses jugements ne le font pas revenir.
+  assert.equal(ajouterCarnet([vue('d', 'k1')], notesCarnet.slice(1), jugementsCarnet)[0].carnet, null)
+  // Les champs du contrat, ni plus ni moins.
+  assert.deepEqual(Object.keys(r[0].carnet).sort(), ['cause', 'emotionDepart', 'erreur', 'grade', 'jugeLe', 'lecon', 'noteId', 'noteTitle', 'ordre', 'outcome', 'phrase', 'r'])
+})
+
+bloc('segmentsNonLies : segments de la periode qu aucune position ne porte, debut compris, fin exclue', () => {
+  const tous = [...notesCarnet, { id: 'n3', title: 'Mercredi', trades: [{ id: 'k5', startedAt: instantDu('07', '10:00').getTime() }, { startedAt: 1 }], warmups: [] }]
+  const toujours = { depuis: null, jusqu: null }
+  assert.equal(compterSegmentsNonLies(tous, [], toujours), 5)
+  assert.equal(compterSegmentsNonLies(tous, ['k1', null, 'k1'], toujours), 4)
+  // Le 5 octobre (bornes de la route : « 2026-10-05 » de 00:00 compris au lendemain exclu).
+  const d5 = Date.parse('2026-10-05T00:00:00Z')
+  assert.equal(compterSegmentsNonLies(tous, ['k1'], { depuis: d5, jusqu: d5 + 86_400_000 }), 3) // k2, k3, k4
+  assert.equal(compterSegmentsNonLies(tous, [], { depuis: ms('10:00'), jusqu: ms('14:30') }), 2) // k1, k4
+  assert.equal(compterSegmentsNonLies(tous, [], { depuis: instantDu('06', '00:00').getTime(), jusqu: null }), 1) // k5
+  assert.equal(compterSegmentsNonLies([], [], toujours), 0)
+})
+
+bloc('Carnet sur les positions : une requete Annotation, une lecture des notes, bornees au userId ; module pur', () => {
+  const lire = chemin => readFileSync(new URL(chemin, import.meta.url), 'utf8')
+  const appels = (source, prefixe) => {
+    const trouves = []
+    let i = source.indexOf(prefixe)
+    while (i >= 0) {
+      let j = source.indexOf('(', i), prof = 0
+      for (let k = j; k < source.length; k++) {
+        if (source[k] === '(') prof++
+        if (source[k] === ')' && --prof === 0) { j = k; break }
+      }
+      trouves.push(source.slice(i, j + 1))
+      i = source.indexOf(prefixe, j)
+    }
+    return trouves
+  }
+  const serveur = lire('../src/lib/trades-serveur.ts')
+  const route = lire('../src/app/api/pilotage/trades/positions/route.ts')
+  const debut = serveur.indexOf('export async function positionsAvecCarnet')
+  assert.ok(debut >= 0)
+  const fonction = serveur.slice(debut, serveur.indexOf('\n}\n', debut) + 2)
+  assert.equal(appels(fonction, 'prisma.annotation.').length, 1)
+  assert.equal(appels(fonction, 'prisma.note.').length, 1)
+  assert.match(fonction, /prisma\.annotation\.findMany\(\{\s*where: \{ userId, tradeRef: \{ in: refs \} \},\s*orderBy: \{ createdAt: 'asc' \},/)
+  assert.match(fonction, /prisma\.note\.findMany\(\{ where: \{ userId, deletedAt: null \}, select: \{ id: true, title: true, trades: true, warmups: true \} \}\)/)
+  for (const prefixe of ['prisma.annotation.', 'prisma.note.']) {
+    for (const appel of appels(serveur, prefixe)) assert.ok(/where: \{ userId[,\s]/.test(appel), `trades-serveur.ts : appel non borne au membre : ${appel.slice(0, 80)}`)
+  }
+  // La route : le userId du jeton, TOUTES les executions du membre (un segment lie hors periode reste lie), la periode demandee.
+  assert.match(route, /const executions = await executionsDuMembre\(userId\)\s*const periode = vuePositions\(executions\)/)
+  assert.match(route, /await positionsAvecCarnet\(userId, rendues, executions, \{ depuis, jusqu \}\)/)
+  assert.match(route, /parCompte: totauxParCompte\(periode\), segmentsNonLies \}, \{ headers: cors \}\)/)
+  // PATCH rend ses positions comme avant, sans carnet.
+  assert.ok(!route.slice(route.indexOf('export async function PATCH')).includes('Carnet('))
+  assert.ok(!/^import /m.test(lire('../src/lib/carnet-sur-positions.ts')), 'carnet-sur-positions.ts importe quelque chose')
 })
 
 // ── Les routes : bornees au membre, CORS de Pilotage ────────────────────────
