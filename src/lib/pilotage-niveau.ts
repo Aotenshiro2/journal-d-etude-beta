@@ -11,11 +11,10 @@
 
 import { prisma } from '@/lib/db'
 import { SQL_IDENTITE } from '@/lib/academie/requetes'
-import { cleAchat } from '@/lib/academie/achat'
 import { checkMentoratAccess } from '@/lib/entitlements'
 import { estSansPlafond } from '@/lib/ia-budget'
 import { octetsDuCoffre } from '@/lib/documents-serveur'
-import { abonnementsDuMembre, portailDe, type AbonnementActif } from '@/lib/pilotage-abonnement'
+import { abonnementsDuMembre, portailDe, type AbonnementActif, clePilotage } from '@/lib/pilotage-abonnement'
 import {
   COFFRE_PAR_PALIER, TARIFS, compterLectures, debutDesLectures, quotaDe, resoudrePalier,
   type Compteur, type Palier,
@@ -81,7 +80,7 @@ export async function niveauDuMembre(userId: string) {
   const [{ compteur }, octets, portail] = await Promise.all([
     compteurDuMembre(userId, p.palier),
     octetsDuCoffre(userId),
-    p.abonnement ? portailDe(cleAchat(), p.abonnement.reference) : Promise.resolve(null),
+    p.abonnement ? portailDe(clePilotage(), p.abonnement.reference) : Promise.resolve(null),
   ])
   return {
     palier: p.palier,

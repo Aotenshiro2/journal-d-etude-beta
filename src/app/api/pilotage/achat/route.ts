@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { cleAchat, clePublique, emailConfirme, ErreurStripe } from '@/lib/academie/achat'
+import { clePublique, emailConfirme, ErreurStripe } from '@/lib/academie/achat'
 import { compteDuJeton, tronquer } from '@/lib/academie/http'
 import { messageErreur } from '@/lib/liveclub/pur'
 import { corsHeaders, corsPreflight } from '@/lib/support-cors'
-import { creerSessionAbonnement, prixDesOffres, ventePubliquePilotage } from '@/lib/pilotage-abonnement'
+import { creerSessionAbonnement, prixDesOffres, ventePubliquePilotage, clePilotage } from '@/lib/pilotage-abonnement'
 import { estAdminPilotage } from '@/lib/pilotage-niveau'
 import { offreDemandee, retourPilotage } from '@/lib/pilotage-paliers'
 
@@ -68,7 +68,7 @@ export async function POST(req: NextRequest) {
     if (!admin) return refus('ferme', 403)
   }
 
-  const cle = cleAchat()
+  const cle = clePilotage()
   const publique = clePublique()
   if (!cle || !publique) {
     console.warn(`[pilotage/achat] config absente (${!cle ? 'cle Checkout' : ''}${!cle && !publique ? ', ' : ''}${!publique ? 'cle publique' : ''})`)

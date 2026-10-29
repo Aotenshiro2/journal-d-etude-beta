@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { cleAchat, ErreurStripe } from '@/lib/academie/achat'
+import { ErreurStripe } from '@/lib/academie/achat'
 import { compteDuJeton, tronquer } from '@/lib/academie/http'
 import { messageErreur } from '@/lib/liveclub/pur'
 import { corsHeaders, corsPreflight } from '@/lib/support-cors'
-import { lireSessionCheckout, synchroniserAbonnement } from '@/lib/pilotage-abonnement'
+import { lireSessionCheckout, synchroniserAbonnement, clePilotage } from '@/lib/pilotage-abonnement'
 import { palierDuMembre } from '@/lib/pilotage-niveau'
 import { estSessionId, lireSessionPilotage, type Palier } from '@/lib/pilotage-paliers'
 
@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
 
   const id = req.nextUrl.searchParams.get('session_id')
   if (!estSessionId(id)) return refus('corps', 400)
-  const cle = cleAchat()
+  const cle = clePilotage()
   if (!cle) return refus('config', 503)
 
   let session: Record<string, unknown>

@@ -21,7 +21,7 @@
 // evenement en relisant l'abonnement chez Stripe (jamais l'evenement seul).
 
 import { prisma } from '@/lib/db'
-import { appeler, ErreurStripe } from '@/lib/academie/achat'
+import { appeler, cleAchat, ErreurStripe } from '@/lib/academie/achat'
 import { messageErreur } from '@/lib/liveclub/pur'
 import {
   CATALOGUE, SITE_PILOTAGE, SLUGS_OFFRES_PILOTAGE, chargeDesPaiements, corpsSessionAbonnement, estSlugPilotage, lireAbonnement, produitDe,
@@ -33,6 +33,12 @@ import {
 
 export const ventePubliquePilotage = () => process.env.PILOTAGE_ACHAT_PUBLIC?.trim() === '1'
 export const secretWebhookPilotage = () => process.env.STRIPE_WEBHOOK_SECRET_PILOTAGE?.trim() || null
+/**
+ * La cle restreinte de Pilotage (Brice, 29/10 : « un produit, une cle »), creee
+ * pour les abonnements : Checkout Sessions, Subscriptions, Customers, Invoices,
+ * Customer portal, Charges. Sans elle, repli sur la cle de l'academie.
+ */
+export const clePilotage = (): string | null => process.env.STRIPE_PILOTAGE_KEY_AOKNOWLEDGE?.trim() || cleAchat()
 
 // ---------------------------------------------------------------------------
 // Les offres et la session

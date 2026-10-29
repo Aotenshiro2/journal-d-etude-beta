@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { cleAchat } from '@/lib/academie/achat'
 import { verifierSignature } from '@/lib/academie/achat-pur'
 import { messageErreur } from '@/lib/liveclub/pur'
-import { lireSessionCheckout, secretWebhookPilotage, synchroniserAbonnement } from '@/lib/pilotage-abonnement'
+import { lireSessionCheckout, secretWebhookPilotage, synchroniserAbonnement, clePilotage } from '@/lib/pilotage-abonnement'
 import { abonnementDeFacture, estAbonnementId, estSessionId, lireSessionPilotage } from '@/lib/pilotage-paliers'
 
 /**
@@ -27,7 +26,7 @@ const MAX_CORPS = 512 * 1024
 
 export async function POST(req: NextRequest) {
   const secret = secretWebhookPilotage()
-  const cle = cleAchat()
+  const cle = clePilotage()
   if (!secret || !cle) {
     console.warn('[pilotage/achat/webhook] secret ou cle absents')
     return NextResponse.json({ ok: false, erreur: 'config' }, { status: 503 })
