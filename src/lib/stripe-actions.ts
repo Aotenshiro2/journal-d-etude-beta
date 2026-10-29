@@ -34,7 +34,8 @@ import { URL_BIENVENUE_LIVECLUB, cleStripeLecture, estProduitLiveClub, nomBot } 
 import { inscrireProduitLiveClub, lireProduitsLiveClub, produitsLiveClub } from '@/lib/liveclub/produits'
 import { tracerGeste } from '@/lib/liveclub/support-pont'
 import {
-  estTypeRepartition, lireParamsRepartition, resumeRepartition, jourParis, moisParis, type TypeRepartition,
+  estTypeRepartition, lireParamsRepartition, resumeRepartition, jourParis, moisParis, lireMoisAcces, libelleMoisAcces,
+  type TypeRepartition,
 } from '@/lib/repartition/pur'
 import { lireParamsEffacement, NOMS_NIVEAUX } from '@/lib/effacement-pur'
 import { lireParamsReponseMembre } from '@/lib/reponse-membre-pur'
@@ -674,7 +675,10 @@ export function validerAction(brut: unknown): ActionAgent | string {
     const emails = [...new Set(morceaux.map(e => normaliserEmail(e) as string))]
     if (emails.length > 50) return '50 emails au plus par carte : découpe la liste.'
     const note = p.note == null ? null : String(p.note).trim().slice(0, 200) || null
-    return { type: 'acces_broker', compte: 'telegram', params: { emails, note } }
+    // (29/10) La duree demandee, de 1 a 24 mois (6 par defaut).
+    const mois = lireMoisAcces(p.mois)
+    if (typeof mois === 'string') return mois
+    return { type: 'acces_broker', compte: 'telegram', params: { emails, note, mois } }
   }
 
   // Marquer un produit EXISTANT comme produit Live Club (13/10) : une ligne
@@ -878,7 +882,7 @@ export function resumeAction(a: ActionAgent): string {
   }
   if (a.type === 'acces_broker') {
     const emails = (p.emails as string[]) ?? []
-    return `Accorder 6 mois d'accès broker au Live Club, à partir d'aujourd'hui, à ${emails.length} `
+    return `Accorder ${libelleMoisAcces(p.mois)} d'accès broker au Live Club, à partir d'aujourd'hui, à ${emails.length} `
       + `adresse${emails.length > 1 ? 's' : ''} : ${emails.join(', ')}. `
       + `Chacune reçoit un email de support@ avec son lien personnel vers le bot. `
       + `Non renouvelable : une adresse qui a déjà eu un accès broker est refusée, `
@@ -1221,6 +1225,8 @@ export async function executerAction(a: ActionAgent, acteur = 'agent'): Promise<
     const emails = (a.params.emails as string[]) ?? []
     const resultats = await accorderAccesBroker(emails, {
       acteur, note: typeof a.params.note === 'string' ? a.params.note : null,
+      // (29/10) Une carte d'avant le 29/10 n'a pas de duree : 6 mois, comme alors.
+      mois: typeof a.params.mois === 'number' ? a.params.mois : undefined,
     })
     const lignes = resultats.map(r => {
       switch (r.resultat) {

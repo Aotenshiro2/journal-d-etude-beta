@@ -15,7 +15,10 @@ import {
   TYPES_REPARTITION, estTypeRepartition, lireParamsRepartition, resumeRepartition,
   etapeApresDepot, etapeApresMarquage,
   etatLitige, litigeDeLigne, jourDuLitige, perteDuLitige, phraseReglement, phraseDeTete,
+  lireMoisAcces, MOIS_ACCES_DEFAUT, MOIS_ACCES_MAX,
 } from '../src/lib/repartition/pur.ts'
+import { MOIS_ACCES_BROKER } from '../src/lib/liveclub/config.ts'
+import { readFileSync } from 'node:fs'
 
 let n = 0
 const test = (nom, f) => { f(); n++; console.log(`ok  ${nom}`) }
@@ -617,7 +620,7 @@ test('outils de l agent : parametres valides, refus clairs, validation idempoten
 
   // Depot : l'email est obligatoire (on le demande, on ne l'invente pas).
   const depot = lireParamsRepartition('depot_broker', { partenaire: 'RaiseFx', email: ' Jean@Exemple.fr ', client: 'Jean', montant: '500' }, ctx)
-  assert.deepEqual(depot, { partenaire: 'raisefx', partenaire_nom: 'RaiseFx', email: 'jean@exemple.fr', client: 'Jean', montant: 500, le: '2026-10-08', note: null })
+  assert.deepEqual(depot, { partenaire: 'raisefx', partenaire_nom: 'RaiseFx', email: 'jean@exemple.fr', client: 'Jean', montant: 500, le: '2026-10-08', mois: 6, commission: null, note: null })
   assert.ok(lireParamsRepartition('depot_broker', { partenaire: 'RaiseFx', montant: 500 }, ctx).includes('demande-la'))
   assert.equal(typeof lireParamsRepartition('depot_broker', { partenaire: 'RaiseFx', email: 'a@b.fr', montant: 0 }, ctx), 'string')
   assert.equal(typeof lireParamsRepartition('depot_broker', { partenaire: 'RaiseFx', email: 'a@b.fr', montant: 500, le: '2026-10-09' }, ctx), 'string')
@@ -637,6 +640,48 @@ test('outils de l agent : parametres valides, refus clairs, validation idempoten
   assert.equal(typeof lireParamsRepartition('taux_partenaire', { partenaire: 'RaiseFx' }, ctx), 'string')
   // Un taux peut partir d'une date passee (pour un depot deja fait).
   assert.equal(lireParamsRepartition('taux_partenaire', { partenaire: 'RaiseFx', taux_pct: 50, a_partir_du: '2026-09-01' }, ctx).a_partir_du, '2026-09-01')
+
+  // (29/10) Un NOUVEAU partenaire sans taux general (seule la commission d'un
+  // depot est connue) : nature obligatoire, note par defaut. Brice : « ne
+  // l'invente pas, a demander au prochain client ».
+  assert.deepEqual(lireParamsRepartition('taux_partenaire', { partenaire: 'RaiseFx', nature: 'broker' }, ctx), {
+    partenaire: 'raisefx', partenaire_nom: 'RaiseFx', nature: 'broker', taux_pct: null, montant_fixe: null, sans_taux: true,
+    a_partir_du: '2026-10-08', note: 'Taux général à demander au prochain client.',
+  })
+  assert.ok(lireParamsRepartition('taux_partenaire', { partenaire: 'RaiseFx' }, ctx).includes('NOUVEAU partenaire'))
+  assert.ok(resumeRepartition('taux_partenaire', lireParamsRepartition('taux_partenaire', { partenaire: 'RaiseFx', nature: 'broker' }, ctx)).includes('sans taux général'))
+
+  // (29/10) La duree de l'acces pose avec le depot (libre, 1 a 24 mois, 6
+  // par defaut) et la commission propre a CE depot (« on prend 400 EUR »).
+  const victor = lireParamsRepartition('depot_broker', { partenaire: 'RaiseFx', email: 'v@exemple.fr', client: 'Victor', montant: 400, le: '2026-10-08', mois: 4, commission: '400' }, ctx)
+  assert.equal(victor.mois, 4)
+  assert.equal(victor.commission, 400)
+  const carteVictor = resumeRepartition('depot_broker', victor)
+  assert.ok(carteVictor.includes('4 mois de Live Club'), carteVictor)
+  assert.ok(carteVictor.includes('commission de ce dépôt : 400 €'), carteVictor)
+  assert.ok(!carteVictor.includes('6 mois'))
+  assert.ok(resumeRepartition('depot_broker', depot).includes('6 mois de Live Club'))
+  for (const mois of [0, 25, 2.5, 'quatre', -1]) {
+    assert.equal(typeof lireParamsRepartition('depot_broker', { partenaire: 'RaiseFx', email: 'a@b.fr', montant: 400, mois }, ctx), 'string', String(mois))
+  }
+  assert.equal(lireMoisAcces('12'), 12)
+  assert.equal(lireMoisAcces(undefined), MOIS_ACCES_DEFAUT)
+  assert.equal(typeof lireMoisAcces(MOIS_ACCES_MAX + 1), 'string')
+  assert.equal(typeof lireParamsRepartition('depot_broker', { partenaire: 'RaiseFx', email: 'a@b.fr', montant: 400, commission: -5 }, ctx), 'string')
+  // La duree par defaut est celle du Live Club (liveclub/config.ts) et de acces.ts.
+  assert.equal(MOIS_ACCES_DEFAUT, MOIS_ACCES_BROKER)
+  const accesTs = readFileSync(new URL('../src/lib/liveclub/acces.ts', import.meta.url), 'utf8')
+  assert.match(accesTs, new RegExp(`const MOIS_ACCES_MAX = ${MOIS_ACCES_MAX}\\b`))
+  assert.match(accesTs, /make_interval\(months => \$\{mois\}::int\)/)
+  assert.ok(!/make_interval\(months => \$\{MOIS_ACCES_BROKER\}/.test(accesTs), 'la duree ne doit plus etre fixe')
+  // Revalidees a l'execution : relire ne change rien ; textes au clavier.
+  assert.deepEqual(lireParamsRepartition('depot_broker', victor, ctx), victor)
+  const sansTaux = lireParamsRepartition('taux_partenaire', { partenaire: 'RaiseFx', nature: 'broker' }, ctx)
+  assert.deepEqual(lireParamsRepartition('taux_partenaire', sansTaux, ctx), sansTaux)
+  for (const t of [carteVictor, resumeRepartition('taux_partenaire', sansTaux)]) {
+    assert.ok(!HORS_CLAVIER.test(t), t)
+    assert.ok(!t.includes('undefined') && !t.includes('null'), t)
+  }
 
   // Intervenant : un tarif par live positif, unite live par defaut.
   assert.deepEqual(lireParamsRepartition('intervenant', { intervenant: 'Adrien', offre_id: 'live-club', montant_par_live: '50', a_partir_du: '2026-10-01' }, ctx),

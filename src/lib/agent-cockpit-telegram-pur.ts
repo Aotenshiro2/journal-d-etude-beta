@@ -416,3 +416,241 @@ export function messagesPourModele(
   messages.push({ role: 'user', content: blocs })
   return messages
 }
+
+// ---------------------------------------------------------------------------
+// LE TEMPS D'UN TOUR (29/10/2026)
+//
+// LE BUG REEL (Melanie, 28/10, 12:53, 14:21 et 22:03) : « Je vérifie... » puis
+// plus rien, trois fois. Preuves (AiUsage, cockpit_generations, historique) :
+// a chaque tour, l'agent lancait les 6 brouillons demandes par generer_post,
+// UN PAR UN (25 a 37 s chacun) ; la fonction du webhook (maxDuration 120 s)
+// etait tuee par Vercel au 3e ou au 4e brouillon, avant toute reponse et sans
+// que le catch tourne. La question restait sans reponse dans l'historique,
+// donc chaque message suivant de Melanie relancait les memes 6 brouillons, et
+// mourait de la meme facon. Le fil de Brice, sans brouillon en attente,
+// repondait normalement.
+//
+// D'ou : une LIMITE par tour, connue de la boucle (elle s'arrete avant et
+// rend ce qui est fait), et un FILET dans le canal (au-dela, un message
+// d'echec clair part quand meme). Un « Je vérifie... » est toujours suivi
+// d'une reponse ou d'un echec dit en clair.
+// ---------------------------------------------------------------------------
+
+/** Ce qu'on garde avant la mort de la fonction : dire l'echec et l'ecrire en base. */
+export const MARGE_FIN_FONCTION_MS = 25_000
+/** Le filet du canal part a la limite + ce delai, si la boucle n'a pas rendu la main. */
+export const GRACE_FILET_MS = 6_000
+/**
+ * Sans limite donnee par l'appelant (message transmis par le bot des membres,
+ * dont la route a maxDuration 120 s) : depuis le debut du tour.
+ */
+export const DUREE_TOUR_DEFAUT_MS = 85_000
+
+/** L'instant (ms) ou un tour doit avoir rendu sa reponse, pour une route de `maxDurationS` secondes. */
+export function limiteDuTour(debutMs: number, maxDurationS: number): number {
+  return debutMs + Math.max(10_000, maxDurationS * 1000 - MARGE_FIN_FONCTION_MS)
+}
+
+/** Le message du filet : le tour n'a pas rendu la main a temps. */
+export const TEXTE_TEMPS_DEPASSE = "Je n'ai pas pu finir à temps : la demande était trop longue pour un seul message. "
+  + "Ce qui a déjà été fait est gardé (un brouillon de post est aussi rangé dans le Cockpit, onglet Création). "
+  + "Dis « continue » et je reprends là où je me suis arrêté, ou découpe la demande."
+
+/** Une reponse que Telegram a refusee (trop longue, format) : dit en clair, jamais le silence. */
+export const TEXTE_REPONSE_NON_PARTIE = "Ma réponse n'a pas pu partir (Telegram l'a refusée). "
+  + "Dis « renvoie » et je la redonne en plus court."
+
+// ---------------------------------------------------------------------------
+// Les messages longs (29/10) : 6 brouillons recopies font plus de 4 096
+// caracteres, la limite d'un message Telegram. Avant, sendMessage etait
+// refuse et rien ne partait. Le texte est coupe entre deux paragraphes, puis
+// entre deux lignes, et en dernier recours au caractere.
+// ---------------------------------------------------------------------------
+
+export const MAX_MESSAGE_TG = 4096
+
+function couperAuCaractere(t: string, max: number): string[] {
+  const morceaux: string[] = []
+  for (let i = 0; i < t.length; i += max) morceaux.push(t.slice(i, i + max))
+  return morceaux
+}
+
+/** Un texte en messages Telegram de `max` caracteres au plus, dans l'ordre, sans morceau vide. */
+export function decouperMessage(texte: string, max: number = MAX_MESSAGE_TG): string[] {
+  const t = texte.trim()
+  if (!t) return []
+  if (t.length <= max) return [t]
+  const sortie: string[] = []
+  let courant = ''
+  const pousser = () => { if (courant.trim()) sortie.push(courant.trim()); courant = '' }
+  const ajouter = (morceau: string, sep: string) => {
+    if (!courant) { courant = morceau; return }
+    if (courant.length + sep.length + morceau.length <= max) { courant = `${courant}${sep}${morceau}`; return }
+    pousser()
+    courant = morceau
+  }
+  for (const paragraphe of t.split('\n\n')) {
+    if (paragraphe.length <= max) { ajouter(paragraphe, '\n\n'); continue }
+    // Un paragraphe trop long : ligne par ligne, et une ligne trop longue au caractere.
+    pousser()
+    for (const ligne of paragraphe.split('\n')) {
+      if (ligne.length <= max) { ajouter(ligne, '\n'); continue }
+      pousser()
+      const bouts = couperAuCaractere(ligne, max)
+      for (const b of bouts.slice(0, -1)) sortie.push(b)
+      courant = bouts[bouts.length - 1] ?? ''
+    }
+    pousser()
+  }
+  pousser()
+  return sortie
+}
+
+/**
+ * La reponse du modele suivie de la carte : la reponse coupee comme
+ * decouperMessage, la carte dans le DERNIER message (celui qui porte les
+ * boutons), jamais coupee (elle porte le texte exact de l'action). Si le
+ * dernier morceau et la carte ne tiennent pas ensemble, la carte part seule.
+ */
+export function messagesAvecCarte(reply: string, carte: string, max: number = MAX_MESSAGE_TG): string[] {
+  const morceaux = decouperMessage(reply, max)
+  const dernier = morceaux.pop()
+  if (dernier === undefined) return [carte]
+  const ensemble = `${dernier}\n\n${carte}`
+  return ensemble.length <= max ? [...morceaux, ensemble] : [...morceaux, dernier, carte]
+}
+
+// ---------------------------------------------------------------------------
+// LES DEMANDES RESTEES SANS REPONSE (29/10, Brice : « chaque conversation est
+// isolee » = une demande de Mel restee sans reponse est perdue).
+//
+// Chaque fil d'Agent AOK est garde en base (cockpit_agent_conversations). Une
+// demande est EN SUSPENS quand les derniers messages de l'interlocuteur n'ont
+// recu aucune reponse de l'agent, ou seulement une reponse d'echec (marquee
+// `echec: true` depuis le 29/10). Les lignes du resume du matin (id resume-...)
+// et les lignes « [système] » ne comptent ni comme question ni comme reponse.
+// Une question de moins de AGE_MIN_SUSPENS_MS est un tour peut-etre en cours :
+// pas en suspens.
+// ---------------------------------------------------------------------------
+
+/** Plus long qu'un tour (maxDuration 300 s) : une question plus jeune est peut-etre en cours de traitement. */
+export const AGE_MIN_SUSPENS_MS = 6 * 60_000
+
+export type MessageEnSuspens = { id: string | null; texte: string; le: string | null }
+export type DemandesEnSuspens = {
+  messages: MessageEnSuspens[]
+  /** Vrai : le tour a repondu par un echec (temps depasse, erreur, reponse partielle). */
+  inachevee: boolean
+  /** La derniere vraie reponse de l'agent avant la demande (souvent la question qu'il avait posee). */
+  contexte: string | null
+  /** Le moment de la premiere question en suspens, quand il est connu. */
+  depuis: string | null
+}
+
+function ligneSysteme(id: unknown, content: string): boolean {
+  return (typeof id === 'string' && id.startsWith('resume-')) || content.startsWith('[système]')
+}
+
+/**
+ * Les demandes en suspens a la fin d'un fil (ou juste avant la question
+ * `avantId`, celle du tour en cours), ou null.
+ */
+export function demandesEnSuspens(
+  stockes: unknown,
+  o: { maintenant: number; avantId?: string | null; ageMinMs?: number },
+): DemandesEnSuspens | null {
+  const liste = Array.isArray(stockes) ? stockes : []
+  let fin = liste.length
+  if (o.avantId) {
+    for (let i = liste.length - 1; i >= 0; i--) {
+      const e = liste[i] as { id?: unknown } | null
+      if (e && typeof e === 'object' && e.id === o.avantId) { fin = i; break }
+    }
+  }
+  const messages: MessageEnSuspens[] = []
+  let inachevee = false
+  let contexte: string | null = null
+  for (let i = fin - 1; i >= 0; i--) {
+    const e = liste[i] as { role?: unknown; content?: unknown; id?: unknown; le?: unknown; echec?: unknown } | null
+    if (!e || typeof e !== 'object' || typeof e.content !== 'string' || !e.content.trim()) continue
+    if (ligneSysteme(e.id, e.content)) continue
+    if (e.role === 'user') {
+      messages.unshift({
+        id: typeof e.id === 'string' ? e.id : null,
+        texte: e.content.trim(),
+        le: typeof e.le === 'string' && Number.isFinite(Date.parse(e.le)) ? e.le : null,
+      })
+      continue
+    }
+    if (e.role === 'assistant') {
+      if (e.echec === true) { inachevee = true; continue }
+      contexte = e.content.trim()
+      break
+    }
+  }
+  const ageMin = o.ageMinMs ?? AGE_MIN_SUSPENS_MS
+  const anciens = messages.filter(m => m.le === null || o.maintenant - Date.parse(m.le) >= ageMin)
+  if (anciens.length === 0) return null
+  return { messages: anciens, inachevee, contexte, depuis: anciens[0].le }
+}
+
+/** « le 28/10 à 12:53 », heure de Paris, ou '' si l'instant est illisible. */
+export function quandParis(iso: string | null): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (!Number.isFinite(d.getTime())) return ''
+  const p = Object.fromEntries(new Intl.DateTimeFormat('fr-FR', {
+    timeZone: 'Europe/Paris', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
+  }).formatToParts(d).map(x => [x.type, x.value]))
+  return `le ${p.day}/${p.month} à ${p.hour}:${p.minute}`
+}
+
+/** Un message en une ligne, coupe a `max` caracteres (trois points si coupe). */
+export function extraitCourt(texte: string, max: number): string {
+  const t = texte.replace(/\s+/g, ' ').trim()
+  return t.length <= max ? t : `${t.slice(0, Math.max(1, max - 3)).trimEnd()}...`
+}
+
+/**
+ * La note donnee au modele avec le message du tour (jamais gardee en base).
+ * 'tour' : un nouveau message arrive alors qu'une demande est en suspens ;
+ * 'reprise' : un membre de l'equipe a demande de la reprendre (reprendre_demande).
+ */
+export function noteSuspens(s: DemandesEnSuspens, o: { mode: 'tour' } | { mode: 'reprise'; par: string }): string {
+  const quand = quandParis(s.depuis)
+  const liste = s.messages.map(m => `« ${extraitCourt(m.texte, 300)} »`).join(' ; ')
+  const etat = s.inachevee ? "n'ont pas eu de réponse complète (le tour s'est arrêté avant la fin)" : 'sont restés sans réponse'
+  const contexte = s.contexte ? ` Ta dernière réponse avant eux : « ${extraitCourt(s.contexte, 300)} ».` : ''
+  if (o.mode === 'reprise') {
+    return `[système] ${o.par} t'a demandé de reprendre ici la demande restée sans réponse${quand ? ` (${quand})` : ''} : ${liste}.${contexte} `
+      + "Traite-la maintenant, pour ton interlocuteur, dans ce fil : dis en une ligne que tu la reprends. "
+      + "Ce qui manque, tu le lui demandes à lui ou à elle, dans ce fil."
+  }
+  return `[système] Avant ce message, ces messages de ton interlocuteur ${etat}${quand ? ` (depuis ${quand})` : ''} : ${liste}.${contexte} `
+    + "Si son nouveau message les relance (« du coup ? », « alors ? », « continue », « reprends »), reprends-les maintenant. "
+    + "Sinon, traite d'abord son nouveau message, puis propose en une ligne de reprendre la demande restée sans réponse."
+}
+
+/** Un compte de l'equipe sur Agent AOK (cockpit_telegram_comptes, libelle du cockpit). */
+export type CompteEquipe = { telegram_id: number; user_id: string; libelle: string | null; label: string | null }
+
+function cleNom(s: unknown): string {
+  return String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '')
+}
+
+/**
+ * Le membre de l'equipe designe par `qui` (« Mel », « Mélanie », « melanie »,
+ * « Brice ») : egalite du nom, ou l'un commence par l'autre (3 lettres au
+ * moins). null = personne, 'plusieurs' = ambigu.
+ */
+export function resoudreMembreEquipe(qui: unknown, comptes: readonly CompteEquipe[]): CompteEquipe | null | 'plusieurs' {
+  const q = cleNom(qui)
+  if (q.length < 3) return null
+  const noms = (c: CompteEquipe) => [cleNom(c.libelle), cleNom(c.label)].filter(n => n.length >= 3)
+  const exacts = comptes.filter(c => noms(c).includes(q))
+  if (exacts.length === 1) return exacts[0]
+  if (exacts.length > 1) return 'plusieurs'
+  const proches = comptes.filter(c => noms(c).some(n => n.startsWith(q) || q.startsWith(n)))
+  if (proches.length === 1) return proches[0]
+  return proches.length > 1 ? 'plusieurs' : null
+}

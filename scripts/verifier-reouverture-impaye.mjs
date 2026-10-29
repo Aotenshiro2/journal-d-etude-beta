@@ -266,7 +266,7 @@ test('webhook invoice.paid (pret, pas branche) : lecture de l evenement, signatu
   assert.match(route, /status: 503/)
   assert.match(route, /verifierSignature\(corps, req\.headers\.get\('stripe-signature'\), secret\)/)
   assert.match(route, /reouvertureApresPaiement\(facture\.client, facture\.email\)/)
-  assert.match(lire('middleware.ts'), /'\/api\/liveclub\/stripe'\]/)
+  assert.match(lire('middleware.ts'), /const publicPaths = \[[^\]]*'\/api\/liveclub\/stripe'[,\]]/)
   // La meme reouverture que le passage, sur les seuls comptes de ce client.
   const passage = lire('src/lib/liveclub/passage.ts')
   const fn = passage.slice(passage.indexOf('export async function reouvertureApresPaiement('), passage.indexOf('export async function passageQuotidien('))

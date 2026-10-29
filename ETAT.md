@@ -3,6 +3,43 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
+## Agent AOK : le fil de Melanie, la duree libre des acces broker, les demandes restees sans reponse (29/10/2026, NON commite, NON deploye, aucune migration)
+
+Bug reel du 28/10 (fil de Melanie, 12:53, 14:21, 22:03) : « Je vérifie... » puis plus rien. CAUSE PROUVEE (AiUsage,
+cockpit_generations, historique en base ; logs Vercel du 28/10 plus disponibles) : 6 brouillons demandes a generer_post,
+lances UN PAR UN (25 a 37 s chacun) dans le webhook (maxDuration 120 s) : fonction tuee au 3e ou 4e brouillon, sans
+reponse ni catch ; la question restait sans reponse, donc chaque message suivant de Melanie relancait les memes brouillons
+et mourait pareil (dernier_update_id bloque a « Oui », 7 brouillons en base jamais montres). Cle API hors de cause :
+agent et generateur sur ANTHROPIC_API_KEY_COCKPIT (Vercel, inchangee depuis 60 j), appels du 28/10 reussis ; la cle
+changee le 28/10 est celle du bot des membres (anthropic-liveclub-bot, posee sur Vercel le 29/10).
+- Temps : route Agent AOK et route web a 300 s ; `limiteDuTour` (300 s - 25 s) passee a `boucleAgent` (canal.limite,
+  canal.signal) : appel au modele coupe a la limite (AbortSignal), plus rien lance qu'il ne peut finir, sinon
+  `reponsePartielle` (brouillons deja faits + « continue »). generer_post : 3 par message au plus, EN PARALLELE.
+  Filet dans `tourAgent` (Promise.race, limite + 6 s) : message d'echec clair TEXTE_TEMPS_DEPASSE, ecrit `echec: true`.
+  Reponse longue coupee (decouperMessage, messagesAvecCarte : carte entiere dans le dernier message), refus de Telegram
+  dit en clair. Message transmis par le bot des membres : DUREE_TOUR_DEFAUT_MS (85 s).
+- Demandes restees sans reponse : questions datees (`le`), echecs marques (`echec`). `demandesEnSuspens` (pur) ;
+  note « [système] » au modele quand un message arrive apres une demande en suspens ; outils `demandes_en_suspens`
+  (lecture) et `reprendre_demande` (sans carte : le tour de Mel tourne dans SON fil, pour elle, apres la reponse a
+  Brice ; route web : after()). Resume du matin : rubrique « Demandes de l'équipe restées sans réponse (Agent AOK) ».
+  Module serveur : src/lib/agent-equipe.ts.
+- Prompt : l'equipe a ses fils (jamais « je ne peux pas ecrire a Melanie ») ; questions posees a l'INTERLOCUTEUR
+  (jamais « demande a Brice / a Melanie ») ; capture envoyee par l'equipe = infos lues en clair, questions, puis carte ;
+  le hors-sujet d'une image signale, jamais execute ; acces broker : section « UNE DEMANDE D'ACCÈS BROKER ».
+- Duree libre (jamais faite avant : MOIS_ACCES_BROKER = 6 en dur depuis le 29/09) : `mois` (1 a 24, 6 par defaut) sur
+  proposer_acces_broker et proposer_depot_broker, `accorderAccesBroker({ mois, source })`, email « pendant N mois ».
+  Nouveau broker : proposer_taux_partenaire SANS taux (nouveau partenaire seulement), depot avec `commission` propre a
+  ce depot (montant_fixe fige, note « [commission propre à ce dépôt] »). Bouton de carte = l'action precise.
+  Le formulaire du cockpit (« Accorder 6 mois ») reste a 6 mois.
+- Verifs : `node scripts/verifier-agent-equipe.mjs` (11 blocs), verifier-repartition (22), verifier-liveclub (63),
+  tsc, eslint. Eval ciblee `node --env-file=.env.local scripts/eval-agent-equipe.mjs` (mode essai, aucune ecriture) :
+  E1 message de Mel 22:03, E2 capture + « Vérifie ça » de Brice, E3 « reprends la demande de Mel » : 3/3 le 29/10.
+- A FAIRE apres GO et deploiement : `scripts/regulariser-victor-weber.mjs` (lecture, puis --ecrire, avec les variables
+  de prod : RaiseFx sans taux, depot 400 EUR du 28/10 SUPPOSE avec 400 EUR de commission, acces 4 mois, exemption
+  2a1da732 fermee) ; `scripts/poser-taux-broker.mjs --partenaire "<nom>" --montant-fixe 650 --depuis <date>` pour
+  l'autre broker (nom inconnu : aucun partenaire en base). Les 3 demandes de Mel du 28/10 restent en suspens dans son
+  fil : « reprends la demande de Mel » apres le deploiement.
+
 ## Academie : le BILLET DU JOUR (27/10/2026, commite NON pousse, migration 20261027190000 APPLIQUEE en prod)
 
 Fonction validee par Brice le 27/10. Brice ecrit un billet dans le cockpit (espace Annonces, onglet « Billets ») :

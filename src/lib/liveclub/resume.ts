@@ -50,6 +50,7 @@
 import { prisma } from '@/lib/db'
 import { stripeGet } from '@/lib/stripe-actions'
 import { ajouterAHistoriqueAgent, tgCockpit } from '@/lib/agent-cockpit-telegram'
+import { lireSuspensEquipe, nomEquipe } from '@/lib/agent-equipe'
 import { cleStripeLecture } from './config'
 import { listerAbonnementsLiveClub, type AbonnementResume } from './stripe'
 import { formaterMontant, libelleTarifReserve, messageErreur, normaliserEmail, parPeriode, relationAbsente } from './pur'
@@ -63,7 +64,7 @@ function idsListe(v: unknown): string[] {
 }
 import {
   attentesHorsEquipe, changementsAbonnements, changementsHorsDuBot, cleAnnonce, cleGeste, composerResume, decouperResume,
-  detailAccesBroker, detailAContacter, detailAttenteHumain, detailAvecRelais, detailDemande, detailExemption,
+  detailAccesBroker, detailAContacter, detailAttenteHumain, detailAvecRelais, detailDemande, detailExemption, detailSuspens,
   detailNouvelAbonnement, detailRepriseBot, detailTarifReserve, entreesHistoriqueResume, episodesAAnnoncer,
   estNouvelAbonnement, evenementDeChangement, evenementDeGeste, instantaneAbonnements, memoireAnnonces, pseudoCroise, relaisParEpisode,
   texteSur,
@@ -508,6 +509,22 @@ export async function resumeDuMatin(o: { maintenant?: Date; apercu?: boolean } =
       where cree_le > ${depuis} and cree_le <= ${jusqua} order by cree_le limit 30`)
     for (const d of demandes) {
       ajouter({ rubrique: 'demandes', qui: `d${d.id}`, quand: d.cree_le.toISOString(), detail: detailDemande(d.texte, d.statut) }, { nom: d.auteur })
+    }
+
+    // (29/10) Les demandes de l'equipe restees sans reponse (ou inachevees)
+    // dans leur fil Agent AOK (agent-equipe.ts). Brice, 28/10 : une demande de
+    // Mel restee sans reponse etait perdue sans que personne le sache. Comme
+    // une demande d'humain : deja la avant la fenetre = dite, sans faire
+    // partir le resume a elle seule.
+    const suspens = await facultatif('suspens', erreurs, () => lireSuspensEquipe(jusqua.getTime()))
+    for (const s of suspens) {
+      const depuisIso = s.suspens.depuis
+      const nom = nomEquipe(s.compte)
+      ajouter({
+        rubrique: 'suspens', qui: `q${s.compte.telegram_id}`, quand: depuisIso ?? jusqua.toISOString(),
+        ancien: depuisIso === null || Date.parse(depuisIso) <= depuis.getTime(),
+        detail: detailSuspens({ extraits: s.suspens.messages.map(m => m.texte), depuisIso, inachevee: s.suspens.inachevee, nom }),
+      }, { nom })
     }
 
     // (18/10) Les membres a contacter : une fenetre ouverte depuis le dernier

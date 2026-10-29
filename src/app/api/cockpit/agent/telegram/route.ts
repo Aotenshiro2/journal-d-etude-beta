@@ -3,7 +3,7 @@ import {
   compteCockpitTelegram, telechargerImageTelegram, traiterClicAgentTelegram, traiterTexteAgentTelegram, tgCockpit,
 } from '@/lib/agent-cockpit-telegram'
 import {
-  lireMessageTelegram, texteDuTour, texteEchecImage, texteImageTropGrosse, texteNonLu, type ImageDuTour,
+  limiteDuTour, lireMessageTelegram, texteDuTour, texteEchecImage, texteImageTropGrosse, texteNonLu, type ImageDuTour,
 } from '@/lib/agent-cockpit-telegram-pur'
 import { MAX_FICHIER_AGENT, lireFichierSortant, lirePieceMessage, tracePieceAgent } from '@/lib/liveclub/support-pont-pur'
 
@@ -29,10 +29,18 @@ import { MAX_FICHIER_AGENT, lireFichierSortant, lirePieceMessage, tracePieceAgen
 //
 // Telegram REJOUE un update reste sans 200 : on traite en synchrone (l'agent
 // peut prendre 30 s) et on dedoublonne par update_id, ceinture et bretelles.
+//
+// (29/10) 300 s au lieu de 120 : le 28/10, trois tours de Melanie ont ete tues
+// a 120 s pendant le generateur de posts, avant toute reponse. Le tour connait
+// maintenant sa limite (limiteDuTour : 300 s moins la marge pour dire l'echec)
+// et ne finit plus jamais en silence. Une reprise demandee depuis ce fil
+// (reprendre_demande) tourne apres la reponse, sur le temps qui reste.
 
-export const maxDuration = 120
+export const maxDuration = 300
 
 export async function POST(req: NextRequest) {
+  const debut = Date.now()
+  const limite = limiteDuTour(debut, maxDuration)
   // Verrou 1 : la requete vient bien de Telegram.
   const secret = process.env.TELEGRAM_WEBHOOK_SECRET?.trim()
   if (!secret || req.headers.get('x-telegram-bot-api-secret-token') !== secret) {
@@ -83,7 +91,7 @@ export async function POST(req: NextRequest) {
     && piece && typeof lireFichierSortant(piece, MAX_FICHIER_AGENT) !== 'string') {
     const legende = typeof message.caption === 'string' ? message.caption.slice(0, 4000).trim() : ''
     await traiterTexteAgentTelegram({
-      chatId, telegramId, texte: [tracePieceAgent(piece), legende].filter(Boolean).join('\n'), image: null, piece, compte, updateId,
+      chatId, telegramId, texte: [tracePieceAgent(piece), legende].filter(Boolean).join('\n'), image: null, piece, compte, updateId, limite,
     })
     return NextResponse.json({ ok: true })
   }
@@ -111,7 +119,7 @@ export async function POST(req: NextRequest) {
   }
 
   await traiterTexteAgentTelegram({
-    chatId, telegramId, texte: texteDuTour(lecture), image, compte, updateId, piece: lecture.image ? piece : null,
+    chatId, telegramId, texte: texteDuTour(lecture), image, compte, updateId, piece: lecture.image ? piece : null, limite,
   })
   return NextResponse.json({ ok: true })
 }

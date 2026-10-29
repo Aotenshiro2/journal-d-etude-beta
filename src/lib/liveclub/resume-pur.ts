@@ -18,7 +18,7 @@ export type Personne = { nom: string | null; email: string | null; pseudo: strin
 
 export type RubriqueResume =
   | 'nouveaux' | 'arrets' | 'pauses' | 'impayes' | 'sorties' | 'entrees' | 'acces' | 'adresses' | 'comptes' | 'humains'
-  | 'reprises' | 'demandes' | 'contacter'
+  | 'reprises' | 'demandes' | 'contacter' | 'suspens'
 
 /** Les rubriques, dans l'ordre du message. */
 export const RUBRIQUES_RESUME: readonly { cle: RubriqueResume; titre: string }[] = [
@@ -35,6 +35,7 @@ export const RUBRIQUES_RESUME: readonly { cle: RubriqueResume; titre: string }[]
   { cle: 'humains', titre: "Demandes d'humain en attente" },
   { cle: 'reprises', titre: "Fils rendus au bot seul (24 h sans message de l'équipe)" },
   { cle: 'demandes', titre: "Nouvelles demandes de l'équipe" },
+  { cle: 'suspens', titre: "Demandes de l'équipe restées sans réponse (Agent AOK)" },
 ]
 
 export type EvenementResume = {
@@ -386,6 +387,19 @@ const STATUTS_DEMANDE: Record<string, string> = { au_picker: ' (déjà au picker
 
 export function detailDemande(texte: string, statut: string): string {
   return `« ${texteSur(texte, 200) ?? 'demande sans texte'} »${STATUTS_DEMANDE[statut] ?? ''}`
+}
+
+/**
+ * (29/10) Une demande d'un membre de l'equipe restee sans reponse (ou
+ * inachevee) dans son fil Agent AOK (demandesEnSuspens,
+ * agent-cockpit-telegram-pur.ts). Brice : une demande de Mel restee sans
+ * reponse etait perdue, personne ne le savait.
+ */
+export function detailSuspens(o: { extraits: readonly string[]; depuisIso: string | null; inachevee: boolean; nom: string }): string {
+  const liste = o.extraits.slice(0, 3).map(t => `« ${texteSur(t, 120) ?? 'message sans texte'} »`).join(', ')
+  const plus = o.extraits.length > 3 ? ` et ${o.extraits.length - 3} autre${o.extraits.length > 4 ? 's' : ''}` : ''
+  const quand = o.depuisIso ? ` depuis le ${dateHeureParis(o.depuisIso)}` : ''
+  return `${liste}${plus}, ${o.inachevee ? 'inachevée' : 'sans réponse'}${quand} ; pour la relancer : « reprends la demande de ${o.nom} »`
 }
 
 // ---------------------------------------------------------------------------

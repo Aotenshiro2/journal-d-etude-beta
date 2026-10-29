@@ -18,7 +18,7 @@
 // (emails-verification.ts).
 
 import { Resend } from 'resend'
-import { SUPPORT, URL_FORMATION_EMAIL_BIENVENUE, URL_PORTAIL_CARTE, MOIS_ACCES_BROKER, lienBotAccueil, texteAbonnement } from './config'
+import { SUPPORT, URL_FORMATION_EMAIL_BIENVENUE, URL_PORTAIL_CARTE, lienBotAccueil, texteAbonnement } from './config'
 import {
   BOUTON_REGLE, echapperHtml, formaterDateFr, formaterMontant, messageErreur, normaliserEmail, phraseARegler, phraseQuestion,
   phraseRetourApresReglement, type FactureARegler,
@@ -75,12 +75,19 @@ export function modeleBienvenue(lienBot: string): ModeleMessage {
   }
 }
 
-export function modeleAccesBroker(lienBot: string, jusquau: string): ModeleMessage {
+/**
+ * (29/10) `mois` : la duree accordee (libre depuis le 29/10). Absente (renvoi
+ * d'une invitation), la phrase ne dit que la date de fin, toujours juste.
+ */
+export function modeleAccesBroker(lienBot: string, jusquau: string, mois?: number): ModeleMessage {
+  const duree = mois === undefined
+    ? `jusqu'au ${formaterDateFr(jusquau)}`
+    : `pendant ${mois} mois, jusqu'au ${formaterDateFr(jusquau)}`
   return {
     sujet: 'Ton accès au Live Club est ouvert',
     paragraphes: [
       'Salut !',
-      `Grâce à ton compte chez notre broker partenaire, tu as accès au Live Club pendant ${MOIS_ACCES_BROKER} mois, jusqu'au ${formaterDateFr(jusquau)}.`,
+      `Grâce à ton compte chez notre broker partenaire, tu as accès au Live Club ${duree}.`,
       "Pour entrer dans le groupe Telegram, ouvre notre bot avec le bouton ci-dessous et appuie sur Démarrer. Il te donne le lien du groupe : tu demandes à rejoindre, et c'est accepté tout seul.",
       "Cet accès n'est pas renouvelable. Une semaine avant la fin, on te prévient, et si tu veux rester, il suffira de t'abonner.",
       `Une question ? Réponds à cet email ou écris à ${SUPPORT}.`,
@@ -405,8 +412,8 @@ export function emailBienvenue(email: string, lienBot: string): Promise<Resultat
   return envoyerModele(email, modeleBienvenue(lienBot))
 }
 
-export function emailAccesBroker(email: string, lienBot: string, jusquau: string): Promise<ResultatEmail> {
-  return envoyerModele(email, modeleAccesBroker(lienBot, jusquau))
+export function emailAccesBroker(email: string, lienBot: string, jusquau: string, mois?: number): Promise<ResultatEmail> {
+  return envoyerModele(email, modeleAccesBroker(lienBot, jusquau, mois))
 }
 
 export function emailRappelPause(email: string, repriseLe: string, moment: 'debut' | 'j7' = 'debut'): Promise<ResultatEmail> {

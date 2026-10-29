@@ -1270,6 +1270,32 @@ function lireUnite(v: unknown): UniteIntervenant | null {
   return (UNITES_INTERVENANT as readonly string[]).includes(u) ? (u as UniteIntervenant) : null
 }
 
+// LA DUREE D'UN ACCES BROKER (29/10, Brice : « on etait cense avoir mis en
+// place qu'elle puisse demander la periode que l'on voulait »). Elle etait
+// fixee a 6 mois en dur (MOIS_ACCES_BROKER, liveclub/config.ts) depuis le
+// 29/09 : rien dans le code, l'outil ni le prompt ne la laissait choisir.
+// Elle est libre, de 1 a 24 mois, 6 par defaut.
+
+/** = MOIS_ACCES_BROKER (liveclub/config.ts), verifie par scripts/verifier-repartition.mjs. */
+export const MOIS_ACCES_DEFAUT = 6
+export const MOIS_ACCES_MAX = 24
+
+/** La duree d'un acces broker en mois entiers (1 a 24), vide = 6, ou le message d'erreur. */
+export function lireMoisAcces(v: unknown): number | string {
+  if (v === null || v === undefined || v === '') return MOIS_ACCES_DEFAUT
+  const n = typeof v === 'number' ? v : Number(String(v).trim())
+  if (!Number.isInteger(n) || n < 1 || n > MOIS_ACCES_MAX) {
+    return `mois : la durée de l'accès en mois entiers, de 1 à ${MOIS_ACCES_MAX} (ex. 4 pour « 4 mois »). Vide = ${MOIS_ACCES_DEFAUT}.`
+  }
+  return n
+}
+
+/** « 6 mois » */
+export function libelleMoisAcces(mois: unknown): string {
+  const n = typeof mois === 'number' && Number.isInteger(mois) ? mois : MOIS_ACCES_DEFAUT
+  return `${n} mois`
+}
+
 function lireEmail(v: unknown): string | null {
   const s = String(v ?? '').trim().toLowerCase()
   return s.length <= 254 && /^[^\s@<>(),;"]+@[^\s@<>(),;"]+\.[a-z]{2,}$/.test(s) ? s : null
@@ -1298,7 +1324,17 @@ export function lireParamsRepartition(
       }
       const montant = lireEuros(p.montant, 'montant (le dépôt)', { max: 1000000 })
       if (typeof montant === 'string') return montant
-      return { partenaire, partenaire_nom: partenaireNom, email, client, montant, le: jour[0], note }
+      // (29/10) La duree de l'acces pose avec le depot, et la commission
+      // propre a CE depot quand elle est donnee (« on prend 400 EUR »).
+      const mois = lireMoisAcces(p.mois)
+      if (typeof mois === 'string') return mois
+      let commission: number | null = null
+      if (p.commission !== null && p.commission !== undefined && p.commission !== '') {
+        const c = lireEuros(p.commission, 'commission (celle de ce dépôt)', { max: 100000, zeroAccepte: true })
+        if (typeof c === 'string') return c
+        commission = c
+      }
+      return { partenaire, partenaire_nom: partenaireNom, email, client, montant, le: jour[0], mois, commission, note }
     }
     // Affiliation : la base n'est utile qu'a un taux en % (le serveur le dit).
     let montant: number | null = null
@@ -1342,7 +1378,21 @@ export function lireParamsRepartition(
     }
     const aPct = p.taux_pct !== null && p.taux_pct !== undefined && p.taux_pct !== ''
     const aFixe = p.montant_fixe !== null && p.montant_fixe !== undefined && p.montant_fixe !== ''
-    if (aPct === aFixe) return 'Il faut soit taux_pct (en % du dépôt), soit montant_fixe (euros par client) : exactement un des deux.'
+    if (aPct && aFixe) return 'Il faut soit taux_pct (en % du dépôt), soit montant_fixe (euros par client) : un seul des deux.'
+    // (29/10) Ni l'un ni l'autre : un NOUVEAU partenaire sans taux general
+    // (seule la commission d'un depot precis est connue). Le serveur refuse
+    // si le partenaire existe deja ; la nature est alors obligatoire.
+    if (!aPct && !aFixe) {
+      if (!nature) {
+        return "Sans taux, c'est l'enregistrement d'un NOUVEAU partenaire : précise sa nature (broker ou affiliation). Pour un partenaire déjà connu, il faut taux_pct ou montant_fixe."
+      }
+      const jourSans = lireJour(p.a_partir_du, 'a_partir_du', ctx.aujourdhui)
+      if (typeof jourSans === 'string') return jourSans
+      return {
+        partenaire, partenaire_nom: partenaireNom, nature, taux_pct: null, montant_fixe: null, sans_taux: true,
+        a_partir_du: jourSans[0], note: note ?? 'Taux général à demander au prochain client.',
+      }
+    }
     let tauxPct: number | null = null
     let montantFixe: number | null = null
     if (aPct) {
@@ -1472,8 +1522,10 @@ export function resumeRepartition(type: TypeRepartition, p: Record<string, unkno
   switch (type) {
     case 'depot_broker':
       return `Inscrire un dépôt de ${eur(p.montant)} chez ${p.partenaire_nom}, le ${libelleJour(String(p.le))}, `
-        + `pour ${p.client ? `${p.client} (${p.email})` : p.email}. Si cette adresse n'a jamais eu d'accès broker, `
-        + `elle reçoit 6 mois de Live Club et son email d'invitation part tout de suite (non renouvelable).${note}`
+        + `pour ${p.client ? `${p.client} (${p.email})` : p.email}`
+        + `${p.commission !== null && p.commission !== undefined ? `, commission de ce dépôt : ${eur(p.commission)}` : ''}. `
+        + `Si cette adresse n'a jamais eu d'accès broker, elle reçoit ${libelleMoisAcces(p.mois)} de Live Club à partir d'aujourd'hui `
+        + `et son email d'invitation part tout de suite (non renouvelable).${note}`
     case 'commission_affiliation':
       return `Inscrire une commission d'affiliation ${p.partenaire_nom} pour ${p.client}, le ${libelleJour(String(p.le))}`
         + `${p.montant !== null && p.montant !== undefined ? `, sur une vente de ${eur(p.montant)}` : ''}.${note}`
@@ -1485,6 +1537,10 @@ export function resumeRepartition(type: TypeRepartition, p: Record<string, unkno
       }
       return `Marquer la commission${p.qui ? ` de ${p.qui}` : ''} perdue : elle sort des commissions attendues.${note}`
     case 'taux_partenaire': {
+      if (p.sans_taux === true) {
+        return `Enregistrer le nouveau partenaire ${p.partenaire_nom} (${p.nature}), sans taux général pour l'instant : `
+          + `la commission de chaque dépôt sera donnée avec lui, jusqu'à ce qu'un taux soit posé.${note}`
+      }
       const t = { tauxPct: (p.taux_pct as number | null) ?? null, montantFixe: p.montant_fixe === null || p.montant_fixe === undefined ? null : centimes(p.montant_fixe) }
       return `Taux de ${p.partenaire_nom}${p.nature ? ` (${p.nature})` : ''} : ${libelleTaux(t)} à partir du ${libelleJour(String(p.a_partir_du))}. `
         + `Les dépôts déjà inscrits gardent le taux de leur date.${note}`

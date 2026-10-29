@@ -2,13 +2,16 @@ import { randomUUID } from 'node:crypto'
 import { Prisma } from '@prisma/client'
 import type Anthropic from '@anthropic-ai/sdk'
 import { prisma } from '@/lib/db'
-import { boucleAgent } from '@/lib/agent-cockpit'
-import { auteurDemande } from '@/lib/agent-cockpit-pur'
+import { boucleAgent, type ReponseAgent } from '@/lib/agent-cockpit'
+import { auteurDemande, libelleBoutonConfirmer } from '@/lib/agent-cockpit-pur'
 import { validerAction, executerAction, RefusAction, expurgerLiensInvitation, paramsPourLog } from '@/lib/stripe-actions'
 import {
-  MAX_OCTETS_IMAGE, TEXTE_IMAGE_REFUSEE, erreurDImage, historiquePourTour, messagesPourModele, typeImageDepuisOctets,
-  type ImageALire, type ImageDuTour,
+  DUREE_TOUR_DEFAUT_MS, GRACE_FILET_MS, MAX_OCTETS_IMAGE, TEXTE_IMAGE_REFUSEE, TEXTE_REPONSE_NON_PARTIE, TEXTE_TEMPS_DEPASSE,
+  decouperMessage, demandesEnSuspens, erreurDImage, historiquePourTour, messagesAvecCarte, messagesPourModele, noteSuspens,
+  typeImageDepuisOctets,
+  type DemandesEnSuspens, type ImageALire, type ImageDuTour,
 } from '@/lib/agent-cockpit-telegram-pur'
+import type { RelanceEquipe } from '@/lib/agent-equipe'
 import { telechargerFichierTelegram, type BotTelegram } from '@/lib/liveclub/telegram'
 import { dernierePieceHistorique, phraseMainRendue, type PieceAgent } from '@/lib/liveclub/support-pont-pur'
 import { lireDonneeRendreLaMain, referenceFil } from '@/lib/alerte-equipe-telegram-pur'
@@ -110,7 +113,13 @@ export async function tgCockpit(methode: string, params: Record<string, unknown>
  * question d'un tour porte l'identifiant du tour (u<update_id> pour Agent
  * AOK, t<uuid> pour un message transmis par le bot des membres).
  */
-type MessageStocke = { role: 'user' | 'assistant'; content: string; id?: string; piece?: PieceAgent }
+type MessageStocke = {
+  role: 'user' | 'assistant'; content: string; id?: string; piece?: PieceAgent
+  /** (29/10) L'arrivee de la question (ISO) : une demande restee sans reponse se date. */
+  le?: string
+  /** (29/10) Une reponse d'echec (erreur, temps depasse, reponse partielle) : la demande reste en suspens. */
+  echec?: true
+}
 
 type LigneConversation = {
   chat_id: bigint
@@ -365,6 +374,17 @@ export type EntreeAgentTelegram = {
   transmis?: boolean
   /** Transmis seulement : appele des que l'accuse est livre dans Agent AOK, avant que l'agent reflechisse. */
   apresAccuse?: () => Promise<void>
+  /**
+   * (29/10) L'instant (ms) ou la reponse doit etre partie (limiteDuTour, d'apres
+   * le maxDuration de la route). Absent : DUREE_TOUR_DEFAUT_MS depuis le debut du tour.
+   */
+  limite?: number
+  /**
+   * (29/10) Reprise d'une demande restee sans reponse, demandee par un autre
+   * membre de l'equipe (reprendre_demande) : le tour tourne pour le titulaire
+   * du fil, sur ses messages en suspens. Rien a reprendre = rien n'est fait.
+   */
+  reprise?: { par: string }
 }
 
 /**
@@ -378,17 +398,28 @@ export type IssueAgentTelegram = 'traite' | 'doublon' | 'non_livre'
 const TEXTE_ERREUR_AGENT = 'L’agent n’a pas pu répondre (erreur côté serveur). Réessaie dans un instant.'
 
 /**
- * La reponse du modele suivie de la carte, dans UN message Telegram (4 096
- * caracteres). S'il deborde, c'est la reponse du modele qui est raccourcie,
- * jamais la carte (16/10 : celle d'une reponse a un membre porte le texte
- * exact qui partira). Une carte qui deborde seule part entiere, comme avant :
- * Telegram la refuse plutot que d'afficher une carte coupee avec ses boutons.
+ * (29/10) Envoie des messages dans l'ordre ; le dernier porte `boutons` s'il y
+ * en a. Une reponse longue (six brouillons recopies) depassait les 4 096
+ * caracteres d'un message : Telegram la refusait et RIEN ne partait. Elle est
+ * maintenant coupee (decouperMessage, messagesAvecCarte), la carte toujours
+ * entiere dans le dernier message. false = un envoi refuse (la suite n'est
+ * pas envoyee).
  */
-function texteAvecCarte(reply: string, carte: string): string {
-  const tout = `${reply}\n\n${carte}`
-  if (tout.length <= 4096) return tout
-  const place = 4096 - carte.length - 5
-  return place > 0 ? `${reply.slice(0, place)}...\n\n${carte}` : tout
+async function envoyerMessages(chatId: number, morceaux: string[], boutons?: unknown): Promise<boolean> {
+  for (const [i, texte] of morceaux.entries()) {
+    const dernier = i === morceaux.length - 1
+    const ok = await tgCockpit('sendMessage', {
+      chat_id: chatId, text: texte, ...(dernier && boutons ? { reply_markup: boutons } : {}),
+    })
+    if (!ok) return false
+  }
+  return true
+}
+
+/** Une reponse refusee par Telegram : dit en clair, jamais le silence. */
+async function signalerNonPartie(chatId: number): Promise<void> {
+  console.error('[cockpit/telegram] reponse refusee par Telegram, message de repli envoye')
+  await tgCockpit('sendMessage', { chat_id: chatId, text: TEXTE_REPONSE_NON_PARTIE })
 }
 
 /**
@@ -428,9 +459,9 @@ export async function traiterTexteAgentTelegram(e: EntreeAgentTelegram): Promise
  * que le tour suivant sache que la question est restee sans reponse. Ne jette
  * pas.
  */
-async function ajouterReponseSeule(chatId: number, contenu: string): Promise<void> {
+async function ajouterReponseSeule(chatId: number, contenu: string, o: { echec?: boolean } = {}): Promise<void> {
   try {
-    const ligne = JSON.stringify([{ role: 'assistant', content: contenu }])
+    const ligne = JSON.stringify([{ role: 'assistant', content: contenu, ...(o.echec ? { echec: true } : {}) }])
     await prisma.$executeRaw`
       update public.cockpit_agent_conversations
       set messages = ${historiqueAvecAjout(Prisma.raw('messages'), Prisma.sql`${ligne}::jsonb`)},
@@ -443,6 +474,8 @@ async function ajouterReponseSeule(chatId: number, contenu: string): Promise<voi
 
 async function tourAgent(e: EntreeAgentTelegram): Promise<IssueAgentTelegram> {
   const { chatId, telegramId, compte, updateId } = e
+  const debut = Date.now()
+  const limite = e.limite ?? debut + DUREE_TOUR_DEFAUT_MS
   const image = e.image ?? null
   const piece = e.piece ?? null
   const texte = e.texte.slice(0, MAX_MESSAGE_LEN).trim()
@@ -480,6 +513,14 @@ async function tourAgent(e: EntreeAgentTelegram): Promise<IssueAgentTelegram> {
     return 'traite'
   }
 
+  // (29/10) Une reprise demandee par un autre membre de l'equipe ne tourne
+  // que s'il reste une demande en suspens dans ce fil (quelqu'un a pu y
+  // repondre entre-temps) : sinon rien, ni accuse ni ligne.
+  if (e.reprise && !demandesEnSuspens(conv?.messages ?? [], { maintenant: Date.now() })) {
+    console.log('[cockpit/telegram] reprise demandee, plus rien en suspens dans ce fil')
+    return 'traite'
+  }
+
   // LA QUESTION EST ECRITE DES SON ARRIVEE (15/10), la reponse en fin de tour.
   // Avant, les deux partaient ensemble a la fin : un message transfere avec un
   // commentaire arrive en DEUX updates quasi simultanes (le commentaire, puis
@@ -494,8 +535,9 @@ async function tourAgent(e: EntreeAgentTelegram): Promise<IssueAgentTelegram> {
   // les photos d'un album arrivent en parallele et dans le desordre, et un
   // update_id ecrit trop tot ferait ignorer les precedents.
   const idTour = updateId !== null ? `u${updateId}` : `t${randomUUID()}`
+  // (29/10) `le` : l'arrivee de la question, pour dater une demande restee sans reponse.
   const question = JSON.stringify([
-    { role: 'user', content: texte, id: idTour, ...(piece ? { piece } : {}) },
+    { role: 'user', content: texte, id: idTour, le: new Date(debut).toISOString(), ...(piece ? { piece } : {}) },
   ] satisfies MessageStocke[])
   const ecrite = await prisma.$queryRaw<{ messages: unknown }[]>`
     insert into public.cockpit_agent_conversations as c (chat_id, telegram_id, messages)
@@ -512,7 +554,14 @@ async function tourAgent(e: EntreeAgentTelegram): Promise<IssueAgentTelegram> {
   // L'historique pour le modele : ce qui precede SA question dans la base
   // (un tour concurrent ecrit apres lui n'est pas a lui), roles normalises,
   // puis la question du tour, avec son image s'il y en a une.
-  const historique = messagesPourModele(historiquePourTour(ecrite[0].messages, idTour), { texte, image }) as Anthropic.MessageParam[]
+  // (29/10) Les messages restes sans reponse AVANT cette question (un tour
+  // tue, un echec) : une note pour le modele, jamais gardee en base. Une
+  // reprise (reprendre_demande) les fait traiter maintenant ; un tour
+  // ordinaire les reprend sur une relance, sinon propose de les reprendre.
+  const suspens: DemandesEnSuspens | null = demandesEnSuspens(ecrite[0].messages, { maintenant: Date.now(), avantId: idTour })
+  const note = suspens ? noteSuspens(suspens, e.reprise ? { mode: 'reprise', par: e.reprise.par } : { mode: 'tour' }) : null
+  const texteModele = note ? (e.reprise ? note : `${note}\n\n${texte}`) : texte
+  const historique = messagesPourModele(historiquePourTour(ecrite[0].messages, idTour), { texte: texteModele, image }) as Anthropic.MessageParam[]
 
   // SIGNE DE VIE (retour Brice 25/09) : sur une question lourde l'agent peut
   // prendre une ou deux minutes, et un silence de deux minutes ressemble a une
@@ -520,37 +569,124 @@ async function tourAgent(e: EntreeAgentTelegram): Promise<IssueAgentTelegram> {
   // d'ecrire » est rafraichi toutes les 4 s (Telegram l'efface au bout de 5)
   // jusqu'a la reponse. L'accuse n'entre pas dans l'historique du modele. Une
   // photo y a droit comme un texte (15/10).
-  await tgCockpit('sendMessage', { chat_id: chatId, text: 'Je vérifie…' })
+  const accuse = e.reprise
+    ? `Je reprends ta demande restée sans réponse (relancée par ${e.reprise.par})...`
+    : 'Je vérifie…'
+  await tgCockpit('sendMessage', { chat_id: chatId, text: accuse })
   await tgCockpit('sendChatAction', { chat_id: chatId, action: 'typing' })
   const battement = setInterval(() => {
     void tgCockpit('sendChatAction', { chat_id: chatId, action: 'typing' })
   }, 4000)
 
-  let reponse
+  // LE FILET (29/10, bug de Melanie du 28/10). La boucle connait la limite et
+  // rend ce qui est fait avant elle. Si elle n'a pas rendu la main a la
+  // limite + GRACE_FILET_MS (appel bloque, base lente...), l'appel en cours
+  // est coupe et l'echec est dit en clair, avant que la plateforme tue la
+  // fonction : un « Je vérifie... » n'est plus jamais suivi du silence.
+  const controleur = new AbortController()
+  let filet: ReturnType<typeof setTimeout> | undefined
+  const delai = new Promise<'delai'>(resolve => {
+    filet = setTimeout(() => resolve('delai'), Math.max(0, limite + GRACE_FILET_MS - Date.now()))
+  })
+  // Une demande notee depuis Telegram porte le libelle du compte (08/10).
+  const travail = boucleAgent(historique, compte.user_id, {
+    source: 'agent_telegram',
+    auteur: auteurDemande({ libelle: compte.libelle, userId: compte.user_id }),
+    // (16/10) La derniere piece recue ici, que proposer_reponse_membre peut joindre.
+    piece: dernierePieceHistorique(ecrite[0].messages),
+    limite,
+    signal: controleur.signal,
+  })
+  // Perdue face au filet, sa fin (ou son erreur) n'interesse plus personne.
+  travail.catch(() => undefined)
+
+  let reponse: ReponseAgent | 'delai'
   try {
-    // Une demande notee depuis Telegram porte le libelle du compte (08/10).
-    reponse = await boucleAgent(historique, compte.user_id, {
-      source: 'agent_telegram',
-      auteur: auteurDemande({ libelle: compte.libelle, userId: compte.user_id }),
-      // (16/10) La derniere piece recue ici, que proposer_reponse_membre peut joindre.
-      piece: dernierePieceHistorique(ecrite[0].messages),
-    })
+    reponse = await Promise.race([travail, delai])
   } catch (err) {
-    clearInterval(battement)
     console.error('[cockpit/telegram]', err)
     // Une image refusee par l'API (poids, dimensions, format) : dit en clair.
     const texteErreur = image && erreurDImage(err) ? TEXTE_IMAGE_REFUSEE : TEXTE_ERREUR_AGENT
     await tgCockpit('sendMessage', { chat_id: chatId, text: texteErreur })
-    await ajouterReponseSeule(chatId, texteErreur)
+    await ajouterReponseSeule(chatId, texteErreur, { echec: true })
+    return 'traite'
+  } finally {
+    clearTimeout(filet)
+    clearInterval(battement)
+  }
+
+  if (reponse === 'delai') {
+    controleur.abort()
+    console.error(`[cockpit/telegram] filet : aucune reponse ${Math.round((Date.now() - debut) / 1000)} s apres le debut du tour, echec dit en clair`)
+    await tgCockpit('sendMessage', { chat_id: chatId, text: TEXTE_TEMPS_DEPASSE })
+    await ajouterReponseSeule(chatId, TEXTE_TEMPS_DEPASSE, { echec: true })
     return 'traite'
   }
 
-  clearInterval(battement)
+  // Une base qui ne repond plus au moment d'ecrire la reponse : la route
+  // rendait une erreur, Telegram rejouait, et le rejeu s'arretait sur la
+  // question deja ecrite (doublon) : le silence. Dit en clair a la place.
+  try {
+    await livrerReponse({ chatId, telegramId, updateId, majUpdate, garde }, reponse)
+  } catch (err) {
+    console.error('[cockpit/telegram] reponse non enregistree', err instanceof Error ? err.message.split('\n')[0].slice(0, 160) : '?')
+    await tgCockpit('sendMessage', { chat_id: chatId, text: TEXTE_ERREUR_AGENT })
+    return 'traite'
+  }
+
+  // (29/10) « Reprends la demande de Mel » : le tour de Mel, dans SON fil,
+  // APRES cette reponse, avec le temps qui reste a cette fonction. Une reprise
+  // ne relance jamais elle-meme (pas de chaine).
+  if (!e.reprise) {
+    for (const r of reponse.relances ?? []) {
+      try {
+        await reprendreDemandeEquipe(r, { limite })
+      } catch (err) {
+        console.error('[cockpit/telegram] relance dans le fil d\'un membre de l\'equipe impossible',
+          err instanceof Error ? err.message.split('\n')[0].slice(0, 160) : '?')
+      }
+    }
+  }
+  return 'traite'
+}
+
+/**
+ * (29/10) Reprend, dans le fil d'un membre de l'equipe, sa demande restee sans
+ * reponse (outil reprendre_demande, appele depuis le fil d'un autre). Le tour
+ * tourne pour LUI : son compte (verifie dans cockpit_telegram_comptes), ses
+ * cartes, sa conversation. Rien en suspens = rien n'est fait. Jette si la base
+ * ne repond pas.
+ */
+export async function reprendreDemandeEquipe(r: RelanceEquipe, o: { limite?: number } = {}): Promise<IssueAgentTelegram> {
+  const compte = await compteCockpitTelegram(r.chatId)
+  if (!compte) {
+    console.warn('[cockpit/telegram] relance : ce compte n\'est plus dans cockpit_telegram_comptes, rien n\'est fait')
+    return 'traite'
+  }
+  return tourAgent({
+    chatId: r.chatId, telegramId: r.chatId, compte, updateId: null,
+    texte: `[système] ${r.par} a demandé de reprendre ta demande restée sans réponse.`,
+    reprise: { par: r.par }, limite: o.limite,
+  })
+}
+
+type ContexteLivraison = {
+  chatId: number; telegramId: number; updateId: number | null; majUpdate: Prisma.Sql; garde: Prisma.Sql
+}
+
+/**
+ * La reponse d'un tour : ecrite a l'historique (en ajout), puis envoyee,
+ * coupee si elle est longue, la carte et ses boutons dans le dernier message.
+ * Une reponse refusee par Telegram est dite en clair (signalerNonPartie).
+ */
+async function livrerReponse(c: ContexteLivraison, reponse: ReponseAgent): Promise<void> {
+  const { chatId, telegramId, updateId, majUpdate, garde } = c
   // La reponse de ce tour, seule (la question est deja en base). Un rejeu
   // Telegram du MEME update s'est arrete a l'ecriture de la question ; la
-  // clause where de chaque upsert reste en ceinture.
+  // clause where de chaque upsert reste en ceinture. (29/10) Une reponse
+  // partielle (temps) est marquee echec : la demande reste en suspens.
   const tour = JSON.stringify([
-    { role: 'assistant', content: reponse.reply },
+    { role: 'assistant', content: reponse.reply, ...(reponse.inacheve ? { echec: true as const } : {}) },
   ] satisfies MessageStocke[])
 
   if (reponse.action) {
@@ -563,12 +699,10 @@ async function tourAgent(e: EntreeAgentTelegram): Promise<IssueAgentTelegram> {
         set messages = ${HISTORIQUE_UPSERT},
             dernier_update_id = ${majUpdate}, maj_le = now()
         where ${garde}`
-      await tgCockpit('sendMessage', {
-        chat_id: chatId,
-        text: texteAvecCarte(reponse.reply, `⚠️ ${resume}\n\n${cle_manquante
-          ?? `La clé d'écriture du compte ${action.compte} n'est pas posée : rien ne peut être exécuté.`}`),
-      })
-      return 'traite'
+      const carte = `⚠️ ${resume}\n\n${cle_manquante
+        ?? `La clé d'écriture du compte ${action.compte} n'est pas posée : rien ne peut être exécuté.`}`
+      if (!await envoyerMessages(chatId, messagesAvecCarte(reponse.reply, carte))) await signalerNonPartie(chatId)
+      return
     }
 
     // Verrou 3 : l'action attend le POUCE. Le nonce lie les boutons de CE
@@ -584,17 +718,16 @@ async function tourAgent(e: EntreeAgentTelegram): Promise<IssueAgentTelegram> {
           nonce = excluded.nonce,
           dernier_update_id = ${majUpdate}, maj_le = now()
       where ${garde}`
-    await tgCockpit('sendMessage', {
-      chat_id: chatId,
-      text: texteAvecCarte(reponse.reply, `⚠️ ${resume}`),
-      reply_markup: {
-        inline_keyboard: [[
-          { text: '✅ Confirmer et exécuter', callback_data: `ok:${nonce}` },
-          { text: '❌ Annuler', callback_data: `non:${nonce}` },
-        ]],
-      },
-    })
-    return 'traite'
+    // (29/10) Le bouton dit l'action precise (Brice : « un bouton a un clic,
+    // avec un libelle qui dit l'action »), plus « Confirmer et exécuter ».
+    const boutons = {
+      inline_keyboard: [[
+        { text: libelleBoutonConfirmer(action.type), callback_data: `ok:${nonce}` },
+        { text: '❌ Annuler', callback_data: `non:${nonce}` },
+      ]],
+    }
+    if (!await envoyerMessages(chatId, messagesAvecCarte(reponse.reply, `⚠️ ${resume}`), boutons)) await signalerNonPartie(chatId)
+    return
   }
 
   await prisma.$executeRaw`
@@ -604,6 +737,5 @@ async function tourAgent(e: EntreeAgentTelegram): Promise<IssueAgentTelegram> {
     set messages = ${HISTORIQUE_UPSERT}, action_en_attente = null, nonce = null,
         dernier_update_id = ${majUpdate}, maj_le = now()
     where ${garde}`
-  await tgCockpit('sendMessage', { chat_id: chatId, text: reponse.reply })
-  return 'traite'
+  if (!await envoyerMessages(chatId, decouperMessage(reponse.reply))) await signalerNonPartie(chatId)
 }

@@ -1,10 +1,12 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getUserId } from '@/lib/api-auth'
 import { aiErrorMessage } from '@/lib/ai'
 import { corsHeaders, corsPreflight } from '@/lib/support-cors'
 import { boucleAgent } from '@/lib/agent-cockpit'
 import { auteurDemande } from '@/lib/agent-cockpit-pur'
+import { limiteDuTour } from '@/lib/agent-cockpit-telegram-pur'
+import { reprendreDemandeEquipe } from '@/lib/agent-cockpit-telegram'
 import type Anthropic from '@anthropic-ai/sdk'
 
 // Le canal WEB de l'agent cockpit : la fenetre flottante ✦. Le cerveau
@@ -18,7 +20,11 @@ import type Anthropic from '@anthropic-ai/sdk'
 // pas la base, il s'y CONFRONTE : le cas d'usage est le releve d'Adil ou
 // l'export Stripe qu'on veut rapprocher de cockpit_paiements.
 
-export const maxDuration = 120
+// (29/10) 300 s comme le canal Telegram : le generateur de posts (un brouillon
+// = 25 a 37 s) depassait 120 s. La boucle s'arrete d'elle-meme avant la
+// limite (limiteDuTour) et rend ce qui est fait ; une reprise demandee ici
+// (reprendre_demande) tourne apres la reponse, dans le fil Telegram concerne.
+export const maxDuration = 300
 
 const MAX_HISTORY = 20
 const MAX_MESSAGE_LEN = 4000
@@ -83,6 +89,7 @@ export function OPTIONS(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const limite = limiteDuTour(Date.now(), maxDuration)
   const cors: Record<string, string> = corsHeaders(req)
   const userId = await getUserId(req)
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: cors })
@@ -170,13 +177,30 @@ export async function POST(req: NextRequest) {
   let reponse: Awaited<ReturnType<typeof boucleAgent>>
   try {
     // Une demande notee depuis cette fenetre porte 'cockpit:<uuid>' (08/10).
-    reponse = await boucleAgent(historique, userId, { source: 'agent_cockpit', auteur: auteurDemande({ userId }) })
+    reponse = await boucleAgent(historique, userId, { source: 'agent_cockpit', auteur: auteurDemande({ userId }), limite })
   } catch (err) {
     console.error('[cockpit/agent]', err)
     return NextResponse.json(
       { error: aiErrorMessage(err, 'ANTHROPIC_API_KEY_COCKPIT') },
       { status: 502, headers: cors },
     )
+  }
+
+  // (29/10) « Reprends la demande de Mel » depuis la fenetre : son tour tourne
+  // dans SON fil Telegram, apres cette reponse (after : la fenetre n'attend pas).
+  const relances = reponse.relances ?? []
+  delete reponse.relances
+  if (relances.length) {
+    after(async () => {
+      for (const r of relances) {
+        try {
+          await reprendreDemandeEquipe(r, { limite })
+        } catch (err) {
+          console.error('[cockpit/agent] relance dans le fil d\'un membre de l\'equipe impossible',
+            err instanceof Error ? err.message.split('\n')[0].slice(0, 160) : '?')
+        }
+      }
+    })
   }
 
   // CARTE A USAGE UNIQUE (29/09) : une action executable est memorisee cote

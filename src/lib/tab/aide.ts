@@ -46,7 +46,7 @@ export function aide(): Record<string, unknown> {
         'L\'ETM (Elite Trader Mentorship) : le mentorat privé de Brice, environ 4 000 euros pour 3 mois, payé par virement, très peu d\'élèves. Il n\'ouvre pas le Live Club.',
         'Les apps des membres : le Carnet du Trader (extension Chrome de prise de notes), le Journal d\'études (journal-d-etude-beta.vercel.app, qui héberge aussi cette API), Pilotage.',
         'L\'audience : chaîne YouTube BriceDlb, Instagram et Page Facebook de Brice, canal Telegram de Mel (MELMOM | ICT Trading), groupe Pot De Trader, newsletter Kit (« Les Échos de l\'Académie »), anciens membres Skool.',
-        'La répartition Brice / Mel : celui qui apporte la vente prend 70 %, l\'autre 30 %. Les commissions broker (RaiseFx) donnent 6 mois de Live Club.',
+        'La répartition Brice / Mel : celui qui apporte la vente prend 70 %, l\'autre 30 %. Un dépôt chez un broker partenaire donne un accès Live Club de la durée choisie (6 mois par défaut, de 1 à 24 mois depuis le 29/10/2026).',
       ],
       les_domaines: {
         argent: '/encaissements, /paiements, /membres (MRR), et en lecture libre cockpit_paiements, cockpit_abonnements, cockpit_charges, cockpit_depenses, cockpit_commissions.',

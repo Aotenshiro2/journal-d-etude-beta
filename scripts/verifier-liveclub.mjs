@@ -65,7 +65,7 @@ import {
   dateFr, dateHeureParis, texteSur, identite, cleGeste, evenementDeGeste, codeAbonnement, instantaneAbonnements,
   changementsAbonnements, changementsHorsDuBot, evenementDeChangement, estNouvelAbonnement, detailNouvelAbonnement,
   detailAccesBroker, detailExemption, detailTarifReserve, detailAttenteHumain, detailDemande, detailRepriseBot,
-  ilYAMouvement, titreResume, composerResume, decouperResume, entreesHistoriqueResume,
+  ilYAMouvement, titreResume, composerResume, decouperResume, entreesHistoriqueResume, detailSuspens,
 } from '../src/lib/liveclub/resume-pur.ts'
 import {
   textePropre, identiteTelegram, ligneNom, cleNomDuJour, nomANoter, MAX_PSEUDO, MAX_NOM, MAX_MEMOIRE_NOMS,
@@ -2375,6 +2375,8 @@ function matineeFictive() {
     // (16/10) Le bot a repris seul la main d'un fil (24 h sans message de l'equipe).
     { rubrique: 'reprises', qui: 't502', quand: '2026-10-15T04:00:00Z', detail: detailRepriseBot('2026-10-15T04:00:00Z') },
     { rubrique: 'demandes', qui: 'd1', quand: '2026-10-14T18:00:00Z', detail: detailDemande('Prévoir un accès broker pour le frère de Souad', 'nouvelle') },
+    // (29/10) Une demande de l'equipe restee sans reponse dans son fil Agent AOK.
+    { rubrique: 'suspens', qui: 'q1899', quand: '2026-10-14T11:53:00Z', detail: detailSuspens({ extraits: ['Enseigner convertir', 'Du coup ?'], depuisIso: '2026-10-14T11:53:00Z', inachevee: false, nom: 'Mélanie' }) },
   ]
   const personnes = new Map([
     ['ssub_YASSINE', { nom: 'Yassine Z.', email: 'yassine.paiement@exemple.fr', pseudo: null, telegramId: 507 }],
@@ -2393,6 +2395,7 @@ function matineeFictive() {
     ['ezap@exemple.fr', { nom: 'Zoé A.', email: 'zap@exemple.fr', pseudo: null, telegramId: null }],
     ['t509', { nom: 'Nelly', email: null, pseudo: 'nelly34', telegramId: 509 }],
     ['d1', { nom: 'melanie', email: null, pseudo: null, telegramId: null }],
+    ['q1899', { nom: 'Mélanie', email: null, pseudo: null, telegramId: null }],
   ])
   return { evenements, personnes }
 }

@@ -1,6 +1,7 @@
 // Acces broker au Live Club (affiliation RaiseFx, 29/09). Melanie colle des
 // emails dans le cockpit (formulaire ou agent) : chacun recoit 6 mois
-// d'acces a partir du jour de l'ajout, UNE SEULE FOIS (index unique
+// d'acces a partir du jour de l'ajout (depuis le 29/10 : la duree demandee,
+// de 1 a 24 mois, 6 par defaut ; source = le broker), UNE SEULE FOIS (index unique
 // (lower(email), motif), migration 20260929200100 : une ligne, meme retiree
 // ou terminee, bloque un second acces). L'email part de support@ avec le
 // lien personnel vers le bot ; l'entree suit le meme parcours qu'un abonne.
@@ -58,11 +59,24 @@ export type ResultatAccesBroker = {
  */
 export async function accorderAccesBroker(
   emails: string[],
-  options: { acteur: string; note?: string | null },
+  options: {
+    acteur: string
+    note?: string | null
+    /**
+     * (29/10) Duree en mois entiers, de 1 a MOIS_ACCES_MAX (Brice : « la
+     * periode que l'on voulait »). Absente = MOIS_ACCES_BROKER (6).
+     */
+    mois?: number
+    /** (29/10) Le broker (partenaire_id). Absent = 'raisefx', comme avant. */
+    source?: string
+  },
 ): Promise<ResultatAccesBroker[]> {
   if (!Array.isArray(emails) || emails.length === 0) throw new Error('Aucun email a traiter.')
   if (emails.length > MAX_EMAILS_PAR_LOT) throw new Error(`${MAX_EMAILS_PAR_LOT} emails au plus par lot.`)
   const note = options.note?.trim().slice(0, 500) || null
+  const mois = options.mois ?? MOIS_ACCES_BROKER
+  if (!Number.isInteger(mois) || mois < 1 || mois > MOIS_ACCES_MAX) throw new Error(`Durée d'accès invalide (${mois} mois) : de 1 à ${MOIS_ACCES_MAX}.`)
+  const source = /^[a-z0-9]{2,40}$/.test(options.source ?? '') ? (options.source as string) : SOURCE_DEFAUT
 
   // D'abord le tri (invalides, doublons du lot), dans l'ordre du collage.
   const vus = new Set<string>()
@@ -88,7 +102,7 @@ export async function accorderAccesBroker(
     while (suivant < aTraiter.length) {
       const { rang, email } = aTraiter[suivant++]
       try {
-        resultats[rang] = await accorderUn(email, options.acteur, note)
+        resultats[rang] = await accorderUn(email, options.acteur, note, mois, source)
       } catch (err) {
         resultats[rang] = { email, resultat: 'echec', erreur: messageErreur(err) }
       }
@@ -99,8 +113,12 @@ export async function accorderAccesBroker(
 }
 
 const CONCURRENCE_LOT = 2
+/** Le broker des acces d'avant le 29/10 (formulaire du cockpit, carte acces_broker sans broker). */
+const SOURCE_DEFAUT = 'raisefx'
+/** = MOIS_ACCES_MAX de repartition/pur.ts (verifier-repartition.mjs). */
+const MOIS_ACCES_MAX = 24
 
-async function accorderUn(email: string, acteur: string, note: string | null): Promise<ResultatAccesBroker> {
+async function accorderUn(email: string, acteur: string, note: string | null, mois: number, source: string): Promise<ResultatAccesBroker> {
   // 1. Non renouvelable : une ligne broker existe deja (active ou non). Une
   //    exception : l'acces est en cours mais son invitation n'est jamais
   //    partie (Resend en panne, table des jetons absente) et personne ne l'a
@@ -151,8 +169,8 @@ async function accorderUn(email: string, acteur: string, note: string | null): P
   try {
     const lignes = await prisma.$queryRaw<{ acces_id: string; jusquau: Date }[]>`
       insert into public.cockpit_liveclub_acces (email, motif, source, debut, jusquau, pose_par, note)
-      values (${email}, 'broker', 'raisefx', current_date,
-              (current_date + make_interval(months => ${MOIS_ACCES_BROKER}::int))::date, ${acteur}, ${note})
+      values (${email}, 'broker', ${source}, current_date,
+              (current_date + make_interval(months => ${mois}::int))::date, ${acteur}, ${note})
       on conflict do nothing
       returning acces_id, jusquau`
     if (!lignes[0]) return { email, resultat: 'deja_accorde' }
@@ -164,10 +182,10 @@ async function accorderUn(email: string, acteur: string, note: string | null): P
 
   // 4. Le jeton et l'email. L'acces reste accorde meme si l'email ne part
   //    pas : invite_envoyee_le reste vide, et recoller l'email le renverra.
-  const { emailEnvoye, erreur } = await envoyerInvitation(accesId, email, jusquau)
+  const { emailEnvoye, erreur } = await envoyerInvitation(accesId, email, jusquau, mois)
 
   await journaliserGesteLiveClub(
-    { geste: 'acces_broker', resultat: 'fait', regle: 'broker', details: { acces_id: accesId, jusquau, email_envoye: emailEnvoye } },
+    { geste: 'acces_broker', resultat: 'fait', regle: 'broker', details: { acces_id: accesId, jusquau, mois, source, email_envoye: emailEnvoye } },
     { telegramId: null, acteur },
   )
   return { email, resultat: 'accorde', jusquau, emailEnvoye, ...(erreur ? { erreur } : {}) }
@@ -183,7 +201,7 @@ type LigneAccesExistant = { acces_id: string; jusquau: Date; a_relancer: boolean
  * valable jusqu'a la fin de l'acces, est reutilise s'il existe deja.
  */
 async function envoyerInvitation(
-  accesId: string, email: string, jusquau: string,
+  accesId: string, email: string, jusquau: string, mois?: number,
 ): Promise<{ emailEnvoye: boolean; deja?: boolean; erreur?: string }> {
   let reserve: { acces_id: string }[]
   try {
@@ -201,7 +219,7 @@ async function envoyerInvitation(
   try {
     const jeton = (await jetonExistant({ accesId, usage: 'entree' }))
       ?? await creerJeton({ usage: 'entree', accesId, email }, joursEntre(new Date(), jusquau) + 1)
-    const envoi = await emailAccesBroker(email, lienBot(jeton), jusquau)
+    const envoi = await emailAccesBroker(email, lienBot(jeton), jusquau, mois)
     if (envoi.ok) return { emailEnvoye: true }
     erreur = `Acces accorde, email pas parti : ${envoi.erreur}`
   } catch (err) {

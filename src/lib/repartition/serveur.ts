@@ -720,13 +720,34 @@ const qui = (c: { client: string | null; email: string | null }) => c.client ?? 
 /** Commission attendue, mois prevu et parts, en une phrase (carte et resultat). */
 function phraseCommission(o: {
   attendue: number | null; taux: TauxPartenaire; nature: 'depot' | 'affiliation'; le: string; client: string; moisCourant: string
+  /** (29/10) « commission propre à ce dépôt » quand elle a ete donnee avec lui. */
+  libelle?: string
 }): string {
-  if (o.attendue === null) return `Taux de ${libelleTaux(o.taux, o.nature)} : montant inconnu sans la base.`
+  const libelle = o.libelle ?? libelleTaux(o.taux, o.nature)
+  if (o.attendue === null) return `Taux de ${libelle} : montant inconnu sans la base.`
   const prevu = moisPrevuCommission({ statut: 'attendue', le: o.le, lotsFaitsLe: null }, o.moisCourant) ?? o.moisCourant
   const parts = partsCommission(o.attendue)
-  return `Commission attendue : ${euros(o.attendue)} (${libelleTaux(o.taux, o.nature)}), prévue fin ${libelleMois(prevu)}`
+  return `Commission attendue : ${euros(o.attendue)} (${libelle}), prévue fin ${libelleMois(prevu)}`
     + (o.nature === 'depot' ? ` si ${o.client} fait ses lots d'ici là, sinon elle glisse au mois suivant.` : '.')
     + ` Part de Mel : ${euros(parts.mel)}, part de Brice : ${euros(parts.brice)} (70/30, avant dépenses).`
+}
+
+/**
+ * (29/10) Le taux qui fixe la commission d'un depot ou d'une affiliation : la
+ * commission donnee pour CE depot (« on prend 400 EUR »), qui prime, sinon le
+ * taux du partenaire en vigueur a sa date. null = ni l'un ni l'autre.
+ */
+async function tauxPourDepot(
+  type: TypeRepartition, p: Record<string, unknown>, partenaireId: string, le: string,
+): Promise<{ taux: TauxPartenaire; libelle?: string } | null> {
+  if (type === 'depot_broker' && p.commission !== null && p.commission !== undefined) {
+    const c = centimes(p.commission)
+    if (c !== null) {
+      return { taux: { partenaireId, aPartirDu: le, tauxPct: null, montantFixe: c }, libelle: 'commission propre à ce dépôt' }
+    }
+  }
+  const taux = tauxEnVigueur(await tauxDuPartenaire(partenaireId), partenaireId, le)
+  return taux ? { taux } : null
 }
 
 /** Le solde d'un mois en une phrase, ou null si la lecture echoue (jamais bloquant). */
@@ -763,24 +784,31 @@ export async function controlerActionRepartition(a: ActionAgent): Promise<Contro
     if (type === 'depot_broker' || type === 'commission_affiliation') {
       const nom = String(p.partenaire_nom)
       const partenaire = await partenaireParId(String(p.partenaire))
+      // (29/10) Les questions vont a l'INTERLOCUTEUR (Brice ou Mel, dans son
+      // fil), plus « demande a Melanie » : Brice, 28/10, « c'est typiquement
+      // les questions que l'agent devrait poser a Mel, pas a moi ».
       if (!partenaire) {
         return {
-          erreur: `Partenaire « ${nom} » inconnu : aucun taux enregistré. Demande à Mélanie le taux de ${nom} `
-            + `(en % du dépôt, ou un montant fixe par client) et depuis quand, propose d'abord proposer_taux_partenaire `
-            + `(nature ${type === 'depot_broker' ? 'broker' : 'affiliation'}), puis ce geste.`,
+          erreur: `Partenaire « ${nom} » absent de la base (cockpit_partenaires) : rien n'est proposé. Demande à ton interlocuteur, `
+            + `dans ce fil et en une question, ce qui manque : la commission de ${nom} (un taux général en % du dépôt ou un montant fixe `
+            + `par client, et depuis quand ; ou seulement la commission de ce dépôt)${type === 'depot_broker' ? ", la date du dépôt et la durée de l'accès si elles ne sont pas dites" : ''}. `
+            + `Puis propose d'abord proposer_taux_partenaire (nature ${type === 'depot_broker' ? 'broker' : 'affiliation'} ; sans taux si seule `
+            + `la commission de ce dépôt est connue), et ce geste ensuite.`,
         }
       }
       if (type === 'depot_broker' && partenaire.nature !== 'broker') {
         return { erreur: `${partenaire.nom} est une affiliation, pas un broker : utilise proposer_commission_affiliation.` }
       }
       const le = String(p.le)
-      const taux = tauxEnVigueur(await tauxDuPartenaire(partenaire.partenaire_id), partenaire.partenaire_id, le)
-      if (!taux) {
+      const choix = await tauxPourDepot(type, p, partenaire.partenaire_id, le)
+      if (!choix) {
         return {
-          erreur: `Aucun taux connu pour ${partenaire.nom} au ${libelleJour(le)}. Demande à Mélanie son taux à cette date `
-            + `(en % du dépôt, ou un montant fixe par client), propose d'abord proposer_taux_partenaire (a_partir_du au plus tard le ${le}), puis ce geste.`,
+          erreur: `Aucun taux connu pour ${partenaire.nom} au ${libelleJour(le)}. Demande à ton interlocuteur, dans ce fil, `
+            + `la commission de ce dépôt (commission), ou le taux de ${partenaire.nom} à cette date (en % du dépôt, ou un montant fixe `
+            + `par client) : dans ce cas propose d'abord proposer_taux_partenaire (a_partir_du au plus tard le ${le}), puis ce geste.`,
         }
       }
+      const { taux, libelle } = choix
       const nature = type === 'depot_broker' ? 'depot' : 'affiliation'
       const base = p.montant === null || p.montant === undefined ? null : centimes(p.montant)
       const attendue = commissionDuTaux(taux, base)
@@ -788,7 +816,7 @@ export async function controlerActionRepartition(a: ActionAgent): Promise<Contro
         return { erreur: `Le taux de ${partenaire.nom} est en % : il faut le montant de la vente (montant) pour calculer la commission. Demande-le.` }
       }
       const client = String(p.client ?? p.email ?? 'le client')
-      let complement = phraseCommission({ attendue, taux, nature, le, client, moisCourant })
+      let complement = phraseCommission({ attendue, taux, nature, le, client, moisCourant, libelle })
       let manque: string | null = null
       if (type === 'depot_broker') {
         const acces = await accesParEmail(String(p.email))
@@ -822,6 +850,17 @@ export async function controlerActionRepartition(a: ActionAgent): Promise<Contro
       const partenaire = await partenaireParId(String(p.partenaire))
       if (!partenaire && !p.nature) {
         return { erreur: `${p.partenaire_nom} est un nouveau partenaire : demande s'il s'agit d'un broker (des dépôts) ou d'une affiliation, puis repropose avec nature.` }
+      }
+      // (29/10) Sans taux : seulement pour ENREGISTRER un nouveau partenaire.
+      if (p.sans_taux === true) {
+        if (partenaire) {
+          return { erreur: `${partenaire.nom} est déjà enregistré : pour lui poser un taux, il faut taux_pct ou montant_fixe ; la commission d'un seul dépôt passe par proposer_depot_broker (commission).` }
+        }
+        return {
+          action: a,
+          complement: `Nouveau partenaire (${p.nature}), sans taux général : chaque dépôt devra porter sa commission (proposer_depot_broker, commission) tant qu'un taux n'est pas posé.`,
+          manque: null,
+        }
       }
       const avant = partenaire
         ? tauxEnVigueur(await tauxDuPartenaire(partenaire.partenaire_id), partenaire.partenaire_id, String(p.a_partir_du))
@@ -1008,9 +1047,11 @@ async function executer(a: ActionAgent, posePar: string, acteur: string): Promis
       throw new RefusAction(`${partenaire.nom} est une affiliation, pas un broker : rien n'a été fait.`)
     }
     const le = String(p.le)
-    // Le taux en vigueur au jour du depot, FIGE dans la ligne.
-    const taux = tauxEnVigueur(await tauxDuPartenaire(partenaire.partenaire_id), partenaire.partenaire_id, le)
-    if (!taux) throw new RefusAction(`Aucun taux connu pour ${partenaire.nom} au ${libelleJour(le)} : rien n'a été fait. Donne d'abord son taux.`)
+    // Le taux en vigueur au jour du depot, ou la commission donnee pour ce
+    // depot (29/10), FIGE dans la ligne.
+    const choix = await tauxPourDepot(type, p, partenaire.partenaire_id, le)
+    if (!choix) throw new RefusAction(`Aucun taux connu pour ${partenaire.nom} au ${libelleJour(le)}, ni commission donnée pour ce dépôt : rien n'a été fait.`)
+    const { taux, libelle } = choix
     const nature = type === 'depot_broker' ? 'depot' : 'affiliation'
     const base = p.montant === null || p.montant === undefined ? null : centimes(p.montant)
     const attendue = commissionDuTaux(taux, base)
@@ -1045,7 +1086,10 @@ async function executer(a: ActionAgent, posePar: string, acteur: string): Promis
     } else {
       const manque = prerequisAccesBroker()
       if (manque) throw new Error(`${manque} Le dépôt n'est pas inscrit non plus.`)
-      const [r] = await accorderAccesBroker([email], { acteur, note: `dépôt ${partenaire.nom}` })
+      // (29/10) La duree demandee (6 mois par defaut), et le vrai broker en source.
+      const [r] = await accorderAccesBroker([email], {
+        acteur, note: `dépôt ${partenaire.nom}`, mois: typeof p.mois === 'number' ? p.mois : undefined, source: partenaire.partenaire_id,
+      })
       if (!r || r.resultat === 'echec') {
         throw new Error(`Accès pas posé, dépôt pas inscrit : ${r?.erreur ?? 'aucune réponse'}. Réessaie dans un instant.`)
       }
@@ -1086,14 +1130,14 @@ async function executer(a: ActionAgent, posePar: string, acteur: string): Promis
         values (${partenaire.partenaire_id}, 'depot', ${acces?.acces_id ?? null}::uuid,
                 ${acces ? null : email}, ${client}, ${le}::date, ${versEuros(base ?? 0)}::numeric,
                 ${taux.tauxPct}::numeric, ${taux.montantFixe === null ? null : versEuros(taux.montantFixe)}::numeric,
-                ${versEuros(attendue)}::numeric, ${note}, ${posePar}::uuid, 'agent')`
+                ${versEuros(attendue)}::numeric, ${libelle ? [`[${libelle}]`, note].filter(Boolean).join(' ') : note}, ${posePar}::uuid, 'agent')`
     } catch (err) {
       if (relationAbsente(err)) throw err
       throw new Error(`${ligneAcces}\nMais le dépôt n'est PAS inscrit (${erreurLisible(err)}) : redemande l'inscription du dépôt, l'accès ne sera pas refait.`)
     }
 
     return `Dépôt de ${euros(base ?? 0)} chez ${partenaire.nom} inscrit pour ${client ? `${client} (${email})` : email}, le ${libelleJour(le)}.\n`
-      + `${phraseCommission({ attendue, taux, nature, le, client: quiClient, moisCourant })}\n`
+      + `${phraseCommission({ attendue, taux, nature, le, client: quiClient, moisCourant, libelle })}\n`
       + `${ligneAcces}\n`
       + etapeApresDepot({ acces: issue, qui: quiClient, partenaire: partenaire.nom, bot: nomBot() })
   }
@@ -1146,21 +1190,28 @@ async function executer(a: ActionAgent, posePar: string, acteur: string): Promis
     const id = String(p.partenaire)
     const nomSaisi = String(p.partenaire_nom)
     const aPartirDu = String(p.a_partir_du)
+    const sansTaux = p.sans_taux === true
     const issue = await prisma.$transaction(async (tx) => {
       const existant = await tx.$queryRaw<LignePartenaire[]>`
         select partenaire_id, nom, nature, note from public.cockpit_partenaires where partenaire_id = ${id} for update`
       let partenaire = existant[0]
+      // (29/10) Sans taux : l'enregistrement d'un NOUVEAU partenaire seulement.
+      if (partenaire && sansTaux) {
+        throw new RefusAction(`${partenaire.nom} est déjà enregistré : rien n'a été fait. Pour son taux, il faut un pourcentage ou un montant fixe.`)
+      }
       if (!partenaire) {
         const nature = p.nature === 'broker' ? 'broker' : p.nature === 'affiliation' ? 'affiliation' : null
         if (!nature) {
           throw new RefusAction(`${nomSaisi} est un nouveau partenaire : précise s'il s'agit d'un broker ou d'une affiliation. Rien n'a été fait.`)
         }
+        const notePartenaire = sansTaux ? note : null
         await tx.$executeRaw`
-          insert into public.cockpit_partenaires (partenaire_id, nom, nature, pose_par, via)
-          values (${id}, ${nomSaisi}, ${nature}, ${posePar}::uuid, 'agent')
+          insert into public.cockpit_partenaires (partenaire_id, nom, nature, note, pose_par, via)
+          values (${id}, ${nomSaisi}, ${nature}, ${notePartenaire}, ${posePar}::uuid, 'agent')
           on conflict (partenaire_id) do nothing`
-        partenaire = { partenaire_id: id, nom: nomSaisi, nature, note: null }
+        partenaire = { partenaire_id: id, nom: nomSaisi, nature, note: notePartenaire }
       }
+      if (sansTaux) return { partenaire, avant: null, nouveau: true }
       const avantLignes = await tx.$queryRaw<LigneTaux[]>`
         select taux_id::text as taux_id, partenaire_id, a_partir_du::text as a_partir_du,
                taux_pct::float8 as taux_pct, montant_fixe::float8 as montant_fixe, note, pose_le
@@ -1173,6 +1224,11 @@ async function executer(a: ActionAgent, posePar: string, acteur: string): Promis
       return { partenaire, avant, nouveau: existant.length === 0 }
     })
     const nature = issue.partenaire.nature === 'broker' ? 'depot' : 'affiliation'
+    if (sansTaux) {
+      return `${issue.partenaire.nom} est enregistré (${issue.partenaire.nature}), sans taux général pour l'instant.\n`
+        + `Ensuite : chaque ${nature === 'depot' ? 'dépôt' : 'commission'} chez ${issue.partenaire.nom} porte sa commission, `
+        + `jusqu'à ce qu'un taux soit posé ; s'il y a un dépôt en cours, réponds « suite » pour sa carte.`
+    }
     const t = {
       tauxPct: p.taux_pct === null ? null : Number(p.taux_pct),
       montantFixe: p.montant_fixe === null ? null : centimes(p.montant_fixe),
