@@ -183,7 +183,7 @@ LES AVATARS CLIENTS :
 - cockpit_avatar_manuel : membre_id, avatar, note, pose_le, pose_par. L'avatar posé à la main depuis le cockpit ; il prime sur le calcul.
 
 Le modèle métier, à ne pas réinventer :
-- DEUX comptes Stripe : aoknowledge = le comptant (formations, VIP), melanie = TOUT le récurrent (Live Club). Le chiffre complet demande les deux.
+- DEUX comptes Stripe : aoknowledge = le comptant (formations, VIP) et les abonnements des apps (Carnet Premium, Pilotage Premium, Premium Duo), melanie = tout le récurrent du Live Club. Le chiffre complet demande les deux.
 - Le Live Club est une communauté : résilier ne retire pas les achats comptants (acces_conserves les liste).
 - Le tier Skool ne décide pas des révocations : un vip a payé comptant.
 - Les montants sont en euros. total_paye et montant sont des numeric.
@@ -243,7 +243,7 @@ LES PERSONNES : LA FICHE ET LES PAROLES (15/10) :
 - Une personne qui demande l'effacement de ses messages ou de ses données : voir « L'EFFACEMENT DES DONNÉES D'UNE PERSONNE » plus bas.
 
 LES ACTIONS STRIPE (03/09) :
-Tu disposes de seize outils d'action : proposer_code_promo, proposer_revoquer_code, proposer_remboursement, proposer_produit, proposer_lien_paiement, proposer_marquer_live_club, proposer_abonnement_reserve, proposer_retirer_tarif_reserve, proposer_pause_abonnement, proposer_reprise_abonnement, proposer_retirer_telegram, proposer_reintegrer_telegram, proposer_acces_broker, proposer_exemption, proposer_effacement et proposer_reponse_membre (décrits plus bas) (et huit pour la répartition, décrits plus bas : proposer_depot_broker, proposer_commission_affiliation, proposer_marquer_commission, proposer_taux_partenaire, proposer_intervenant, proposer_lives_du_mois, proposer_depense, proposer_reglement). Un appel N'EXÉCUTE RIEN : il affiche une carte de confirmation que Brice ou Mélanie doit cliquer : dis-le dans ta réponse. Après la confirmation, le résultat leur arrive directement et finit par l'étape humaine suivante (rien à faire, quoi dire à la personne, ou le lien à transmettre). Règles strictes :
+Tu disposes de dix-sept outils d'action : proposer_code_promo, proposer_revoquer_code, proposer_remboursement, proposer_produit, proposer_lien_paiement, proposer_marquer_live_club, proposer_abonnement_reserve, proposer_retirer_tarif_reserve, proposer_pause_abonnement, proposer_reprise_abonnement, proposer_annulation_abonnement, proposer_retirer_telegram, proposer_reintegrer_telegram, proposer_acces_broker, proposer_exemption, proposer_effacement et proposer_reponse_membre (décrits plus bas) (et huit pour la répartition, décrits plus bas : proposer_depot_broker, proposer_commission_affiliation, proposer_marquer_commission, proposer_taux_partenaire, proposer_intervenant, proposer_lives_du_mois, proposer_depense, proposer_reglement). Un appel N'EXÉCUTE RIEN : il affiche une carte de confirmation que Brice ou Mélanie doit cliquer : dis-le dans ta réponse. Après la confirmation, le résultat leur arrive directement et finit par l'étape humaine suivante (rien à faire, quoi dire à la personne, ou le lien à transmettre). Règles strictes :
 - AJOUTER, REMETTRE OU FAIRE REVENIR QUELQU'UN DANS LE GROUPE (règle de Brice, 08/10) : le groupe ne s'ouvre qu'à quelqu'un qui a un DROIT, parce que c'est le droit qui compte sa durée et qui le fait sortir à la fin. Un lien brut donné à quelqu'un sans droit l'ouvre pour toujours, sans que rien ne le compte ni ne le sorte. AVANT toute proposition, vérifie son droit par requêtes : exemption active (cockpit_liveclub_exemptions), accès broker actif (cockpit_liveclub_acces, par email ou telegram_id), abonnement Live Club vivant (cockpit_membre_emails ou cockpit_liveclub_rattachements, puis cockpit_abonnements), accès manuel (cockpit_acces_manuel). Le serveur revérifie de toute façon.
   - SANS droit : pose d'abord le droit, jamais une réintégration. Un dépôt chez un broker partenaire (« il a fait un dépôt », « il a accès pour 4 mois ») : voir « UNE DEMANDE D'ACCÈS BROKER » plus bas (proposer_depot_broker, ou proposer_acces_broker sans dépôt, avec la durée demandée ; l'email part avec son lien personnel vers le bot, qui le fait entrer tout seul). Jamais une exemption pour un dépôt broker. Un geste de l'équipe (fondateur, admin, équipe, favorisé, cadeau) = proposer_exemption, qui demande son compte Telegram : cherche le telegram_id (cockpit_telegram_membres, cockpit_liveclub_rattachements, cockpit_membre_telegram, archive) et, s'il reste inconnu, demande-le au lieu d'en deviner un. Une durée dite (« pour 3 mois ») devient la date de fin incluse ; sans durée, demande si l'exemption est permanente.
   - AVEC un droit mais hors du groupe : rien à poser. Le bot des membres lui donne tout seul son lien de retour dès qu'il lui écrit (Démarrer, /menu, un bouton ou n'importe quel message). proposer_reintegrer_telegram ne sert que si la personne reste bloquée malgré son droit (ancien ban, bot jamais ouvert) : le serveur la refuse si le droit n'est pas ouvert, et dit quel droit poser.
@@ -252,6 +252,11 @@ Tu disposes de seize outils d'action : proposer_code_promo, proposer_revoquer_co
 - TELEGRAM, le retrait n'est plus un bannissement (règle de Brice, 29/09) : la personne sort du groupe sans être bannie, et un lien d'invitation valide suffirait à la faire revenir. Ne dis jamais « banni » pour un retrait fait par nous. Quelqu'un en statut_tg kicked a été banni par Metricgram : le réintégrer lève ce ban.
 - TELEGRAM, historique Metricgram (avant le 06/10/2026) : Metricgram sortait parfois un membre qui avait droit ; les lignes 'sortie_abusive_metricgram' de cockpit_liveclub_gestes en gardent la trace. Pour faire revenir quelqu'un QUI A UN DROIT et reste bloqué, proposer_reintegrer_telegram reste le bon geste (il lève aussi un ancien ban de Metricgram).
 - PAUSE : elle démarre toujours à la fin de la période payée (le serveur la calcule, tu ne choisis pas la date), 1 à 6 mois, reprise automatique. Côté Telegram, tu n'as rien à proposer : si le compte Telegram du membre est rattaché, le passage quotidien le sort du groupe quand la période payée est finie et le prévient, puis le bot lui renvoie un lien quand les prélèvements reprennent. Ne propose pas de pause sur un abonnement résilié, déjà en pause, ou dont l'arrêt est programmé (annule_a_la_fin vrai) : le serveur refuse, comme le bot du membre, et il faut d'abord annuler l'arrêt.
+- ANNULER UN ABONNEMENT (règles de Brice, 30/10) : « arrête son abonnement », « annule le Pilotage Premium de X », « coupe cet abonnement d'essai » = proposer_annulation_abonnement. Carnet Premium, Pilotage Premium et Premium Duo sont sur le compte aoknowledge, le Live Club sur melanie.
+  1. Retrouve d'abord l'abonnement par requête, comme le charge_id d'un remboursement : cockpit_abonnements (le membre par cockpit_membre_emails, statut vivant), abonnement_id sans le préfixe stripe:. Absent de la base (acheté aujourd'hui, pas encore collecté) : passe l'email du membre, le serveur le cherche chez Stripe. Plusieurs abonnements en cours : le serveur te les rend, montre-les et demande lequel, puis rappelle l'outil avec son abonnement_id. Ne devine jamais un identifiant.
+  2. quand : fin-de-periode PAR DÉFAUT (le membre garde ce qu'il a payé, rien n'est remboursé). immediatement SEULEMENT si on te le demande (« tout de suite », « maintenant ») ou pour un abonnement d'essai (un achat de test de l'équipe, ou une période d'essai Stripe, statut trialing). motif : la raison donnée, courte, jamais inventée.
+  3. ANNULER N'EST PAS REMBOURSER : aucune des deux cartes ne fait l'autre. Si on te demande les deux, propose deux cartes, le remboursement d'abord (proposer_remboursement, le charge_id du paiement à rendre), puis l'annulation une fois le remboursement confirmé (« réponds « suite » »). Si on ne te demande que l'annulation, ne propose pas de remboursement.
+  4. Le droit du membre suit tout seul : rien à proposer côté Telegram (le passage quotidien sort un désabonné du groupe) ni côté apps. Une pause n'est pas un arrêt : « il veut faire une pause » = proposer_pause_abonnement. Un refus du serveur (déjà terminé, arrêt déjà programmé, clé sans la permission Subscriptions) : dis-le tel quel, c'est un réglage que Brice fera.
 - UN PRIX RÉSERVÉ À UNE PERSONNE (règle de Brice, 13/10) : « ouvre un abonnement à 1 EUR par mois pour X », « prépare un accès Live Club pour X à tel prix », « fais-lui un tarif à part » = proposer_abonnement_reserve, en UNE seule carte. Il faut : qui, son email (obligatoire, c'est lui qui la reconnaît au paiement et au bot : demande-le s'il manque, n'en invente jamais), le montant et la récurrence (month ou year ; demande s'ils ne sont pas dits), et son compte Telegram s'il est connu (telegram_id, facultatif : le bot la reconnaît alors dès Démarrer). Le serveur crée le tarif à son nom, son lien de paiement personnel (un seul paiement, email prérempli) et la réservation, que le bot des membres reconnaît pour lui donner ce même lien. Elle n'a accès qu'une fois payé : aucun droit à poser, ni exemption, ni réintégration. Le résultat donne le lien et l'étape suivante. Ce n'est PLUS la suite proposer_produit puis proposer_lien_paiement.
   Un tarif réservé est PERSONNEL : il ne sert qu'à la personne nommée, jamais repris pour quelqu'un d'autre (le serveur refuse). Le nom d'un produit (« ETM », « élève », « symbolique ») ne dit rien du prix d'une autre personne : un autre élève paie le prix public tant que Brice ou Mélanie ne demande pas une réservation à son nom. Ne propose jamais à quelqu'un le tarif réservé d'un autre.
   price_id ne sert qu'à reprendre un tarif existant créé POUR CETTE PERSONNE avant la réservation (par exemple un produit fait pour elle avec proposer_produit) : le serveur vérifie qu'il est actif, mensuel ou annuel, et à personne d'autre, et l'inscrit au Live Club si besoin.
@@ -273,7 +278,7 @@ Tu disposes de seize outils d'action : proposer_code_promo, proposer_revoquer_co
 - ACCÈS BROKER SANS DÉPÔT À INSCRIRE : quand on te colle des emails de clients d'un broker partenaire pour leur ouvrir le Live Club, sans montant, propose proposer_acces_broker avec TOUTES les adresses collées, sans en retirer ni en inventer (50 au plus par carte), et la durée demandée (mois, 6 par défaut). Chacune reçoit son accès à partir d'aujourd'hui et un email de support@ avec son lien personnel vers le bot, qui fait entrer la personne tout seul : personne n'a rien à faire à la main sur Telegram. NON RENOUVELABLE : une adresse qui a déjà eu un accès broker est refusée par le serveur, même si l'accès est terminé ; ne promets jamais un second accès. Une adresse déjà abonnée au Live Club est signalée sans rien accorder. Après la confirmation, rends le résultat adresse par adresse tel que le serveur le donne.
 - N'appelle un outil d'action QUE si on te le demande explicitement. Jamais de ta propre initiative, jamais « pendant que j'y suis ».
 - Une seule action proposée à la fois.
-- Le compte doit être certain : melanie = tout le récurrent (Live Club), aoknowledge = le comptant. En cas de doute, demande.
+- Le compte doit être certain : melanie = le Live Club (tout son récurrent), aoknowledge = le comptant et les abonnements des apps (Carnet Premium, Pilotage Premium, Premium Duo). En cas de doute, demande.
 - Pour un remboursement, retrouve d'abord le charge_id exact dans cockpit_paiements (paiement_id sans le préfixe stripe:) et vérifie le montant avec une requête. Ne devine jamais un identifiant.
 - S'il manque un paramètre (montant ? durée ? code ?), pose la question au lieu d'inventer.
 - Les autres gestes (marquer traité, envoyer un email) ne sont pas encore outillés : dis où le faire à la main dans le cockpit. Répondre à un membre dans son fil Support, si : proposer_reponse_membre.
@@ -505,6 +510,29 @@ const OUTILS: Anthropic.Tool[] = [
         qui: { type: 'string', description: 'Nom du membre.' },
       },
       required: ['compte', 'abonnement_id', 'qui'],
+    },
+  },
+  // Annuler un abonnement (30/10, demande de Brice) : controle avant la carte
+  // et execution dans stripe-actions.ts, regles et textes dans
+  // annulation-abonnement-pur.ts.
+  {
+    name: 'proposer_annulation_abonnement',
+    description:
+      "Propose d'ANNULER (arrêter) un abonnement Stripe : Carnet Premium, Pilotage Premium, Premium Duo (compte aoknowledge) ou Live Club (compte melanie). N'exécute rien : carte de confirmation (le membre, le produit, le montant et le rythme, la prochaine échéance, ce qui se passe). Annuler n'est PAS rembourser : un remboursement est sa propre carte (proposer_remboursement), proposée AVANT celle-ci quand on te demande les deux. Retrouve d'abord l'abonnement par requête (cockpit_abonnements, abonnement_id sans le préfixe stripe:) ; absent de la base (acheté aujourd'hui, pas encore collecté), passe l'email du membre : le serveur cherche ses abonnements en cours chez Stripe, et s'il en trouve plusieurs il te les rend : demande lequel.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        compte: { type: 'string', enum: ['aoknowledge', 'melanie'] },
+        abonnement_id: { type: 'string', description: 'sub_..., depuis cockpit_abonnements.abonnement_id sans le préfixe stripe:. Prioritaire sur email.' },
+        email: { type: 'string', description: "L'email du membre, quand l'abonnement_id n'est pas connu : le serveur retrouve ses abonnements en cours chez Stripe." },
+        quand: {
+          type: 'string', enum: ['fin-de-periode', 'immediatement'],
+          description: "fin-de-periode (défaut) : il s'arrête à la fin de la période payée, le membre garde ce qu'il a payé, rien n'est remboursé. immediatement : il s'arrête tout de suite (abonnement d'essai, remboursement, fraude), seulement si on te le demande ou pour un essai.",
+        },
+        motif: { type: 'string', description: 'Le motif, court, tel qu\'on te l\'a dit (« demande du membre », « essai de Brice », « fraude »). 200 caractères au plus. Il part aussi chez Stripe.' },
+        qui: { type: 'string', description: 'Nom du membre si tu le connais (le serveur lit aussi le nom et l\'email chez Stripe).' },
+      },
+      required: ['compte'],
     },
   },
   {
@@ -960,6 +988,7 @@ const TYPE_PAR_OUTIL: Record<string, ActionAgent['type']> = {
   proposer_reintegrer_telegram: 'reintegrer_telegram',
   proposer_pause_abonnement: 'pause_abonnement',
   proposer_reprise_abonnement: 'reprise_abonnement',
+  proposer_annulation_abonnement: 'annulation_abonnement',
   proposer_acces_broker: 'acces_broker',
   proposer_exemption: 'exemption',
   proposer_depot_broker: 'depot_broker',

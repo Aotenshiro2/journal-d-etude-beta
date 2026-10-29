@@ -57,6 +57,8 @@ const LIBELLES_BOUTON: Record<string, string> = {
   reintegrer_telegram: 'Réintégrer dans le groupe',
   pause_abonnement: 'Mettre en pause',
   reprise_abonnement: 'Lever la pause',
+  // « Arrêter », pas « Annuler » : sur Telegram, il voisine avec le bouton Annuler de la carte.
+  annulation_abonnement: "Arrêter l'abonnement",
   acces_broker: "Ouvrir l'accès broker",
   exemption: "Poser l'exemption",
   lien_paiement: 'Créer le lien de paiement',

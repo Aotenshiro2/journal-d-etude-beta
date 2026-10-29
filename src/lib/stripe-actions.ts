@@ -15,8 +15,10 @@
 // remboursements), Coupons = ecriture (couvre les codes promotionnels),
 // Produits = ecriture (couvre les tarifs), Payment Links = ecriture (liens de
 // paiement de l'agent, 13/10 : sans elle, le resultat dit quoi demander a
-// Adil). Tant que la cle manque, la carte de confirmation le dit au lieu d'un
-// bouton Confirmer.
+// Adil), Subscriptions = ecriture (pause, reprise et, depuis le 30/10,
+// annulation d'un abonnement ; couvre la lecture), Customers = lecture
+// (annulation retrouvee par l'email du membre). Tant que la cle manque, la
+// carte de confirmation le dit au lieu d'un bouton Confirmer.
 
 import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db'
@@ -39,6 +41,12 @@ import {
 } from '@/lib/repartition/pur'
 import { lireParamsEffacement, NOMS_NIVEAUX } from '@/lib/effacement-pur'
 import { lireParamsReponseMembre } from '@/lib/reponse-membre-pur'
+import {
+  lireParamsAnnulation, lireAbonnementStripe, produitsDeAbonnement, choisirAbonnement, refusAnnulation,
+  avertissementAnnulation, paramsDepuisAbonnement, carteAnnulation, requeteAnnulation, phraseAnnulationFaite,
+  phraseEchecAnnulation, phraseLectureRefusee, normaliserEmailAnnulation,
+  type AbonnementLu, type ParamsAnnulation,
+} from '@/lib/annulation-abonnement-pur'
 
 // La regle de la pause vit dans liveclub/pur.ts (testable sans base) ; elle
 // est reexportee ici pour les appelants de stripe-actions (29/09).
@@ -143,6 +151,9 @@ export type ActionAgent = {
   type: 'code_promo' | 'remboursement' | 'produit' | 'revoquer_code'
     | 'retirer_telegram' | 'reintegrer_telegram'
     | 'pause_abonnement' | 'reprise_abonnement'
+    // Annuler un abonnement, en fin de periode ou tout de suite (30/10) :
+    // annulation-abonnement-pur.ts. Compte aoknowledge ou melanie.
+    | 'annulation_abonnement'
     | 'acces_broker' | 'exemption'
     // Acces payant a un tarif particulier (13/10) : lien de paiement d'un
     // produit, et marquage d'un produit existant comme produit Live Club.
@@ -194,6 +205,10 @@ export function paramsPourLog(a: ActionAgent): Record<string, unknown> {
     }
   }
   if (a.type === 'retirer_tarif_reserve') return { reserve_id: a.params.reserve_id ?? null }
+  // Annulation (30/10) : l'abonnement et le moment, jamais l'email, le nom ni le motif.
+  if (a.type === 'annulation_abonnement') {
+    return { abonnement_id: a.params.abonnement_id ?? null, quand: a.params.quand ?? null, motif: a.params.motif ? 'oui' : 'non' }
+  }
   // Effacement (15/10) : le niveau seul, jamais qui ni ses identifiants.
   if (a.type === 'effacement') return { niveau: a.params.niveau }
   // Reponse a un membre (16/10) : la reference du fil et la longueur, jamais le texte ni qui.
@@ -737,6 +752,16 @@ export function validerAction(brut: unknown): ActionAgent | string {
     return { type: a.type, compte: a.compte, params: { abonnement_id: abo, qui, nb_mois: mois } }
   }
 
+  // Annulation d'un abonnement (30/10) : l'abonnement_id ou l'email du
+  // membre, et quand (fin-de-periode par defaut). Ce que dit la carte (qui,
+  // produit, tarif, echeance) est pose par le controle avant la carte, d'apres
+  // Stripe ; l'execution relit l'abonnement.
+  if (a.type === 'annulation_abonnement') {
+    const lu = lireParamsAnnulation(p)
+    if (typeof lu === 'string') return lu
+    return { type: 'annulation_abonnement', compte: a.compte, params: { ...lu } }
+  }
+
   if (a.type === 'code_promo') {
     const code = String(p.code ?? '').toUpperCase()
     if (!/^[A-Z0-9_-]{3,30}$/.test(code)) return 'Code invalide (3 à 30 caractères, A-Z 0-9 - _).'
@@ -862,6 +887,11 @@ export function resumeAction(a: ActionAgent): string {
   if (a.type === 'reprise_abonnement') {
     return `Lever la pause de l'abonnement de ${p.qui} : les prélèvements reprennent au prochain cycle.`
   }
+  // Annulation (30/10) : la carte entiere, d'apres ce que le controle a lu chez Stripe.
+  if (a.type === 'annulation_abonnement') {
+    const lu = lireParamsAnnulation(p)
+    return typeof lu === 'string' ? `Annuler un abonnement sur le compte ${a.compte} (${lu})` : carteAnnulation(lu, a.compte)
+  }
   if (a.type === 'retirer_telegram') {
     return `Retirer ${p.qui} (u${p.telegram_id}) du groupe Telegram Live Club, SANS le bannir : `
       + `il sort, et un lien d'invitation valide suffirait à le faire revenir. `
@@ -952,6 +982,7 @@ export type ControleCarteStripe =
 export function aControleStripe(type: ActionAgent['type']): boolean {
   return type === 'lien_paiement' || type === 'marquer_live_club'
     || type === 'abonnement_reserve' || type === 'retirer_tarif_reserve'
+    || type === 'annulation_abonnement'
 }
 
 /** La cle qui LIT un compte : celle de l'agent (l'ecriture lit aussi), sinon la cle de lecture de melanie. */
@@ -1015,12 +1046,119 @@ async function preparerLien(cle: string, compte: CompteStripe, p: Record<string,
   return { produitNom: nom, tarif, liveClub }
 }
 
+// ---------------------------------------------------------------------------
+// Annulation d'un abonnement (30/10, demande de Brice) : l'abonnement est
+// retrouve chez Stripe AVANT la carte, par son id ou par l'email du membre
+// (un abonnement achete aujourd'hui n'est pas encore dans cockpit_abonnements).
+// Les regles et les textes vivent dans annulation-abonnement-pur.ts.
+// ---------------------------------------------------------------------------
+
+/** Les clients Stripe d'un email (egalite exacte, casse ignoree), 5 au plus. */
+async function clientsDeEmail(cle: string, email: string): Promise<Record<string, unknown>[]> {
+  const garder = new Map<string, Record<string, unknown>>()
+  const ajouter = (liste: unknown) => {
+    for (const c of Array.isArray(liste) ? liste as Record<string, unknown>[] : []) {
+      // La recherche Stripe n'est pas une egalite (bob@ remonte jean.bob@) : on
+      // n'annule jamais l'abonnement d'un voisin d'adresse.
+      if (normaliserEmailAnnulation(c?.email) === email && typeof c.id === 'string') garder.set(c.id, c)
+    }
+  }
+  // Le filtre email= est sensible a la casse ; la recherche (email:'...') ne
+  // l'est pas mais s'indexe avec jusqu'a une minute de retard (entitlements.ts).
+  ajouter((await stripeGet(cle, `/v1/customers?${new URLSearchParams({ email, limit: '10' })}`)).data)
+  if (garder.size === 0) {
+    try {
+      const requete = `email:'${email.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`
+      ajouter((await stripeGet(cle, `/v1/customers/search?${new URLSearchParams({ query: requete, limit: '10' })}`)).data)
+    } catch (err) {
+      console.warn(`[stripe-actions] recherche de client indisponible, la liste fait foi : ${masquerCleStripe(messageErreur(err))}`)
+    }
+  }
+  return [...garder.values()].slice(0, 5)
+}
+
+/**
+ * Les abonnements candidats, tous statuts, avec leur client (nom, email) et
+ * les noms de leurs produits. Par id : celui-la seul ([] s'il est introuvable
+ * sur ce compte). Par email : tous ceux des clients de cet email. Jette sur une
+ * panne ou un refus de permission (l'appelant le dit en clair).
+ */
+async function lireAbonnementsAAnnuler(cle: string, p: ParamsAnnulation): Promise<AbonnementLu[]> {
+  const bruts: Record<string, unknown>[] = []
+  if (p.abonnement_id) {
+    let sub: Record<string, unknown> | null = null
+    try {
+      sub = await stripeGet(cle, `/v1/subscriptions/${p.abonnement_id}`)
+    } catch (err) {
+      if (!/No such subscription/i.test(err instanceof Error ? err.message : String(err))) throw err
+    }
+    if (sub) {
+      // Le client a part (et pas en expand) : sans la permission Customers, la
+      // carte part quand meme, avec le nom donne par l'agent.
+      if (typeof sub.customer === 'string') {
+        try {
+          sub = { ...sub, customer: await stripeGet(cle, `/v1/customers/${sub.customer}`) }
+        } catch (err) {
+          console.warn(`[stripe-actions] client de l'abonnement illisible : ${masquerCleStripe(messageErreur(err))}`)
+        }
+      }
+      bruts.push(sub)
+    }
+  } else if (p.email) {
+    for (const client of await clientsDeEmail(cle, p.email)) {
+      const liste = await stripeGet(cle, `/v1/subscriptions?${new URLSearchParams({ customer: String(client.id), status: 'all', limit: '20' })}`)
+      for (const s of (liste.data as Record<string, unknown>[] | undefined) ?? []) bruts.push({ ...s, customer: client })
+    }
+  }
+  // Les noms des produits (price.product n'est qu'un identifiant). Un nom
+  // illisible laisse l'identifiant sur la carte, sans bloquer.
+  const noms: Record<string, string> = {}
+  for (const id of [...new Set(bruts.flatMap(produitsDeAbonnement))].slice(0, 10)) {
+    try {
+      noms[id] = String((await stripeGet(cle, `/v1/products/${id}`)).name ?? id)
+    } catch {
+      // l'identifiant reste
+    }
+  }
+  const maintenant = Date.now()
+  return bruts.map(s => lireAbonnementStripe(s, noms, maintenant)).filter((a): a is AbonnementLu => a !== null)
+}
+
+/** Le controle avant la carte d'une annulation : l'abonnement retrouve, ou la raison rendue au modele. */
+async function controlerAnnulation(a: ActionAgent): Promise<ControleCarteStripe> {
+  const compte = a.compte as CompteStripe
+  const p = lireParamsAnnulation(a.params)
+  if (typeof p === 'string') return { erreur: p }
+  const cle = cleLectureCompte(compte)
+  if (!cle) {
+    return { erreur: `Aucune clé Stripe du compte ${compte} n'est posée sur le projet journal (${nomVariableCle(compte)}) : impossible de retrouver l'abonnement, rien ne peut être annulé.` }
+  }
+  try {
+    const lus = await lireAbonnementsAAnnuler(cle, p)
+    const choix = choisirAbonnement(lus, { abonnementId: p.abonnement_id, email: p.email, compte })
+    if ('erreur' in choix) return { erreur: choix.erreur }
+    const params = paramsDepuisAbonnement(p, choix.abonnement)
+    const refus = refusAnnulation(choix.abonnement, p.quand, params.qui ?? choix.abonnement.id)
+    if (refus) return { erreur: refus }
+    return { action: { ...a, params }, complement: avertissementAnnulation(choix.abonnement, p.quand), manque: null }
+  } catch (err) {
+    const message = masquerCleStripe(messageErreur(err))
+    if (estRefusDePermission(message)) {
+      const variable = cleAgent(compte) ? nomVariableCle(compte) : 'STRIPE_READ_KEY_MELANIE'
+      return { erreur: phraseLectureRefusee({ compte, variable, message, parEmail: !p.abonnement_id }) }
+    }
+    return { erreur: `Lecture Stripe impossible avant la carte (${message}) : réessaie dans un instant.` }
+  }
+}
+
 /**
  * Controle avant la carte d'un lien de paiement ou d'un marquage Live Club.
  * `erreur` retourne au modele (il corrige ou pose la question) ; sinon la
  * carte part avec les champs lus chez Stripe et, au besoin, un avertissement.
  */
 export async function controlerActionStripe(a: ActionAgent): Promise<ControleCarteStripe> {
+  // Annulation (30/10) : ses propres refus (permission Subscriptions ou Customers).
+  if (a.type === 'annulation_abonnement') return controlerAnnulation(a)
   try {
     // Tarif reserve (13/10) : la place en base, le tarif repris chez Stripe.
     // Import dynamique : reserves.ts importe ce fichier.
@@ -1427,6 +1565,73 @@ export async function executerAction(a: ActionAgent, acteur = 'agent'): Promise<
       + (resume
         ? ` Si son compte Telegram est rattaché, le passage quotidien le sortira du groupe à la fin de la période payée et le préviendra.`
         : '')
+  }
+
+  // ── Annulation d'un abonnement (30/10) ────────────────────────────────────
+  // Fin de periode : POST cancel_at_period_end=true ; immediatement : DELETE
+  // sans facture finale ni prorata (requeteAnnulation). Rien n'est rembourse
+  // ici : un remboursement est sa propre carte. Le droit du membre suit seul
+  // (webhook Pilotage, Carnet verifie en direct, passage quotidien du Live
+  // Club). Trace : la carte consommee et le log de la route, comme un
+  // remboursement ; plus le journal du Live Club pour un abonnement Live Club,
+  // comme la pause.
+  if (a.type === 'annulation_abonnement') {
+    const compte = a.compte as CompteStripe
+    const variable = nomVariableCle(compte)
+    const lu = lireParamsAnnulation(p)
+    if (typeof lu === 'string') throw new RefusAction(`${lu} Rien n'a été annulé.`)
+    if (!lu.abonnement_id) throw new RefusAction("Carte sans abonnement retrouvé : rien n'a été annulé, redemande l'annulation.")
+    const abo = lu.abonnement_id
+    const qui = lu.qui ?? lu.email ?? abo
+
+    // Relu AVANT le geste : la carte a pu vieillir (arret pose entre-temps par
+    // le membre, au portail ou au Dashboard ; abonnement deja fini).
+    let sub: Record<string, unknown>
+    try {
+      sub = await stripeGet(cle, `/v1/subscriptions/${abo}`)
+    } catch (err) {
+      const message = masquerCleStripe(messageErreur(err))
+      if (/No such subscription/i.test(message)) throw new RefusAction(`Abonnement ${abo} introuvable sur le compte ${compte} : rien n'a été annulé.`)
+      if (estRefusDePermission(message)) {
+        throw new Error(phraseEchecAnnulation({ message, permission: true, incertain: false, compte, variable, quand: lu.quand }))
+      }
+      throw new Error(`Lecture de l'abonnement impossible (${message}) : rien n'a été annulé, réessaie dans un instant.`)
+    }
+    const avant = lireAbonnementStripe(sub, {}, Date.now())
+    if (!avant) throw new Error("Stripe a rendu un abonnement illisible : rien n'a été annulé.")
+    const refus = refusAnnulation(avant, lu.quand, qui)
+    if (refus) throw new RefusAction(refus)
+    const liveClub = compte === 'melanie' && resumerAbonnement(sub, await produitsLiveClub()) !== null
+
+    const requete = requeteAnnulation(abo, lu.quand, lu.motif)
+    let apres: Record<string, unknown>
+    try {
+      apres = requete.methode === 'DELETE'
+        ? await stripeDelete(cle, requete.chemin, requete.corps)
+        : await stripePost(cle, requete.chemin, requete.corps)
+    } catch (err) {
+      const message = masquerCleStripe(messageErreur(err))
+      // Une Error simple = Stripe a repondu par un refus ; TypeError (reseau),
+      // SyntaxError (reponse illisible), delai : on ne sait pas si c'est passe.
+      const nom = err instanceof Error ? err.name : ''
+      throw new Error(phraseEchecAnnulation({
+        message, permission: estRefusDePermission(message),
+        incertain: ['TypeError', 'SyntaxError', 'AbortError', 'TimeoutError'].includes(nom),
+        compte, variable, quand: lu.quand,
+      }))
+    }
+    const apresLu = lireAbonnementStripe(apres, {}, Date.now())
+    const finLe = lu.quand === 'immediatement'
+      ? (apresLu?.termineLe ?? dateIso(new Date()))
+      : (apresLu?.arretLe ?? avant.echeance)
+
+    if (liveClub) {
+      // Lu par le resume du matin : « arrêt programmé par l'équipe, accès jusqu'au <fin> ». Ne jette pas.
+      await journaliserGesteLiveClub({
+        geste: 'arret', resultat: 'fait', regle: 'manuel', details: { quand: lu.quand, fin: finLe },
+      }, { telegramId: null, acteur, abonnementId: abo })
+    }
+    return phraseAnnulationFaite({ qui, produit: lu.produit, quand: lu.quand, finLe, liveClub })
   }
 
   if (a.type === 'code_promo') {
