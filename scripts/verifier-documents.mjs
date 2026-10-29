@@ -993,7 +993,7 @@ bloc('D3 controle des consignes : IBAN, BIC, references et restes d extraction n
   const releve = [
     'Releve de compte N° 01/2026', `IBAN: DE00 1234 5678 9012 3456 78 ${ctl(1)}${ctl(2)}${ctl(3)} BIC: ESSADEFFXXX`,
     `Virement recu REF 4F7Q2K9X8Z1M5N3B6V0C ${zw}${zw}${zw} 12${ctl(0x7f)}0,00${ctl(0x85)} EUR`, 'Carte BOULANGERIE -4,20 EUR',
-    'IBAN: FR00 0000 0000 0000 0000 0000 000 • BIC: ESSAFRPPXXX',
+    'IBAN: FR00 0000 0000 0000 0000 0000 000 - BIC: ESSAFRPPXXX',
   ].join('\n')
   const avant = analyserTexte(releve, { niveau: 'tiers' })
   assert.ok(avant.suspect, 'le controle d avant tombait sur ce releve')
