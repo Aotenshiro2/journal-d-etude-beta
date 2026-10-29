@@ -14,8 +14,8 @@
 // - sinon ce qu'on enverra à l'IA, au moindre coût : le texte d'un PDF lisible
 //   (200 caractères utiles au moins) ou d'un HTML, et l'image seulement quand le
 //   texte manque (documents-pilotage-ia.ts) ;
-// - le compte de Pilotage auquel la lecture se rapproche, la limite de 5
-//   lectures IA par jour, le chemin de l'original dans le coffre.
+// - le compte de Pilotage auquel la lecture se rapproche (la limite des
+//   lectures vit dans pilotage-paliers.ts, brief E1), le chemin de l'original dans le coffre.
 // Brief D3 (30/10/2026, après l'essai à l'aveugle) : les exports Quantower
 // (exécutions et ordres, imports-trades.ts) et le relevé annuel d'eToro en PDF
 // se lisent sans IA ; le texte envoyé à l'IA est nettoyé des restes
@@ -1276,19 +1276,11 @@ export function finaliserLecture(lecture: Lecture, comptes: ComptePilotage[]): {
   return { lecture: l, empreintes }
 }
 
-// ── La limite : 5 lectures par l'IA par membre et par jour ──────────────────
+// ── La limite ───────────────────────────────────────────────────────────────
+// La limite de D1 (5 lectures par jour) a disparu le 30/10 (brief E1) : les
+// lectures se comptent par palier sur 30 jours glissants (pilotage-paliers.ts).
 
-export const LIMITE_LECTURES_IA_JOUR = 5
-export const MESSAGE_LIMITE = 'Tu as lu tes 5 documents du jour, reviens demain.'
-
-export interface Quota { lusParIaAujourdhui: number; limite: number; sansPlafond: boolean }
-
-/** Une lecture par l'IA de plus est-elle permise ? `lus` = lectures IA déjà faites aujourd'hui. */
-export function etatQuota(lus: number, sansPlafond: boolean, limite = LIMITE_LECTURES_IA_JOUR): { autorise: boolean; quota: Quota } {
-  return { autorise: sansPlafond || lus < limite, quota: { lusParIaAujourdhui: lus, limite, sansPlafond } }
-}
-
-/** Le début du jour à Paris (minuit, heure d'été comprise), en vrai instant : la limite se recharge à minuit à Paris. */
+/** Le début du jour à Paris (minuit, heure d'été comprise), en vrai instant. */
 export function debutJourParis(maintenant: Date): Date {
   const jour = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit' }).format(maintenant)
   const [a, m, j] = jour.split('-').map(Number)
@@ -1296,11 +1288,9 @@ export function debutJourParis(maintenant: Date): Date {
 }
 
 // ── Le coffre ────────────────────────────────────────────────────────────────
+// La place par palier (100 Mo, 2 Go, 10 Go) : pilotage-paliers.ts (brief E1).
 
 export const BUCKET_DOCUMENTS = 'documents-pilotage'
-/** 200 Mo par membre (brief D1). */
-export const COFFRE_MAX_OCTETS = 200 * 1024 * 1024
-export const MESSAGE_COFFRE_PLEIN = "Ton coffre est plein (200 Mo) : l'original n'a pas été gardé. Retire des documents que tu n'as plus besoin de garder, puis redépose celui-ci."
 
 /** Les types MIME que le coffre garde tels quels (les mêmes que le bucket) ; tout autre original part en octet-stream. */
 export const TYPES_COFFRE = [
@@ -1325,9 +1315,4 @@ export function nettoyerNom(nom: string): string {
 /** Le chemin de l'original : le dossier du membre, puis l'id du document. */
 export function cheminDocument(userId: string, id: string, nom: string): string {
   return `${userId}/${id}-${nettoyerNom(nom)}`
-}
-
-/** Le coffre peut-il prendre ce fichier ? */
-export function coffreAccepte(octetsDejaGardes: number, taille: number): boolean {
-  return octetsDejaGardes + taille <= COFFRE_MAX_OCTETS
 }

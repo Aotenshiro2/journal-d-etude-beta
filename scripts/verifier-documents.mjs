@@ -2,7 +2,7 @@
 // nature d'un document et les refus, les lecteurs sans IA (Cash History de
 // Tradovate, Trader Dashboard, CSV de trades, releve MetaTrader 4), le choix
 // texte ou vision, la remise en forme de ce que rend l'IA, le rapprochement du
-// compte de Pilotage, la limite de 5 lectures IA par jour, l'import par
+// compte de Pilotage, l'import par
 // `trades` (dedoublonnage), le coffre, et le bornage des nouvelles routes au
 // membre. Fonctions pures, aucune base, aucun reseau ; fixtures SYNTHETIQUES
 // (memes en-tetes que les vrais exports, valeurs inventees).
@@ -545,16 +545,12 @@ bloc('rapprochement compteId : identifiant, puis firme, puis broker ; plusieurs 
   assert.deepEqual(D.lireComptes('pas une liste'), [])
 })
 
-// ── La limite du jour ───────────────────────────────────────────────────────
+// ── La limite ───────────────────────────────────────────────────────────────
 
-bloc('limite : 4 lues puis la 5e passe, la 6e refuse ; sans plafond passe ; jour de Paris', () => {
-  assert.equal(D.LIMITE_LECTURES_IA_JOUR, 5)
-  assert.equal(D.etatQuota(0, false).autorise, true)
-  assert.equal(D.etatQuota(4, false).autorise, true) // la 5e
-  assert.equal(D.etatQuota(5, false).autorise, false) // la 6e
-  assert.deepEqual(D.etatQuota(5, false).quota, { lusParIaAujourdhui: 5, limite: 5, sansPlafond: false })
-  assert.equal(D.etatQuota(40, true).autorise, true)
-  assert.equal(D.MESSAGE_LIMITE, 'Tu as lu tes 5 documents du jour, reviens demain.')
+bloc('limite : celle du jour de D1 a disparu (brief E1, compteurs par palier dans verifier-pilotage-paliers.mjs) ; jour de Paris', () => {
+  assert.equal(D.LIMITE_LECTURES_IA_JOUR, undefined)
+  assert.equal(D.etatQuota, undefined)
+  assert.equal(D.MESSAGE_LIMITE, undefined)
   // Minuit a Paris, heure d'ete et d'hiver, et juste apres minuit.
   assert.equal(D.debutJourParis(new Date('2026-07-15T10:00:00Z')).toISOString(), '2026-07-14T22:00:00.000Z')
   assert.equal(D.debutJourParis(new Date('2026-12-15T10:00:00Z')).toISOString(), '2026-12-14T23:00:00.000Z')
@@ -605,16 +601,17 @@ bloc('import par trades : verifies, source imposee, dedoublonnage (userId, sourc
 
 // ── Le coffre ────────────────────────────────────────────────────────────────
 
-bloc('coffre : chemin dans le dossier du membre, nom nettoye, 200 Mo par membre, types gardes', () => {
+bloc('coffre : chemin dans le dossier du membre, nom nettoye, place par palier (brief E1), types gardes', () => {
   const uid = '11111111-2222-3333-4444-555555555555'
   assert.equal(D.nettoyerNom('Relevé Mars 2025 (2).PDF'), 'Releve-Mars-2025-2.pdf')
   assert.equal(D.nettoyerNom('../../etc/passwd'), 'etc-passwd')
   assert.equal(D.nettoyerNom('***'), 'document')
   assert.equal(D.cheminDocument(uid, 'abc', 'Cash History.csv'), `${uid}/abc-Cash-History.csv`)
   assert.ok(!D.cheminDocument(uid, 'abc', '../x/../../y.pdf').includes('..'))
-  assert.equal(D.coffreAccepte(D.COFFRE_MAX_OCTETS - 10, 10), true)
-  assert.equal(D.coffreAccepte(D.COFFRE_MAX_OCTETS - 10, 11), false)
-  assert.equal(D.COFFRE_MAX_OCTETS, 200 * 1024 * 1024)
+  // La place vit dans pilotage-paliers.ts (100 Mo, 2 Go, 10 Go) ; garderDocument la lit par le palier.
+  assert.equal(D.coffreAccepte, undefined)
+  assert.equal(D.COFFRE_MAX_OCTETS, undefined)
+  assert.match(lire('../src/lib/documents-serveur.ts'), /if \(coffrePlein\(palier, deja\._sum\.taille \?\? 0, taille\)\) return \{ erreur: messageCoffrePlein\(palier\) \}/)
   assert.equal(D.typeCoffre('application/pdf'), 'application/pdf')
   assert.equal(D.typeCoffre('application/x-msdownload'), 'application/octet-stream')
   assert.equal(D.BUCKET_DOCUMENTS, 'documents-pilotage')
@@ -658,8 +655,9 @@ bloc('controle statique : chaque acces a DocumentPilotage et au coffre est borne
   // Brief D3 : une seule ligne d'usage pour le document, quel que soit le nombre de tranches (une lecture comptée).
   assert.match(serveur, /const usage = sommeJetons\(reponses\.map\(r => r\.usage\)\)\s*await logAiUsage\(userId, 'pilotage', model, usage, null, \{ usage: 'document' \}\)/)
   assert.equal(serveur.match(/logAiUsage\(/g).length, 1)
-  assert.match(serveur, /appelsDuPosteDepuis\(userId, 'document', debutJourParis\(new Date\(\)\)\)/)
-  assert.match(serveur, /return etatQuota\(lus, estSansPlafond\(email\)\)/)
+  // Brief E1 : le compteur par palier vit dans pilotage-niveau.ts (verifier-pilotage-paliers.mjs), plus ici.
+  assert.ok(!serveur.includes('debutJourParis'))
+  assert.ok(!serveur.includes('quotaDuMembre'))
   assert.match(lire('../src/lib/ia-budget.ts'), /prisma\.aiUsage\.count\(\{ where: \{ userId, usage, createdAt: \{ gte: depuis \} \} \}\)/)
   assert.match(lire('../src/lib/ai.ts'), /\| 'document'/)
 
@@ -680,7 +678,7 @@ bloc('controle statique : chaque acces a DocumentPilotage et au coffre est borne
   }
   const route = lire('../src/app/api/pilotage/documents/lire/route.ts')
   assert.match(route, /export const maxDuration = 60/)
-  assert.match(route, /if \(!etat\.autorise\) return NextResponse\.json\(\{ error: MESSAGE_LIMITE, quota \}, \{ status: 429, headers: cors \}\)/)
+  assert.match(route, /if \(!etat\.autorise\) return NextResponse\.json\(\{ error: MESSAGE_LECTURES_EPUISEES, quota \}, \{ status: 429, headers: cors \}\)/)
   // La limite ne s'applique qu'aux lectures par l'IA : le test vient apres la lecture sans IA.
   assert.ok(route.indexOf("if ('lecture' in prep)") < route.indexOf('if (!etat.autorise)'))
   for (const f of ['[id]/route.ts', '[id]/lien/route.ts']) {
@@ -980,7 +978,7 @@ bloc('D3 tranches : un texte long se coupe en tranches (4 au plus, contexte repr
     { input_tokens: 11, output_tokens: 7, cache_creation_input_tokens: 3, cache_read_input_tokens: 0 })
   // Le serveur : les tranches partent ensemble, la fusion avant la lecture, un seul logAiUsage.
   const serveur = lire('../src/lib/documents-serveur.ts')
-  assert.match(serveur, /const decoupe = prep\.ia === 'texte' \? tranchesDuTexte\(prep\.texte\) : null/)
+  assert.match(serveur, /const decoupe = prepIA\.ia === 'texte' \? tranchesDuTexte\(prepIA\.texte, \{ appelsMax: tranchesMax \}\) : null/)
   assert.match(serveur, /await Promise\.allSettled\(tranches\.map\(appeler\)\)/)
   assert.match(serveur, /lectureDepuisIA\(tranches\.length > 1 \? fusionnerEntreesIA\(entrees\) : entrees\[0\]/)
   assert.equal(IA.APPELS_MAX_IA, 4)

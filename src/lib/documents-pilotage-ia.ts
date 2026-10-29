@@ -37,7 +37,7 @@ export const DELAI_IA_MS = 52_000
 /**
  * Un texte long se lit en tranches, 4 appels au plus pour un document (brief
  * D3), lancés ensemble : chacun tient dans DELAI_IA_MS, le tout dans les 60 s
- * de la fonction. Une seule lecture comptée dans la limite du jour.
+ * de la fonction. Une seule lecture comptée (pilotage-paliers.ts).
  */
 export const APPELS_MAX_IA = 4
 

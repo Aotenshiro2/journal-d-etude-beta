@@ -218,7 +218,7 @@ export async function droitsVisiteur(): Promise<DroitsAcademie> {
 //
 // Jette si la base est illisible : la route en fait un 503, jamais un refus.
 
-export type RaisonAcademieEssai = 'admin' | Exclude<MentoratReason, 'carnet-premium'>
+export type RaisonAcademieEssai = 'admin' | Exclude<MentoratReason, 'carnet-premium' | 'duo'>
 
 export type AccesAcademieEssai = {
   acces: boolean
@@ -230,7 +230,7 @@ const RAISONS_MEMBRE_PAYANT: ReadonlySet<MentoratReason> = new Set<MentoratReaso
   'etm', 'manuel', 'liveclub', 'skool-vip', 'skool-premium', 'formation',
 ])
 
-function estRaisonMembrePayant(r: MentoratReason | null): r is Exclude<MentoratReason, 'carnet-premium'> {
+function estRaisonMembrePayant(r: MentoratReason | null): r is Exclude<MentoratReason, 'carnet-premium' | 'duo'> {
   return r !== null && RAISONS_MEMBRE_PAYANT.has(r)
 }
 

@@ -17,7 +17,9 @@
 // l'extension.
 import { prisma } from './db'
 
-export type MentoratReason = 'etm' | 'manuel' | 'liveclub' | 'skool-vip' | 'skool-premium' | 'formation' | 'carnet-premium'
+// 'duo' (brief E1, 30/10/2026) : l'abonnement Premium Duo (Carnet + Pilotage,
+// Stripe aoknowledge) ouvre le même palier que 'carnet-premium'.
+export type MentoratReason = 'etm' | 'manuel' | 'liveclub' | 'skool-vip' | 'skool-premium' | 'formation' | 'duo' | 'carnet-premium'
 
 // Le produit « Carnet Premium » (5,99 €/mois) sur le Stripe aoknowledge —
 // créé le 28/08/2026. La vérification en direct donne l'accès IMMÉDIAT après
@@ -265,6 +267,21 @@ export async function checkMentoratAccess(userId: string): Promise<MentoratAcces
     limit 1
   `
   if (pack.length > 0) return { entitled: true, reason: 'formation', email }
+
+  // 2 ter. L'abonnement Premium Duo (brief E1, 30/10/2026) : le Carnet Premium
+  // et Pilotage Premium. Le droit est une ligne academie_acces posée par la
+  // confirmation de la page et le webhook de Pilotage (fin = fin de la période
+  // payée + 3 jours), lue comme le pack Formation.
+  const duo = await prisma.$queryRaw<{ un: number }[]>`
+    select 1 as un
+    from academie_acces a
+    join academie_offres o on o.id = a.offre_id
+    where o.slug in ('premium-duo-mensuel', 'premium-duo-annuel')
+      and a.retire_le is null and a.debut <= now() and (a.fin is null or a.fin > now())
+      and (a.user_id = ${userId}::uuid or a.email = ${email})
+    limit 1
+  `
+  if (duo.length > 0) return { entitled: true, reason: 'duo', email }
 
   // 3. Abonnement Carnet Premium (Stripe aoknowledge, vérif en direct :
   // l'accès s'ouvre dans la minute qui suit le paiement)

@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getUserId } from '@/lib/api-auth'
 import { corsHeaders, corsPreflight } from '@/lib/support-cors'
-import { MESSAGE_LIMITE, finaliserLecture, lireComptes, natureDuDocument, preparerLecture, type Lecture } from '@/lib/documents-pilotage'
+import { finaliserLecture, lireComptes, natureDuDocument, preparerLecture, type Lecture } from '@/lib/documents-pilotage'
 import { documentSuspect } from '@/lib/documents-pilotage-ia'
-import { extraireTextePdf, garderDocument, lireParIA, quotaDuMembre } from '@/lib/documents-serveur'
+import { extraireTextePdf, garderDocument, lireParIA } from '@/lib/documents-serveur'
+import { quotaDuMembre } from '@/lib/pilotage-niveau'
+import { MESSAGE_LECTURES_EPUISEES, apresUneLecture, quotaDe } from '@/lib/pilotage-paliers'
 
 // Un PDF de plusieurs pages lu par l'IA dépasse les 10 s par défaut d'une fonction Vercel.
 export const maxDuration = 60
@@ -26,8 +28,12 @@ export const maxDuration = 60
  *    (méthode texte, en tranches quand il est long : 4 appels au plus, une
  *    lecture comptée), le PDF ou l'image eux-mêmes seulement quand le texte
  *    manque (méthode vision) ;
- * 3. 5 lectures par l'IA par membre et par jour (Europe/Paris), l'équipe sans
- *    limite : au-delà, 429 et les lectures sans IA restent possibles ;
+ * 3. les lectures par l'IA se comptent par palier sur 30 jours glissants
+ *    (brief E1, pilotage-paliers.ts) : Libre 10 plus 25 offertes la première
+ *    semaine, Premium 200, l'équipe sans limite ; au-delà, 429 avec le quota
+ *    et les lectures sans IA restent possibles. Un texte long : une tranche
+ *    en Libre (« Premium lit en entier »), 4 en Premium ;
+ *    `quota` = { utilisees, limite, offertes, jusquAu, palier } ;
  * 4. le compte de Pilotage rapproché (`compteId`), et les empreintes des
  *    faits rendus (`empreintes`, `mouvements[].empreinte`,
  *    `releveBroker.empreinte`) : le même fait lu dans deux documents d'un
@@ -84,8 +90,8 @@ export async function POST(req: NextRequest) {
     if ('lecture' in prep) {
       lecture = prep.lecture
     } else {
-      if (!etat.autorise) return NextResponse.json({ error: MESSAGE_LIMITE, quota }, { status: 429, headers: cors })
-      const lu = await lireParIA(userId, prep, nom, data)
+      if (!etat.autorise) return NextResponse.json({ error: MESSAGE_LECTURES_EPUISEES, quota }, { status: 429, headers: cors })
+      const lu = await lireParIA(userId, prep, nom, data, etat.palier)
       if ('erreur' in lu) {
         return NextResponse.json(
           { error: lu.erreur, quota, ...(lu.indisponible ? { indisponible: true } : {}) },
@@ -93,7 +99,7 @@ export async function POST(req: NextRequest) {
         )
       }
       lecture = lu.lecture
-      quota = { ...quota, lusParIaAujourdhui: quota.lusParIaAujourdhui + 1 }
+      quota = quotaDe(apresUneLecture({ ...etat.entree, maintenant: new Date() }), etat.palier)
       // Une consigne adressée à une IA dans le texte (jamais un IBAN, un BIC ni un reste d'extraction,
       // brief D3) : la lecture reste une proposition, mais le membre le voit.
       if (prep.ia === 'texte' && documentSuspect(prep.texte)) {
@@ -106,7 +112,7 @@ export async function POST(req: NextRequest) {
     }
 
     const fin = finaliserLecture(lecture, comptes)
-    const coffre = garder ? await garderDocument(userId, { nom, mime: nature.mime, octets, lecture: fin.lecture }) : null
+    const coffre = garder ? await garderDocument(userId, { nom, mime: nature.mime, octets, lecture: fin.lecture }, etat.palier) : null
     return NextResponse.json(
       {
         lecture: fin.lecture,

@@ -55,7 +55,7 @@ export class ErreurStripe extends Error {
   }
 }
 
-async function appeler(cle: string, chemin: string, corps?: URLSearchParams): Promise<Record<string, unknown>> {
+export async function appeler(cle: string, chemin: string, corps?: URLSearchParams): Promise<Record<string, unknown>> {
   const r = await fetch(`${API}${chemin}`, {
     method: corps ? 'POST' : 'GET',
     headers: {
