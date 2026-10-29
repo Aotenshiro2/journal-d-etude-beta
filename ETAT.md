@@ -3,7 +3,7 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
-## Securite des bots : injections de consignes (29/10/2026, NON commite, NON deploye, aucune migration)
+## Securite des bots : injections de consignes (29/10/2026, DEPLOYE le 29/10, commit 71edf2c, aucune migration)
 
 Demande de Brice du 29/10 : rien ne doit pouvoir lui porter prejudice par une consigne cachee (email, image, page, note
 d'une autre IA, message de membre). Grille : memoire `bots-securite-par-conception.md` ; regle des sessions Claude :
@@ -45,7 +45,7 @@ D:\CLAUDE.md, section « Securite : injections et hameconnage par les IA ». A a
   ne se coupe pas depuis le cockpit (console Anthropic ou Vercel ; journal = AiUsage) ; l'urgence seule n'est pas un signal
   (trop frequente chez les membres) ; anti-rafale de l'alerte par instance seulement.
 
-## Agent AOK : question a l'equipe, accords des brokers, depot inscrit une seule fois (29/10/2026, NON commite, NON deploye, aucune migration)
+## Agent AOK : question a l'equipe, accords des brokers, depot inscrit une seule fois (29/10/2026, DEPLOYE le 29/10, commit 71edf2c, aucune migration)
 
 - Question a l'equipe (Brice : « demande a Mel ses accords avec Pulse ») : outil `poser_question_equipe` (sans carte),
   seulement sur l'ordre explicite du titulaire dans SES mots (`ordreQuestionExplicite` : verbe de demande + nom de la
