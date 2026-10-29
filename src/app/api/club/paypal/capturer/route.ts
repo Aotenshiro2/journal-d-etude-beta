@@ -8,6 +8,8 @@ import {
   estIdPayPal, etatCapture, lireCommande, montantConforme, noteAcces, texteAlerteEnAttente, type CommandeLue,
 } from '@/lib/academie/club-paypal-pur'
 import { emailConfirme } from '@/lib/academie/achat'
+import { roleAcademie } from '@/lib/academie/droits'
+import { estAdmin } from '@/lib/academie/pur'
 import { compteDuJeton, corsAcademie, entetesAcademie, refusAcademie, tronquer } from '@/lib/academie/http'
 import { SQL_IDENTITE } from '@/lib/academie/requetes'
 import { messageErreur } from '@/lib/liveclub/pur'
@@ -76,6 +78,22 @@ export async function POST(req: NextRequest) {
     try { prixBase = await prixClub() } catch (err) {
       console.warn(`[club/paypal/capturer] base illisible : ${messageErreur(err)}`)
       return refus('indisponible', 503)
+    }
+  } else {
+    // Une commande se cree aussi dans le navigateur avec le seul client id
+    // public (actions.order.create du SDK) : reference_id club-10-essai et
+    // 1 EUR ne prouvent rien. L'essai n'est capture que pour un compte admin.
+    const titulaireEssai = lu.commande.titulaire.userId ?? null
+    let admin = false
+    if (titulaireEssai) {
+      try { admin = estAdmin(await roleAcademie(titulaireEssai)) } catch (err) {
+        console.warn(`[club/paypal/capturer] role illisible : ${messageErreur(err)}`)
+        return refus('indisponible', 503)
+      }
+    }
+    if (!admin) {
+      console.warn(`[club/paypal/capturer] commande ${lu.commande.orderId} : essai hors compte admin, non capturee`)
+      return refus('montant', 409)
     }
   }
   if (!montantConforme(lu.commande, prixBase)) {
