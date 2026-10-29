@@ -16,6 +16,11 @@
 //   texte manque (documents-pilotage-ia.ts) ;
 // - le compte de Pilotage auquel la lecture se rapproche, la limite de 5
 //   lectures IA par jour, le chemin de l'original dans le coffre.
+// Brief D3 (30/10/2026, après l'essai à l'aveugle) : les exports Quantower
+// (exécutions et ordres, imports-trades.ts) et le relevé annuel d'eToro en PDF
+// se lisent sans IA ; le texte envoyé à l'IA est nettoyé des restes
+// d'extraction ; `origine` dit si firme et identifiant viennent du document ou
+// du seul nom du fichier.
 //
 // Module PUR : il n'importe que d'autres modules purs (imports-trades, fuseau).
 // scripts/verifier-documents.mjs le charge tel quel.
@@ -90,6 +95,14 @@ export interface Capture {
   comptes?: CompteCapture[]
 }
 
+/**
+ * D'où viennent la firme (ou le broker) et l'identifiant (brief D3) : écrits
+ * dans le document, ou tirés du seul nom du fichier (une courbe de solde
+ * nommée « Statement-Courtier-123456.png »). null : la valeur manque.
+ */
+export type Provenance = 'document' | 'nom-de-fichier'
+export interface Origine { firme: Provenance | null; identifiant: Provenance | null }
+
 export interface Lecture {
   type: TypeLecture
   methode: MethodeLecture
@@ -97,6 +110,8 @@ export interface Lecture {
   firme: string | null
   broker: string | null
   identifiant: string | null
+  /** D'où viennent firme / broker et identifiant (brief D3). Les lecteurs sans IA lisent le document. */
+  origine: Origine
   periode: Periode | null
   devise: string | null
   compteId: string | null
@@ -125,7 +140,7 @@ export interface ComptePilotage {
 export function lectureVide(type: TypeLecture, methode: MethodeLecture, remarque = ''): Lecture {
   return {
     type, methode, confiance: type === 'illisible' ? 1 : 0, firme: null, broker: null, identifiant: null,
-    periode: null, devise: null, compteId: null, remarque,
+    origine: { firme: null, identifiant: null }, periode: null, devise: null, compteId: null, remarque,
   }
 }
 
@@ -346,6 +361,32 @@ export function caracteresUtiles(texte: string | null | undefined): number {
   return (texte.match(/[\p{L}\p{N}]/gu) ?? []).length
 }
 
+/** Ce qui ne se lit pas : contrôles (sauf tabulation et fins de ligne), largeur nulle, direction, trait d'union conditionnel, BOM, sélecteurs de variante, tags. */
+function illisible(cp: number): boolean {
+  return (cp < 0x20 && cp !== 0x09 && cp !== 0x0a && cp !== 0x0d) || (cp >= 0x7f && cp <= 0x9f)
+    || cp === 0x00ad || cp === 0x034f || cp === 0x061c || cp === 0x180e
+    || (cp >= 0x200b && cp <= 0x200f) || (cp >= 0x202a && cp <= 0x202e) || (cp >= 0x2060 && cp <= 0x206f)
+    || cp === 0xfeff || (cp >= 0xfff9 && cp <= 0xfffb) || (cp >= 0xfe00 && cp <= 0xfe0f)
+    || (cp >= 0xe0000 && cp <= 0xe007f) || (cp >= 0xe0100 && cp <= 0xe01ef)
+}
+
+/**
+ * Le texte extrait (PDF, HTML, CSV) débarrassé de ce qui ne se lit pas (brief
+ * D3) : les restes d'extraction d'un PDF (caractères de contrôle et
+ * invisibles) ne gênent plus ni l'IA ni le contrôle des consignes. Le texte
+ * caché en caractères « tag » (ASCII invisible) est rendu lisible : une
+ * consigne qui s'y cachait se lit alors comme du texte, et se contrôle.
+ */
+export function nettoyerTexteExtrait(texte: string): string {
+  let sortie = ''
+  for (const c of texte) {
+    const cp = c.codePointAt(0) as number
+    if (cp >= 0xe0020 && cp <= 0xe007e) sortie += String.fromCharCode(cp - 0xe0000)
+    else if (!illisible(cp)) sortie += c
+  }
+  return sortie
+}
+
 /** Un PDF dont le texte se sélectionne se lit en texte ; un scan ou une capture, en image. */
 export function methodePourPdf(texteExtrait: string | null | undefined): 'texte' | 'vision' {
   return caracteresUtiles(texteExtrait) >= SEUIL_TEXTE_UTILE ? 'texte' : 'vision'
@@ -495,6 +536,9 @@ export function lireTraderDashboard(texte: string): Lecture | null {
 const BROKERS_FORMAT: Record<string, { broker: string | null; firme: string | null }> = {
   'tradovate-performance': { broker: 'Tradovate', firme: null },
   'topstepx-trades': { broker: 'TopstepX', firme: 'Topstep' },
+  // Quantower est une plateforme : le fichier ne dit ni la firme ni le broker.
+  'quantower-executions': { broker: null, firme: null },
+  'quantower-orders': { broker: null, firme: null },
 }
 
 const jourDe = (d: Date) => d.toISOString().slice(0, 10)
@@ -521,7 +565,8 @@ export function lireCsv(texte: string, nom: string): Lecture | null {
       confiance,
       firme: origine.firme,
       broker: origine.broker,
-      identifiant: unique(trades.map(t => t.compte)),
+      // Plusieurs sous-comptes d'un même compte (Quantower) : le compte commun.
+      identifiant: unique(trades.map(t => t.compte)) ?? lu.compte ?? null,
       periode: periodeDe(trades.map(t => jourDe(t.entreLe))),
       devise: unique(trades.map(t => t.devise)),
       remarque,
@@ -530,8 +575,13 @@ export function lireCsv(texte: string, nom: string): Lecture | null {
     }
   }
   if (lu.format && lu.format !== 'csv-generique') {
-    const erreurs = lu.erreurs.length > 0 ? ` ${lu.erreurs.slice(0, 3).join(' ')}` : ''
-    return avecTrades(lu.trades, lu.format, lu.trades.length > 0 ? 1 : 0.9, `Export de trades lu sans IA (${lu.format}) : ${lu.trades.length} trade${lu.trades.length > 1 ? 's' : ''}.${erreurs}`.trim())
+    const n = lu.trades.length
+    const remarque = [
+      `Export de trades lu sans IA (${lu.format}) : ${n} trade${n > 1 ? 's' : ''}.`,
+      ...(lu.remarques ?? []),
+      ...lu.erreurs.slice(0, 3),
+    ].join(' ')
+    return avecTrades(lu.trades, lu.format, n > 0 ? 1 : 0.9, remarque.trim())
   }
 
   // CSV générique : des trades seulement si les colonnes indispensables se devinent.
@@ -683,6 +733,178 @@ export function lireCashHistoryPdf(texte: string): Lecture | null {
       new Set(comptes).size > 1 ? 'Le fichier mélange plusieurs comptes.' : '',
     ].filter(Boolean).join(' '),
     mouvements,
+  }
+}
+
+// ── Le relevé annuel d'eToro en PDF (brief D3) ──────────────────────────────
+//
+// Le texte du relevé (« account statement ») est régulier : un récapitulatif,
+// la table des positions fermées (une position sur plusieurs lignes : action et
+// nom de l'instrument, identifiant, montant, unités, ouverture, clôture,
+// levier, spread, bénéfice, taux d'ouverture, de clôture, take profit, stop
+// loss, frais de roulement et dividendes, type, ISIN), puis l'activité du
+// compte (dépôts, retraits, frais, dividendes). L'IA n'en rendait que 25
+// lignes : il se lit sans IA, en entier, que le texte soit en français ou en
+// anglais.
+
+const MOIS_COURTS: Record<string, number> = {
+  JAN: 1, JANV: 1, FEB: 2, FEV: 2, FEVR: 2, MAR: 3, MARS: 3, APR: 4, AVR: 4, MAY: 5, MAI: 5, JUN: 6, JUIN: 6,
+  JUL: 7, JUIL: 7, AUG: 8, AOU: 8, AOUT: 8, SEP: 9, SEPT: 9, OCT: 10, NOV: 11, DEC: 12,
+}
+
+/** « JANV. 1, 2018 », « Dec 31, 2018 » en AAAA-MM-JJ, ou null. */
+function dateMoisEcrit(mot: string, jour: string, annee: string): string | null {
+  const mois = MOIS_COURTS[mot.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\./g, '').toUpperCase()]
+  return mois ? dateValide(`${annee}-${String(mois).padStart(2, '0')}-${jour.padStart(2, '0')}`) : null
+}
+
+const NOMBRE_ETORO = String.raw`\(?-?\d[\d,]*(?:\.\d+)?\)?`
+const DATE_ETORO = String.raw`\d{2}[-/.]\d{2}[-/.]\d{4} \d{2}:\d{2}(?::\d{2})?`
+const FIN_POSITION = String.raw`(?= (?:Buy|Sell) | (?:Activité du compte|Account Activity)\b|$)`
+// Le nom de l'instrument ne traverse jamais une autre position (aucun mot « Buy » ou « Sell ») :
+// une position coupée par la mise en page est perdue seule, sans avaler la suivante.
+const RE_POSITION_ETORO = new RegExp(
+  String.raw`(Buy|Sell) ((?:(?!(?:Buy|Sell) )\S+ )+?)(\d{5,12}) (${NOMBRE_ETORO}) (${NOMBRE_ETORO}) (${DATE_ETORO}) (${DATE_ETORO}) X?(\d+(?:\.\d+)?) `
+  + String.raw`(${NOMBRE_ETORO}) (${NOMBRE_ETORO}) (${NOMBRE_ETORO}) (${NOMBRE_ETORO}) (${NOMBRE_ETORO}) (${NOMBRE_ETORO}) (${NOMBRE_ETORO}) `
+  + String.raw`([^\d() ][^\d()]*?)(?: ([A-Z]{2}[A-Z0-9]{9}\d))?${FIN_POSITION}`,
+  'g',
+)
+
+/** Les dates « JJ-MM-AAAA HH:MM:SS » d'eToro (jour d'abord, sauf si une date dit le contraire), codées comme UTC. */
+function lecteurDatesEtoro(valeurs: string[]): (brut: string) => Date | null {
+  const re = /^(\d{2})[-/.](\d{2})[-/.](\d{4}) (\d{2}):(\d{2})(?::(\d{2}))?$/
+  const moisDabord = valeurs.some(v => { const m = re.exec(v); return !!m && +m[2] > 12 })
+  return brut => {
+    const m = re.exec(brut.trim())
+    if (!m) return null
+    const [jour, mois] = moisDabord ? [m[2], m[1]] : [m[1], m[2]]
+    const d = new Date(Date.UTC(+m[3], +mois - 1, +jour, +m[4], +m[5], +(m[6] ?? 0)))
+    return Number.isNaN(d.getTime()) || d.getUTCDate() !== +jour || d.getUTCMonth() !== +mois - 1 ? null : d
+  }
+}
+
+/** Un montant du récapitulatif (« Dépôts 1234.56 », « Deposits 1,234.56 »), ou null. */
+function montantResume(plat: string, libelles: string[]): number | null {
+  for (const l of libelles) {
+    const m = new RegExp(`${l} (${NOMBRE_ETORO})(?= |$)`).exec(plat)
+    if (m) return lireNombre(m[1])
+  }
+  return null
+}
+
+/**
+ * Relevé d'eToro en PDF : releve-broker, toutes les positions fermées en
+ * trades (source etoro-statement, clé = identifiant de la position, pnl =
+ * bénéfice, frais = frais de roulement quand ils sont négatifs), les dépôts et
+ * retraits de l'activité du compte en mouvements, le récapitulatif en
+ * releveBroker. Identifiant = le nom d'utilisateur eToro (le relevé n'a pas
+ * d'autre numéro de compte). Null si ce n'est pas un relevé eToro.
+ */
+export function lireReleveEtoro(texte: string): Lecture | null {
+  const plat = texte.replace(/\s+/g, ' ').trim()
+  if (!/eToro/i.test(plat)) return null
+  const debut = plat.search(/(Positions fermées|Closed Positions)\b/i)
+  if (debut < 0) return null
+  const finTable = plat.slice(debut).search(/(Activité du compte|Account Activity)\b/i)
+  const table = (finTable < 0 ? plat.slice(debut) : plat.slice(debut, debut + finTable)).trim()
+
+  const positions = [...table.matchAll(RE_POSITION_ETORO)]
+  if (positions.length === 0) return null
+  const quand = lecteurDatesEtoro(positions.flatMap(p => [p[6], p[7]]))
+  const utilisateur = /(?:Nom d.utilisateur|Username|User name)\s*:\s*(\S+)/i.exec(plat)?.[1]?.slice(0, 80) ?? null
+  // Les positions annoncées par la table (chaque ligne commence par Buy ou Sell suivi d'un nom) : celles qu'on n'a pas lues se disent.
+  const annoncees = (table.match(/(?:^| )(?:Buy|Sell) (?!\d)/g) ?? []).length
+  const broker = /(eToro \([A-Za-z]+\) (?:Ltd|Limited|GmbH|AG|S\.A\.)\.?|eToro [A-Z][A-Za-z]* (?:Ltd|Limited)\.?)/.exec(plat)?.[1] ?? 'eToro'
+
+  const trades: TradeNormalise[] = []
+  const vus = new Set<string>()
+  let illisibles = 0
+  for (const p of positions) {
+    const [, action, nom, id, , unites, ouverture, cloture, , , benefice, tauxOuverture, tauxCloture, , stop, roulement] = p
+    const entreLe = quand(ouverture)
+    const sortiLe = quand(cloture)
+    const quantite = lireNombre(unites)
+    const pnl = lireNombre(benefice)
+    if (!entreLe || !sortiLe || quantite === null || quantite <= 0 || pnl === null || vus.has(id)) { illisibles++; continue }
+    vus.add(id)
+    const frais = lireNombre(roulement)
+    const stopPrix = lireNombre(stop)
+    trades.push({
+      source: 'etoro-statement',
+      idExterne: id,
+      compte: utilisateur,
+      symbole: nom.trim().slice(0, 40),
+      direction: action === 'Buy' ? 'long' : 'short',
+      quantite,
+      prixEntree: lireNombre(tauxOuverture),
+      prixSortie: lireNombre(tauxCloture),
+      entreLe,
+      sortiLe,
+      pnl,
+      devise: 'USD',
+      frais: frais !== null && frais < 0 ? -frais : null,
+      dureeSec: Math.round((sortiLe.getTime() - entreLe.getTime()) / 1000),
+      fuseau: null,
+      stopPrix: stopPrix === null || stopPrix <= 0 ? null : stopPrix,
+    })
+  }
+
+  // L'activité du compte : dépôts et retraits (les quatre derniers nombres d'une ligne : montant, changement, équité, solde).
+  const mouvements: Mouvement[] = []
+  if (finTable >= 0) {
+    const activite = plat.slice(debut + finTable)
+    for (const m of activite.matchAll(new RegExp(String.raw`(${DATE_ETORO}) (Deposit|Dépôt|Withdraw\w*|Retrait\w*)\b(.*?)(?= ${DATE_ETORO}|$)`, 'g'))) {
+      const nombres = m[3].match(new RegExp(NOMBRE_ETORO, 'g')) ?? []
+      const montant = nombres.length >= 4 ? lireNombre(nombres[nombres.length - 4]) : null
+      const d = quand(m[1])
+      if (montant === null || montant === 0 || !d) continue
+      const depot = /^(Deposit|Dépôt)/i.test(m[2])
+      mouvements.push({
+        date: jourDe(d),
+        type: depot ? 'depot' : 'retrait',
+        montant: depot ? Math.abs(montant) : -Math.abs(montant),
+        devise: 'USD',
+        libelle: (depot ? 'Dépôt' : 'Retrait'),
+      })
+    }
+  }
+
+  const resume = /(?:Récapitulatif du compte|Account Summary) ([A-Za-zÀ-ÿ]+)\.? (\d{1,2}), (\d{4}) (?:to|au|à) ([A-Za-zÀ-ÿ]+)\.? (\d{1,2}), (\d{4})/i.exec(plat)
+  const debutPeriode = resume ? dateMoisEcrit(resume[1], resume[2], resume[3]) : null
+  const finPeriode = resume ? dateMoisEcrit(resume[4], resume[5], resume[6]) : null
+  const periode = debutPeriode && finPeriode
+    ? { debut: debutPeriode, fin: finPeriode }
+    : periodeDe([...trades.flatMap(t => [jourDe(t.entreLe), t.sortiLe ? jourDe(t.sortiLe) : null]), ...mouvements.map(m => m.date)])
+  const resultat = montantResume(plat, ['Bénéfice ou perte \\(positions fermées uniquement\\)', 'Profit or Loss \\(Closed positions only\\)'])
+  const somme = arrondi(trades.reduce((s, t) => s + t.pnl, 0))
+  const n = trades.length
+  const manquantes = Math.max(illisibles, annoncees - n)
+  const juste = resultat !== null && Math.abs(somme - resultat) < 0.05 && manquantes === 0
+  return {
+    ...lectureVide('releve-broker', 'csv'),
+    confiance: juste ? 1 : 0.85,
+    broker,
+    identifiant: utilisateur,
+    periode,
+    devise: 'USD',
+    remarque: [
+      `Relevé eToro lu sans IA : ${n} position${n > 1 ? 's' : ''} fermée${n > 1 ? 's' : ''}, ${mouvements.length} mouvement${mouvements.length > 1 ? 's' : ''}.`,
+      manquantes > 0 ? `${manquantes} position${manquantes > 1 ? 's' : ''} de la table illisible${manquantes > 1 ? 's' : ''} (coupée${manquantes > 1 ? 's' : ''} par la mise en page) : non rendue${manquantes > 1 ? 's' : ''}.` : '',
+      resultat !== null && !juste ? 'La somme des bénéfices ne retombe pas sur le résultat du récapitulatif : vérifie la liste.' : '',
+      "L'identifiant est le nom d'utilisateur eToro. Heures telles qu'écrites, sans fuseau.",
+    ].filter(Boolean).join(' '),
+    trades,
+    mouvements,
+    releveBroker: {
+      broker,
+      identifiant: utilisateur,
+      periode,
+      resultat,
+      depots: montantResume(plat, ['Dépôts', 'Deposits']),
+      retraits: (() => { const r = montantResume(plat, ['Retraits', 'Withdrawals']); return r === null || r === 0 ? r : -Math.abs(r) })(),
+      soldeFin: montantResume(plat, ["Fin de l'équité réalisée", 'Ending Realized Equity']),
+      devise: 'USD',
+    },
   }
 }
 
@@ -868,7 +1090,7 @@ export function origineDuNom(nom: string): string | null {
 /** Le texte envoyé à l'IA est borné : au-delà, l'IA ne rendrait de toute façon pas tout dans le temps d'une requête. */
 export const TEXTE_MAX_IA = 100_000
 
-/** origine (rapport reconnu au nom) fait la source des trades lus par l'IA, sinon « ia:<broker ou firme> » ; prefixe dit le format. */
+/** origine (rapport reconnu au nom) fait la source des trades lus par l'IA, sinon « ia:<identifiant de compte> » (sourceIA) ; prefixe dit le format. */
 export type Preparation =
   | { lecture: Lecture }
   | { ia: 'texte'; texte: string; prefixe: string; origine: string | null; indice: string | null; coupe: boolean }
@@ -883,18 +1105,21 @@ export function preparerLecture(e: { nom: string; nature: Nature; octets: Uint8A
   const { nom, nature, octets } = e
   const indice = indiceDuNom(nom)
   const origine = origineDuNom(nom)
-  const versIA = (texte: string, prefixe: string): Preparation => ({
-    ia: 'texte', texte: texte.slice(0, TEXTE_MAX_IA), prefixe, origine, indice, coupe: texte.length > TEXTE_MAX_IA,
-  })
+  // Le texte envoyé à l'IA est nettoyé (nettoyerTexteExtrait) : c'est aussi celui que contrôle la route.
+  const versIA = (brut: string, prefixe: string): Preparation => {
+    const texte = nettoyerTexteExtrait(brut)
+    return { ia: 'texte', texte: texte.slice(0, TEXTE_MAX_IA), prefixe, origine, indice, coupe: texte.length > TEXTE_MAX_IA }
+  }
 
   switch (nature.famille) {
     case 'refuse':
       return { lecture: { ...lectureVide('illisible', 'nom'), remarque: nature.raison ?? 'Format non lu.' } }
     case 'pdf': {
-      if (methodePourPdf(e.textePdf) !== 'texte') return { ia: 'vision', bloc: 'pdf', media: 'application/pdf', prefixe: 'pdf', origine, indice }
-      const lu = lirePerformancePdf(e.textePdf ?? '') ?? lireCashHistoryPdf(e.textePdf ?? '')
+      const textePdf = e.textePdf == null ? null : nettoyerTexteExtrait(e.textePdf)
+      if (methodePourPdf(textePdf) !== 'texte') return { ia: 'vision', bloc: 'pdf', media: 'application/pdf', prefixe: 'pdf', origine, indice }
+      const lu = lirePerformancePdf(textePdf ?? '') ?? lireCashHistoryPdf(textePdf ?? '') ?? lireReleveEtoro(textePdf ?? '')
       if (lu && ((lu.trades?.length ?? 0) > 0 || (lu.mouvements?.length ?? 0) > 0)) return { lecture: lu }
-      return versIA(e.textePdf ?? '', 'pdf')
+      return versIA(textePdf ?? '', 'pdf')
     }
     case 'image':
       return { ia: 'vision', bloc: 'image', media: nature.media ?? 'image/png', prefixe: 'image', origine, indice }
@@ -1032,6 +1257,9 @@ export function empreinteFacture(f: Pick<Facture, 'fournisseur' | 'date' | 'mont
  */
 export function finaliserLecture(lecture: Lecture, comptes: ComptePilotage[]): { lecture: Lecture; empreintes: string[] } {
   const l = avecCompte(lecture, comptes)
+  // La provenance (brief D3) : une valeur lue sans provenance dite vient du document (lecteurs sans IA).
+  const o = l.origine ?? { firme: null, identifiant: null }
+  l.origine = { firme: l.firme || l.broker ? (o.firme ?? 'document') : null, identifiant: l.identifiant ? (o.identifiant ?? 'document') : null }
   const empreintes: string[] = []
   const rangTrade = rangeur()
   for (const t of l.trades ?? []) empreintes.push(rangTrade(['trade', t.source, empreinteTrade(t)].join('|')))

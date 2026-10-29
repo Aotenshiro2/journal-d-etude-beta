@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getUserId } from '@/lib/api-auth'
 import { corsHeaders, corsPreflight } from '@/lib/support-cors'
-import { analyserTexte } from '@/lib/securite/injection-pur'
 import { MESSAGE_LIMITE, finaliserLecture, lireComptes, natureDuDocument, preparerLecture, type Lecture } from '@/lib/documents-pilotage'
+import { documentSuspect } from '@/lib/documents-pilotage-ia'
 import { extraireTextePdf, garderDocument, lireParIA, quotaDuMembre } from '@/lib/documents-serveur'
 
 // Un PDF de plusieurs pages lu par l'IA dépasse les 10 s par défaut d'une fonction Vercel.
@@ -19,10 +19,12 @@ export const maxDuration = 60
  * Dans l'ordre :
  * 1. sans IA : CSV de trades connus, Cash History de Tradovate (CSV et PDF),
  *    rapport Performance de Tradovate en PDF, Trader Dashboard, CSV aux
- *    colonnes devinées, relevé MetaTrader 4 en HTML ; HEIC, RAR, ZIP, vidéos,
- *    classeurs : `illisible` avec la raison ;
+ *    colonnes devinées, relevé MetaTrader 4 en HTML, exports Quantower
+ *    (exécutions et historique d'ordres appariés), relevé annuel d'eToro en
+ *    PDF ; HEIC, RAR, ZIP, vidéos, classeurs : `illisible` avec la raison ;
  * 2. sinon l'IA, au moindre coût : le texte d'un PDF lisible ou d'un HTML
- *    (méthode texte), le PDF ou l'image eux-mêmes seulement quand le texte
+ *    (méthode texte, en tranches quand il est long : 4 appels au plus, une
+ *    lecture comptée), le PDF ou l'image eux-mêmes seulement quand le texte
  *    manque (méthode vision) ;
  * 3. 5 lectures par l'IA par membre et par jour (Europe/Paris), l'équipe sans
  *    limite : au-delà, 429 et les lectures sans IA restent possibles ;
@@ -92,8 +94,9 @@ export async function POST(req: NextRequest) {
       }
       lecture = lu.lecture
       quota = { ...quota, lusParIaAujourdhui: quota.lusParIaAujourdhui + 1 }
-      // Une consigne cachée dans le texte : la lecture reste une proposition, mais le membre le voit.
-      if (prep.ia === 'texte' && analyserTexte(prep.texte, { niveau: 'tiers' }).suspect) {
+      // Une consigne adressée à une IA dans le texte (jamais un IBAN, un BIC ni un reste d'extraction,
+      // brief D3) : la lecture reste une proposition, mais le membre le voit.
+      if (prep.ia === 'texte' && documentSuspect(prep.texte)) {
         lecture = {
           ...lecture,
           confiance: Math.min(lecture.confiance, 0.5),

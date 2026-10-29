@@ -21,7 +21,8 @@ import {
   type Lecture, type Preparation,
 } from '@/lib/documents-pilotage'
 import {
-  DELAI_IA_MS, MAX_JETONS_IA, OUTIL_DOCUMENT, PROMPT_DOCUMENT, contenuPourIA, lectureDepuisIA,
+  DELAI_IA_MS, MAX_JETONS_IA, OUTIL_DOCUMENT, PROMPT_DOCUMENT, contenuPourIA, fusionnerEntreesIA, lectureDepuisIA, sommeJetons, tranchesDuTexte,
+  type Tranche,
 } from '@/lib/documents-pilotage-ia'
 
 type PreparationIA = Exclude<Preparation, { lecture: unknown }>
@@ -79,8 +80,13 @@ export async function quotaDuMembre(userId: string) {
 
 /**
  * Une lecture par l'IA : un prompt, un outil forcé, le texte d'abord ou le
- * document en vision. Le coût est journalisé (AiUsage, poste 'document') : il
- * compte pour la limite du jour dès que l'appel a abouti.
+ * document en vision. Un texte long (plus de 25 lignes datées) se lit en
+ * tranches (tranchesDuTexte, 4 au plus, brief D3) : les appels partent
+ * ensemble (chacun borné à DELAI_IA_MS, le tout dans les 60 s de la fonction),
+ * leurs listes se fusionnent sans doublon. Images et PDF en vision : un appel.
+ * Le coût est journalisé en UNE ligne pour le document (AiUsage, poste
+ * 'document', jetons de tous les appels) : une lecture comptée dans la limite
+ * du jour dès qu'un appel a abouti.
  */
 export async function lireParIA(
   userId: string, prep: PreparationIA, nom: string, data: string,
@@ -93,22 +99,30 @@ export async function lireParIA(
   }
   try {
     const model = AI_MODEL.pilotage
-    const reponse = await ia.messages.create({
+    const decoupe = prep.ia === 'texte' ? tranchesDuTexte(prep.texte) : null
+    const tranches: (Tranche | undefined)[] = decoupe && decoupe.tranches.length > 1 ? decoupe.tranches : [undefined]
+    const appeler = (tranche: Tranche | undefined) => ia.messages.create({
       model,
       max_tokens: MAX_JETONS_IA,
       system: [{ type: 'text', text: PROMPT_DOCUMENT, cache_control: { type: 'ephemeral' } }],
       tools: [OUTIL_DOCUMENT],
       // Forcé : une structure, pas une réponse rédigée à reparser.
       tool_choice: { type: 'tool', name: OUTIL_DOCUMENT.name },
-      messages: [{ role: 'user', content: contenuPourIA(prep, nom, data) }],
+      messages: [{ role: 'user', content: contenuPourIA(prep, nom, data, tranche) }],
     } as never, { timeout: DELAI_IA_MS, maxRetries: 0 })
-    await logAiUsage(userId, 'pilotage', model, reponse.usage, null, { usage: 'document' })
+    const resultats = await Promise.allSettled(tranches.map(appeler))
+    const reponses = resultats.flatMap(r => (r.status === 'fulfilled' ? [r.value] : []))
+    if (reponses.length === 0) throw (resultats[0] as PromiseRejectedResult).reason
+    for (const r of resultats) if (r.status === 'rejected') console.error('[pilotage/documents/lire] tranche perdue', r.reason)
+    const usage = sommeJetons(reponses.map(r => r.usage))
+    await logAiUsage(userId, 'pilotage', model, usage, null, { usage: 'document' })
 
-    const outil = reponse.content.find((c: { type: string }) => c.type === 'tool_use') as { input?: unknown } | undefined
-    const lecture = lectureDepuisIA(outil?.input, {
-      methode: prep.ia, origine: prep.origine, coupe: prep.ia === 'texte' && prep.coupe,
+    const entrees = reponses.map(r => (r.content.find((c: { type: string }) => c.type === 'tool_use') as { input?: unknown } | undefined)?.input)
+    const lecture = lectureDepuisIA(tranches.length > 1 ? fusionnerEntreesIA(entrees) : entrees[0], {
+      methode: prep.ia, origine: prep.origine, coupe: prep.ia === 'texte' && (prep.coupe || !!decoupe?.coupe),
+      texte: prep.ia === 'texte' ? prep.texte : null, nom, tranches: tranches.length, tranchesPerdues: resultats.length - reponses.length,
     })
-    if (reponse.stop_reason === 'max_tokens') {
+    if (reponses.some(r => r.stop_reason === 'max_tokens')) {
       lecture.remarque = `Lecture coupée : le document est trop long pour une seule lecture. ${lecture.remarque}`.trim()
       lecture.confiance = Math.min(lecture.confiance, 0.5)
     }
