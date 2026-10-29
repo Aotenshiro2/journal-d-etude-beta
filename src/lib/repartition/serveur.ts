@@ -28,6 +28,7 @@ import {
   euros, glissementCommission, jourDuPaiement, jourParis, libelleDepenseLives, libelleJour, libelleLives, libelleMois,
   libelleTarif, libelleTaux, moisDe, moisParis, moisPrevuCommission, moisValide, partsCommission, pourcent,
   repartitionDuMois, tarifDuMois, tarifsEnVigueur, tauxEnVigueur, venteDePaiement, versEuros,
+  type CommissionRetro, PREFIXE_NOTE_ACCORD, accordNote, phraseRetroactif, planRetroactif, texteDepotDejaInscrit,
 } from '@/lib/repartition/pur'
 
 const MIGRATION = '20261008170000_cockpit_repartition.sql'
@@ -700,6 +701,62 @@ async function commissionParId(id: string): Promise<LigneCommission | null> {
   return lignes[0] ?? null
 }
 
+/**
+ * (29/10, cas de Victor Weber) Un depot DEJA INSCRIT : meme broker, meme jour
+ * de depot, meme montant, meme personne (email de la ligne ou de son acces
+ * broker), SANS limite de temps. Avant : seulement les 10 dernieres minutes,
+ * et une carte confirmee plus tard inscrivait la commission une seconde fois.
+ */
+async function depotDejaInscrit(partenaireId: string, le: string, base: number, email: string): Promise<string | null> {
+  const lignes = await prisma.$queryRaw<{
+    qui: string | null; partenaire: string; le: string; montant_base: number; commission_attendue: number; statut: string; pose_le: string | null
+  }[]>`
+    select coalesce(c.client, c.email, a.email) as qui, p.nom as partenaire, c.le::text as le,
+           c.montant_base::float8 as montant_base, c.commission_attendue::float8 as commission_attendue,
+           c.statut, c.pose_le::text as pose_le
+    from public.cockpit_commissions c
+    join public.cockpit_partenaires p on p.partenaire_id = c.partenaire_id
+    left join public.cockpit_liveclub_acces a on a.acces_id = c.acces_id
+    where c.partenaire_id = ${partenaireId} and c.nature = 'depot' and c.le = ${le}::date
+      and c.montant_base = ${versEuros(base)}::numeric
+      and (lower(c.email) = ${email} or lower(a.email) = ${email})
+    order by c.pose_le
+    limit 1`
+  const d = lignes[0]
+  if (!d) return null
+  return texteDepotDejaInscrit({
+    qui: d.qui ?? email, partenaire: d.partenaire, base: centimes(d.montant_base) ?? base, le: d.le,
+    attendue: centimes(d.commission_attendue) ?? 0, statut: d.statut, poseLe: d.pose_le,
+  })
+}
+
+/** (29/10) Les commissions d'un partenaire depuis une date, pour un taux retroactif. */
+async function commissionsDepuis(partenaireId: string, depuis: string): Promise<CommissionRetro[]> {
+  const lignes = await prisma.$queryRaw<{
+    commission_id: string; qui: string | null; le: string; montant_base: number | null; commission_attendue: number; statut: string; note: string | null
+  }[]>`
+    select c.commission_id::text as commission_id, coalesce(c.client, c.email, a.email, 'client') as qui, c.le::text as le,
+           c.montant_base::float8 as montant_base, c.commission_attendue::float8 as commission_attendue, c.statut, c.note
+    from public.cockpit_commissions c
+    left join public.cockpit_liveclub_acces a on a.acces_id = c.acces_id
+    where c.partenaire_id = ${partenaireId} and c.le >= ${depuis}::date
+    order by c.le, c.pose_le`
+  return lignes.map(l => ({
+    commissionId: l.commission_id, qui: l.qui ?? 'client', le: l.le,
+    base: l.montant_base === null ? null : centimes(l.montant_base), attendue: centimes(l.commission_attendue) ?? 0,
+    statut: l.statut === 'recue' ? 'recue' : l.statut === 'perdue' ? 'perdue' : 'attendue', note: l.note,
+  }))
+}
+
+/** (29/10) L'accord d'un partenaire avant un changement, en clair : son taux en vigueur et l'accord note. */
+function accordAvant(avant: TauxPartenaire | null, note: string | null, nature: 'depot' | 'affiliation'): string {
+  const accord = accordNote(note)
+  return [
+    avant ? `${libelleTaux(avant, nature)} depuis le ${libelleJour(avant.aPartirDu)}` : 'aucun taux général',
+    accord ? `accord noté : ${accord}` : null,
+  ].filter(Boolean).join(' ; ')
+}
+
 async function nomOffre(offreId: string): Promise<string | null> {
   const lignes = await prisma.$queryRaw<{ nom: string }[]>`
     select nom from public.cockpit_offres where offre_id = ${offreId}`
@@ -800,12 +857,28 @@ export async function controlerActionRepartition(a: ActionAgent): Promise<Contro
         return { erreur: `${partenaire.nom} est une affiliation, pas un broker : utilise proposer_commission_affiliation.` }
       }
       const le = String(p.le)
+      // (29/10, cas de Victor Weber) Un depot deja inscrit : rien a proposer.
+      if (type === 'depot_broker') {
+        const deja = await depotDejaInscrit(partenaire.partenaire_id, le, centimes(p.montant) ?? 0, String(p.email))
+        if (deja) return { erreur: `${deja} Dis-le à ton interlocuteur au lieu de proposer une carte.` }
+      }
       const choix = await tauxPourDepot(type, p, partenaire.partenaire_id, le)
       if (!choix) {
+        // (29/10) L'accord connu (note du partenaire, un accord a paliers) :
+        // le modele l'applique sans le redemander.
+        const accord = accordNote(partenaire.note)
+        if (accord) {
+          return {
+            erreur: `Pas de taux général pour ${partenaire.nom} au ${libelleJour(le)}, mais son accord est noté : « ${accord} ». `
+              + `Ne le redemande pas : calcule la commission de ce dépôt d'après lui, passe-la (commission) et repropose. `
+              + `Si l'accord ne permet pas de la calculer pour ce montant, demande seulement ce qui manque.`,
+          }
+        }
         return {
-          erreur: `Aucun taux connu pour ${partenaire.nom} au ${libelleJour(le)}. Demande à ton interlocuteur, dans ce fil, `
-            + `la commission de ce dépôt (commission), ou le taux de ${partenaire.nom} à cette date (en % du dépôt, ou un montant fixe `
-            + `par client) : dans ce cas propose d'abord proposer_taux_partenaire (a_partir_du au plus tard le ${le}), puis ce geste.`,
+          erreur: `Aucun accord connu pour ${partenaire.nom} au ${libelleJour(le)}. Demande à ton interlocuteur, dans ce fil et en une question, `
+            + `l'accord de ${partenaire.nom} (la règle de commission : un montant fixe par dépôt ou un % du dépôt ; le dépôt minimum et les paliers ; depuis quand), `
+            + `ou seulement la commission de ce dépôt (commission). Un accord simple : propose d'abord proposer_taux_partenaire (taux, accord, `
+            + `a_partir_du au plus tard le ${le}) ; un accord à paliers : proposer_taux_partenaire sans taux avec accord. Puis ce geste.`,
         }
       }
       const { taux, libelle } = choix
@@ -817,6 +890,8 @@ export async function controlerActionRepartition(a: ActionAgent): Promise<Contro
       }
       const client = String(p.client ?? p.email ?? 'le client')
       let complement = phraseCommission({ attendue, taux, nature, le, client, moisCourant, libelle })
+      const accordConnu = accordNote(partenaire.note)
+      if (accordConnu) complement += ` Accord de ${partenaire.nom} : ${accordConnu}.`
       let manque: string | null = null
       if (type === 'depot_broker') {
         const acces = await accesParEmail(String(p.email))
@@ -851,28 +926,42 @@ export async function controlerActionRepartition(a: ActionAgent): Promise<Contro
       if (!partenaire && !p.nature) {
         return { erreur: `${p.partenaire_nom} est un nouveau partenaire : demande s'il s'agit d'un broker (des dépôts) ou d'une affiliation, puis repropose avec nature.` }
       }
-      // (29/10) Sans taux : seulement pour ENREGISTRER un nouveau partenaire.
+      // (29/10, accords des brokers) La carte dit l'ANCIEN accord (taux en
+      // vigueur a la date d'effet, accord note), le nouveau (le resume) et la
+      // date d'effet ; en retroactif, les depots touches.
+      const aPartirDu = String(p.a_partir_du)
+      const nature = (partenaire?.nature ?? p.nature) === 'broker' ? 'depot' : 'affiliation'
+      const avant = partenaire
+        ? tauxEnVigueur(await tauxDuPartenaire(partenaire.partenaire_id), partenaire.partenaire_id, aPartirDu)
+        : null
+      // Sans taux : ENREGISTRER un nouveau partenaire, ou noter l'accord a paliers d'un partenaire connu.
       if (p.sans_taux === true) {
         if (partenaire) {
-          return { erreur: `${partenaire.nom} est déjà enregistré : pour lui poser un taux, il faut taux_pct ou montant_fixe ; la commission d'un seul dépôt passe par proposer_depot_broker (commission).` }
+          if (!p.accord) {
+            return { erreur: `${partenaire.nom} est déjà enregistré : pour lui poser un taux, il faut taux_pct ou montant_fixe ; pour un accord à paliers, accord (le texte de l'accord) ; la commission d'un seul dépôt passe par proposer_depot_broker (commission).` }
+          }
+          return {
+            action: a,
+            complement: `Avant : ${accordAvant(avant, partenaire.note, nature)}.`
+              + (avant ? ` Le taux général de ${libelleTaux(avant, nature)} reste en base : chaque dépôt devra porter sa commission (commission), calculée d'après le nouvel accord.` : ''),
+            manque: null,
+          }
         }
         return {
           action: a,
-          complement: `Nouveau partenaire (${p.nature}), sans taux général : chaque dépôt devra porter sa commission (proposer_depot_broker, commission) tant qu'un taux n'est pas posé.`,
+          complement: `Nouveau partenaire (${p.nature}), sans taux général : chaque dépôt devra porter sa commission (proposer_depot_broker, commission)${p.accord ? ", calculée d'après cet accord" : " tant qu'un taux n'est pas posé"}.`,
           manque: null,
         }
       }
-      const avant = partenaire
-        ? tauxEnVigueur(await tauxDuPartenaire(partenaire.partenaire_id), partenaire.partenaire_id, String(p.a_partir_du))
-        : null
-      const nature = (partenaire?.nature ?? p.nature) === 'broker' ? 'depot' : 'affiliation'
-      return {
-        action: a,
-        complement: partenaire
-          ? (avant ? `Avant : ${libelleTaux(avant, nature)} depuis le ${libelleJour(avant.aPartirDu)}.` : `Premier taux de ${partenaire.nom}.`)
-          : `Nouveau partenaire (${p.nature}).`,
-        manque: null,
+      let complement = partenaire
+        ? `Avant : ${accordAvant(avant, partenaire.note, nature)}.`
+        : `Nouveau partenaire (${p.nature}).`
+      if (p.retroactif === true) {
+        if (!partenaire) return { erreur: "retroactif : un nouveau partenaire n'a aucun dépôt inscrit. Repropose sans retroactif." }
+        const t = { tauxPct: p.taux_pct === null || p.taux_pct === undefined ? null : Number(p.taux_pct), montantFixe: p.montant_fixe === null || p.montant_fixe === undefined ? null : centimes(p.montant_fixe) }
+        complement += `\n${phraseRetroactif(planRetroactif(await commissionsDepuis(partenaire.partenaire_id, aPartirDu), t, aPartirDu), aPartirDu)}`
       }
+      return { action: a, complement, manque: null }
     }
 
     if (type === 'intervenant') {
@@ -1077,6 +1166,12 @@ async function executer(a: ActionAgent, posePar: string, acteur: string): Promis
     // puis le depot relie a cet acces.
     const email = String(p.email)
     const quiClient = client ?? email
+    // (29/10, cas de Victor Weber) Garde contre un double depot, SANS limite de
+    // temps et AVANT tout geste : meme broker, meme jour, meme montant, meme
+    // personne (email de la ligne ou de son acces). Avant : 10 minutes
+    // seulement, et une carte confirmee plus tard comptait la commission deux fois.
+    const deja = await depotDejaInscrit(partenaire.partenaire_id, le, base ?? 0, email)
+    if (deja) throw new RefusAction(deja)
     let acces = await accesParEmail(email)
     let issue: 'email_parti' | 'email_pas_parti' | 'existant' | 'abonne'
     let ligneAcces: string
@@ -1110,16 +1205,15 @@ async function executer(a: ActionAgent, posePar: string, acteur: string): Promis
       }
     }
 
-    // Garde contre un double geste (deux cartes pour le meme depot) : meme
-    // personne, meme partenaire, meme jour, meme montant, il y a moins de 10 minutes.
+    // Deux cartes confirmees en meme temps : la garde d'en haut a pu passer
+    // pour les deux. Relue juste avant l'ecriture, par l'acces cette fois.
     const doublon = await prisma.$queryRaw<{ n: number }[]>`
       select count(*)::int as n from public.cockpit_commissions
       where partenaire_id = ${partenaire.partenaire_id} and nature = 'depot' and le = ${le}::date
         and montant_base = ${versEuros(base ?? 0)}::numeric
-        and (acces_id = ${acces?.acces_id ?? null}::uuid or lower(email) = ${email})
-        and pose_le > now() - interval '10 minutes'`
+        and (acces_id = ${acces?.acces_id ?? null}::uuid or lower(email) = ${email})`
     if ((doublon[0]?.n ?? 0) > 0) {
-      throw new RefusAction(`Ce dépôt de ${euros(base ?? 0)} pour ${quiClient} vient déjà d'être inscrit : rien n'a été refait.`)
+      throw new RefusAction(`Ce dépôt de ${euros(base ?? 0)} pour ${quiClient} est déjà inscrit : rien n'a été refait.`)
     }
 
     try {
@@ -1191,27 +1285,40 @@ async function executer(a: ActionAgent, posePar: string, acteur: string): Promis
     const nomSaisi = String(p.partenaire_nom)
     const aPartirDu = String(p.a_partir_du)
     const sansTaux = p.sans_taux === true
+    // (29/10, accords des brokers) L'accord en clair, date, note sur le
+    // partenaire (le texte courant) et sur la ligne de taux (l'historique).
+    const accord = typeof p.accord === 'string' && p.accord.trim() ? p.accord.trim() : null
+    const noteAccord = accord ? `${PREFIXE_NOTE_ACCORD}${libelleJour(aPartirDu)} : ${accord}`.slice(0, 500) : null
+    const retroactif = p.retroactif === true && !sansTaux
+    const t = {
+      tauxPct: p.taux_pct === null || p.taux_pct === undefined ? null : Number(p.taux_pct),
+      montantFixe: p.montant_fixe === null || p.montant_fixe === undefined ? null : centimes(p.montant_fixe),
+    }
     const issue = await prisma.$transaction(async (tx) => {
       const existant = await tx.$queryRaw<LignePartenaire[]>`
         select partenaire_id, nom, nature, note from public.cockpit_partenaires where partenaire_id = ${id} for update`
       let partenaire = existant[0]
-      // (29/10) Sans taux : l'enregistrement d'un NOUVEAU partenaire seulement.
-      if (partenaire && sansTaux) {
-        throw new RefusAction(`${partenaire.nom} est déjà enregistré : rien n'a été fait. Pour son taux, il faut un pourcentage ou un montant fixe.`)
+      const noteAvant = partenaire?.note ?? null
+      // (29/10) Sans taux ni accord : l'enregistrement d'un NOUVEAU partenaire seulement.
+      if (partenaire && sansTaux && !noteAccord) {
+        throw new RefusAction(`${partenaire.nom} est déjà enregistré : rien n'a été fait. Pour son taux, il faut un pourcentage ou un montant fixe ; pour un accord à paliers, son texte.`)
       }
       if (!partenaire) {
         const nature = p.nature === 'broker' ? 'broker' : p.nature === 'affiliation' ? 'affiliation' : null
         if (!nature) {
           throw new RefusAction(`${nomSaisi} est un nouveau partenaire : précise s'il s'agit d'un broker ou d'une affiliation. Rien n'a été fait.`)
         }
-        const notePartenaire = sansTaux ? note : null
+        const notePartenaire = noteAccord ?? (sansTaux ? note : null)
         await tx.$executeRaw`
           insert into public.cockpit_partenaires (partenaire_id, nom, nature, note, pose_par, via)
           values (${id}, ${nomSaisi}, ${nature}, ${notePartenaire}, ${posePar}::uuid, 'agent')
           on conflict (partenaire_id) do nothing`
         partenaire = { partenaire_id: id, nom: nomSaisi, nature, note: notePartenaire }
+      } else if (noteAccord) {
+        // Un partenaire connu : son accord courant change (l'ancien est dans la carte et ce resultat).
+        await tx.$executeRaw`update public.cockpit_partenaires set note = ${noteAccord} where partenaire_id = ${id}`
       }
-      if (sansTaux) return { partenaire, avant: null, nouveau: true }
+      if (sansTaux) return { partenaire, avant: null, nouveau: existant.length === 0, noteAvant, retro: null }
       const avantLignes = await tx.$queryRaw<LigneTaux[]>`
         select taux_id::text as taux_id, partenaire_id, a_partir_du::text as a_partir_du,
                taux_pct::float8 as taux_pct, montant_fixe::float8 as montant_fixe, note, pose_le
@@ -1220,22 +1327,60 @@ async function executer(a: ActionAgent, posePar: string, acteur: string): Promis
       await tx.$executeRaw`
         insert into public.cockpit_partenaire_taux (partenaire_id, a_partir_du, taux_pct, montant_fixe, note, pose_par, via)
         values (${id}, ${aPartirDu}::date, ${p.taux_pct === null ? null : Number(p.taux_pct)}::numeric,
-                ${p.montant_fixe === null ? null : Number(p.montant_fixe)}::numeric, ${note}, ${posePar}::uuid, 'agent')`
-      return { partenaire, avant, nouveau: existant.length === 0 }
+                ${p.montant_fixe === null ? null : Number(p.montant_fixe)}::numeric, ${noteAccord ?? note}, ${posePar}::uuid, 'agent')`
+      // (29/10) Retroactif, dit explicitement : les commissions ENCORE
+      // ATTENDUES depuis la date d'effet prennent le nouveau taux (fige dans
+      // la ligne, comme a l'inscription). Recues, perdues et commissions
+      // propres a un depot ne bougent jamais.
+      let retro: ReturnType<typeof planRetroactif> | null = null
+      if (retroactif && existant.length > 0) {
+        const lignes = await tx.$queryRaw<{
+          commission_id: string; qui: string | null; le: string; montant_base: number | null; commission_attendue: number; statut: string; note: string | null
+        }[]>`
+          select c.commission_id::text as commission_id, coalesce(c.client, c.email, a.email, 'client') as qui, c.le::text as le,
+                 c.montant_base::float8 as montant_base, c.commission_attendue::float8 as commission_attendue, c.statut, c.note
+          from public.cockpit_commissions c
+          left join public.cockpit_liveclub_acces a on a.acces_id = c.acces_id
+          where c.partenaire_id = ${id} and c.le >= ${aPartirDu}::date
+          order by c.le, c.pose_le
+          for update of c`
+        retro = planRetroactif(lignes.map(l => ({
+          commissionId: l.commission_id, qui: l.qui ?? 'client', le: l.le,
+          base: l.montant_base === null ? null : centimes(l.montant_base), attendue: centimes(l.commission_attendue) ?? 0,
+          statut: l.statut === 'recue' ? 'recue' : l.statut === 'perdue' ? 'perdue' : 'attendue', note: l.note,
+        })), t, aPartirDu)
+        const marque = `[taux revu le ${libelleJour(jourParis(new Date()))}, rétroactif]`
+        for (const c of retro.touchees) {
+          await tx.$executeRaw`
+            update public.cockpit_commissions
+            set taux_pct = ${t.tauxPct}::numeric,
+                montant_fixe = ${t.montantFixe === null ? null : versEuros(t.montantFixe)}::numeric,
+                commission_attendue = ${versEuros(c.apres)}::numeric,
+                note = left(trim(coalesce(note, '') || ' ' || ${marque}), 500)
+            where commission_id = ${c.commissionId}::uuid and statut = 'attendue'`
+        }
+      }
+      return { partenaire, avant, nouveau: existant.length === 0, noteAvant, retro }
     })
     const nature = issue.partenaire.nature === 'broker' ? 'depot' : 'affiliation'
+    const ancien = issue.nouveau ? null : accordAvant(issue.avant, issue.noteAvant, nature)
     if (sansTaux) {
+      if (noteAccord) {
+        return `Accord de ${issue.partenaire.nom} noté à partir du ${libelleJour(aPartirDu)} : ${accord}`
+          + (issue.nouveau ? ` (nouveau partenaire, ${issue.partenaire.nature}).` : ` (avant : ${ancien}).`)
+          + `\nEnsuite : chaque ${nature === 'depot' ? 'dépôt' : 'commission'} chez ${issue.partenaire.nom} porte sa commission, calculée d'après cet accord ; `
+          + `les dépôts déjà inscrits gardent la leur. S'il y a un dépôt en cours, réponds « suite » pour sa carte.`
+      }
       return `${issue.partenaire.nom} est enregistré (${issue.partenaire.nature}), sans taux général pour l'instant.\n`
         + `Ensuite : chaque ${nature === 'depot' ? 'dépôt' : 'commission'} chez ${issue.partenaire.nom} porte sa commission, `
         + `jusqu'à ce qu'un taux soit posé ; s'il y a un dépôt en cours, réponds « suite » pour sa carte.`
     }
-    const t = {
-      tauxPct: p.taux_pct === null ? null : Number(p.taux_pct),
-      montantFixe: p.montant_fixe === null ? null : centimes(p.montant_fixe),
-    }
     return `Taux de ${issue.partenaire.nom} : ${libelleTaux(t, nature)} à partir du ${libelleJour(aPartirDu)}`
-      + (issue.nouveau ? ` (nouveau partenaire, ${issue.partenaire.nature}).` : issue.avant ? ` (avant : ${libelleTaux(issue.avant, nature)}).` : ' (premier taux).')
-      + ` Les dépôts déjà inscrits gardent le taux de leur date.\n`
+      + (issue.nouveau ? ` (nouveau partenaire, ${issue.partenaire.nature}).` : ` (avant : ${ancien}).`)
+      + (accord ? ` Accord noté : ${accord}.` : '')
+      + (issue.retro
+        ? `\n${phraseRetroactif(issue.retro, aPartirDu).replace('Dépôts touchés', 'Commissions revues')}\n`
+        : ` Les dépôts déjà inscrits gardent le taux de leur date.\n`)
       + `Rien à faire : les prochains ${nature === 'depot' ? 'dépôts' : 'clients'} prendront ce taux.`
   }
 

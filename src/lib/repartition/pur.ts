@@ -1379,18 +1379,28 @@ export function lireParamsRepartition(
     const aPct = p.taux_pct !== null && p.taux_pct !== undefined && p.taux_pct !== ''
     const aFixe = p.montant_fixe !== null && p.montant_fixe !== undefined && p.montant_fixe !== ''
     if (aPct && aFixe) return 'Il faut soit taux_pct (en % du dépôt), soit montant_fixe (euros par client) : un seul des deux.'
+    // (29/10, accords des brokers) L'accord en clair (minimum, paliers,
+    // conditions), note sur le partenaire ; et la retroactivite, seulement
+    // quand elle est dite explicitement (les commissions encore attendues des
+    // depots inscrits depuis a_partir_du prennent le nouveau taux).
+    const accord = texteCourt(p.accord, 400)
+    const retroactif = p.retroactif === true || p.retroactif === 'true'
     // (29/10) Ni l'un ni l'autre : un NOUVEAU partenaire sans taux general
-    // (seule la commission d'un depot precis est connue). Le serveur refuse
-    // si le partenaire existe deja ; la nature est alors obligatoire.
+    // (seule la commission d'un depot precis est connue), ou un accord a
+    // PALIERS (accord obligatoire, nouveau partenaire ou deja connu). Le
+    // serveur refuse un partenaire deja connu sans accord.
     if (!aPct && !aFixe) {
-      if (!nature) {
-        return "Sans taux, c'est l'enregistrement d'un NOUVEAU partenaire : précise sa nature (broker ou affiliation). Pour un partenaire déjà connu, il faut taux_pct ou montant_fixe."
+      if (retroactif) {
+        return "retroactif : seulement avec un taux (taux_pct ou montant_fixe). Un accord à paliers ne change pas les commissions déjà inscrites : chaque dépôt garde la sienne."
+      }
+      if (!nature && !accord) {
+        return "Sans taux, c'est l'enregistrement d'un NOUVEAU partenaire : précise sa nature (broker ou affiliation). Pour un partenaire déjà connu, il faut taux_pct ou montant_fixe, ou son accord à paliers (accord)."
       }
       const jourSans = lireJour(p.a_partir_du, 'a_partir_du', ctx.aujourdhui)
       if (typeof jourSans === 'string') return jourSans
       return {
         partenaire, partenaire_nom: partenaireNom, nature, taux_pct: null, montant_fixe: null, sans_taux: true,
-        a_partir_du: jourSans[0], note: note ?? 'Taux général à demander au prochain client.',
+        a_partir_du: jourSans[0], accord, note: note ?? (accord ? null : NOTE_SANS_TAUX),
       }
     }
     let tauxPct: number | null = null
@@ -1406,7 +1416,10 @@ export function lireParamsRepartition(
     }
     const jour = lireJour(p.a_partir_du, 'a_partir_du', ctx.aujourdhui)
     if (typeof jour === 'string') return jour
-    return { partenaire, partenaire_nom: partenaireNom, nature, taux_pct: tauxPct, montant_fixe: montantFixe, a_partir_du: jour[0], note }
+    return {
+      partenaire, partenaire_nom: partenaireNom, nature, taux_pct: tauxPct, montant_fixe: montantFixe, a_partir_du: jour[0],
+      accord, retroactif, note,
+    }
   }
 
   if (type === 'intervenant') {
@@ -1537,13 +1550,25 @@ export function resumeRepartition(type: TypeRepartition, p: Record<string, unkno
       }
       return `Marquer la commission${p.qui ? ` de ${p.qui}` : ''} perdue : elle sort des commissions attendues.${note}`
     case 'taux_partenaire': {
+      // (29/10) L'accord en clair et la retroactivite ; l'ancien accord est
+      // ajoute par le serveur (complement « Avant : ... »).
+      const accord = p.accord ? ` Accord noté : ${p.accord}.` : ''
+      const depuis = libelleJour(String(p.a_partir_du))
       if (p.sans_taux === true) {
+        if (p.accord) {
+          return `Noter l'accord de ${p.partenaire_nom}${p.nature ? ` (nouveau partenaire, ${p.nature})` : ''} à partir du ${depuis} : ${p.accord}. `
+            + `Pas de taux général : chaque dépôt porte sa commission, calculée d'après cet accord et montrée sur sa carte. `
+            + `Les dépôts déjà inscrits gardent la leur.${note}`
+        }
         return `Enregistrer le nouveau partenaire ${p.partenaire_nom} (${p.nature}), sans taux général pour l'instant : `
           + `la commission de chaque dépôt sera donnée avec lui, jusqu'à ce qu'un taux soit posé.${note}`
       }
       const t = { tauxPct: (p.taux_pct as number | null) ?? null, montantFixe: p.montant_fixe === null || p.montant_fixe === undefined ? null : centimes(p.montant_fixe) }
-      return `Taux de ${p.partenaire_nom}${p.nature ? ` (${p.nature})` : ''} : ${libelleTaux(t)} à partir du ${libelleJour(String(p.a_partir_du))}. `
-        + `Les dépôts déjà inscrits gardent le taux de leur date.${note}`
+      return `Taux de ${p.partenaire_nom}${p.nature ? ` (${p.nature})` : ''} : ${libelleTaux(t)} à partir du ${depuis}. `
+        + (p.retroactif === true
+          ? `RÉTROACTIF : les commissions encore attendues des dépôts inscrits depuis le ${depuis} prennent ce taux (liste ci-dessous) ; celles déjà reçues ou perdues ne bougent pas.`
+          : 'Les dépôts déjà inscrits gardent le taux de leur date.')
+        + `${accord}${note}`
     }
     case 'intervenant': {
       const unite = (p.unite as UniteIntervenant | undefined) ?? 'live'
@@ -1612,4 +1637,92 @@ export function etapeApresMarquage(etat: 'lots_faits' | 'recue' | 'perdue', part
   if (etat === 'lots_faits') return `Quand ${partenaire} paie, donne-moi le montant reçu et la date.`
   if (etat === 'recue') return `Rien à faire : elle compte dans la répartition ${deMois(moisRecue ?? '')}.`
   return 'Rien à faire : elle sort des commissions attendues.'
+}
+
+// ---------------------------------------------------------------------------
+// (29/10) UN ACCORD QUI CHANGE, RETROACTIF (Brice : « l'accord avec RaiseFx
+// evolue, on passe a 800 EUR »). Par defaut les depots deja inscrits gardent
+// leur commission (figee a l'inscription). Retroactivite dite explicitement :
+// les commissions ENCORE ATTENDUES des depots inscrits depuis la date d'effet
+// prennent le nouveau taux. Jamais touchees : celles deja recues ou perdues
+// (des faits), et celles dont la commission a ete donnee pour CE depot
+// (« [commission propre à ce dépôt] », un accord a paliers par exemple).
+// ---------------------------------------------------------------------------
+
+/** La note posee sur un partenaire enregistre sans taux ni accord (29/10) : ce n'est pas un accord. */
+export const NOTE_SANS_TAUX = 'Taux général à demander au prochain client.'
+
+/** Le debut de la note qu'ecrit la carte d'accord (proposer_taux_partenaire avec accord). */
+export const PREFIXE_NOTE_ACCORD = 'Accord à partir du '
+
+/**
+ * L'accord note sur un partenaire, ou null. Seule la note ecrite par la carte
+ * d'accord (« Accord à partir du ... ») en est un : une autre note (la note
+ * par defaut d'un partenaire sans taux, « Accord à confirmer par Mel » posee
+ * a la main, eval S3 du 29/10) est une remarque, pas un accord a appliquer.
+ */
+export function accordNote(note: string | null | undefined): string | null {
+  const n = (note ?? '').trim()
+  return n.startsWith(PREFIXE_NOTE_ACCORD) ? n : null
+}
+
+/** La marque d'une commission donnee pour un depot precis (note de la ligne). */
+export const MARQUE_COMMISSION_PROPRE = '[commission propre à ce dépôt]'
+
+export type CommissionRetro = {
+  commissionId: string
+  qui: string
+  le: string
+  /** Centimes. */
+  base: number | null
+  /** Centimes. */
+  attendue: number
+  statut: 'attendue' | 'recue' | 'perdue'
+  note: string | null
+}
+
+export type PlanRetroactif = {
+  touchees: (CommissionRetro & { apres: number })[]
+  /** Pas touchees, avec la raison. */
+  gardees: (CommissionRetro & { raison: string })[]
+}
+
+/** Ce que ferait un nouveau taux retroactif sur les commissions d'un partenaire depuis sa date d'effet. */
+export function planRetroactif(
+  lignes: readonly CommissionRetro[], t: { tauxPct: number | null; montantFixe: number | null }, depuis: string,
+): PlanRetroactif {
+  const plan: PlanRetroactif = { touchees: [], gardees: [] }
+  for (const c of lignes) {
+    if (c.le < depuis) continue
+    if (c.statut !== 'attendue') { plan.gardees.push({ ...c, raison: c.statut === 'recue' ? 'déjà reçue' : 'perdue' }); continue }
+    if ((c.note ?? '').includes(MARQUE_COMMISSION_PROPRE)) { plan.gardees.push({ ...c, raison: 'commission propre à ce dépôt' }); continue }
+    const apres = commissionDuTaux(t, c.base)
+    if (apres === null) { plan.gardees.push({ ...c, raison: 'montant de la vente inconnu' }); continue }
+    if (apres === c.attendue) { plan.gardees.push({ ...c, raison: 'déjà à ce montant' }); continue }
+    plan.touchees.push({ ...c, apres })
+  }
+  return plan
+}
+
+const MAX_LIGNES_RETRO = 20
+
+/** La liste de la carte (et du resultat) : les depots touches, ancien et nouveau montant, puis ceux gardes. */
+export function phraseRetroactif(plan: PlanRetroactif, depuis: string): string {
+  if (plan.touchees.length === 0) {
+    return `Rétroactif : aucune commission attendue depuis le ${libelleJour(depuis)} ne change`
+      + (plan.gardees.length ? ` (${plan.gardees.length} gardée${plan.gardees.length > 1 ? 's' : ''} : ${[...new Set(plan.gardees.map(g => g.raison))].join(', ')}).` : '.')
+  }
+  const lignes = plan.touchees.slice(0, MAX_LIGNES_RETRO).map(c =>
+    `- ${c.qui}, dépôt${c.base !== null ? ` de ${euros(c.base)}` : ''} du ${libelleJour(c.le)} : ${euros(c.attendue)} -> ${euros(c.apres)}`)
+  const reste = plan.touchees.length > MAX_LIGNES_RETRO ? [`- et ${plan.touchees.length - MAX_LIGNES_RETRO} autre(s)`] : []
+  const gardees = plan.gardees.length
+    ? [`Gardées telles quelles : ${plan.gardees.length} (${[...new Set(plan.gardees.map(g => g.raison))].join(', ')}).`] : []
+  return [`Dépôts touchés (${plan.touchees.length}) :`, ...lignes, ...reste, ...gardees].join('\n')
+}
+
+/** (29/10) Le refus d'un depot deja inscrit (garde sans limite de temps, Victor Weber). */
+export function texteDepotDejaInscrit(o: { qui: string; partenaire: string; base: number; le: string; attendue: number; statut: string; poseLe: string | null }): string {
+  return `Ce dépôt est déjà inscrit : ${euros(o.base)} chez ${o.partenaire} pour ${o.qui}, le ${libelleJour(o.le)}, `
+    + `commission ${euros(o.attendue)} (${o.statut === 'attendue' ? 'attendue' : o.statut === 'recue' ? 'reçue' : 'perdue'})`
+    + `${o.poseLe ? `, inscrit le ${libelleJour(o.poseLe.slice(0, 10))}` : ''}. Rien n'a été refait : un dépôt ne s'inscrit qu'une fois.`
 }

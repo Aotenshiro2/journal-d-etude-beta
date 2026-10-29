@@ -27,6 +27,12 @@ export type DemandeHumain = {
   genre?: 'demande' | 'reponse' | 'annulee'
   /** (16/10) Son message porte une image : 'jointe' sous l'alerte, ou 'onglet' (a voir dans l'onglet Support). */
   image?: 'jointe' | 'onglet' | null
+  /**
+   * (29/10, securite des bots) Son message porte du texte cache ou une
+   * consigne adressee a une IA : la ligne qui le dit, juste sous son message
+   * (rendu visible par l'appelant). null = rien de suspect.
+   */
+  securite?: string | null
 }
 
 /** Le bouton « Rendre la main au bot » sous l'alerte : callback_data rm:<id du fil> (64 octets au plus). */
@@ -66,10 +72,12 @@ export function texteDemandeHumain(d: DemandeHumain): string {
       : `${d.genre === 'reponse' ? 'Son message' : 'Son dernier message'} : « ${cite} »`
   const qui = d.qui?.trim() || null
   // (22/10) Une demande annulee par le membre : qui, son message, rien a faire.
+  const securite = d.securite?.trim() || null
   if (d.genre === 'annulee') {
     return [
       `${qui ?? 'Un membre'} a annulé sa demande (${d.origine}) : rien à faire.`,
       message && !/^\(.*\)$/.test(message) ? `Son message : « ${cite} »` : null,
+      securite,
       reference ? `Si tu veux quand même lui écrire : dis-moi « réponds-lui : ton message » (${reference}).` : null,
     ].filter(Boolean).join('\n')
   }
@@ -79,6 +87,7 @@ export function texteDemandeHumain(d: DemandeHumain): string {
       : `Un membre demande un humain (${d.origine}).`,
     d.genre === 'reponse' ? null : `Qui : ${qui ?? 'inconnu'}`,
     ligneMessage,
+    securite,
     d.image === 'jointe' ? 'Avec une image : la voici juste en dessous.'
       : d.image === 'onglet' ? "Avec une image, à voir dans l'onglet Support." : null,
     reference

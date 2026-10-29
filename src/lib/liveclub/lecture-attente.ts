@@ -30,6 +30,8 @@ import { cleAgentMembre } from './agent-membre'
 import { MODELE_LIVECLUB } from './prompt-membre'
 import { messageErreur } from './pur'
 import { lireSensEnAttente, requeteLectureAttente, type SensEnAttente } from './support-pont-pur'
+import { analyserTexte } from '@/lib/securite/injection-pur'
+import { alerterBriceSecurite } from '@/lib/securite/alerte'
 
 /** Au-dela, on n'attend plus : le membre attend sa reponse, et la panne transmet sans rien annuler. */
 export const DELAI_LECTURE_ATTENTE_MS = 6000
@@ -66,6 +68,17 @@ async function tracerUsage(telegramId: number, usage: Anthropic.Usage): Promise<
  * sortie illisible. Ne jette jamais.
  */
 export async function lireSensEnAttenteIA(telegramId: number, texte: string, fil: unknown): Promise<SensEnAttente | null> {
+  // (29/10, securite des bots) Un message suspect (texte cache, consigne a une
+  // IA) n'est pas lu par le modele : il ne peut rien annuler, il est transmis
+  // tel quel a l'equipe (null = « autre »), et Brice est prevenu.
+  const analyse = analyserTexte(texte, { niveau: 'injection' })
+  if (analyse.suspect) {
+    await alerterBriceSecurite({
+      source: 'bot Live Club, message d\'un membre pendant l\'attente de l\'équipe', qui: `u${telegramId}`, analyse,
+      suite: "Rien n'a été annulé ni lu par l'IA : le message est transmis à l'équipe dans son fil Support.",
+    })
+    return null
+  }
   const apiKey = cleAgentMembre()
   if (!apiKey) {
     console.warn('[liveclub/lecture-attente] cle API absente : message transmis sans lecture')

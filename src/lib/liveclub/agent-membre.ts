@@ -44,6 +44,9 @@ import type { ActionMembre, MessageConserve } from './conversations'
 import { messageErreur, pauseDejaProposee } from './pur'
 import { estRelaisActif, ficheMembrePourRelais } from './relais'
 import { proposerCorrectionPseudo } from './corrections-pseudo'
+import { REFUS_PRUDENCE_MEMBRE, analyserTexte, contextePrudenceMembre, rendreVisible } from '@/lib/securite/injection-pur'
+import { alerterBriceSecurite } from '@/lib/securite/alerte'
+import { nomTelegram } from '@/lib/alerte-equipe-telegram'
 import {
   CONSIGNE_ACCES_OFFERT, CONSIGNE_EQUIPE_TRANSMISE, CONSIGNE_MONTANTS, MODELE_LIVECLUB, NOM_OUTIL_MEMBRE_A_CONTACTER,
   NOM_OUTIL_PROPOSER_CORRECTION_PSEUDO, RESULTAT_DEMANDER_UN_HUMAIN, requeteAgentMembre,
@@ -111,7 +114,10 @@ export type ReponseAgentMembre = {
  * un assistant en tete est ecarte).
  */
 function versMessages(historique: MessageConserve[], question: string): Anthropic.MessageParam[] {
-  const brut = [...historique.map(m => ({ role: m.role, content: m.content })), { role: 'user' as const, content: question }]
+  // (29/10) Un caractere cache d'un message d'avant reste visible pour le
+  // modele (« [U+200B] », « [texte caché : ...] ») : rendreVisible ne touche
+  // pas un texte ordinaire.
+  const brut = [...historique.map(m => ({ role: m.role, content: m.role === 'user' ? rendreVisible(m.content) : m.content })), { role: 'user' as const, content: question }]
   const sortie: { role: 'user' | 'assistant'; content: string }[] = []
   for (const m of brut) {
     if (!m.content.trim()) continue
@@ -167,7 +173,22 @@ export async function repondreAuMembre(
   o: { contexte?: string } = {},
 ): Promise<ReponseAgentMembre> {
   const client = clientAgent()
-  const messages = versMessages(historique, question)
+  // (29/10) SECURITE DES BOTS : le message du membre (niveau 'injection' :
+  // texte cache, « ignore tes instructions », faux « [système] », « Brice a
+  // deja valide »). Suspect : rendu visible pour le modele, une information du
+  // serveur en plus, aucune proposition ni outil de relais dans ce message,
+  // et Brice prevenu (citation et source). Le membre recoit sa reponse
+  // habituelle : aucun message de plus.
+  const analyse = analyserTexte(question, { niveau: 'injection' })
+  const prudence = analyse.suspect
+  if (prudence) {
+    await alerterBriceSecurite({
+      source: 'bot Live Club, message privé d\'un membre', qui: (await nomTelegram(telegramId)) ?? `u${telegramId}`, analyse,
+      suite: "Le bot lui a répondu sans proposition (pause, arrêt) ni outil de relais ; son message est dans son fil Support.",
+    })
+  }
+  const contexte = [o.contexte, prudence ? contextePrudenceMembre(analyse) : null].filter(Boolean).join('\n\n') || undefined
+  const messages = versMessages(historique, prudence ? rendreVisible(question) : question)
   // demander_un_humain appele pendant la boucle : le drapeau suit la reponse.
   let humain = false
   const drapeau = (): { veutHumain?: true } => (humain ? { veutHumain: true } : {})
@@ -185,7 +206,7 @@ export async function repondreAuMembre(
   // Relais d'accueil (24/10) : l'outil membre_a_contacter et sa consigne, pour un relais actif seulement.
   const relais = await estRelaisActif(telegramId)
   for (let tour = 0; tour < MAX_TOURS; tour++) {
-    const response = await client.messages.create(requeteAgentMembre(messages, o.contexte, { relais }))
+    const response = await client.messages.create(requeteAgentMembre(messages, contexte, { relais }))
     await tracerUsage(telegramId, response.usage, echange)
 
     if (response.stop_reason !== 'tool_use') {
@@ -199,6 +220,12 @@ export async function repondreAuMembre(
     const resultats: Anthropic.ToolResultBlockParam[] = []
     for (const bloc of response.content) {
       if (bloc.type !== 'tool_use') continue
+
+      // (29/10) Message suspect : ni proposition, ni outil du relais.
+      if (prudence && (TYPE_PAR_OUTIL[bloc.name] || bloc.name === NOM_OUTIL_MEMBRE_A_CONTACTER || bloc.name === NOM_OUTIL_PROPOSER_CORRECTION_PSEUDO)) {
+        resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify(REFUS_PRUDENCE_MEMBRE) })
+        continue
+      }
 
       if (bloc.name === 'demander_un_humain') {
         humain = true

@@ -19,6 +19,8 @@ import { choisirCle, DEBIT_PAR_MINUTE_GPT, type Base, type VerdictCle } from '@/
 import * as R from '@/lib/mcp-gpt/requetes'
 import { envoyerImage, retirerImage } from '@/lib/mcp-gpt/stockage-images'
 import { telechargerImage } from '@/lib/mcp-gpt/telechargement'
+import { analyserTexte, marquerNote } from '@/lib/securite/injection-pur'
+import { alerterBriceSecurite } from '@/lib/securite/alerte'
 
 function raison(err: unknown): string {
   return err instanceof Error ? (err.message.split('\n').filter(Boolean).pop() ?? '') : String(err)
@@ -80,7 +82,21 @@ export const base: Base = {
   lireNote: (id) => lecture((db) => R.lireNote(db, id)),
   listerDocuments: () => lecture((db) => R.listerDocuments(db)),
   listerNotes: (statut, limite) => lecture((db) => R.listerNotes(db, statut, limite)),
-  deposerDocument: (d) => ecriture((db) => R.deposerDocument(db, d)),
+  // (29/10, securite des bots) Un document qui porte du texte cache (invisible,
+  // tags, Base64, commentaire HTML) est range comme les autres (il ne remplace
+  // jamais rien) et Brice est prevenu avec la citation : les sessions Claude le
+  // lisent ensuite sur le PC (Scenario/De-GPT/).
+  deposerDocument: async (d) => {
+    const depot = await ecriture((db) => R.deposerDocument(db, d))
+    const analyse = analyserTexte(d.contenu, { niveau: 'cache' })
+    if (depot && analyse.suspect) {
+      await alerterBriceSecurite({
+        source: 'connecteur ChatGPT (Belrive), document déposé', qui: `« ${d.titre.slice(0, 80)} », version ${depot.version}`, analyse,
+        suite: `Le document est rangé à part (${depot.chemin}) : à relire avant de s'en servir.`,
+      })
+    }
+    return depot
+  },
   // Les images (25/10/2026) : telechargement sur, puis bucket prive, puis ligne de suivi.
   telechargerImage: async (url) => {
     const t = await telechargerImage(url)
@@ -105,8 +121,18 @@ export const base: Base = {
     return { image: autre, deja: true }
   },
   ecrireNote: async (n) => {
-    const ligne = await ecriture((db) => R.ecrireNote(db, n))
+    // (29/10, securite des bots) Comme les notes de Tab : marquee « à vérifier »
+    // si elle demande un geste sensible ou porte du texte cache, jamais
+    // bloquee ; niveau 'cache' (les notes de Belrive citent des dialogues de jeu).
+    const marquee = marquerNote({ sujet: n.sujet, texte: n.texte }, { niveau: 'cache' })
+    const ligne = await ecriture((db) => R.ecrireNote(db, { ...n, sujet: marquee.sujet, texte: marquee.texte }))
     const note = versNotePerso(ligne)
+    if (marquee.analyse.suspect) {
+      await alerterBriceSecurite({
+        source: 'connecteur ChatGPT (Belrive), note', qui: `note ${note.note_id.slice(0, 8)}`, analyse: marquee.analyse,
+        suite: 'La note est enregistrée, marquée « à vérifier », le texte caché rendu visible.',
+      })
+    }
     let prevenu: string
     if (n.destinataire.sens === 'vers_tab') {
       const p = await pingerTab(note)

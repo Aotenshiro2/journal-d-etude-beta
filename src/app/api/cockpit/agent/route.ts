@@ -6,7 +6,9 @@ import { corsHeaders, corsPreflight } from '@/lib/support-cors'
 import { boucleAgent } from '@/lib/agent-cockpit'
 import { auteurDemande } from '@/lib/agent-cockpit-pur'
 import { limiteDuTour } from '@/lib/agent-cockpit-telegram-pur'
-import { reprendreDemandeEquipe } from '@/lib/agent-cockpit-telegram'
+import { executerRelanceEquipe } from '@/lib/agent-cockpit-telegram'
+import { analyserTexte, combinerAnalyses, rendreVisible, type Analyse } from '@/lib/securite/injection-pur'
+import { alerterBriceSecurite } from '@/lib/securite/alerte'
 import type Anthropic from '@anthropic-ai/sdk'
 
 // Le canal WEB de l'agent cockpit : la fenetre flottante ✦. Le cerveau
@@ -174,10 +176,48 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // (29/10) SECURITE DES BOTS : le message de ce tour. Ce que tape le
+  // titulaire (niveau 'cache' : ses mots sont des ordres, un caractere
+  // invisible n'est jamais tape a la main) et le texte d'un fichier joint
+  // (niveau 'tiers' : un email, un export, une page). Suspect = rendu visible
+  // pour le modele, Brice prevenu, tour sous prudence (aucune carte). Un PDF
+  // ou une image ne se lisent pas ici : leur regle est dans le prompt.
+  const dernier = historique[historique.length - 1]
+  const analyses: Analyse[] = []
+  let texteTitulaire = ''
+  if (typeof dernier.content === 'string') {
+    texteTitulaire = dernier.content
+    analyses.push(analyserTexte(dernier.content, { niveau: 'cache' }))
+  } else {
+    for (const bloc of dernier.content) {
+      if (bloc.type !== 'text') continue
+      const fichier = bloc.text.startsWith('Contenu du fichier « ')
+      if (!fichier) texteTitulaire = bloc.text
+      analyses.push(analyserTexte(bloc.text, { niveau: fichier ? 'tiers' : 'cache' }))
+    }
+  }
+  const analyse = combinerAnalyses(...analyses)
+  if (analyse.suspect) {
+    if (typeof dernier.content === 'string') dernier.content = rendreVisible(dernier.content)
+    else for (const bloc of dernier.content) if (bloc.type === 'text') bloc.text = rendreVisible(bloc.text)
+    texteTitulaire = rendreVisible(texteTitulaire)
+    await alerterBriceSecurite({
+      source: 'Agent AOK, fenêtre du cockpit', qui: null, analyse,
+      suite: "Aucune carte ni aucun geste dans ce tour ; l'agent dit à son interlocuteur ce qu'il a repéré.",
+    })
+  }
+  const avant = historique[historique.length - 2]
+  const derniereReponse = avant?.role === 'assistant' && typeof avant.content === 'string' ? avant.content : null
+
   let reponse: Awaited<ReturnType<typeof boucleAgent>>
   try {
     // Une demande notee depuis cette fenetre porte 'cockpit:<uuid>' (08/10).
-    reponse = await boucleAgent(historique, userId, { source: 'agent_cockpit', auteur: auteurDemande({ userId }), limite })
+    reponse = await boucleAgent(historique, userId, {
+      source: 'agent_cockpit', auteur: auteurDemande({ userId }), limite,
+      // (29/10) Pas de fil Telegram ici : une question a l'equipe repond dans le fil Telegram du demandeur.
+      texteTitulaire, derniereReponse, chatId: null, prudence: analyse.suspect ? analyse : null,
+      sourceAlerte: 'Agent AOK, fenêtre du cockpit',
+    })
   } catch (err) {
     console.error('[cockpit/agent]', err)
     return NextResponse.json(
@@ -194,7 +234,7 @@ export async function POST(req: NextRequest) {
     after(async () => {
       for (const r of relances) {
         try {
-          await reprendreDemandeEquipe(r, { limite })
+          await executerRelanceEquipe(r, { limite })
         } catch (err) {
           console.error('[cockpit/agent] relance dans le fil d\'un membre de l\'equipe impossible',
             err instanceof Error ? err.message.split('\n')[0].slice(0, 160) : '?')

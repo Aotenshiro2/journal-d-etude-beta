@@ -7,11 +7,13 @@ import { auteurDemande, libelleBoutonConfirmer } from '@/lib/agent-cockpit-pur'
 import { validerAction, executerAction, RefusAction, expurgerLiensInvitation, paramsPourLog } from '@/lib/stripe-actions'
 import {
   DUREE_TOUR_DEFAUT_MS, GRACE_FILET_MS, MAX_OCTETS_IMAGE, TEXTE_IMAGE_REFUSEE, TEXTE_REPONSE_NON_PARTIE, TEXTE_TEMPS_DEPASSE,
-  decouperMessage, demandesEnSuspens, erreurDImage, historiquePourTour, messagesAvecCarte, messagesPourModele, noteSuspens,
-  typeImageDepuisOctets,
-  type DemandesEnSuspens, type ImageALire, type ImageDuTour,
+  decouperMessage, demandesEnSuspens, entreesQuestionEquipe, erreurDImage, historiquePourTour, marqueurRapportEquipe,
+  messagesAvecCarte, messagesPourModele, noteSuspens, partsDuTour, texteQuestionEquipe, texteRapportEquipe, typeImageDepuisOctets,
+  type DemandesEnSuspens, type ImageALire, type ImageDuTour, type QuestionEquipe,
 } from '@/lib/agent-cockpit-telegram-pur'
 import type { RelanceEquipe } from '@/lib/agent-equipe'
+import { analyserTexte, combinerAnalyses, rendreVisible } from '@/lib/securite/injection-pur'
+import { alerterBriceSecurite } from '@/lib/securite/alerte'
 import { telechargerFichierTelegram, type BotTelegram } from '@/lib/liveclub/telegram'
 import { dernierePieceHistorique, phraseMainRendue, type PieceAgent } from '@/lib/liveclub/support-pont-pur'
 import { lireDonneeRendreLaMain, referenceFil } from '@/lib/alerte-equipe-telegram-pur'
@@ -119,6 +121,10 @@ type MessageStocke = {
   le?: string
   /** (29/10) Une reponse d'echec (erreur, temps depasse, reponse partielle) : la demande reste en suspens. */
   echec?: true
+  /** (29/10) Une question posee par l'autre membre de l'equipe (poser_question_equipe), dans le fil de la personne interrogee. */
+  questionEquipe?: QuestionEquipe
+  /** (29/10) La question d'equipe que cette ligne ferme (reponse rapportee). */
+  rapportQuestion?: string
 }
 
 type LigneConversation = {
@@ -521,6 +527,20 @@ async function tourAgent(e: EntreeAgentTelegram): Promise<IssueAgentTelegram> {
     return 'traite'
   }
 
+  // (29/10) SECURITE DES BOTS (grille de Brice) : les mots du titulaire et ce
+  // qu'il transmet (un message transfere), analyses chacun a son niveau. Un
+  // texte suspect est garde et montre au modele RENDU VISIBLE, Brice est
+  // prevenu avec la citation et la source, et le tour passe sous prudence :
+  // aucune carte, aucun geste sans carte (boucleAgent). Une image ne se lit
+  // pas ici : sa regle est dans le prompt (donnee, jamais un ordre).
+  const parts = e.reprise ? { titulaire: '', transmis: '' } : partsDuTour(texte)
+  const analyse = combinerAnalyses(
+    analyserTexte(parts.titulaire, { niveau: 'cache' }),
+    analyserTexte(parts.transmis, { niveau: 'tiers' }),
+  )
+  const texteGarde = analyse.suspect ? rendreVisible(texte) : texte
+  const sourceAlerte = `Agent AOK, fil de ${compte.libelle?.trim() || `u${telegramId}`}${e.transmis ? ' (transmis par le bot Live Club)' : ''}`
+
   // LA QUESTION EST ECRITE DES SON ARRIVEE (15/10), la reponse en fin de tour.
   // Avant, les deux partaient ensemble a la fin : un message transfere avec un
   // commentaire arrive en DEUX updates quasi simultanes (le commentaire, puis
@@ -537,7 +557,7 @@ async function tourAgent(e: EntreeAgentTelegram): Promise<IssueAgentTelegram> {
   const idTour = updateId !== null ? `u${updateId}` : `t${randomUUID()}`
   // (29/10) `le` : l'arrivee de la question, pour dater une demande restee sans reponse.
   const question = JSON.stringify([
-    { role: 'user', content: texte, id: idTour, le: new Date(debut).toISOString(), ...(piece ? { piece } : {}) },
+    { role: 'user', content: texteGarde, id: idTour, le: new Date(debut).toISOString(), ...(piece ? { piece } : {}) },
   ] satisfies MessageStocke[])
   const ecrite = await prisma.$queryRaw<{ messages: unknown }[]>`
     insert into public.cockpit_agent_conversations as c (chat_id, telegram_id, messages)
@@ -551,6 +571,15 @@ async function tourAgent(e: EntreeAgentTelegram): Promise<IssueAgentTelegram> {
     returning messages`
   if (ecrite.length === 0) return 'doublon'
 
+  // (29/10) L'alerte a Brice, une fois la question ecrite (un rejeu Telegram
+  // s'est arrete juste au-dessus) : la citation et la source.
+  if (analyse.suspect) {
+    await alerterBriceSecurite({
+      source: `${sourceAlerte}, ${parts.transmis ? 'message transféré' : 'message'}`,
+      analyse, suite: "Aucune carte ni aucun geste dans ce tour ; l'agent dit à son interlocuteur ce qu'il a repéré.",
+    })
+  }
+
   // L'historique pour le modele : ce qui precede SA question dans la base
   // (un tour concurrent ecrit apres lui n'est pas a lui), roles normalises,
   // puis la question du tour, avec son image s'il y en a une.
@@ -560,8 +589,11 @@ async function tourAgent(e: EntreeAgentTelegram): Promise<IssueAgentTelegram> {
   // ordinaire les reprend sur une relance, sinon propose de les reprendre.
   const suspens: DemandesEnSuspens | null = demandesEnSuspens(ecrite[0].messages, { maintenant: Date.now(), avantId: idTour })
   const note = suspens ? noteSuspens(suspens, e.reprise ? { mode: 'reprise', par: e.reprise.par } : { mode: 'tour' }) : null
-  const texteModele = note ? (e.reprise ? note : `${note}\n\n${texte}`) : texte
-  const historique = messagesPourModele(historiquePourTour(ecrite[0].messages, idTour), { texte: texteModele, image }) as Anthropic.MessageParam[]
+  const texteModele = note ? (e.reprise ? note : `${note}\n\n${texteGarde}`) : texteGarde
+  const precedents = historiquePourTour(ecrite[0].messages, idTour)
+  const historique = messagesPourModele(precedents, { texte: texteModele, image }) as Anthropic.MessageParam[]
+  // (29/10) La derniere reponse de l'agent : un « oui » du titulaire s'y rapporte (poser_question_equipe).
+  const derniereReponse = [...precedents].reverse().find(m => m.role === 'assistant')?.content ?? null
 
   // SIGNE DE VIE (retour Brice 25/09) : sur une question lourde l'agent peut
   // prendre une ou deux minutes, et un silence de deux minutes ressemble a une
@@ -596,6 +628,12 @@ async function tourAgent(e: EntreeAgentTelegram): Promise<IssueAgentTelegram> {
     piece: dernierePieceHistorique(ecrite[0].messages),
     limite,
     signal: controleur.signal,
+    // (29/10) Securite des bots : qui parle, et la prudence du tour.
+    texteTitulaire: analyse.suspect ? rendreVisible(parts.titulaire) : parts.titulaire,
+    derniereReponse,
+    chatId,
+    prudence: analyse.suspect ? analyse : null,
+    sourceAlerte,
   })
   // Perdue face au filet, sa fin (ou son erreur) n'interesse plus personne.
   travail.catch(() => undefined)
@@ -637,10 +675,11 @@ async function tourAgent(e: EntreeAgentTelegram): Promise<IssueAgentTelegram> {
   // (29/10) « Reprends la demande de Mel » : le tour de Mel, dans SON fil,
   // APRES cette reponse, avec le temps qui reste a cette fonction. Une reprise
   // ne relance jamais elle-meme (pas de chaine).
+  // (29/10) Meme chemin pour une question posee a l'autre et une reponse rapportee (executerRelanceEquipe).
   if (!e.reprise) {
     for (const r of reponse.relances ?? []) {
       try {
-        await reprendreDemandeEquipe(r, { limite })
+        await executerRelanceEquipe(r, { limite })
       } catch (err) {
         console.error('[cockpit/telegram] relance dans le fil d\'un membre de l\'equipe impossible',
           err instanceof Error ? err.message.split('\n')[0].slice(0, 160) : '?')
@@ -668,6 +707,60 @@ export async function reprendreDemandeEquipe(r: RelanceEquipe, o: { limite?: num
     texte: `[système] ${r.par} a demandé de reprendre ta demande restée sans réponse.`,
     reprise: { par: r.par }, limite: o.limite,
   })
+}
+
+/**
+ * (29/10) Ce qui part apres la reponse d'un tour, dans le fil d'un membre de
+ * l'equipe : une question qu'on lui pose, la reponse a sa question, ou la
+ * reprise de sa demande restee sans reponse. Jette si la base ne repond pas.
+ */
+export async function executerRelanceEquipe(r: RelanceEquipe, o: { limite?: number } = {}): Promise<void> {
+  if (r.question) { await poserQuestionEquipe(r, r.question); return }
+  if (r.rapport) { await rapporterReponseEquipe(r, r.rapport); return }
+  await reprendreDemandeEquipe(r, o)
+}
+
+/**
+ * La question dans le fil de la personne interrogee (« Brice demande : ... »),
+ * puis ses deux lignes d'historique (le marqueur, la question) : quand elle
+ * repond, son tour voit la question et qui l'a posee. Rien ne part si son
+ * compte n'est plus dans l'equipe ; un refus de Telegram est dit au demandeur.
+ */
+async function poserQuestionEquipe(r: RelanceEquipe, q: QuestionEquipe): Promise<void> {
+  const compte = await compteCockpitTelegram(r.chatId)
+  if (!compte) {
+    await tgCockpit('sendMessage', { chat_id: q.parChat, text: `La question n'est pas partie : ${r.qui} n'est plus un compte de l'équipe sur Agent AOK.` })
+    return
+  }
+  if (!await tgCockpit('sendMessage', { chat_id: r.chatId, text: texteQuestionEquipe(q) })) {
+    await tgCockpit('sendMessage', {
+      chat_id: q.parChat,
+      text: `La question n'a pas pu partir chez ${r.qui} (Telegram l'a refusée : son fil avec Agent AOK n'est peut-être pas ouvert). Rien n'est enregistré chez ${r.qui}.`,
+    })
+    return
+  }
+  await ajouterAHistoriqueAgent(r.chatId, r.chatId, entreesQuestionEquipe(q))
+}
+
+/**
+ * La reponse rapportee dans le fil de celui qui a pose la question, telle que
+ * la personne l'a ecrite, puis la question fermee dans le fil de celle-ci
+ * (ligne rapportQuestion, « [système] » : ni question ni reponse pour les
+ * demandes en suspens).
+ */
+async function rapporterReponseEquipe(r: RelanceEquipe, p: NonNullable<RelanceEquipe['rapport']>): Promise<void> {
+  const texte = texteRapportEquipe({ de: p.de, question: p.question, reponse: p.reponse }).slice(0, MAX_MESSAGE_LEN)
+  if (!await tgCockpit('sendMessage', { chat_id: r.chatId, text: texte })) {
+    await tgCockpit('sendMessage', { chat_id: p.deChat, text: `Ta réponse n'a pas pu partir chez ${r.qui} (Telegram l'a refusée) : redis-la-moi dans un instant.` })
+    return
+  }
+  await ajouterAHistoriqueAgent(r.chatId, r.chatId, [
+    { role: 'user', content: marqueurRapportEquipe(p.de), id: `r-${p.questionId}` },
+    { role: 'assistant', content: texte, id: `r-${p.questionId}-texte` },
+  ])
+  await ajouterAHistoriqueAgent(p.deChat, p.deChat, [
+    { role: 'assistant', content: `[système] Réponse transmise à ${r.qui}.`, id: `r-${p.questionId}-fermee`, rapportQuestion: p.questionId },
+  ])
 }
 
 type ContexteLivraison = {

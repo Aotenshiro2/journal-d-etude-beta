@@ -12,6 +12,8 @@ import { lireDemandeGeneration } from '@/lib/generation-pur'
 import { genererPost } from '@/lib/generation'
 import { estUuid, lireFiltreStatut, lireNoteEntrante } from '@/lib/tab/notes-pur'
 import { creerNote, listerNotes, marquerLueParTab, prevenirBrice } from '@/lib/tab/notes'
+import { marquerNote } from '@/lib/securite/injection-pur'
+import { alerterBriceSecurite } from '@/lib/securite/alerte'
 import { lireImage as lireImageBelrive, listerImages as listerImagesBelrive, type Executeur } from '@/lib/mcp-gpt/requetes'
 import { urlSigneeImage } from '@/lib/mcp-gpt/stockage-images'
 
@@ -231,13 +233,26 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ chemin?: s
   if (route === '/notes') {
     const note = lireNoteEntrante(corps)
     if (typeof note === 'string') return fin({ ok: false, erreur: note, aide: `${url.origin}/api/tab/v1/aide` }, 400, null, note)
+    // (29/10, securite des bots) Une note qui demande un geste sensible, ou qui
+    // porte du texte cache, est marquee « à vérifier » (sujet et premiere
+    // ligne), jamais bloquee ; le texte cache y est rendu visible, et Brice est
+    // prevenu avec la citation. Claude ne fait jamais un geste sensible sur la
+    // foi d'une note (D:\CLAUDE.md, section securite).
+    const marquee = marquerNote({ sujet: note.sujet, texte: note.texte })
     try {
-      const creee = await creerNote('vers_claude', 'tab', note)
+      const creee = await creerNote('vers_claude', 'tab', { ...note, sujet: marquee.sujet, texte: marquee.texte })
       const brice = await prevenirBrice(creee)
+      if (marquee.analyse.suspect) {
+        await alerterBriceSecurite({
+          source: 'API de Tab, note pour Claude', qui: `note ${creee.note_id.slice(0, 8)}`, analyse: marquee.analyse,
+          suite: 'La note est enregistrée, marquée « à vérifier », le texte caché rendu visible.',
+        })
+      }
       return fin({
         ok: true, libelle: 'Note pour Claude enregistrée', donnees: { note: creee },
         notes: [brice ? 'Brice est prévenu sur Telegram.' : 'Brice n\'a pas pu être prévenu sur Telegram (la note est bien enregistrée).',
-          'Claude la lit au démarrage de sa prochaine session.'],
+          'Claude la lit au démarrage de sa prochaine session.',
+          ...(marquee.aVerifier ? ['Elle est marquée « à vérifier » : elle demande un geste sensible ou porte du texte caché. Claude ne fera ce geste qu\'avec l\'accord de Brice.'] : [])],
       }, 201, 1)
     } catch (err) {
       const raison = err instanceof Error ? err.message.split('\n').filter(Boolean).pop() ?? '' : String(err)

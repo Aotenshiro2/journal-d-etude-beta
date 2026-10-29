@@ -635,7 +635,7 @@ test('outils de l agent : parametres valides, refus clairs, validation idempoten
 
   // Taux : exactement un de taux_pct et montant_fixe.
   assert.deepEqual(lireParamsRepartition('taux_partenaire', { partenaire: 'RaiseFx', nature: 'broker', taux_pct: '50 %' }, ctx),
-    { partenaire: 'raisefx', partenaire_nom: 'RaiseFx', nature: 'broker', taux_pct: 50, montant_fixe: null, a_partir_du: '2026-10-08', note: null })
+    { partenaire: 'raisefx', partenaire_nom: 'RaiseFx', nature: 'broker', taux_pct: 50, montant_fixe: null, a_partir_du: '2026-10-08', accord: null, retroactif: false, note: null })
   assert.equal(typeof lireParamsRepartition('taux_partenaire', { partenaire: 'RaiseFx', taux_pct: 50, montant_fixe: 30 }, ctx), 'string')
   assert.equal(typeof lireParamsRepartition('taux_partenaire', { partenaire: 'RaiseFx' }, ctx), 'string')
   // Un taux peut partir d'une date passee (pour un depot deja fait).
@@ -646,7 +646,7 @@ test('outils de l agent : parametres valides, refus clairs, validation idempoten
   // l'invente pas, a demander au prochain client ».
   assert.deepEqual(lireParamsRepartition('taux_partenaire', { partenaire: 'RaiseFx', nature: 'broker' }, ctx), {
     partenaire: 'raisefx', partenaire_nom: 'RaiseFx', nature: 'broker', taux_pct: null, montant_fixe: null, sans_taux: true,
-    a_partir_du: '2026-10-08', note: 'Taux général à demander au prochain client.',
+    a_partir_du: '2026-10-08', accord: null, note: 'Taux général à demander au prochain client.',
   })
   assert.ok(lireParamsRepartition('taux_partenaire', { partenaire: 'RaiseFx' }, ctx).includes('NOUVEAU partenaire'))
   assert.ok(resumeRepartition('taux_partenaire', lireParamsRepartition('taux_partenaire', { partenaire: 'RaiseFx', nature: 'broker' }, ctx)).includes('sans taux général'))

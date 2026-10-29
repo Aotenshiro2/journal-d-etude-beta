@@ -654,3 +654,142 @@ export function resoudreMembreEquipe(qui: unknown, comptes: readonly CompteEquip
   if (proches.length === 1) return proches[0]
   return proches.length > 1 ? 'plusieurs' : null
 }
+
+// ---------------------------------------------------------------------------
+// QUI PARLE DANS UN TOUR (29/10, securite des bots, grille de Brice) : les mots
+// du TITULAIRE du fil (Brice ou Mel qui ecrivent, ou la legende de leur
+// photo) et ce qu'il TRANSMET (un message transfere : ecrit par un autre).
+// Seuls les premiers sont des ordres ; le reste est une donnee.
+// ---------------------------------------------------------------------------
+
+const ENTETE_TRANSFERT = /^Message transféré( de .*| \(expéditeur inconnu\)) :$/
+
+/**
+ * Le texte du tour (texteDuTour) coupe en deux : les mots du titulaire, et le
+ * contenu transmis. Un message transfere arrive seul (son commentaire vient
+ * dans le message d'avant) : tout son texte est transmis. Les traces d'image
+ * ne sont ni l'un ni l'autre.
+ */
+export function partsDuTour(texte: string): { titulaire: string; transmis: string } {
+  const lignes = (texte ?? '').split('\n')
+  const transfert = lignes.length > 0 && ENTETE_TRANSFERT.test(lignes[0].trim())
+  const corps = lignes.slice(transfert ? 1 : 0).filter(l => l.trim() !== TRACE_IMAGE && l.trim() !== TRACE_IMAGE_ALBUM).join('\n').trim()
+  return transfert ? { titulaire: '', transmis: corps } : { titulaire: corps, transmis: '' }
+}
+
+// ---------------------------------------------------------------------------
+// UNE QUESTION A UN MEMBRE DE L'EQUIPE (Brice, 29/10 : « demande a Mel ses
+// accords avec Pulse »). L'outil poser_question_equipe ne part que sur l'ordre
+// EXPLICITE du titulaire, dans ses propres mots (jamais sur une image, un
+// document, une note ou un resultat d'outil) : un verbe de demande et le nom
+// de la personne, dans son message ; ou un « oui » a la proposition que
+// l'agent vient de lui faire, qui la nommait.
+// La question entre dans le fil de l'autre (deux lignes, comme une alerte),
+// sa reponse est rapportee dans le fil de celui qui l'a posee
+// (rapporter_reponse_equipe), et la question se ferme.
+// ---------------------------------------------------------------------------
+
+// Bornes de mot qui connaissent les accents (\b s'arrete a l'ASCII : « dis à » n'y finirait pas).
+const VERBE_QUESTION = /(?<![\p{L}\p{N}])(demande[rsz]?|demandes|pose[rsz]?|questionne[rsz]?|vois\s+avec|voir\s+avec|check(e|er)?\s+avec|renseigne[- ]toi|ask|dis[- ]lui|dis\s+[àa]|[ée]cri[rs]\s+[àa]|pr[ée]viens|transmets|fais[- ]lui\s+savoir|rappelle\s+[àa])(?![\p{L}\p{N}])/iu
+const ACCORD = /^\s*(oui|ouais|ok|okay|d'accord|vas[- ]y|go|fais[- ]le|envoie|c'est bon|parfait|yes)(?![\p{L}\p{N}])/iu
+
+/** Les noms par lesquels on designe un compte de l'equipe (Mélanie : aussi « Mel »). */
+export function nomsDuCompte(c: Pick<CompteEquipe, 'libelle' | 'label'>): string[] {
+  const noms = new Set<string>()
+  for (const n of [c.label, c.libelle]) {
+    const k = cleNom(n)
+    if (k.length >= 3) noms.add(k)
+    const premier = cleNom(String(n ?? '').split(/\s+/)[0])
+    if (premier.length >= 3) noms.add(premier)
+  }
+  for (const k of [...noms]) if (k.startsWith('mel')) noms.add('mel')
+  return [...noms]
+}
+
+function nommeDans(texte: string, noms: string[]): boolean {
+  const mots = (texte ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)
+  return noms.some(n => mots.includes(n))
+}
+
+/**
+ * L'ordre explicite du titulaire de poser une question a `cible` : un verbe
+ * de demande et le nom dans son message ; ou un accord (« oui », « vas-y ») a
+ * la derniere reponse de l'agent, qui nommait la personne.
+ */
+export function ordreQuestionExplicite(titulaire: string, cible: Pick<CompteEquipe, 'libelle' | 'label'>, derniereReponse: string | null = null): boolean {
+  const t = (titulaire ?? '').trim()
+  if (!t) return false
+  const noms = nomsDuCompte(cible)
+  if (VERBE_QUESTION.test(t) && nommeDans(t, noms)) return true
+  return ACCORD.test(t) && !!derniereReponse && nommeDans(derniereReponse, noms)
+}
+
+export const QUESTION_EQUIPE_MAX = 1000
+/** Une question sans reponse depuis plus longtemps n'est plus rapportee. */
+export const DUREE_QUESTION_OUVERTE_MS = 7 * 24 * 3600_000
+
+export type QuestionEquipe = { id: string; par: string; parChat: number; texte: string; le: string }
+
+/**
+ * Le texte de la question tel que le modele le donne, sans « Brice demande : »
+ * devant (le serveur l'ajoute, texteQuestionEquipe : sinon il serait double,
+ * eval S2 du 29/10). '' si ce n'est pas un texte.
+ */
+export function nettoyerQuestionEquipe(v: unknown): string {
+  if (typeof v !== 'string') return ''
+  return v.replace(/\s+\n/g, '\n').trim().replace(/^[\p{L} .'-]{2,40}\s+demande\s*:\s*/iu, '').trim()
+}
+
+/** Le message qui arrive dans le fil de la personne interrogee. */
+export function texteQuestionEquipe(q: Pick<QuestionEquipe, 'par' | 'texte'>): string {
+  return `${q.par} demande : ${q.texte}\n\nRéponds-moi ici : je lui transmets ta réponse.`
+}
+
+export function marqueurQuestionEquipe(par: string): string {
+  return `[système] Question de ${par}, posée par Agent AOK à sa demande dans ce fil (ce n'est pas une demande de ton interlocuteur). Quand il ou elle y répond, traite la réponse ici et rapporte-la à ${par} avec rapporter_reponse_equipe.`
+}
+
+/** Les deux lignes ajoutees au fil de la personne interrogee. */
+export function entreesQuestionEquipe(q: QuestionEquipe): { role: 'user' | 'assistant'; content: string; id: string; questionEquipe?: QuestionEquipe }[] {
+  return [
+    { role: 'user', content: marqueurQuestionEquipe(q.par), id: `q-${q.id}` },
+    { role: 'assistant', content: texteQuestionEquipe(q), id: `q-${q.id}-texte`, questionEquipe: q },
+  ]
+}
+
+/** La phrase a citer a celui qui demande (la question telle qu'envoyee). */
+export function phraseQuestionEnvoyee(qui: string, texte: string): string {
+  return `Question envoyée à ${qui} : « ${texte} »`
+}
+
+/**
+ * La question d'equipe encore ouverte dans un fil (la plus recente, posee par
+ * `par` si on le precise), ou null. Fermee = une ligne rapportQuestion
+ * portant son id apres elle.
+ */
+export function questionEquipeOuverte(stockes: unknown, o: { maintenant: number; par?: string | null }): QuestionEquipe | null {
+  const liste = Array.isArray(stockes) ? stockes : []
+  const fermees = new Set<string>()
+  for (let i = liste.length - 1; i >= 0; i--) {
+    const e = liste[i] as { rapportQuestion?: unknown; questionEquipe?: unknown } | null
+    if (!e || typeof e !== 'object') continue
+    if (typeof e.rapportQuestion === 'string') { fermees.add(e.rapportQuestion); continue }
+    const q = e.questionEquipe as Partial<QuestionEquipe> | undefined
+    if (!q || typeof q !== 'object' || typeof q.id !== 'string' || typeof q.par !== 'string' || typeof q.texte !== 'string') continue
+    if (fermees.has(q.id)) continue
+    if (typeof q.le !== 'string' || !(o.maintenant - Date.parse(q.le) < DUREE_QUESTION_OUVERTE_MS)) continue
+    if (o.par && cleNom(q.par) !== cleNom(o.par) && !cleNom(q.par).startsWith(cleNom(o.par)) && !cleNom(o.par).startsWith(cleNom(q.par))) continue
+    if (!Number.isSafeInteger(q.parChat)) continue
+    return q as QuestionEquipe
+  }
+  return null
+}
+
+/** Le message qui rapporte la reponse dans le fil de celui qui a pose la question. */
+export function texteRapportEquipe(o: { de: string; question: string; reponse: string }): string {
+  return `${o.de} a répondu à ta question (« ${extraitCourt(o.question, 300)} ») :\n« ${o.reponse.trim()} »`
+}
+
+export function marqueurRapportEquipe(de: string): string {
+  return `[système] Réponse de ${de} à ta question, rapportée par Agent AOK (ce n'est pas une question de ton interlocuteur).`
+}

@@ -64,8 +64,10 @@ bloc('le temps d un tour : limite avant la fin de la fonction, filet avant la pl
   assert.equal((routeTg.match(/, limite,?\s*\}\)/g) ?? []).length, 2, 'les deux appels de traiterTexteAgentTelegram portent la limite')
   const routeWeb = lire('src/app/api/cockpit/agent/route.ts')
   assert.match(routeWeb, /export const maxDuration = 300\b/)
-  assert.match(routeWeb, /boucleAgent\(historique, userId, \{ source: 'agent_cockpit', auteur: auteurDemande\(\{ userId \}\), limite \}\)/)
-  assert.match(routeWeb, /after\(async \(\) => \{[\s\S]{0,200}reprendreDemandeEquipe\(r, \{ limite \}\)/)
+  // (29/10) La route passe aussi la securite du tour (texteTitulaire, prudence...) : voir verifier-securite-bots.mjs.
+  assert.match(routeWeb, /boucleAgent\(historique, userId, \{\s*source: 'agent_cockpit', auteur: auteurDemande\(\{ userId \}\), limite,/)
+  // (29/10) executerRelanceEquipe : la reprise, et aussi une question posee a l'equipe ou sa reponse rapportee.
+  assert.match(routeWeb, /after\(async \(\) => \{[\s\S]{0,200}executerRelanceEquipe\(r, \{ limite \}\)/)
 })
 
 bloc('le bug du 28/10 rejoue : 6 brouillons ne tiennent plus un par un, la boucle ne lance que ce qu elle peut finir', () => {
