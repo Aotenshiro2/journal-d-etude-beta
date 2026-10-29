@@ -18,6 +18,7 @@
 import { prisma } from './db'
 import { formaterEuros } from './ia-prix'
 import type { NiveauIA } from './ia-niveau'
+import type { PosteIA } from './ai'
 
 const JOURS_FENETRE = 30
 
@@ -72,6 +73,17 @@ export async function depenseMembreMicros(userId: string): Promise<number> {
     where: { userId, createdAt: { gte: debutFenetre() } },
   })
   return r._sum.costMicros ?? 0
+}
+
+/**
+ * Nombre d'APPELS d'un poste par un membre depuis un instant (lignes
+ * d'AiUsage, pas des euros). Sert aux limites comptées en nombre, à côté du
+ * budget en euros qui reste inchangé : les 5 documents lus par l'IA par jour
+ * dans Pilotage (poste 'document', brief D1, 30/10/2026). Ces appels restent
+ * aussi dans la dépense du membre, comme les relevés ('releve').
+ */
+export async function appelsDuPosteDepuis(userId: string, usage: PosteIA, depuis: Date): Promise<number> {
+  return prisma.aiUsage.count({ where: { userId, usage, createdAt: { gte: depuis } } })
 }
 
 /** Dépense cumulée de tout le niveau libre sur la fenêtre. */

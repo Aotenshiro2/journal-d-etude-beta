@@ -5,6 +5,7 @@ import { corsHeaders, corsPreflight } from '@/lib/support-cors'
 import { lireColonnes, parserFichierTrades, separerNouveaux } from '@/lib/imports-trades'
 import { appliquerFuseau, fuseauDemande } from '@/lib/fuseau'
 import { confirmerImport, supprimerExecutions } from '@/lib/trades-serveur'
+import { connusParEmpreinte, lireTradesEnvoyes } from '@/lib/trades-envoyes'
 
 // Un gros export (5 Mo) se lit, se dédoublonne et se regroupe en quelques
 // secondes : plus que les 10 s par défaut d'une fonction Vercel par prudence.
@@ -36,6 +37,19 @@ export const maxDuration = 60
  *   (ordre = place du segment dans sa note, à partir de 1 ; instants en ms,
  *   comme dans le Carnet).
  *
+ * POST { trades, source, compteId, fichier?, confirmer?, fuseau? } à la place
+ * de `csv` (brief D1, 30/10/2026) : les trades déjà lus (TradeNormalise, dates
+ * en ISO) dans un PDF, un HTML ou une image par /api/pilotage/documents/lire.
+ * Chaque trade est vérifié (trades-envoyes.ts) et prend la `source` donnée
+ * (celle du lecteur CSV du même rapport, « tradovate-performance », ou
+ * « mt4:vantage », « ia:etoro ») ; ensuite tout est pareil : même aperçu, même
+ * dédoublonnage, même regroupement, mêmes correspondances. Source invalide : 400.
+ *
+ * Dédoublonnage, CSV comme trades : la clé (userId, source, idExterne), puis
+ * l'empreinte (symbole, instant d'entrée, quantité, P&L) parmi les exécutions
+ * de la même source : le CSV et le PDF d'un même rapport Performance (ids de
+ * fills dans l'un, pas dans l'autre) donnent 0 nouveau dans les deux sens.
+ *
  * DELETE { compteId?, source? } : retire les exécutions du membre (fausse
  * manip, fichier de test). Sans filtre : toutes. Corps illisible : 400, rien
  * n'est retiré.
@@ -61,17 +75,20 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => null)
     if (!body || typeof body !== 'object') return NextResponse.json({ error: 'Requête illisible.' }, { status: 400, headers: cors })
     const csv = typeof body.csv === 'string' ? body.csv : ''
+    // Les trades lus par /api/pilotage/documents/lire, à la place du csv.
+    const envoyes = Array.isArray(body.trades) ? lireTradesEnvoyes(body.trades, body.source) : null
     const fichier = texte(body.fichier)
     const compteId = texte(body.compteId)
     const colonnes = lireColonnes(body.colonnes)
     const confirmer = body.confirmer === true
     const fuseau = fuseauDemande(body.fuseau)
     if ('erreur' in fuseau) return NextResponse.json({ error: fuseau.erreur }, { status: 400, headers: cors })
-    if (!csv.trim()) return NextResponse.json({ error: 'Fichier vide.' }, { status: 400, headers: cors })
+    if (envoyes && !envoyes.format) return NextResponse.json({ error: envoyes.erreurs[0] }, { status: 400, headers: cors })
+    if (!envoyes && !csv.trim()) return NextResponse.json({ error: 'Fichier vide.' }, { status: 400, headers: cors })
     if (csv.length > 5_000_000) return NextResponse.json({ error: 'Fichier trop gros (5 Mo max).' }, { status: 400, headers: cors })
     if (confirmer && !compteId) return NextResponse.json({ error: 'Compte Pilotage manquant (compteId).' }, { status: 400, headers: cors })
 
-    const lu = parserFichierTrades(csv, fichier ?? undefined, colonnes)
+    const lu = envoyes ?? parserFichierTrades(csv, fichier ?? undefined, colonnes)
     const { format, erreurs, entetes, proposition } = lu
     const trades = fuseau.fuseau ? appliquerFuseau(lu.trades, fuseau.fuseau) : lu.trades
     const lecture = { format, erreurs, ...(entetes ? { entetes } : {}), ...(proposition ? { proposition } : {}) }
@@ -88,7 +105,13 @@ export async function POST(req: NextRequest) {
       where: { userId, source: trades[0].source, idExterne: { in: trades.map(t => t.idExterne) } },
       select: { idExterne: true },
     })
-    const connus = new Set(existants.map(e => e.idExterne))
+    // Le même trade sous une autre clé de la même source (le CSV d'un rapport
+    // Performance porte les ids de fills, son PDF non) : reconnu à l'empreinte.
+    const memeEntree = await prisma.tradeImport.findMany({
+      where: { userId, source: trades[0].source, entreLe: { in: [...new Set(trades.map(t => t.entreLe.getTime()))].map(ms => new Date(ms)) } },
+      select: { idExterne: true, symbole: true, entreLe: true, quantite: true, pnl: true },
+    })
+    const connus = connusParEmpreinte(trades, new Set(existants.map(e => e.idExterne)), memeEntree)
     const nouveaux = separerNouveaux(trades, connus)
     const comptes = { ...lecture, lus: trades.length, nouveaux: nouveaux.length, dejaConnus: trades.length - nouveaux.length }
 

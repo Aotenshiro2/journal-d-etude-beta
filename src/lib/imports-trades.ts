@@ -172,6 +172,17 @@ export function parserFichierTrades(texte: string, fichier?: string, colonnes?: 
   return parserCsvGenerique(lignes, sep, colonnes)
 }
 
+/**
+ * L'empreinte d'un trade : symbole, instant d'entrée, quantité, P&L. C'est la
+ * clé du rapport Performance de Tradovate quand les ids de fills manquent, et
+ * celle des trades lus dans un PDF, un HTML ou une image (brief D1,
+ * 30/10/2026) : le même rapport en CSV et en PDF se reconnaît par elle
+ * (trades-envoyes.ts, connusParEmpreinte).
+ */
+export function empreinteTrade(t: { symbole: string; entreLe: Date; quantite: number; pnl: number }): string {
+  return `${t.symbole}-${t.entreLe.toISOString()}-${t.quantite}-${t.pnl}`
+}
+
 /** Les trades dont la clé (idExterne) n'est pas déjà connue. Réimporter le
  *  même fichier = 0 nouveau, par construction. */
 export function separerNouveaux<T extends { idExterne: string }>(trades: T[], connus: Set<string>): T[] {
@@ -593,7 +604,7 @@ function parserTradovatePerformance(lignes: string[], entetes: string[], fichier
 
     trades.push({
       source: 'tradovate-performance',
-      idExterne: buyFillId && sellFillId ? `${buyFillId}-${sellFillId}` : `${symbole}-${entreLe.toISOString()}-${quantite}-${pnl}`,
+      idExterne: buyFillId && sellFillId ? `${buyFillId}-${sellFillId}` : empreinteTrade({ symbole, entreLe, quantite, pnl }),
       compte: null,
       symbole,
       direction,

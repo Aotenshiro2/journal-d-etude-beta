@@ -398,6 +398,27 @@ model TradeImport {
   @@index([userId, segmentRef])
 }
 
+// Le coffre des originaux de Pilotage (brief D1, 30/10/2026) : un document
+// déposé par le membre, gardé dans le bucket PRIVÉ documents-pilotage sous
+// <userId>/<id>-<nom nettoyé>, 200 Mo par membre. Table FERMÉE (RLS + revoke,
+// migration 20261031090000_documents_pilotage.sql) : le journal y accède en
+// postgres, toujours borné au userId du jeton (/api/pilotage/documents/...).
+model DocumentPilotage {
+  id           String    @id @default(uuid())
+  userId       String
+  nom          String // nom du fichier tel que déposé
+  type         String // type MIME de l'original (reconnu aux octets quand c'est possible)
+  taille       Int // octets
+  chemin       String    @unique // chemin dans le bucket documents-pilotage
+  lectureType  String // trades | mouvements-compte | facture | releve-bancaire | releve-broker | capture-tableau | autre | illisible
+  compteId     String? // compte Pilotage rapproché à la lecture (chaîne opaque)
+  periodeDebut DateTime? @db.Date
+  periodeFin   DateTime? @db.Date
+  createdAt    DateTime  @default(now())
+
+  @@index([userId, createdAt])
+}
+
 // Fiche « Pattern Map » (Tendler) : l'escalade d'un problème récurrent + la correction
 model Pattern {
   id              String   @id @default(uuid())

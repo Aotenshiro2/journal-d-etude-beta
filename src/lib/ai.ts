@@ -82,6 +82,9 @@ export type PosteIA =
   | 'support_chat'
   | 'capture' | 'etude'
   | 'releve'
+  // Documents déposés dans Pilotage et lus par l'IA (brief D1, 30/10/2026) : une
+  // ligne = une lecture, comptée pour la limite de 5 par membre et par jour.
+  | 'document'
   | 'liveclub_membre'
   | 'tests_liveclub' | 'tests_support' | 'tests_juge'
   // Chaine clips (20/10/2026) : notation des passages d'un live par la grille, faite par le script
