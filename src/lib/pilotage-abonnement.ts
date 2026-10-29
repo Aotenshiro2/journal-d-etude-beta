@@ -69,7 +69,7 @@ export async function lireSessionCheckout(cle: string, id: string): Promise<Reco
 // ---------------------------------------------------------------------------
 
 export type Synchro =
-  | { ok: true; etat: 'ouvert'; slug: SlugOffrePilotage; cree: boolean; userId: string | null; email: string | null; essai: boolean }
+  | { ok: true; etat: 'ouvert'; slug: SlugOffrePilotage; cree: boolean; userId: string | null; email: string | null; essai: boolean; fin: Date }
   | { ok: true; etat: 'ferme' | 'retire'; slug: SlugOffrePilotage }
   | { ok: false; raison: 'pas_pilotage' | 'incomplet' | 'offre_inconnue' }
 
@@ -138,7 +138,7 @@ export async function synchroniserAbonnement(cle: string, abonnementId: string, 
   ))[0]
   if (!l || l.offre_connue === 0) return { ok: false, raison: 'offre_inconnue' }
   if (charge) await nommerPaiement(cle, charge, ab.offre)
-  return { ok: true, etat: 'ouvert', slug: ab.offre, cree: l.cree > 0, userId, email, essai }
+  return { ok: true, etat: 'ouvert', slug: ab.offre, cree: l.cree > 0, userId, email, essai, fin: ab.fin }
 }
 
 // ---------------------------------------------------------------------------

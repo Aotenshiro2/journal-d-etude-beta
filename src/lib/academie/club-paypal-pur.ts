@@ -147,6 +147,8 @@ export type CommandeLue = {
   /** create_time de la commande : la case de renonciation est cochee avant sa creation. */
   creeLe: Date | null
   payeurEmail: string | null
+  /** payer.name.given_name, brut (le mail d'acces le met en forme avec prenomDe, mails-achat-pur.ts). */
+  payeurPrenom: string | null
   capture: CaptureLue | null
 }
 
@@ -209,6 +211,7 @@ export function lireCommande(o: Record<string, unknown>): LectureCommande {
       devise: montant.currency_code,
       creeLe: date(o.create_time),
       payeurEmail,
+      payeurPrenom: typeof objet(payeur.name).given_name === 'string' ? String(objet(payeur.name).given_name).trim() || null : null,
       capture,
     },
   }
@@ -276,16 +279,32 @@ export type ModeleEmailClub = {
   bouton: { texte: string; url: string }
 }
 
-/** L'email d'acces : ce qui est ouvert, ou entrer, avec quelle adresse, et comment en ajouter une. */
-export function modeleEmailClub(p: { email: string; essai: boolean }): ModeleEmailClub {
+export const URL_CONDITIONS = 'https://aoknowledge.com/conditions-generales'
+
+/** La signature des mails d'achat (brief F1, Brice 30/10 : vouvoiement, « Brice et Mélanie »). */
+export const SIGNATURE_CLUB = ['À bientôt sur les marchés,', 'Brice et Mélanie'] as const
+
+/**
+ * L'email d'acces : ce qui est ouvert, ou entrer, avec quelle adresse, et
+ * comment en ajouter une. Texte valide de la Formation complete (brief F1,
+ * 30/10, D:\2_Creation\Productions\Ecriture\2026-10-30-mails-confirmation-achat.md,
+ * section 5), MOT POUR MOT : le meme que modeleFormation (mails-achat-pur.ts),
+ * verifie par scripts/verifier-mails-achat.mjs. montant (« 1 999 euros ») et
+ * prenom deja mis en forme par l'appelant (formaterEuros, prenomDe) ; absents,
+ * la phrase s'en passe.
+ */
+export function modeleEmailClub(p: { email: string; essai: boolean; montant?: string | null; prenom?: string | null }): ModeleEmailClub {
+  const paiement = p.montant ? `votre paiement de ${p.montant} est bien reçu` : 'votre paiement est bien reçu'
   return {
-    sujet: `${p.essai ? '[Essai] ' : ''}Ton accès au 10% Club est ouvert`,
+    sujet: `${p.essai ? '[Essai] ' : ''}Votre accès au 10% Club est ouvert`,
     paragraphes: [
-      'Bienvenue dans le 10% Club. Ton paiement est bien reçu : ta formation complète est ouverte, à vie.',
-      "Tout est dans l'académie : le parcours de 0 à 5, Psychologie et émotions, les Chroniques de l'Accélérateur, Journaling, nos articles privés, les archives et les replays du Live Club.",
-      `Pour y entrer, connecte-toi avec CETTE adresse : ${p.email}. Pas encore de compte ? Il se crée à ta première connexion : {lien:${URL_CONNEXION}|aoknowledge.com/connexion}`,
-      `Tu préfères une autre adresse ? Une fois connecté, ajoute-la dans Comptes liés : {lien:${URL_COMPTES_LIES}|Mon espace, Comptes liés}`,
-      'Une question ? Réponds simplement à cet email.',
+      p.prenom ? `Bonjour ${p.prenom},` : 'Bonjour,',
+      `Bienvenue dans le 10% Club. Merci, ${paiement}, et la formation complète est ouverte, à vie. Si vous payez en 4 fois, les échéances sont gérées par PayPal, pas par nous.`,
+      "Tout est dans l'académie : le parcours de 0 à 5, Psychologie et émotions, les Chroniques de l'Accélérateur, Journaling, nos articles privés, les archives et les replays du Live Club. Le Carnet du Trader Premium et Pilotage Premium sont inclus aussi, avec la même adresse.",
+      `Pour entrer : {lien:${URL_CONNEXION}|aoknowledge.com/connexion}, avec ${p.email}, l'adresse de votre achat. C'est elle qui ouvre l'accès. Pas encore de compte ? Il se crée à votre première connexion. Une autre adresse vous convient mieux ? Une fois connecté, ajoutez-la dans Mon espace, Comptes liés : {lien:${URL_COMPTES_LIES}|aoknowledge.com/mon-espace/parametres/comptes}`,
+      'Vous pouvez reprendre le parcours depuis le début ou au niveau qui est le vôtre : votre progression se garde toute seule.',
+      `Vous avez demandé l'accès immédiat en payant, ce qui vaut renonciation à votre droit de rétractation (nos conditions : {lien:${URL_CONDITIONS}|aoknowledge.com/conditions-generales}). Votre reçu, lui, vient de PayPal.`,
+      'Une question, un souci ? Répondez à cet email, ou écrivez à support@aoknowledge.com : ça arrive chez nous dans les deux cas.',
     ],
     bouton: { texte: "Ouvrir l'académie", url: URL_ACADEMIE },
   }
@@ -308,21 +327,21 @@ function paragrapheHtml(p: string): string {
   return html + echapper(p.slice(dernier))
 }
 
-/** Meme gabarit que les emails du Live Club (liveclub/emails.ts), signe AO Knowledge. */
+/** Meme gabarit que les emails du Live Club (liveclub/emails.ts), signe Brice et Melanie (brief F1). */
 export function htmlEmailClub(m: ModeleEmailClub): string {
   const corps = m.paragraphes.map(p => `<p style="margin:0 0 16px;line-height:1.5">${paragrapheHtml(p)}</p>`).join('\n')
   return `<!doctype html><html lang="fr"><body style="margin:0;padding:24px;background:#ffffff;color:#111827;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:15px">
 <div style="max-width:560px;margin:0 auto">
 ${corps}
 <p style="margin:24px 0"><a href="${echapper(m.bouton.url)}" style="display:inline-block;padding:12px 20px;border-radius:8px;background:#111827;color:#ffffff;text-decoration:none;font-weight:600">${echapper(m.bouton.texte)}</a></p>
-<p style="margin:0 0 16px;font-size:13px;color:#6b7280">Si le bouton ne marche pas, copie ce lien : ${echapper(m.bouton.url)}</p>
-<p style="margin:32px 0 0;font-size:13px;color:#6b7280">AO Knowledge</p>
+<p style="margin:0 0 16px;font-size:13px;color:#6b7280">Si le bouton ne marche pas, copiez ce lien : ${echapper(m.bouton.url)}</p>
+<p style="margin:32px 0 0;line-height:1.5">${SIGNATURE_CLUB.map(echapper).join('<br>')}</p>
 </div></body></html>`
 }
 
 export function texteEmailClub(m: ModeleEmailClub): string {
   const paragraphes = m.paragraphes.map(p => p.replace(LIEN, (_t, url: string) => url))
-  return [...paragraphes, `${m.bouton.texte} : ${m.bouton.url}`, 'AO Knowledge'].join('\n\n')
+  return [...paragraphes, `${m.bouton.texte} : ${m.bouton.url}`, SIGNATURE_CLUB.join('\n')].join('\n\n')
 }
 
 /** L'alerte de l'equipe pour une capture en attente (Telegram, Agent AOK). Pas de secret, rien que PayPal ne sache deja. */

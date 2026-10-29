@@ -177,10 +177,12 @@ async function oublierDroitsGardes(userId: string | null, email: string | null):
 }
 
 /** L'email d'acces. Ne jette jamais : ok false et l'appelant le note (jamais l'adresse dans un log). */
-export async function envoyerEmailClub(email: string, essai: boolean): Promise<{ ok: true } | { ok: false; erreur: string }> {
+export async function envoyerEmailClub(
+  email: string, essai: boolean, extra: { montant?: string | null; prenom?: string | null } = {},
+): Promise<{ ok: true } | { ok: false; erreur: string }> {
   const cle = process.env.RESEND_API_KEY_LIVECLUB?.trim() || process.env.RESEND_API_KEY?.trim()
   if (!cle) return { ok: false, erreur: 'RESEND_API_KEY_LIVECLUB et RESEND_API_KEY absentes' }
-  const m = modeleEmailClub({ email, essai })
+  const m = modeleEmailClub({ email, essai, montant: extra.montant, prenom: extra.prenom })
   try {
     const { error } = await new Resend(cle).emails.send({
       from: process.env.CLUB_FROM_EMAIL?.trim() || 'AO Knowledge <support@aoknowledge.com>',

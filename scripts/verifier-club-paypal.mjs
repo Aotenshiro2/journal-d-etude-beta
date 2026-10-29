@@ -190,10 +190,10 @@ bloc('note de l acces : commande, capture, montant, essai, payeur s il differe',
   assert.ok(noteAcces({ ...base, payeurEmail: `${'a'.repeat(1200)}@x.fr` }).length <= 1000)
 })
 
-bloc('email d acces : objet, ce qui est ouvert, l academie, CETTE adresse, Comptes lies', () => {
+bloc('email d acces : objet, ce qui est ouvert, l academie, l adresse de l achat, Comptes lies (texte de la Formation, brief F1)', () => {
   const m = modeleEmailClub({ email: 'eleve@exemple.fr', essai: false })
-  assert.equal(m.sujet, 'Ton accès au 10% Club est ouvert')
-  assert.equal(modeleEmailClub({ email: 'a@b.fr', essai: true }).sujet, '[Essai] Ton accès au 10% Club est ouvert')
+  assert.equal(m.sujet, 'Votre accès au 10% Club est ouvert')
+  assert.equal(modeleEmailClub({ email: 'a@b.fr', essai: true }).sujet, '[Essai] Votre accès au 10% Club est ouvert')
   assert.equal(m.bouton.url, URL_ACADEMIE)
   assert.equal(URL_ACADEMIE, 'https://aoknowledge.com/academie')
   const texte = texteEmailClub(m)
@@ -203,7 +203,7 @@ bloc('email d acces : objet, ce qui est ouvert, l academie, CETTE adresse, Compt
     assert.ok(t.includes(URL_CONNEXION))
     assert.ok(t.includes(URL_COMPTES_LIES))
     assert.ok(t.includes(URL_ACADEMIE))
-    assert.match(t, /CETTE adresse/)
+    assert.match(t, /adresse de votre achat\. C('|&#39;)est elle qui ouvre l('|&#39;)accès/)
     assert.match(t, /parcours de 0 à 5/)
     assert.doesNotMatch(t, /[–—…“”‘’ ]/, 'typographie simple')
   }

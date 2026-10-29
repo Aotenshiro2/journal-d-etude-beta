@@ -3,6 +3,8 @@ import { verifierSignature } from '@/lib/academie/achat-pur'
 import { messageErreur } from '@/lib/liveclub/pur'
 import { lireSessionCheckout, secretWebhookPilotage, synchroniserAbonnement, clePilotage } from '@/lib/pilotage-abonnement'
 import { abonnementDeFacture, estAbonnementId, estSessionId, lireSessionPilotage } from '@/lib/pilotage-paliers'
+import { mailAchatCarnet, mailAchatPilotage } from '@/lib/mails-achat'
+import { evenementEnvoieMail } from '@/lib/mails-achat-pur'
 
 /**
  * POST /api/pilotage/achat/webhook : le webhook Stripe Ao Knowledge des
@@ -17,6 +19,13 @@ import { abonnementDeFacture, estAbonnementId, estSessionId, lireSessionPilotage
  *   customer.subscription.updated : changement d'offre, impaye (droit ferme), reprise ;
  *   customer.subscription.deleted : droit retire (retire_le, rien ne s'efface).
  * Ce qui n'est pas un abonnement de Pilotage est ignore (200). 500 = Stripe renvoie plus tard.
+ *
+ * Mails d'achat (brief F1, 30/10/2026, mails-achat.ts) : checkout.session.completed
+ * SEULEMENT (jamais un renouvellement), une fois par abonnement (anti-doublon
+ * en base). Le point d'acces recoit les sessions de tout le compte : une
+ * session d'abonnement sans metadata source dont l'abonnement porte le produit
+ * du Carnet Premium (liens de paiement) envoie le mail du Carnet, sans toucher
+ * aux droits. Un mail rate ne fait jamais echouer le webhook.
  */
 
 export const dynamic = 'force-dynamic'
@@ -44,10 +53,18 @@ export async function POST(req: NextRequest) {
   try {
     let abonnement: string | null = null
     let extra: Parameters<typeof synchroniserAbonnement>[2] = {}
+    let session: Record<string, unknown> | null = null
     if (type === 'checkout.session.completed') {
       const meta = (objet.metadata ?? {}) as Record<string, unknown>
-      if (meta.source !== 'pilotage' || !estSessionId(objet.id)) return NextResponse.json({ ok: true, ignore: true })
-      const lu = lireSessionPilotage(await lireSessionCheckout(cle, objet.id))
+      if (!estSessionId(objet.id)) return NextResponse.json({ ok: true, ignore: true })
+      if (meta.source !== 'pilotage') {
+        // Hors Pilotage : peut-etre un Carnet Premium (mail seulement, aucun droit ecrit).
+        if (objet.mode !== 'subscription' || meta.source) return NextResponse.json({ ok: true, ignore: true })
+        const mail = await mailAchatCarnet(cle, await lireSessionCheckout(cle, objet.id))
+        return NextResponse.json({ ok: true, ignore: mail === 'pas_concerne', mail })
+      }
+      session = await lireSessionCheckout(cle, objet.id)
+      const lu = lireSessionPilotage(session)
       if (!lu.ok) return NextResponse.json({ ok: true, etat: lu.raison })
       abonnement = lu.abonnementId
       extra = { userId: lu.userId, email: lu.email, essai: lu.essai, renonciationLe: lu.renonciationLe }
@@ -64,6 +81,10 @@ export async function POST(req: NextRequest) {
     if (!r.ok && r.raison === 'offre_inconnue') throw new Error('offre inconnue en base')
     if (!r.ok) return NextResponse.json({ ok: true, ignore: r.raison === 'pas_pilotage', etat: r.raison })
     if (r.etat !== 'ouvert' || r.cree) console.info(`[pilotage/achat/webhook] ${type} : droit ${r.etat} offre=${r.slug}`)
+    if (r.etat === 'ouvert' && session && evenementEnvoieMail(type)) {
+      const mail = await mailAchatPilotage({ session, abonnementId: abonnement, slug: r.slug, email: r.email, essai: r.essai, fin: r.fin })
+      return NextResponse.json({ ok: true, etat: r.etat, mail })
+    }
     return NextResponse.json({ ok: true, etat: r.etat })
   } catch (err) {
     console.warn(`[pilotage/achat/webhook] ${type} NON traite : ${messageErreur(err)}`)

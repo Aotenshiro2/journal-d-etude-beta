@@ -13,6 +13,7 @@ import { estAdmin } from '@/lib/academie/pur'
 import { compteDuJeton, corsAcademie, entetesAcademie, refusAcademie, tronquer } from '@/lib/academie/http'
 import { SQL_IDENTITE } from '@/lib/academie/requetes'
 import { messageErreur } from '@/lib/liveclub/pur'
+import { formaterEuros, prenomDe } from '@/lib/mails-achat-pur'
 
 /**
  * POST /api/club/paypal/capturer : appelee par le onApprove des boutons PayPal
@@ -171,7 +172,10 @@ export async function POST(req: NextRequest) {
   if (r.cree) {
     console.info(`[club/paypal/capturer] acces pose commande=${c.orderId} compte=${userId ? tronquer(userId) : 'email'} ${montantEur} EUR${c.essai ? ' essai' : ''}`)
     if (email) {
-      const envoi = await envoyerEmailClub(email, c.essai)
+      const envoi = await envoyerEmailClub(email, c.essai, {
+        montant: formaterEuros(c.capture.centimes ?? c.centimes),
+        prenom: prenomDe(c.payeurPrenom),
+      })
       if (!envoi.ok) console.warn(`[club/paypal/capturer] email d'acces NON envoye commande=${c.orderId} : ${envoi.erreur}`)
     } else {
       console.warn(`[club/paypal/capturer] acces pose sans email confirme (compte=${userId ? tronquer(userId) : '?'}) : pas d'email d'acces`)

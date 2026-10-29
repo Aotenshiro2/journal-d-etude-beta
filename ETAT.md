@@ -3,6 +3,23 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
+## Mails de confirmation d'achat (brief F1, 30/10/2026, LOCAL, non pousse ; migration 20261031150000 NON appliquee)
+
+- Textes (vouvoiement, signes « Brice et Mélanie », depuis support@) : `src/lib/mails-achat-pur.ts`, mot pour mot de
+  D:\2_Creation\Productions\Ecriture\2026-10-30-mails-confirmation-achat.md. Envoi Resend : `src/lib/mails-achat.ts`
+  (RESEND_API_KEY_LIVECLUB ou RESEND_API_KEY, expediteur ACHAT_FROM_EMAIL facultatif, portail PILOTAGE_PORTAIL_LIEN).
+- Declencheurs : webhook Pilotage (checkout.session.completed : Pilotage Premium ou Duo ; session d'abonnement sans
+  metadata source sur le produit du Carnet Premium : mail du Carnet, aucun droit ecrit), webhook de l'academie (module).
+  Jamais au renouvellement. Essai (?achat=essai ou Stripe de test) : objet « [Essai] ».
+- Anti-doublon : table `mails_achat_envoyes` (cle reservee avant l'envoi). Table absente = AUCUN mail.
+- 10% Club : `modeleEmailClub` = texte de la Formation (montant, prenom PayPal), meme declenchement.
+- Live Club : les EMAILS vouvoient et sont signes (bienvenue vers l'academie, plus Skool) ; les messages prives du bot
+  tutoient toujours. Code de verification aussi.
+- Fiche du support `docs/connaissances/pilotage.md` : Libre, Premium, Duo, inclus Live Club et Formation, arret.
+- A FAIRE SUR GO : migration 20261031150000, webhook Pilotage declare chez Stripe (deja au plan E1), domaine Resend.
+  Verifs : `node scripts/verifier-mails-achat.mjs` (10 blocs), `node --env-file=.env.local
+  scripts/essayer-migration-mails-achat.mjs` (transaction annulee). Compte rendu : D:\6_Societe\Pilotage\COMPTE-RENDU-F1.md.
+
 ## Offres de Pilotage (brief E1, 30/10/2026, LOCAL, non pousse ; migration 20261031120000 NON appliquee)
 
 - Paliers (pur, `src/lib/pilotage-paliers.ts`) : libre (10 lectures sur 30 jours glissants + 25 offertes les 7 jours
