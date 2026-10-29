@@ -3,7 +3,7 @@
 // lendemain). Verifie :
 // - les textes des modeles de emails.ts et emails-verification.ts : aucun
 //   renvoi vers support@ dans un message prive (Telegram), la porte
-//   « Une question ? Écris-moi ici. » en prive, « Réponds à cet email » par
+//   « Une question ? Écris-moi ici. » en prive, « Répondez à cet email » par
 //   email ; seuls les modeles qui ne partent QUE par email gardent support@ ;
 // - le message de sortie pour impaye : la phrase de Brice, le bouton
 //   « J'ai réglé : revenir dans le groupe » en prive, jamais dans l'email ;
@@ -61,7 +61,7 @@ const DEUX = [
 const LIMITE = '2026-11-16T07:00:00Z'
 const LIEN_BOT = C.lienBotAccueil()
 const PHRASE_TELEGRAM = "Dès que c'est réglé, appuie sur « J'ai réglé : revenir dans le groupe » (ou écris-moi) : je te redonne ton lien tout de suite. Sinon, je te le renvoie demain matin."
-const PHRASE_EMAIL = `Dès que c'est réglé, écris au bot du Live Club (${LIEN_BOT}) : il te redonne ton lien tout de suite. Sinon, on te le renvoie demain matin.`
+const PHRASE_EMAIL = `Dès que c'est réglé, écrivez au bot du Live Club (${LIEN_BOT}) : il vous redonne votre lien tout de suite. Sinon, on vous le renvoie demain matin.`
 
 // Les modeles qui partent des deux cotes (prevenir du passage : prive d'abord,
 // email sinon), en prive et par email. Le dernier argument est le canal.
@@ -97,16 +97,16 @@ test('messages prives : aucun renvoi vers support@, la porte est le bot (« Écr
   assert.ok(!SUPPORT_RE.test(abusive) && abusive.includes('Un souci ? Écris-moi ici.'))
 })
 
-test('emails : « Réponds à cet email » (la reponse arrive a l equipe), jamais « Écris-moi ici »', () => {
+test('emails : « Répondez à cet email » (la reponse arrive a l equipe, vouvoiement depuis le 30/10), jamais « Écris-moi ici »', () => {
   for (const [nom, f] of Object.entries(DOUBLES)) {
     const t = visible(f('email'))
     assert.ok(!/Écris-moi ici|écris-moi ici/.test(t), `${nom} : « écris-moi ici » dans un email`)
     if (nom === 'modeleRappelPrelevement') {
-      assert.ok(t.includes(`Écris au bot du Live Club : ${LIEN_BOT}`), nom)
+      assert.ok(t.includes(`Écrivez au bot du Live Club : ${LIEN_BOT}`), nom)
       continue
     }
     if (nom.startsWith('modeleSortieImpaye')) assert.ok(t.includes(LIEN_BOT), `${nom} : lien du bot`)
-    assert.ok(/Réponds à cet email|réponds à cet email/.test(t), `${nom} : pas de « Réponds à cet email »`)
+    assert.ok(/Répondez à cet email|répondez à cet email/.test(t), `${nom} : pas de « Répondez à cet email »`)
     assert.ok(!SUPPORT_RE.test(t.replace(LIEN_BOT, '')), `${nom} : adresse email`)
     assert.ok(!CARACTERES_INTERDITS.test(t), `${nom} : caractere interdit`)
   }
@@ -162,7 +162,7 @@ test('sortie pour impaye, par email : le lien du bot, aucun bouton du bot dans l
   assert.ok(m.paragraphes.includes(PHRASE_EMAIL), m.paragraphes.join('\n'))
   assert.equal(m.boutonBot, undefined)
   assert.deepEqual(m.bouton, { texte: 'Régler ma facture', url: LIEN_FACTURE })
-  assert.equal(m.paragraphes.at(-1), 'Une question ? Réponds à cet email.')
+  assert.equal(m.paragraphes.at(-1), 'Une question ? Répondez à cet email.')
   const html = E.htmlEmail(m)
   const texte = E.texteTelegram(m)
   for (const t of [html, texte]) {
@@ -170,7 +170,7 @@ test('sortie pour impaye, par email : le lien du bot, aucun bouton du bot dans l
     assert.ok(!/support@/.test(t))
   }
   // Le lien du bot devient un lien dans l'email, sans la parenthese fermante.
-  assert.ok(html.includes(`(<a href="${LIEN_BOT}" style="color:#111827">${LIEN_BOT}</a>) : il te redonne`), html)
+  assert.ok(html.includes(`(<a href="${LIEN_BOT}" style="color:#111827">${LIEN_BOT}</a>) : il vous redonne`), html)
   // Meme un modele en prive passe dans htmlEmail ne montre pas le bouton du bot.
   assert.ok(!E.htmlEmail(E.modeleSortieImpaye(UNE, LIMITE)).includes('m:regle'))
 })
@@ -208,7 +208,7 @@ test('textes du clic : montant et lien de la facture, sans support@', () => {
     assert.ok(!CARACTERES_INTERDITS.test(t), t)
   }
   assert.equal(P.phraseQuestion('telegram'), 'Une question ? Écris-moi ici.')
-  assert.equal(P.phraseQuestion('email', 'Un souci ?'), 'Un souci ? Réponds à cet email.')
+  assert.equal(P.phraseQuestion('email', 'Un souci ?'), 'Un souci ? Répondez à cet email.')
 })
 
 test('branchement : le bouton dans le bot, les boutons du passage, le lien sur un message ecrit', () => {

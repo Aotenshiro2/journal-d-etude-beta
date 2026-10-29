@@ -1068,16 +1068,17 @@ export function detteOuverte(abonnements: readonly AbonnementResume[], maintenan
  * Les lignes « ce qui reste a regler » d'un message, montants compris. Une
  * facture : une phrase, et son lien si lienDansLeTexte (sinon l'appelant le
  * met sur un bouton). Plusieurs : une ligne par facture, lien compris. Rien a
- * regler : chaine vide.
+ * regler : chaine vide. `vous` (30/10, brief F1) : au vouvoiement (emails).
  */
-export function phraseARegler(aRegler: readonly FactureARegler[], o: { lienDansLeTexte: boolean }): string {
+export function phraseARegler(aRegler: readonly FactureARegler[], o: { lienDansLeTexte: boolean; vous?: boolean }): string {
   if (!aRegler.length) return ''
-  const facture = (f: FactureARegler) => (f.factureLe ? ` sur ta facture du ${formaterDateFr(f.factureLe)}` : '')
+  const facture = (f: FactureARegler) => (f.factureLe ? ` sur ${o.vous ? 'votre' : 'ta'} facture du ${formaterDateFr(f.factureLe)}` : '')
   if (aRegler.length === 1) {
     const f = aRegler[0]
     const base = `Il reste ${formaterMontant(f.centimes, f.devise)} à régler${facture(f)}.`
     if (!o.lienDansLeTexte) return base
-    return f.lien ? `${base} Tu peux la régler ici : ${f.lien}` : `${base} Le lien de paiement n'est pas disponible là, tout de suite.`
+    const ici = o.vous ? 'Vous pouvez la régler ici' : 'Tu peux la régler ici'
+    return f.lien ? `${base} ${ici} : ${f.lien}` : `${base} Le lien de paiement n'est pas disponible là, tout de suite.`
   }
   const lignes = aRegler.map(f => {
     const quand = f.factureLe ? `, facture du ${formaterDateFr(f.factureLe)}` : ''
@@ -1163,10 +1164,11 @@ export const TEXTE_LIEN_DEJA_DONNE = `Je t'ai donné ton lien il y a quelques mi
  * La phrase « une question ? » d'un message qui part des deux cotes (Brice,
  * 16/10 puis 22/10) : en message prive, le bot lui-meme (l'equipe repond dans
  * la conversation), plus jamais support@ ; par email, la reponse a l'email
- * (replyTo = support@, elle arrive a l'equipe).
+ * (replyTo = support@, elle arrive a l'equipe), au vouvoiement depuis le
+ * 30/10 (brief F1 : un email represente l'organisation).
  */
 export function phraseQuestion(canal: 'telegram' | 'email', debut = 'Une question ?'): string {
-  return canal === 'telegram' ? `${debut} Écris-moi ici.` : `${debut} Réponds à cet email.`
+  return canal === 'telegram' ? `${debut} Écris-moi ici.` : `${debut} Répondez à cet email.`
 }
 
 /**
@@ -1178,7 +1180,7 @@ export function phraseQuestion(canal: 'telegram' | 'email', debut = 'Une questio
 export function phraseRetourApresReglement(canal: 'telegram' | 'email', lienBot: string): string {
   return canal === 'telegram'
     ? `Dès que c'est réglé, appuie sur « ${BOUTON_REGLE.texte} » (ou écris-moi) : je te redonne ton lien tout de suite. Sinon, je te le renvoie demain matin.`
-    : `Dès que c'est réglé, écris au bot du Live Club (${lienBot}) : il te redonne ton lien tout de suite. Sinon, on te le renvoie demain matin.`
+    : `Dès que c'est réglé, écrivez au bot du Live Club (${lienBot}) : il vous redonne votre lien tout de suite. Sinon, on vous le renvoie demain matin.`
 }
 
 /**

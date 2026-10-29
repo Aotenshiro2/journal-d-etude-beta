@@ -5,19 +5,20 @@
 
 import { Resend } from 'resend'
 import { SUPPORT } from './config'
-import { htmlEmail, texteTelegram, type ModeleMessage, type ResultatEmail } from './emails'
+import { htmlEmail, texteEmail, type ModeleMessage, type ResultatEmail } from './emails'
 import { messageErreur, normaliserEmail } from './pur'
 import { CODE_VALIDITE_MINUTES } from './verification-pur'
 
+/** (30/10, brief F1) Un email vouvoie et se signe « Brice et Mélanie » (htmlEmail, texteEmail). */
 export function modeleCodeVerification(code: string): ModeleMessage {
   return {
-    sujet: `Ton code pour le bot Live Club : ${code}`,
+    sujet: `Votre code pour le bot Live Club : ${code}`,
     paragraphes: [
-      'Salut !',
-      `Voici ton code pour relier ton compte Telegram à ton abonnement Live Club : ${code}`,
-      `Tape-le dans ta conversation avec le bot. Il marche ${CODE_VALIDITE_MINUTES} minutes.`,
-      "Tu n'as rien demandé ? Ne fais rien : sans ce code, rien ne change. Et ne le donne à personne.",
-      `Une question ? Écris à ${SUPPORT}.`,
+      'Bonjour,',
+      `Voici votre code pour relier votre compte Telegram à votre abonnement Live Club : ${code}`,
+      `Tapez-le dans votre conversation avec le bot. Il marche ${CODE_VALIDITE_MINUTES} minutes.`,
+      "Vous n'avez rien demandé ? Ne faites rien : sans ce code, rien ne change. Et ne le donnez à personne.",
+      `Une question ? Écrivez à ${SUPPORT}.`,
     ],
   }
 }
@@ -35,7 +36,7 @@ export async function emailCodeVerification(email: string, code: string): Promis
       replyTo: SUPPORT,
       subject: m.sujet,
       html: htmlEmail(m),
-      text: texteTelegram(m),
+      text: texteEmail(m),
     })
     if (error) return { ok: false, erreur: `Resend : ${String(error.message ?? error.name ?? '?').slice(0, 200)}` }
     return { ok: true, id: data?.id ?? null }
