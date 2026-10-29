@@ -13,12 +13,14 @@ const ALLOWED_ORIGINS = [
   /^http:\/\/localhost(:\d+)?$/, // dev local
 ]
 
-export function corsHeaders(req: NextRequest): Record<string, string> {
+// `methodes` : les routes qui servent aussi GET, PATCH ou DELETE (trades de
+// Pilotage, 29/10/2026) les annoncent au préflight ; POST par défaut.
+export function corsHeaders(req: NextRequest, methodes = 'POST, OPTIONS'): Record<string, string> {
   const origin = req.headers.get('origin')
   if (!origin || !ALLOWED_ORIGINS.some(re => re.test(origin))) return {}
   return {
     'Access-Control-Allow-Origin': origin,
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Methods': methodes,
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Access-Control-Max-Age': '86400',
     Vary: 'Origin',
@@ -26,6 +28,6 @@ export function corsHeaders(req: NextRequest): Record<string, string> {
 }
 
 // Réponse au préflight (le middleware laisse passer les OPTIONS sur /api/).
-export function corsPreflight(req: NextRequest) {
-  return new NextResponse(null, { status: 204, headers: corsHeaders(req) })
+export function corsPreflight(req: NextRequest, methodes?: string) {
+  return new NextResponse(null, { status: 204, headers: corsHeaders(req, methodes) })
 }

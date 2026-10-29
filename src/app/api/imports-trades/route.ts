@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getUserId } from '@/lib/api-auth'
-import { parserFichierTrades } from '@/lib/imports-trades'
+import { parserFichierTrades, separerNouveaux } from '@/lib/imports-trades'
+import { confirmerImport, supprimerExecutions } from '@/lib/trades-serveur'
 
 /**
  * POST /api/imports-trades — analyse puis import d'un fichier de trades.
@@ -10,7 +11,9 @@ import { parserFichierTrades } from '@/lib/imports-trades'
  *   dit combien de trades sont lus, combien sont nouveaux, combien déjà
  *   connus (dédup par (source, idExterne)) — la garantie « réimporter le
  *   même fichier n'ajoute rien ».
- * - confirmer: true → insère les nouveaux uniquement (skipDuplicates).
+ * - confirmer: true → insère les nouveaux uniquement (skipDuplicates), sans
+ *   compte Pilotage, puis les regroupe en positions et les rapproche du Carnet
+ *   comme l'import de Pilotage (29/10/2026) ; la réponse ne change pas.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -35,15 +38,11 @@ export async function POST(req: NextRequest) {
       select: { idExterne: true },
     })
     const connus = new Set(existants.map(e => e.idExterne))
-    const nouveaux = trades.filter(t => !connus.has(t.idExterne))
+    const nouveaux = separerNouveaux(trades, connus)
 
     let importes = 0
     if (confirmer && nouveaux.length > 0) {
-      const res = await prisma.tradeImport.createMany({
-        data: nouveaux.map(t => ({ ...t, userId, fichier })),
-        skipDuplicates: true,
-      })
-      importes = res.count
+      importes = (await confirmerImport(userId, null, nouveaux, fichier)).importes
     }
 
     return NextResponse.json({
@@ -101,6 +100,6 @@ export async function DELETE(req: NextRequest) {
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const body = await req.json().catch(() => ({}))
   const source = typeof body.source === 'string' && body.source ? body.source : null
-  const r = await prisma.tradeImport.deleteMany({ where: { userId, ...(source ? { source } : {}) } })
-  return NextResponse.json({ supprimes: r.count })
+  // Retire, puis regroupe ce qui reste à côté (une exécution retirée pouvait relier deux autres).
+  return NextResponse.json({ supprimes: await supprimerExecutions(userId, { source }) })
 }

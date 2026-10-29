@@ -362,10 +362,13 @@ model AbcGame {
 // factor, payoff, win rate) — réglage par membre plus tard, rien dans le dur.
 // Déduplication : (userId, source, idExterne) — idExterne = ids de fills quand la
 // plateforme en donne, empreinte calculée sinon. Réimporter le même fichier = 0 doublon.
+// Une ligne = une EXÉCUTION ; les exécutions qui se chevauchent forment une
+// position (positionId, src/lib/positions.ts), rattachée à un compte Pilotage
+// (compteId) et, si possible, à un segment du Carnet (segmentRef), 29/10/2026.
 model TradeImport {
   id         String    @id @default(uuid())
   userId     String
-  source     String // 'tradovate-performance' | 'topstepx' | ...
+  source     String // 'tradovate-performance' | 'topstepx-trades' | 'csv-generique'
   idExterne  String
   compte     String?
   symbole    String
@@ -373,7 +376,7 @@ model TradeImport {
   quantite   Int       @default(1)
   prixEntree Float?
   prixSortie Float?
-  entreLe    DateTime // heure telle qu'exportée par la plateforme
+  entreLe    DateTime // instant réel si `fuseau` est connu, sinon heure telle qu'affichée
   sortiLe    DateTime?
   pnl        Float // analytique, pas comptable : Float suffit
   devise     String    @default("USD")
@@ -381,9 +384,18 @@ model TradeImport {
   dureeSec   Int?
   fichier    String? // nom du fichier d'origine, pour s'y retrouver
   createdAt  DateTime  @default(now())
+  positionId       String? // id de la première exécution de la position
+  positionManuelle Boolean  @default(false) // fusion/séparation à la main : jamais recalculée
+  compteId         String? // compte Pilotage (chaîne opaque venue de son localStorage)
+  segmentRef       String? // Note.trades[].id : le segment du Carnet lié
+  stopPrix         Float? // null = le fichier ne dit pas s'il y avait un stop
+  fuseau           String? // décalage lu dans le fichier (« +02:00 »), null = inconnu
 
   @@unique([userId, source, idExterne])
   @@index([userId, entreLe])
+  @@index([userId, positionId])
+  @@index([userId, compteId])
+  @@index([userId, segmentRef])
 }
 
 // Fiche « Pattern Map » (Tendler) : l'escalade d'un problème récurrent + la correction

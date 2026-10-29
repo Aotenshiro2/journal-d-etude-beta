@@ -5,8 +5,12 @@
 //
 // v1 : Tradovate « Performance.csv » — le format en or, une ligne = un trade
 // déjà apparié (buyFillId/sellFillId, prix des deux jambes, pnl, horodatages).
-// v2 prévue : table Trades de TopstepX (capture intelligente, même schéma).
-// v3 prévue : Orders history Quantower/Rithmic (des ordres à reconstruire).
+// v2 (brief A, 29/10/2026) : table Trades de TopstepX (« trades_export.csv »,
+// horodatages avec décalage), et le CSV GÉNÉRIQUE dont le membre désigne les
+// colonnes (sans désignation : on rend les en-têtes et une proposition).
+// Prévu : Orders history Quantower/Rithmic (des ordres à reconstruire).
+//
+// Ce module n'importe rien : scripts/verifier-imports-trades.mjs le charge tel quel.
 
 export interface TradeNormalise {
   source: string
@@ -23,16 +27,45 @@ export interface TradeNormalise {
   devise: string
   frais: number | null
   dureeSec: number | null
+  /** Décalage lu dans le fichier (« +02:00 ») : entreLe est alors un vrai
+   *  instant UTC. Absent ou null : heure telle qu'affichée (Tradovate). */
+  fuseau?: string | null
+  /** null = le fichier ne dit pas s'il y avait un stop. */
+  stopPrix?: number | null
 }
 
 export interface ResultatParse {
   format: string | null
   trades: TradeNormalise[]
   erreurs: string[]
+  /** CSV générique : les en-têtes trouvés (doublons renommés « Time (2) »). */
+  entetes?: string[]
+  /** CSV générique sans `colonnes` : une correspondance devinée au nom des colonnes. */
+  proposition?: Partial<ColonnesCsv>
+}
+
+/** Les colonnes d'un CSV inconnu, désignées par le membre (nom d'en-tête par champ). */
+export interface ColonnesCsv {
+  symbole: string
+  entreLe: string
+  sortiLe?: string
+  direction?: string
+  quantite?: string
+  prixEntree?: string
+  prixSortie?: string
+  pnl: string
+  frais?: string
+  idExterne?: string
+  stopPrix?: string
+  /** « DD/MM/YYYY » ou « MM/DD/YYYY » (« JJ/MM/AAAA » accepté) : lève
+   *  l'ambiguïté jour/mois des dates à barres. Inutile pour l'ISO. */
+  formatDate?: string
+  /** Code de la monnaie du fichier (« EUR ») ; USD par défaut. */
+  devise?: string
 }
 
 /** Découpe une ligne CSV en gérant les champs entre guillemets ("$1,195.00"). */
-function decouperLigneCsv(ligne: string): string[] {
+function decouperLigneCsv(ligne: string, sep = ','): string[] {
   const champs: string[] = []
   let courant = ''
   let entreGuillemets = false
@@ -44,7 +77,7 @@ function decouperLigneCsv(ligne: string): string[] {
       else courant += c
     } else if (c === '"') {
       entreGuillemets = true
-    } else if (c === ',') {
+    } else if (c === sep) {
       champs.push(courant)
       courant = ''
     } else {
@@ -99,8 +132,15 @@ function lireDuree(brut: string): number | null {
 
 const ENTETES_TRADOVATE = ['symbol', 'buyFillId', 'sellFillId', 'qty', 'buyPrice', 'sellPrice', 'pnl', 'boughtTimestamp', 'soldTimestamp']
 
-/** Reconnaît le format à la signature des en-têtes et parse. */
-export function parserFichierTrades(texte: string, fichier?: string): ResultatParse {
+const ENTETES_TOPSTEPX = ['Id', 'ContractName', 'EnteredAt', 'ExitedAt', 'EntryPrice', 'ExitPrice', 'Fees', 'PnL', 'Size', 'Type']
+
+/**
+ * Reconnaît le format à la signature des en-têtes et parse.
+ * @param colonnes Désignation des colonnes d'un CSV inconnu. Ignorée quand la
+ *   signature d'un format connu est reconnue : le lecteur dédié est plus juste,
+ *   et le même fichier garde ainsi toujours la même source (dédoublonnage).
+ */
+export function parserFichierTrades(texte: string, fichier?: string, colonnes?: Partial<ColonnesCsv>): ResultatParse {
   const lignes = texte.replace(/^﻿/, '').split(/\r?\n/).filter(l => l.trim().length > 0)
   if (lignes.length === 0) return { format: null, trades: [], erreurs: ['Fichier vide.'] }
 
@@ -109,17 +149,414 @@ export function parserFichierTrades(texte: string, fichier?: string): ResultatPa
     return parserTradovatePerformance(lignes, entetes, fichier)
   }
 
+  // Les autres lecteurs suivent le séparateur du fichier (« ; » d'un Excel français).
+  const sep = separateurDe(lignes[0])
+  const entetesSep = sep === ',' ? entetes : decouperLigneCsv(lignes[0], sep)
+  if (ENTETES_TOPSTEPX.every(e => entetesSep.includes(e))) {
+    return parserTopstepX(lignes, entetesSep, sep)
+  }
+
   // Orders history Quantower/Rithmic : reconnu mais pas encore supporté —
   // le dire clairement vaut mieux qu'un « format inconnu ».
-  if (entetes.includes('Order type') && entetes.includes('Average fill price')) {
+  if (entetesSep.includes('Order type') && entetesSep.includes('Average fill price')) {
     return {
       format: 'quantower-orders',
       trades: [],
-      erreurs: ['Ce fichier est un historique d’ORDRES (Quantower/Rithmic), pas de trades : la reconstruction arrive dans une prochaine version. Exporte plutôt le rapport Performance de Tradovate.'],
+      erreurs: ["Ce fichier est un historique d'ordres, pas de trades : exporte le rapport Performance de Tradovate, ou envoie-nous ton fichier au support pour qu'on l'ajoute."],
     }
   }
 
-  return { format: null, trades: [], erreurs: ['Format non reconnu. Formats supportés aujourd’hui : rapport Performance de Tradovate (CSV).'] }
+  return parserCsvGenerique(lignes, sep, colonnes)
+}
+
+/** Les trades dont la clé (idExterne) n'est pas déjà connue. Réimporter le
+ *  même fichier = 0 nouveau, par construction. */
+export function separerNouveaux<T extends { idExterne: string }>(trades: T[], connus: Set<string>): T[] {
+  return trades.filter(t => !connus.has(t.idExterne))
+}
+
+/** Le body.colonnes d'une requête, réduit aux champs connus (chaînes non vides). */
+export function lireColonnes(brut: unknown): Partial<ColonnesCsv> | undefined {
+  if (!brut || typeof brut !== 'object' || Array.isArray(brut)) return undefined
+  const sortie: Partial<Record<keyof ColonnesCsv, string>> = {}
+  for (const champ of [...CHAMPS_CSV, 'formatDate', 'devise'] as (keyof ColonnesCsv)[]) {
+    const v = (brut as Record<string, unknown>)[champ]
+    if (typeof v === 'string' && v.trim()) sortie[champ] = v.trim().slice(0, 200)
+  }
+  return sortie
+}
+
+/** Le séparateur le plus présent dans la ligne d'en-têtes (virgule à égalité). */
+function separateurDe(ligne: string): string {
+  const compte = (c: string) => ligne.split(c).length - 1
+  const candidats: [string, number][] = [[',', compte(',')], [';', compte(';')], ['\t', compte('\t')]]
+  candidats.sort((a, b) => b[1] - a[1])
+  return candidats[0][1] > 0 ? candidats[0][0] : ','
+}
+
+/** Nombre entier positif (« 3 », « 1,000 ») ; null si illisible, nul ou décimal. */
+function lireQuantite(brut: string): number | null {
+  const s = brut.trim()
+  const n = /^[1-9]\d{0,2}(,\d{3})+$/.test(s) ? Number(s.replace(/,/g, '')) : lireMontant(s)
+  if (n === null || !Number.isFinite(n)) return null
+  const q = Math.abs(n)
+  return Number.isInteger(q) && q > 0 ? q : null
+}
+
+// ── Horodatages ──────────────────────────────────────────────────────────────
+
+/** Pour les dates à barres : le jour d'abord (« 21/04/2025 ») ou le mois (« 04/21/2025 »). */
+type OrdreDate = 'jour' | 'mois'
+
+interface Horodatage { date: Date; fuseau: string | null }
+
+// ISO et assimilés, année d'abord (« 2025-06-06T17:25:45Z », « 2025.06.06 17:25 » de MT5).
+const RE_ISO = /^(\d{4})[-./](\d{1,2})[-./](\d{1,2})[T ]+(\d{1,2}):(\d{2})(?::(\d{2})(?:[.,](\d+))?)?\s*(Z|UTC|GMT|[+-]\d{2}:?\d{2})?$/i
+// Année à la fin (« 06/06/2025 17:25:45 +02:00 », « 6/6/2025 5:25 PM »).
+const RE_BARRES = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})[T ]+(\d{1,2}):(\d{2})(?::(\d{2})(?:[.,](\d+))?)?\s*(AM|PM)?\s*(Z|UTC|GMT|[+-]\d{2}:?\d{2})?$/i
+
+/**
+ * Un horodatage avec heure (la date seule ne suffit pas à regrouper des
+ * exécutions). Avec un décalage (« +02:00 », « Z ») : le vrai instant UTC, et
+ * le décalage normalisé dans `fuseau`. Sans : l'heure telle qu'affichée,
+ * construite comme pour Tradovate, `fuseau` null.
+ */
+function lireHorodatage(brut: string, ordre: OrdreDate | null): Horodatage | null {
+  const s = brut.trim()
+  let annee: string, mois: string, jour: string, h: string, min: string
+  let sec: string | undefined, frac: string | undefined, ampm: string | undefined, decalage: string | undefined
+  const iso = RE_ISO.exec(s)
+  if (iso) {
+    [, annee, mois, jour, h, min, sec, frac, decalage] = iso
+  } else {
+    const b = RE_BARRES.exec(s)
+    if (!b || !ordre) return null
+    let premier: string, second: string
+    ;[, premier, second, annee, h, min, sec, frac, ampm, decalage] = b
+    jour = ordre === 'jour' ? premier : second
+    mois = ordre === 'jour' ? second : premier
+  }
+
+  let heure = +h
+  if (ampm) {
+    if (heure < 1 || heure > 12) return null
+    heure = (heure % 12) + (ampm.toUpperCase() === 'PM' ? 12 : 0)
+  }
+  if (heure > 23 || +min > 59 || +(sec ?? 0) > 59) return null
+  const ms = frac ? Number(frac.slice(0, 3).padEnd(3, '0')) : 0
+  const local = Date.UTC(+annee, +mois - 1, +jour, heure, +min, +(sec ?? 0), ms)
+  const verif = new Date(local)
+  // Le 31/02 « passe » en JavaScript (il devient le 3 mars) : on le refuse.
+  if (Number.isNaN(local) || verif.getUTCMonth() !== +mois - 1 || verif.getUTCDate() !== +jour) return null
+
+  if (!decalage) return { date: verif, fuseau: null }
+  if (/^(Z|UTC|GMT)$/i.test(decalage)) return { date: verif, fuseau: '+00:00' }
+  const d = /^([+-])(\d{2}):?(\d{2})$/.exec(decalage)!
+  const minutes = (+d[2] * 60 + +d[3]) * (d[1] === '-' ? -1 : 1)
+  if (Math.abs(minutes) > 14 * 60) return null
+  return { date: new Date(local - minutes * 60_000), fuseau: `${d[1]}${d[2]}:${d[3]}` }
+}
+
+/**
+ * L'ordre jour/mois des dates à barres d'un fichier. `formatDate` tranche ;
+ * sinon les valeurs : un premier nombre > 12 dit « jour d'abord », un second
+ * > 12 dit « mois d'abord ». Si rien ne tranche et qu'une date au moins se
+ * lirait différemment (« 04/06 »), on ne devine pas : on demande.
+ */
+function ordreDesDates(valeurs: string[], formatDate?: string): { ordre: OrdreDate } | { erreur: string } {
+  if (formatDate) {
+    const f = formatDate.trim().toUpperCase()
+    if (f.startsWith('DD') || f.startsWith('JJ')) return { ordre: 'jour' }
+    if (f.startsWith('MM')) return { ordre: 'mois' }
+    if (f.startsWith('YYYY') || f.startsWith('AAAA') || f === 'ISO') return { ordre: 'jour' }
+    return { erreur: `formatDate « ${formatDate.slice(0, 40)} » inconnu : « DD/MM/YYYY » ou « MM/DD/YYYY ».` }
+  }
+  let jourDabord = false, moisDabord = false, ambigu = false
+  for (const v of valeurs) {
+    const b = RE_BARRES.exec(v.trim())
+    if (!b) continue
+    const a = +b[1], c = +b[2]
+    if (a > 12) jourDabord = true
+    if (c > 12) moisDabord = true
+    if (a !== c && a <= 12 && c <= 12) ambigu = true
+  }
+  if (jourDabord && moisDabord) return { erreur: 'Dates incohérentes : le jour et le mois changent de place selon les lignes.' }
+  if (jourDabord) return { ordre: 'jour' }
+  if (moisDabord) return { ordre: 'mois' }
+  if (ambigu) return { erreur: 'Dates ambiguës (jour et mois tous deux de 1 à 12) : précise formatDate, « DD/MM/YYYY » ou « MM/DD/YYYY ».' }
+  return { ordre: 'jour' } // aucune date à barres, ou jour = mois partout : l'ordre ne change rien
+}
+
+/** « 00:02:08.2771580 » (TimeSpan .NET, « 1.02:03:04 » au-delà d'un jour), en secondes. */
+function lireDureeHms(brut: string): number | null {
+  const m = /^(?:(\d+)\.)?(\d{1,2}):(\d{2}):(\d{2})(?:\.(\d+))?$/.exec(brut.trim())
+  if (!m) return null
+  const [, jours, h, min, sec, frac] = m
+  return Math.round(+(jours ?? 0) * 86_400 + +h * 3600 + +min * 60 + +sec + (frac ? Number(`0.${frac}`) : 0))
+}
+
+// ── TopstepX ─────────────────────────────────────────────────────────────────
+
+/**
+ * Table Trades de TopstepX (« trades_export.csv ») : une ligne = un trade
+ * apparié, Id unique, dates en MM/DD/YYYY avec le décalage du poste
+ * (« 06/06/2025 17:25:45 +02:00 »), Type Long/Short, PnL brut et Fees à part.
+ */
+function parserTopstepX(lignes: string[], entetes: string[], sep: string): ResultatParse {
+  const idx = (nom: string) => entetes.indexOf(nom)
+  const trades: TradeNormalise[] = []
+  const erreurs: string[] = []
+  const vus = new Map<string, number>()
+
+  for (let i = 1; i < lignes.length; i++) {
+    const c = decouperLigneCsv(lignes[i], sep)
+    const val = (nom: string) => (idx(nom) >= 0 ? c[idx(nom)] ?? '' : '')
+    const id = val('Id')
+    const symbole = val('ContractName')
+    const entree = lireHorodatage(val('EnteredAt'), 'mois')
+    const sortie = lireHorodatage(val('ExitedAt'), 'mois')
+    const pnl = lireMontant(val('PnL'))
+    const quantite = lireQuantite(val('Size'))
+    const type = val('Type').toLowerCase()
+    const direction = type === 'long' ? 'long' : type === 'short' ? 'short' : null
+
+    const raisons: string[] = []
+    if (!id) raisons.push('Id vide')
+    if (!symbole) raisons.push('ContractName vide')
+    if (!entree) raisons.push('EnteredAt illisible')
+    if (!sortie) raisons.push('ExitedAt illisible')
+    if (pnl === null) raisons.push('PnL illisible')
+    if (quantite === null) raisons.push('Size illisible')
+    if (!direction) raisons.push('Type ni Long ni Short')
+    if (raisons.length > 0 || !entree || !sortie || pnl === null || quantite === null) {
+      erreurs.push(`Ligne ${i + 1} illisible (${raisons.join(', ')}) : ignorée.`)
+      continue
+    }
+    if (vus.has(id)) {
+      erreurs.push(`Ligne ${i + 1} : même Id que la ligne ${vus.get(id)}, ignorée.`)
+      continue
+    }
+    vus.set(id, i + 1)
+
+    const frais = lireMontant(val('Fees'))
+    trades.push({
+      source: 'topstepx-trades',
+      idExterne: id,
+      compte: null,
+      symbole,
+      direction,
+      quantite,
+      prixEntree: lireMontant(val('EntryPrice')),
+      prixSortie: lireMontant(val('ExitPrice')),
+      entreLe: entree.date,
+      sortiLe: sortie.date,
+      pnl,
+      devise: 'USD',
+      frais: frais === null ? null : Math.abs(frais),
+      dureeSec: lireDureeHms(val('TradeDuration')) ?? Math.round((sortie.date.getTime() - entree.date.getTime()) / 1000),
+      fuseau: entree.fuseau,
+      stopPrix: null,
+    })
+  }
+
+  if (trades.length === 0 && erreurs.length === 0) erreurs.push('Aucun trade dans le fichier.')
+  return { format: 'topstepx-trades', trades, erreurs }
+}
+
+// ── CSV générique ────────────────────────────────────────────────────────────
+
+type ChampCsv = Exclude<keyof ColonnesCsv, 'formatDate' | 'devise'>
+
+const CHAMPS_CSV: ChampCsv[] = [
+  'symbole', 'entreLe', 'sortiLe', 'direction', 'quantite', 'prixEntree', 'prixSortie', 'pnl', 'frais', 'idExterne', 'stopPrix',
+]
+const CHAMPS_OBLIGATOIRES: ChampCsv[] = ['symbole', 'entreLe', 'pnl']
+
+// Noms probables, comparés sans casse, accents ni ponctuation (« P&L » = « pl »).
+// Ordre des champs = ordre d'attribution ; dans un champ, le premier nom l'emporte.
+const NOMS_PROBABLES: [ChampCsv, string[]][] = [
+  ['symbole', ['symbole', 'symbol', 'instrument', 'contractname', 'contract', 'contrat', 'ticker', 'market', 'marche', 'asset', 'actif', 'produit']],
+  ['entreLe', ['entreele', 'enteredat', 'entrytime', 'entrydate', 'entrydatetime', 'opentime', 'opendate', 'opened', 'dateentree', 'heureentree', 'entree', 'dateouverture', 'heureouverture', 'ouverture', 'open', 'datetime', 'date', 'time', 'heure']],
+  ['sortiLe', ['sortile', 'exitedat', 'exittime', 'exitdate', 'exitdatetime', 'closetime', 'closedate', 'closed', 'datesortie', 'heuresortie', 'sortie', 'datecloture', 'cloture', 'fermeture', 'close']],
+  ['prixEntree', ['prixentree', 'entryprice', 'openprice', 'avgentryprice', 'prixouverture', 'entry']],
+  ['prixSortie', ['prixsortie', 'exitprice', 'closeprice', 'avgexitprice', 'prixcloture', 'exit']],
+  ['pnl', ['pnl', 'netpnl', 'realizedpnl', 'pnlnet', 'profitloss', 'pl', 'netprofit', 'profit', 'gainperte', 'resultat', 'gain']],
+  ['frais', ['frais', 'fees', 'fee', 'commission', 'commissions', 'costs']],
+  ['quantite', ['quantite', 'quantity', 'qty', 'size', 'volume', 'lots', 'lot', 'contracts', 'contrats', 'taille']],
+  ['direction', ['direction', 'side', 'sens', 'type', 'longshort', 'buysell', 'action']],
+  ['stopPrix', ['stopprix', 'stopprice', 'stoploss', 'stop', 'sl']],
+  ['idExterne', ['idexterne', 'id', 'tradeid', 'ticket', 'positionid', 'position', 'dealid', 'deal', 'orderid']],
+]
+
+const normaliserNom = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '')
+
+/** Deux colonnes du même nom (MT5 : « Time », « Price » deux fois) : « Time (2) ». */
+function entetesUniques(entetes: string[]): string[] {
+  const vus = new Map<string, number>()
+  return entetes.map(e => {
+    const n = (vus.get(e) ?? 0) + 1
+    vus.set(e, n)
+    return n === 1 ? e : `${e} (${n})`
+  })
+}
+
+/** Correspondance devinée au seul nom des colonnes (aucune ligne lue). */
+export function proposerColonnes(entetes: string[]): Partial<ColonnesCsv> {
+  const normes = entetes.map(normaliserNom)
+  const pris = new Set<number>()
+  const proposition: Partial<ColonnesCsv> = {}
+  for (const [champ, noms] of NOMS_PROBABLES) {
+    let trouve = -1
+    // D'abord le nom exact, puis un nom long contenu dans l'en-tête (« Entry Time (UTC) »).
+    for (const nom of noms) {
+      trouve = normes.findIndex((n, i) => !pris.has(i) && n === nom)
+      if (trouve >= 0) break
+    }
+    if (trouve < 0) {
+      for (const nom of noms.filter(x => x.length >= 5)) {
+        trouve = normes.findIndex((n, i) => !pris.has(i) && n.includes(nom))
+        if (trouve >= 0) break
+      }
+    }
+    if (trouve >= 0) { pris.add(trouve); proposition[champ] = entetes[trouve] }
+  }
+  return proposition
+}
+
+/** Long / short depuis les mots usuels ; null si vide, 'inconnu' sinon. */
+function lireDirection(brut: string): 'long' | 'short' | null | 'inconnu' {
+  const s = normaliserNom(brut)
+  if (!s) return null
+  if (/^(long|buy|achat|bought)/.test(s) || ['b', 'l', 'acheter'].includes(s)) return 'long'
+  if (/^(short|sell|vente|sold)/.test(s) || ['s', 'vendre'].includes(s)) return 'short'
+  return 'inconnu'
+}
+
+function parserCsvGenerique(lignes: string[], sep: string, colonnes?: Partial<ColonnesCsv>): ResultatParse {
+  const entetes = entetesUniques(decouperLigneCsv(lignes[0], sep))
+  const base = { format: 'csv-generique', entetes }
+  if (!colonnes) {
+    return {
+      ...base,
+      trades: [],
+      erreurs: ['Format non reconnu automatiquement : désigne les colonnes du fichier (symbole, entrée et P&L au minimum) pour le lire.'],
+      proposition: proposerColonnes(entetes),
+    }
+  }
+
+  // Les colonnes désignées doivent exister ; le nom exact d'abord, puis sans casse.
+  const index: Partial<Record<ChampCsv, number>> = {}
+  const erreurs: string[] = []
+  for (const champ of CHAMPS_CSV) {
+    const nom = colonnes[champ]
+    if (!nom) {
+      if (CHAMPS_OBLIGATOIRES.includes(champ)) erreurs.push(`Colonne non désignée : ${champ}.`)
+      continue
+    }
+    let i = entetes.indexOf(nom)
+    if (i < 0) i = entetes.findIndex(e => e.trim().toLowerCase() === nom.trim().toLowerCase())
+    if (i < 0) erreurs.push(`Colonne « ${nom} » (${champ}) introuvable dans le fichier.`)
+    else index[champ] = i
+  }
+  const devise = (colonnes.devise ?? 'USD').trim().toUpperCase()
+  if (!/^[A-Z]{3}$/.test(devise)) erreurs.push(`Devise « ${colonnes.devise} » inconnue : un code en trois lettres (EUR, USD...).`)
+  if (erreurs.length > 0) return { ...base, trades: [], erreurs, proposition: proposerColonnes(entetes) }
+
+  const cellules = lignes.slice(1).map(l => decouperLigneCsv(l, sep))
+  const val = (c: string[], champ: ChampCsv) => (index[champ] === undefined ? '' : c[index[champ]!] ?? '')
+  const dates = cellules.flatMap(c => [val(c, 'entreLe'), val(c, 'sortiLe')]).filter(Boolean)
+  const ordre = ordreDesDates(dates, colonnes.formatDate)
+  if ('erreur' in ordre) return { ...base, trades: [], erreurs: [ordre.erreur] }
+
+  const trades: TradeNormalise[] = []
+  const vusId = new Map<string, number>()
+  const occurrences = new Map<string, number>()
+
+  cellules.forEach((c, k) => {
+    const ligne = k + 2
+    const raisons: string[] = []
+    // Montant facultatif : vide = null ; présent mais illisible = raison.
+    const montant = (champ: ChampCsv, libelle: string) => {
+      const brut = val(c, champ)
+      if (!brut) return null
+      const n = lireMontant(brut)
+      if (n === null) raisons.push(`${libelle} illisible`)
+      return n
+    }
+
+    const symbole = val(c, 'symbole')
+    if (!symbole) raisons.push('symbole vide')
+    const entree = lireHorodatage(val(c, 'entreLe'), ordre.ordre)
+    if (!entree) raisons.push("date d'entrée illisible")
+    let sortie: Horodatage | null = null
+    if (val(c, 'sortiLe')) {
+      sortie = lireHorodatage(val(c, 'sortiLe'), ordre.ordre)
+      if (!sortie) raisons.push('date de sortie illisible')
+    }
+    const pnl = lireMontant(val(c, 'pnl'))
+    if (pnl === null) raisons.push('P&L illisible')
+    let quantite: number | null = 1
+    if (index.quantite !== undefined) {
+      quantite = lireQuantite(val(c, 'quantite'))
+      if (quantite === null) raisons.push("quantité illisible (un nombre entier de contrats ou d'unités ; les lots décimaux ne sont pas encore pris en charge)")
+    }
+    const sens = lireDirection(val(c, 'direction'))
+    if (sens === 'inconnu') raisons.push(`sens « ${val(c, 'direction').slice(0, 20)} » inconnu`)
+    const prixEntree = montant('prixEntree', "prix d'entrée")
+    const prixSortie = montant('prixSortie', 'prix de sortie')
+    const frais = montant('frais', 'frais')
+    const stop = montant('stopPrix', 'stop')
+    if (entree && sortie && sortie.date.getTime() < entree.date.getTime()) raisons.push("sortie avant l'entrée")
+
+    if (raisons.length > 0 || !entree || pnl === null || quantite === null) {
+      erreurs.push(`Ligne ${ligne} illisible (${raisons.join(', ')}) : ignorée.`)
+      return
+    }
+
+    // Clé de dédoublonnage. Avec un identifiant : il est complété du symbole et
+    // de l'instant d'entrée, pour que deux fichiers de plateformes différentes
+    // qui numérotent tous deux « 1, 2, 3 » ne se confondent pas. Sans : une
+    // empreinte, et un rang quand deux lignes identiques se suivent (deux
+    // partiels au même prix), stable d'un réimport à l'autre.
+    const id = val(c, 'idExterne')
+    let idExterne: string
+    if (id) {
+      if (vusId.has(id)) {
+        erreurs.push(`Ligne ${ligne} : même identifiant que la ligne ${vusId.get(id)}, ignorée.`)
+        return
+      }
+      vusId.set(id, ligne)
+      idExterne = `${id}|${symbole}|${entree.date.toISOString()}`
+    } else {
+      const empreinte = `${symbole}|${entree.date.toISOString()}|${quantite}|${pnl}`
+      const rang = (occurrences.get(empreinte) ?? 0) + 1
+      occurrences.set(empreinte, rang)
+      idExterne = rang === 1 ? empreinte : `${empreinte}#${rang}`
+    }
+
+    trades.push({
+      source: 'csv-generique',
+      idExterne,
+      compte: null,
+      symbole,
+      direction: sens === 'inconnu' ? null : sens,
+      quantite,
+      prixEntree,
+      prixSortie,
+      entreLe: entree.date,
+      sortiLe: sortie?.date ?? null,
+      pnl,
+      devise,
+      frais: frais === null ? null : Math.abs(frais),
+      dureeSec: sortie ? Math.round((sortie.date.getTime() - entree.date.getTime()) / 1000) : null,
+      fuseau: entree.fuseau,
+      // Un stop à 0 est l'absence de stop chez MT4/MT5 (« S / L » vide).
+      stopPrix: stop === null || stop === 0 ? null : stop,
+    })
+  })
+
+  if (trades.length === 0 && erreurs.length === 0) erreurs.push('Aucun trade dans le fichier.')
+  return { ...base, trades, erreurs }
 }
 
 function parserTradovatePerformance(lignes: string[], entetes: string[], fichier?: string): ResultatParse {
