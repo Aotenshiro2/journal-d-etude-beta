@@ -3,7 +3,7 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
-## Agent AOK : le fil de Melanie, la duree libre des acces broker, les demandes restees sans reponse (29/10/2026, NON commite, NON deploye, aucune migration)
+## Agent AOK : le fil de Melanie, la duree libre des acces broker, les demandes restees sans reponse (29/10/2026, DEPLOYE le 29/10 a 13:05, commit 1548eda, aucune migration)
 
 Bug reel du 28/10 (fil de Melanie, 12:53, 14:21, 22:03) : « Je vérifie... » puis plus rien. CAUSE PROUVEE (AiUsage,
 cockpit_generations, historique en base ; logs Vercel du 28/10 plus disponibles) : 6 brouillons demandes a generer_post,
@@ -34,11 +34,18 @@ changee le 28/10 est celle du bot des membres (anthropic-liveclub-bot, posee sur
 - Verifs : `node scripts/verifier-agent-equipe.mjs` (11 blocs), verifier-repartition (22), verifier-liveclub (63),
   tsc, eslint. Eval ciblee `node --env-file=.env.local scripts/eval-agent-equipe.mjs` (mode essai, aucune ecriture) :
   E1 message de Mel 22:03, E2 capture + « Vérifie ça » de Brice, E3 « reprends la demande de Mel » : 3/3 le 29/10.
-- A FAIRE apres GO et deploiement : `scripts/regulariser-victor-weber.mjs` (lecture, puis --ecrire, avec les variables
-  de prod : RaiseFx sans taux, depot 400 EUR du 28/10 SUPPOSE avec 400 EUR de commission, acces 4 mois, exemption
-  2a1da732 fermee) ; `scripts/poser-taux-broker.mjs --partenaire "<nom>" --montant-fixe 650 --depuis <date>` pour
-  l'autre broker (nom inconnu : aucun partenaire en base). Les 3 demandes de Mel du 28/10 restent en suspens dans son
-  fil : « reprends la demande de Mel » apres le deploiement.
+- 29/10 apres deploiement : `regulariser-victor-weber.mjs --ecrire` a fait l'etape 1 (RaiseFx enregistre, broker, sans
+  taux) puis s'est ARRETE a l'etape 2 sans rien ecrire : `vercel env pull` rend les variables « Sensitive » sous la
+  forme du texte « [SENSITIVE] » (cles Stripe et sans doute Resend), Stripe repond 401. La prod n'est pas en cause.
+  Un script local ne peut donc pas poser un acces broker : passer par l'app en ligne. Suite : Brice dit a Agent AOK
+  « reprends la demande de Mel » ; le bot traite chez elle les brouillons et le depot de Victor (carte : RaiseFx,
+  400 EUR, commission 400, 4 mois). Une fois l'acces pose, relancer le script : etapes 1 et 2 sautees, droit verifie
+  sans l'exemption, exemption 2a1da732 fermee (base seulement).
+- Brokers (Brice, 29/10) : RaiseFx et Pulse. Si les 6 acces d'avant (source « raisefx » par defaut du code) etaient
+  bien RaiseFx, la commission etait 650 EUR fixes par depot des 1000 EUR, a partager a deux ; le palier minimum a
+  baisse depuis (Victor : 400 EUR). Brice ne connait pas le detail des accords : A DEMANDER A MEL avant tout
+  `poser-taux-broker.mjs`. Agent AOK ne sait pas encore poser une question NOUVELLE a Mel de lui-meme
+  (reprendre_demande exige une demande en suspens).
 
 ## Academie : le BILLET DU JOUR (27/10/2026, commite NON pousse, migration 20261027190000 APPLIQUEE en prod)
 

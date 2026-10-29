@@ -36,7 +36,7 @@ const EXEMPTION = '2a1da732-88c9-4580-877c-91bf71f70689'
 const DEPOT = { partenaire: 'RaiseFx', email: EMAIL, client: 'Victor Weber', montant: 400, le: '2026-10-28', mois: 4, commission: 400,
   note: 'Date du dépôt supposée (28/10, Brice), à confirmer par Mel. Demande de Mel du 28/10 22:03 ; remplace l\'exemption favorisé du 28/10.' }
 const PARTENAIRE = { partenaire: 'RaiseFx', nature: 'broker', a_partir_du: '2026-10-28',
-  note: 'Taux général à demander au prochain client (Brice, 29/10). Premier dépôt : Victor Weber, 400 EUR de commission sur 400 EUR.' }
+  note: 'Si les accès d\'avant étaient RaiseFx (et non Pulse) : 650 EUR fixes par dépôt dès 1000 EUR (Brice, 29/10) ; palier minimum abaissé depuis. Accord à confirmer par Mel.' }
 
 const { prisma } = await import('../src/lib/db.ts')
 const { validerAction, executerAction, resumeAction } = await import('../src/lib/stripe-actions.ts')
