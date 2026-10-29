@@ -18,6 +18,7 @@ export interface TradeNormalise {
   compte: string | null
   symbole: string
   direction: 'long' | 'short' | null
+  /** Contrats, unités ou lots : décimal permis (CFD : 0,5 lot). */
   quantite: number
   prixEntree: number | null
   prixSortie: number | null
@@ -28,7 +29,9 @@ export interface TradeNormalise {
   frais: number | null
   dureeSec: number | null
   /** Décalage lu dans le fichier (« +02:00 ») : entreLe est alors un vrai
-   *  instant UTC. Absent ou null : heure telle qu'affichée (Tradovate). */
+   *  instant UTC. Absent ou null : heure telle qu'affichée (Tradovate), que
+   *  appliquerFuseau (fuseau.ts) ramène à un instant si le membre donne son
+   *  fuseau IANA, écrit alors ici. */
   fuseau?: string | null
   /** null = le fichier ne dit pas s'il y avait un stop. */
   stopPrix?: number | null
@@ -194,13 +197,13 @@ function separateurDe(ligne: string): string {
   return candidats[0][1] > 0 ? candidats[0][0] : ','
 }
 
-/** Nombre entier positif (« 3 », « 1,000 ») ; null si illisible, nul ou décimal. */
+/** Quantité positive, décimale permise (« 3 », « 0,5 », « 1.5 Lots », « 1,000 » = mille) ; null si illisible ou nulle. */
 function lireQuantite(brut: string): number | null {
-  const s = brut.trim()
+  const s = brut.trim().replace(/\s*(lots?|units?|unités?|contracts?|contrats?)$/i, '')
   const n = /^[1-9]\d{0,2}(,\d{3})+$/.test(s) ? Number(s.replace(/,/g, '')) : lireMontant(s)
   if (n === null || !Number.isFinite(n)) return null
   const q = Math.abs(n)
-  return Number.isInteger(q) && q > 0 ? q : null
+  return q > 0 ? q : null
 }
 
 // ── Horodatages ──────────────────────────────────────────────────────────────
@@ -388,7 +391,8 @@ const NOMS_PROBABLES: [ChampCsv, string[]][] = [
   ['idExterne', ['idexterne', 'id', 'tradeid', 'ticket', 'positionid', 'position', 'dealid', 'deal', 'orderid']],
 ]
 
-const normaliserNom = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '')
+// NFD sépare la lettre de son accent ; le filtre final retire l'accent avec la ponctuation.
+const normaliserNom = (s: string) => s.normalize('NFD').toLowerCase().replace(/[^a-z0-9]/g, '')
 
 /** Deux colonnes du même nom (MT5 : « Time », « Price » deux fois) : « Time (2) ». */
 function entetesUniques(entetes: string[]): string[] {
@@ -498,7 +502,7 @@ function parserCsvGenerique(lignes: string[], sep: string, colonnes?: Partial<Co
     let quantite: number | null = 1
     if (index.quantite !== undefined) {
       quantite = lireQuantite(val(c, 'quantite'))
-      if (quantite === null) raisons.push("quantité illisible (un nombre entier de contrats ou d'unités ; les lots décimaux ne sont pas encore pris en charge)")
+      if (quantite === null) raisons.push('quantité illisible (un nombre de contrats, d\'unités ou de lots, plus grand que 0)')
     }
     const sens = lireDirection(val(c, 'direction'))
     if (sens === 'inconnu') raisons.push(`sens « ${val(c, 'direction').slice(0, 20)} » inconnu`)

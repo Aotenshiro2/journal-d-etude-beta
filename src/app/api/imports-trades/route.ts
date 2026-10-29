@@ -2,11 +2,15 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getUserId } from '@/lib/api-auth'
 import { parserFichierTrades, separerNouveaux } from '@/lib/imports-trades'
+import { appliquerFuseau, fuseauDemande } from '@/lib/fuseau'
 import { confirmerImport, supprimerExecutions } from '@/lib/trades-serveur'
 
 /**
  * POST /api/imports-trades — analyse puis import d'un fichier de trades.
- * Body : { csv: string, fichier?: string, confirmer?: boolean }
+ * Body : { csv: string, fichier?: string, fuseau?: string, confirmer?: boolean }
+ * - fuseau (IANA, « Europe/Paris », facultatif, 30/10/2026) : les heures
+ *   « telles qu'affichées » y sont lues pour en faire de vrais instants ;
+ *   inconnu = 400 ; absent = comportement d'avant.
  * - confirmer absent/false → APERÇU seulement : rien n'est écrit. La réponse
  *   dit combien de trades sont lus, combien sont nouveaux, combien déjà
  *   connus (dédup par (source, idExterne)) — la garantie « réimporter le
@@ -24,10 +28,14 @@ export async function POST(req: NextRequest) {
     const csv = typeof body.csv === 'string' ? body.csv : ''
     const fichier = typeof body.fichier === 'string' ? body.fichier.slice(0, 200) : null
     const confirmer = body.confirmer === true
+    const fuseau = fuseauDemande(body.fuseau)
+    if ('erreur' in fuseau) return NextResponse.json({ error: fuseau.erreur }, { status: 400 })
     if (!csv.trim()) return NextResponse.json({ error: 'Fichier vide.' }, { status: 400 })
     if (csv.length > 5_000_000) return NextResponse.json({ error: 'Fichier trop gros (5 Mo max).' }, { status: 400 })
 
-    const { format, trades, erreurs } = parserFichierTrades(csv, fichier ?? undefined)
+    const lu = parserFichierTrades(csv, fichier ?? undefined)
+    const { format, erreurs } = lu
+    const trades = fuseau.fuseau ? appliquerFuseau(lu.trades, fuseau.fuseau) : lu.trades
     if (trades.length === 0) {
       return NextResponse.json({ format, lus: 0, nouveaux: 0, dejaConnus: 0, importes: 0, erreurs, apercu: [] })
     }

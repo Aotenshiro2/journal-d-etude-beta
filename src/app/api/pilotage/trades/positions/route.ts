@@ -51,7 +51,7 @@ function lireBorne(brut: string | null, fin: boolean): number | null {
 export async function GET(req: NextRequest) {
   const cors = corsHeaders(req, METHODES)
   const userId = await getUserId(req)
-  if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: cors })
+  if (!userId) return NextResponse.json({ error: 'Non connecté.' }, { status: 401, headers: cors })
 
   const p = req.nextUrl.searchParams
   const compteId = p.get('compteId')?.trim() || null
@@ -79,7 +79,7 @@ const texte = (brut: unknown) => (typeof brut === 'string' && brut.trim() ? brut
 export async function PATCH(req: NextRequest) {
   const cors = corsHeaders(req, METHODES)
   const userId = await getUserId(req)
-  if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: cors })
+  if (!userId) return NextResponse.json({ error: 'Non connecté.' }, { status: 401, headers: cors })
   const refus = (error: string, status: number) => NextResponse.json({ error }, { status, headers: cors })
 
   const body = await req.json().catch(() => null)

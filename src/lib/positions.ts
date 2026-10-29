@@ -174,7 +174,7 @@ export function vuePositions(executions: Execution[]): VuePosition[] {
       devise: premiere.devise,
       entreLe: premiere.entreLe.toISOString(),
       sortiLe: sorties.length > 0 ? new Date(Math.max(...sorties)).toISOString() : null,
-      quantite: g.reduce((s, e) => s + e.quantite, 0),
+      quantite: arrondi(g.reduce((s, e) => s + e.quantite, 0)), // lots décimaux : 0,1 + 0,2
       pnl: arrondi(g.reduce((s, e) => s + e.pnl, 0)),
       frais: frais.length > 0 ? arrondi(frais.reduce((s, e) => s + (e.frais ?? 0), 0)) : null,
       prixEntree: moyennePonderee(g, 'prixEntree'),

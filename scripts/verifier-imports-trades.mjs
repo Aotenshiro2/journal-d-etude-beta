@@ -9,6 +9,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { parserFichierTrades, proposerColonnes, separerNouveaux, lireColonnes } from '../src/lib/imports-trades.ts'
 import { liensAHarmoniser, planFusion, positionsRecalculees, regrouperEnPositions, totauxParCompte, vuePositions } from '../src/lib/positions.ts'
 import { candidatsPourPosition, proposerLiens, segmentsDesNotes, FENETRE_OUVERTE_MS } from '../src/lib/correspondances-carnet.ts'
+import { appliquerFuseau, decalageMs, fuseauDemande, instantDepuisHeureLocale, nomFuseau } from '../src/lib/fuseau.ts'
 
 let n = 0
 const bloc = (nom, f) => { f(); n++; console.log(`ok  ${nom}`) }
@@ -16,6 +17,9 @@ const ids = r => r.trades.map(t => t.idExterne)
 const reimport = r => separerNouveaux(r.trades, new Set(ids(r))).length
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
+
+// Le BOM qu'Excel et TopstepX mettent en tete de fichier (ecrit en code, jamais en caractere invisible).
+const BOM = String.fromCharCode(0xfeff)
 
 const TRADOVATE = [
   'symbol,_priceFormat,_priceFormatType,_tickSize,buyFillId,sellFillId,qty,buyPrice,sellPrice,pnl,boughtTimestamp,soldTimestamp,duration',
@@ -25,7 +29,7 @@ const TRADOVATE = [
 
 const ENTETES_TOPSTEPX = 'Id,ContractName,EnteredAt,ExitedAt,EntryPrice,ExitPrice,Fees,PnL,Size,Type,TradeDay,TradeDuration'
 const TOPSTEPX = [
-  '﻿' + ENTETES_TOPSTEPX,
+  BOM + ENTETES_TOPSTEPX,
   '500000001,MNQZ6,10/05/2026 15:30:00 +02:00,10/05/2026 15:32:30 +02:00,20000.000000000,20005.000000000,0.74000,10.000000000,1,Long,10/05/2026 00:00:00 -05:00,00:02:30.1234560',
   '500000002,MNQZ6,10/05/2026 15:31:00 +02:00,10/05/2026 15:40:00 +02:00,20002.000000000,20010.000000000,0.74000,16.000000000,1,Long,10/05/2026 00:00:00 -05:00,00:09:00.0000000',
   '500000003,MNQZ6,10/05/2026 16:00:00 +02:00,10/05/2026 16:05:00 +02:00,20020.000000000,20015.000000000,1.48000,20.000000000,2,Short,10/05/2026 00:00:00 -05:00,1.00:05:00',
@@ -44,6 +48,7 @@ const GENERIQUE = [
   ';16/10/2026 10:00:00;16/10/2026 10:30:00;Vente;1;19100;19080;abc;;T-5;',
   'DAX;17/10/2026 10:00:00;17/10/2026 10:30:00;Achat;0,5;19100;19080;10;;T-6;',
   'DAX;18/10/2026 10:00:00;18/10/2026 10:30:00;Achat;1;19100;19080;10;;T-1;',
+  'DAX;19/10/2026 10:00:00;19/10/2026 10:30:00;Achat;abc;19100;19080;10;;T-7;',
 ].join('\n')
 const COLONNES = {
   symbole: 'Instrument', entreLe: 'Ouverture', sortiLe: 'Clôture', direction: 'Sens', quantite: 'Quantité',
@@ -52,7 +57,7 @@ const COLONNES = {
 }
 
 const QUANTOWER = [
-  '﻿Account,Symbol,Description,Symbol type,Expiration date,Strike price,Side,Order type,Quantity,Price,Trigger price,TIF,Status,Date/Time,Order ID,Order group ID,Connection name,Original status,Additional parameters,Exchange,Comment,Average fill price,Order value,Qty. filled,Qty. remaining,',
+  BOM + 'Account,Symbol,Description,Symbol type,Expiration date,Strike price,Side,Order type,Quantity,Price,Trigger price,TIF,Status,Date/Time,Order ID,Order group ID,Connection name,Original status,Additional parameters,Exchange,Comment,Average fill price,Order value,Qty. filled,Qty. remaining,',
   'DEMO-001,NQZ6,Contrat de demo,Futures,18/12/2026 00:00:00 -05:00,0,Buy,Limit,1,"20000,5",,GTC,Filled,05/10/2026 09:00:00 -05:00,1000001,,Rithmic,complete,,CME,,"20000,5",400010,1,0,',
 ].join('\r\n')
 
@@ -126,11 +131,11 @@ bloc('CSV generique sans colonnes : en-tetes et proposition, aucune ligne lue', 
   })
 })
 
-bloc('CSV generique avec colonnes : montants francais, sens, stop, rejets motives, reimport = 0', () => {
+bloc('CSV generique avec colonnes : montants francais, sens, stop, lot decimal, rejets motives, reimport = 0', () => {
   const r = parserFichierTrades(GENERIQUE, 'export.csv', lireColonnes(COLONNES))
   assert.equal(r.format, 'csv-generique')
-  assert.equal(r.trades.length, 3)
-  const [a, b, c] = r.trades
+  assert.equal(r.trades.length, 4)
+  const [a, b, c, d] = r.trades
   assert.equal(a.entreLe.toISOString(), '2026-10-06T09:15:00.000Z') // jour d'abord (le 13/10 tranche)
   assert.equal(a.fuseau, null) // pas de decalage dans le fichier
   assert.equal(a.direction, 'long')
@@ -146,11 +151,15 @@ bloc('CSV generique avec colonnes : montants francais, sens, stop, rejets motive
   assert.equal(b.stopPrix, null) // 0 = pas de stop (MT4/MT5)
   assert.equal(c.sortiLe, null)
   assert.equal(c.prixSortie, null)
+  assert.equal(d.quantite, 0.5) // un demi-lot de CFD
   assert.equal(r.erreurs.length, 4)
   assert.match(r.erreurs[0], /^Ligne 5 illisible \(date d'entrée illisible\)/)
   assert.match(r.erreurs[1], /^Ligne 6 illisible \(symbole vide, P&L illisible\)/)
-  assert.match(r.erreurs[2], /^Ligne 7 illisible \(quantité illisible/)
-  assert.match(r.erreurs[3], /^Ligne 8 : même identifiant que la ligne 2/)
+  assert.match(r.erreurs[2], /^Ligne 8 : même identifiant que la ligne 2/)
+  assert.match(r.erreurs[3], /^Ligne 9 illisible \(quantité illisible/)
+  // Les unites ecrites apres le nombre (cTrader) ne genent pas.
+  const lots = parserFichierTrades('s,e,q,p\nEURUSD,2026-10-05 09:00:00,1.5 Lots,12\nEURUSD,2026-10-05 10:00:00,0.01,1\n', undefined, { symbole: 's', entreLe: 'e', quantite: 'q', pnl: 'p' })
+  assert.deepEqual(lots.trades.map(t => t.quantite), [1.5, 0.01])
   assert.equal(reimport(parserFichierTrades(GENERIQUE, 'export.csv', lireColonnes(COLONNES))), 0)
 })
 
@@ -198,6 +207,53 @@ bloc('Quantower : reconnu et refuse, avec le nouveau message', () => {
   assert.equal(r.trades.length, 0)
   assert.equal(r.erreurs[0], "Ce fichier est un historique d'ordres, pas de trades : exporte le rapport Performance de Tradovate, ou envoie-nous ton fichier au support pour qu'on l'ajoute.")
   assert.deepEqual(parserFichierTrades('  \n').erreurs, ['Fichier vide.'])
+})
+
+bloc('fuseau IANA : ete et hiver a Paris, New York, changement d heure, fuseau inconnu refuse', () => {
+  const local = iso => new Date(`${iso}Z`) // l'heure telle qu'affichee, codee comme les lecteurs la rendent
+  assert.equal(instantDepuisHeureLocale(local('2026-07-15T10:00:00'), 'Europe/Paris').toISOString(), '2026-07-15T08:00:00.000Z')
+  assert.equal(instantDepuisHeureLocale(local('2026-01-15T10:00:00'), 'Europe/Paris').toISOString(), '2026-01-15T09:00:00.000Z')
+  assert.equal(instantDepuisHeureLocale(local('2026-07-15T10:00:00'), 'America/New_York').toISOString(), '2026-07-15T14:00:00.000Z')
+  assert.equal(instantDepuisHeureLocale(local('2026-01-15T10:00:00.250'), 'America/New_York').toISOString(), '2026-01-15T15:00:00.250Z')
+  // 01:30 a Paris le jour du passage a l'heure d'ete : encore l'heure d'hiver.
+  // La premiere passe lit +2 h (01:30 UTC est deja apres le changement), la seconde corrige.
+  assert.equal(instantDepuisHeureLocale(local('2026-03-29T01:30:00'), 'Europe/Paris').toISOString(), '2026-03-29T00:30:00.000Z')
+  assert.equal(instantDepuisHeureLocale(local('2026-03-29T03:30:00'), 'Europe/Paris').toISOString(), '2026-03-29T01:30:00.000Z')
+  assert.equal(decalageMs('Europe/Paris', Date.UTC(2026, 6, 15, 8)), 2 * 3600_000)
+  assert.equal(nomFuseau('Europe/Paris'), 'Europe/Paris')
+  assert.equal(nomFuseau('Mars/Olympus'), null)
+  assert.equal(nomFuseau(''), null)
+  assert.deepEqual(fuseauDemande(undefined), { fuseau: null })
+  assert.deepEqual(fuseauDemande(''), { fuseau: null })
+  assert.deepEqual(fuseauDemande('America/New_York'), { fuseau: 'America/New_York' })
+  assert.match(fuseauDemande('Mars/Olympus').erreur, /^Fuseau inconnu : « Mars\/Olympus »\. Donne un nom IANA/)
+  assert.match(fuseauDemande(42).erreur, /^Fuseau inconnu/)
+})
+
+bloc('Tradovate importe avec fuseau Europe/Paris : vrais instants, meme cle, rapprochement sur le vrai instant', () => {
+  const naif = parserFichierTrades(TRADOVATE)
+  const [long] = appliquerFuseau(naif.trades, 'Europe/Paris')
+  assert.equal(long.entreLe.toISOString(), '2026-10-05T13:30:00.000Z') // 15:30 a Paris, heure d'ete : 2 h de moins
+  assert.equal(long.sortiLe.toISOString(), '2026-10-05T13:35:10.000Z')
+  assert.equal(long.fuseau, 'Europe/Paris')
+  assert.equal(long.idExterne, naif.trades[0].idExterne) // reimporter avec ou sans fuseau : 0 nouveau
+  assert.equal(long.dureeSec, 310)
+  assert.equal(separerNouveaux(appliquerFuseau(naif.trades, 'Europe/Paris'), new Set(ids(naif))).length, 0)
+  // Le fichier initial n'est pas touche (fonction pure).
+  assert.equal(naif.trades[0].entreLe.toISOString(), '2026-10-05T15:30:00.000Z')
+  // Un decalage lu dans le fichier l'emporte : TopstepX ne bouge pas.
+  const [topstep] = appliquerFuseau(parserFichierTrades(TOPSTEPX).trades, 'America/New_York')
+  assert.equal(topstep.entreLe.toISOString(), '2026-10-05T13:30:00.000Z')
+  assert.equal(topstep.fuseau, '+02:00')
+  // CSV generique : la ligne avec « Z » garde son instant, la ligne sans decalage passe dans le fuseau.
+  const mixte = parserFichierTrades('s,e,p\nNQ,2026-10-05T08:00:00Z,1\nNQ,2026-10-05 10:00:00,2\n', undefined, { symbole: 's', entreLe: 'e', pnl: 'p' })
+  assert.deepEqual(appliquerFuseau(mixte.trades, 'Europe/Paris').map(t => [t.entreLe.toISOString(), t.fuseau]), [
+    ['2026-10-05T08:00:00.000Z', '+00:00'], ['2026-10-05T08:00:00.000Z', 'Europe/Paris'],
+  ])
+  // Le segment du Carnet (vrai instant, 13:29 a 13:40 UTC) ne se rapproche que du trade remis a l'heure.
+  const segments = [{ segmentRef: 'seg', noteId: 'n', noteTitle: 'Seance', ordre: 1, startedAt: Date.parse('2026-10-05T13:29:00Z'), closedAt: Date.parse('2026-10-05T13:40:00Z') }]
+  assert.equal(candidatsPourPosition({ entreLe: long.entreLe, sortiLe: long.sortiLe }, segments).length, 1)
+  assert.equal(candidatsPourPosition({ entreLe: naif.trades[0].entreLe, sortiLe: naif.trades[0].sortiLe }, segments).length, 0)
 })
 
 bloc('lireColonnes : seuls les champs connus, en chaines', () => {
@@ -256,6 +312,14 @@ bloc('vue agregee : sommes, moyennes ponderees, premier stop, bornes', () => {
     quantite: 4, pnl: 0.3, frais: 1.2, prixEntree: 103, prixSortie: 111.5, stopPrix: 95,
     executions: 2, segmentRef: 's1', fuseau: '+02:00', manuelle: false,
   })
+  // Lots decimaux (CFD) : 0,1 + 0,2 lot font 0,3 (pas 0,30000000000000004), moyenne ponderee juste.
+  const [cfd] = vuePositions([
+    ex('a', '10:00', '10:10', { positionId: 'a', quantite: 0.1, prixEntree: 1.1, prixSortie: 1.2 }),
+    ex('b', '10:05', '10:20', { positionId: 'a', quantite: 0.2, prixEntree: 1.4, prixSortie: 1.5 }),
+  ])
+  assert.equal(cfd.quantite, 0.3)
+  assert.equal(cfd.prixEntree, 1.3)
+  assert.equal(cfd.prixSortie, 1.4)
   // Une execution d'avant le regroupement (positionId vide) est sa propre position.
   const vues = vuePositions([ex('x', '09:00', '09:05'), ex('y', '11:00', null)])
   assert.deepEqual(vues.map(p => [p.positionId, p.frais, p.prixEntree, p.sortiLe]), [['y', null, null, null], ['x', null, null, '2026-10-05T09:05:00.000Z']])
@@ -373,7 +437,13 @@ bloc('chaque acces a TradeImport est borne au userId ; CORS et jeton comme relev
   for (const f of fichiers.slice(1, 3)) {
     const source = lire(f)
     assert.match(source, /export async function OPTIONS\(req: NextRequest\) \{\s*return corsPreflight\(req, METHODES\)/)
-    assert.match(source, /const userId = await getUserId\(req\)\s*if \(!userId\) return NextResponse\.json\(\{ error: 'Unauthorized' \}, \{ status: 401, headers: cors \}\)/)
+    assert.match(source, /const userId = await getUserId\(req\)\s*if \(!userId\) return NextResponse\.json\(\{ error: 'Non connecté\.' \}, \{ status: 401, headers: cors \}\)/)
+  }
+  // Le fuseau demande est valide AVANT toute lecture, et applique aux deux imports (Pilotage et ecran du journal).
+  for (const f of [fichiers[1], fichiers[3]]) {
+    const source = lire(f)
+    assert.match(source, /const fuseau = fuseauDemande\(body\.fuseau\)\s*if \('erreur' in fuseau\) return NextResponse\.json\(\{ error: fuseau\.erreur \}, \{ status: 400/)
+    assert.match(source, /const trades = fuseau\.fuseau \? appliquerFuseau\(lu\.trades, fuseau\.fuseau\) : lu\.trades/)
   }
   assert.match(lire(fichiers[1]), /const METHODES = 'POST, DELETE, OPTIONS'/)
   assert.match(lire(fichiers[2]), /const METHODES = 'GET, PATCH, OPTIONS'/)
@@ -383,7 +453,7 @@ bloc('chaque acces a TradeImport est borne au userId ; CORS et jeton comme relev
   // L'insertion et la reecriture des positions partent dans une transaction.
   assert.match(lire(fichiers[0]), /prisma\.\$transaction\(\[\s*prisma\.tradeImport\.createMany\(\{[\s\S]*?skipDuplicates: true,\s*\}\),\s*\.\.\.ecrituresDesChangements/)
   // Les modules purs n'importent rien (ni @/, ni Next, ni Prisma) : ce script les charge tels quels.
-  for (const pur of ['../src/lib/imports-trades.ts', '../src/lib/positions.ts', '../src/lib/correspondances-carnet.ts']) {
+  for (const pur of ['../src/lib/imports-trades.ts', '../src/lib/positions.ts', '../src/lib/correspondances-carnet.ts', '../src/lib/fuseau.ts']) {
     assert.ok(!/^import /m.test(lire(pur)), `${pur} importe quelque chose`)
   }
   // Le filtre du membre passe APRES le filtre de l'appelant : il ne se contourne pas.
@@ -392,10 +462,10 @@ bloc('chaque acces a TradeImport est borne au userId ; CORS et jeton comme relev
   assert.match(lire('../src/lib/mentorat-brief.ts'), /prisma\.tradeImport\.findMany\(\{\s*where: \{ userId, entreLe: \{ gte: sinceDate \} \},\s*select: \{ symbole: true, pnl: true, devise: true \},/)
 })
 
-bloc('schema et migration : les six colonnes, les trois index, la table reste fermee', () => {
+bloc('schema et migration : les six colonnes, quantite decimale, les trois index, la table reste fermee', () => {
   const schema = readFileSync(new URL('../prisma/schema.prisma', import.meta.url), 'utf8')
   const modele = schema.slice(schema.indexOf('model TradeImport {'), schema.indexOf('}', schema.indexOf('model TradeImport {')))
-  for (const ligne of [/positionId\s+String\?/, /positionManuelle\s+Boolean\s+@default\(false\)/, /compteId\s+String\?/, /segmentRef\s+String\?/, /stopPrix\s+Float\?/, /fuseau\s+String\?/,
+  for (const ligne of [/quantite\s+Float\s+@default\(1\)/, /positionId\s+String\?/, /positionManuelle\s+Boolean\s+@default\(false\)/, /compteId\s+String\?/, /segmentRef\s+String\?/, /stopPrix\s+Float\?/, /fuseau\s+String\?/,
     /@@index\(\[userId, positionId\]\)/, /@@index\(\[userId, compteId\]\)/, /@@index\(\[userId, segmentRef\]\)/]) {
     assert.match(modele, ligne)
   }
@@ -405,6 +475,8 @@ bloc('schema et migration : les six colonnes, les trois index, la table reste fe
     for (const col of ['positionId" TEXT', 'positionManuelle" BOOLEAN NOT NULL DEFAULT false', 'compteId" TEXT', 'segmentRef" TEXT', 'stopPrix" DOUBLE PRECISION', 'fuseau" TEXT']) {
       assert.ok(sql.includes(`ADD COLUMN IF NOT EXISTS "${col}`), col)
     }
+    assert.ok(sql.includes('ALTER TABLE "TradeImport" ALTER COLUMN "quantite" TYPE DOUBLE PRECISION;'))
+    assert.ok(sql.includes('ALTER TABLE "TradeImport" ALTER COLUMN "quantite" SET DEFAULT 1;'))
     for (const idx of ['positionId', 'compteId', 'segmentRef']) assert.ok(sql.includes(`CREATE INDEX IF NOT EXISTS "TradeImport_userId_${idx}_idx"`), idx)
     assert.match(sql, /ENABLE ROW LEVEL SECURITY;\s*REVOKE ALL ON TABLE "TradeImport" FROM anon, authenticated;/)
   }

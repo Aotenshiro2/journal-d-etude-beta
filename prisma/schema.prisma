@@ -373,7 +373,7 @@ model TradeImport {
   compte     String?
   symbole    String
   direction  String? // 'long' | 'short'
-  quantite   Int       @default(1)
+  quantite   Float     @default(1) // décimale pour les lots CFD (0,5), 30/10/2026
   prixEntree Float?
   prixSortie Float?
   entreLe    DateTime // instant réel si `fuseau` est connu, sinon heure telle qu'affichée
@@ -389,7 +389,7 @@ model TradeImport {
   compteId         String? // compte Pilotage (chaîne opaque venue de son localStorage)
   segmentRef       String? // Note.trades[].id : le segment du Carnet lié
   stopPrix         Float? // null = le fichier ne dit pas s'il y avait un stop
-  fuseau           String? // décalage lu dans le fichier (« +02:00 »), null = inconnu
+  fuseau           String? // décalage lu dans le fichier (« +02:00 ») ou fuseau IANA donné à l'import (« Europe/Paris ») ; null = inconnu
 
   @@unique([userId, source, idExterne])
   @@index([userId, entreLe])

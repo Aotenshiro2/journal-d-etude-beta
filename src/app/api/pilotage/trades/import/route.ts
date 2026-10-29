@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { getUserId } from '@/lib/api-auth'
 import { corsHeaders, corsPreflight } from '@/lib/support-cors'
 import { lireColonnes, parserFichierTrades, separerNouveaux } from '@/lib/imports-trades'
+import { appliquerFuseau, fuseauDemande } from '@/lib/fuseau'
 import { confirmerImport, supprimerExecutions } from '@/lib/trades-serveur'
 
 // Un gros export (5 Mo) se lit, se dédoublonne et se regroupe en quelques
@@ -17,7 +18,11 @@ export const maxDuration = 60
  * rattache à un de SES comptes (`compteId`, chaîne opaque pour le journal) et
  * calcule lui-même ses ratios à partir de GET /api/pilotage/trades/positions.
  *
- * POST { csv, fichier?, compteId, colonnes?, confirmer? }
+ * POST { csv, fichier?, compteId, colonnes?, fuseau?, confirmer? }
+ * - `fuseau` : le fuseau IANA du membre (« Europe/Paris »). Les heures « telles
+ *   qu'affichées » (Tradovate, CSV sans décalage) y sont lues pour en faire de
+ *   vrais instants, et ce nom est écrit dans `fuseau`. Inconnu : 400. Absent :
+ *   heures gardées telles quelles, `fuseau` null, comme avant.
  * - sans `confirmer` : APERÇU, rien n'est écrit. `{ format, lus, nouveaux,
  *   dejaConnus, erreurs, entetes?, proposition?, apercu }` (30 premières
  *   exécutions). Un CSV inconnu sans `colonnes` rend `entetes` et une
@@ -50,7 +55,7 @@ function texte(brut: unknown, max = 200): string | null {
 export async function POST(req: NextRequest) {
   const cors = corsHeaders(req, METHODES)
   const userId = await getUserId(req)
-  if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: cors })
+  if (!userId) return NextResponse.json({ error: 'Non connecté.' }, { status: 401, headers: cors })
 
   try {
     const body = await req.json().catch(() => null)
@@ -60,11 +65,15 @@ export async function POST(req: NextRequest) {
     const compteId = texte(body.compteId)
     const colonnes = lireColonnes(body.colonnes)
     const confirmer = body.confirmer === true
+    const fuseau = fuseauDemande(body.fuseau)
+    if ('erreur' in fuseau) return NextResponse.json({ error: fuseau.erreur }, { status: 400, headers: cors })
     if (!csv.trim()) return NextResponse.json({ error: 'Fichier vide.' }, { status: 400, headers: cors })
     if (csv.length > 5_000_000) return NextResponse.json({ error: 'Fichier trop gros (5 Mo max).' }, { status: 400, headers: cors })
     if (confirmer && !compteId) return NextResponse.json({ error: 'Compte Pilotage manquant (compteId).' }, { status: 400, headers: cors })
 
-    const { format, trades, erreurs, entetes, proposition } = parserFichierTrades(csv, fichier ?? undefined, colonnes)
+    const lu = parserFichierTrades(csv, fichier ?? undefined, colonnes)
+    const { format, erreurs, entetes, proposition } = lu
+    const trades = fuseau.fuseau ? appliquerFuseau(lu.trades, fuseau.fuseau) : lu.trades
     const lecture = { format, erreurs, ...(entetes ? { entetes } : {}), ...(proposition ? { proposition } : {}) }
     if (trades.length === 0) {
       return NextResponse.json(
@@ -115,7 +124,7 @@ export async function POST(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   const cors = corsHeaders(req, METHODES)
   const userId = await getUserId(req)
-  if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: cors })
+  if (!userId) return NextResponse.json({ error: 'Non connecté.' }, { status: 401, headers: cors })
 
   // Un corps qui ne se lit pas ne doit JAMAIS valoir « tout retirer ».
   const body = await req.json().catch(() => null)
