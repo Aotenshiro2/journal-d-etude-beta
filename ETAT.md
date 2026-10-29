@@ -3,6 +3,22 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
+## Offres de Pilotage (brief E1, 30/10/2026, LOCAL, non pousse ; migration 20261031120000 NON appliquee)
+
+- Paliers (pur, `src/lib/pilotage-paliers.ts`) : libre (10 lectures sur 30 jours glissants + 25 offertes les 7 jours
+  qui suivent la premiere lecture, consommees d'abord ; coffre 100 Mo ; une tranche par document long, remarque
+  « Premium lit en entier »), premium (Pilotage Premium, Premium Duo ou raison Club du Carnet : 200 lectures, 2 Go,
+  4 tranches), equipe (estSansPlafond : sans limite, 10 Go). La limite de 5 par jour de D1 a disparu.
+- Droit = ligne academie_acces par abonnement (reference sub_..., fin = fin de periode + 3 jours, cote brice), posee par
+  `GET /api/pilotage/achat/confirmer` et le webhook NOUVEAU `/api/pilotage/achat/webhook` (abonnement toujours relu chez
+  Stripe). Le Duo ouvre le Carnet Premium (entitlements.ts, raison `duo`).
+- Routes : `POST /api/pilotage/achat` (Embedded Checkout, mode subscription, fermee sans PILOTAGE_ACHAT_PUBLIC=1 sauf
+  essai d'un admin), `GET /api/pilotage/niveau` (palier, compteurs, coffre, portail Stripe).
+- A FAIRE SUR GO : migration 20261031120000, `node scripts/creer-produits-stripe-pilotage.mjs` (reel), webhook Stripe et
+  STRIPE_WEBHOOK_SECRET_PILOTAGE, permissions de la cle Checkout, puis deploiement avec Pilotage E2. Compte rendu :
+  D:\6_Societe\Pilotage\COMPTE-RENDU-E1.md. Verifs : `node scripts/verifier-pilotage-paliers.mjs` (11 blocs),
+  `node --env-file=.env.local scripts/essayer-migration-pilotage.mjs` (transaction annulee).
+
 ## Securite des bots : injections de consignes (29/10/2026, DEPLOYE le 29/10, commit 71edf2c, aucune migration)
 
 Demande de Brice du 29/10 : rien ne doit pouvoir lui porter prejudice par une consigne cachee (email, image, page, note
