@@ -3,6 +3,29 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
+## Academie : les QUESTIONS D'ENTREE (30/10/2026, LOCAL, non pousse ; migration 20261031170000 NON appliquee)
+
+- Ce que Skool demandait a l'arrivee, repose par l'academie : a la premiere entree d'un membre CONNECTE (pas un
+  visiteur, pas un compte admin), deux questions facultatives au tutoiement, « Envoyer » ou « Passer » (la croix
+  aussi), une seule fois. Textes et versions : `src/lib/academie/questions-entree.ts` (aucun import). Changer un
+  libelle = AJOUTER une version ; chaque ligne garde le texte exact des questions avec la version.
+- `/api/academie/moi` rend `questions_entree { poser, version, questions }` (table absente ou illisible = poser faux,
+  /moi ne tombe pas). `POST /api/academie/questions` (Bearer, CORS academie) : reponses nettoyees (controles et
+  invisibles retires, 2000 caracteres au plus) ou passe ; insert on conflict do nothing (une 2e ecriture ne remplace
+  rien, rend deja) ; essai = verifie, n'ecrit rien. `POST /api/cockpit/academie/questions` (allowlist) : `membre`
+  (user_ids d'une personne, fiche du cockpit) ou `lister`. Logs : compte tronque, jamais une reponse.
+- Table `academie_questions_entree` fermee (RLS forcee, rien pour anon/authenticated, select pour service_role : le
+  releve hebdo `extract_skool_painpoints.py` la lit, source `academie-questions-entree`).
+- Site : `src/academie/Questions.tsx` (PopupQuestions dans la Coquille, apres le billet du jour, jamais par-dessus
+  une autre fenetre : `fenetres.ts`), essai `?questions=essai`, demo `?questions=poser|essai|erreur`. Cockpit :
+  `views/academie/QuestionsEntree.tsx` dans la rubrique Academie de la fiche membre.
+- Verifs : `node scripts/verifier-questions-entree.mjs` (9 blocs), `node --env-file=.env.local
+  scripts/essayer-migration-questions-entree.mjs` (transaction annulee). Compte rendu :
+  D:\6_Societe\Pilotage\Academie\COMPTE-RENDU-QUESTIONS-ENTREE.md.
+- A FAIRE SUR GO : migration 20261031170000, push du journal AVANT le site (sinon /moi n'a pas le champ : rien ne
+  s'affiche, sans erreur), puis cockpit. L'effacement d'une personne (migration effacement, 15/10) ne connait pas
+  encore cette table.
+
 ## Mails de confirmation d'achat (brief F1, 30/10/2026, LOCAL, non pousse ; migration 20261031150000 NON appliquee)
 
 - Textes (vouvoiement, signes « Brice et Mélanie », depuis support@) : `src/lib/mails-achat-pur.ts`, mot pour mot de

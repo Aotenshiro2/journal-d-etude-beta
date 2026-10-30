@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { prisma } from '@/lib/db'
 import { droitsAcademie, type DroitsAcademie } from '@/lib/academie/droits'
 import { lireCatalogue, type Catalogue } from '@/lib/academie/catalogue'
 import { construire } from '@/lib/academie/vue-moi'
 import { compteDuJeton, corsAcademie, entetesAcademie, origineDeLaRequete, refusAcademie, tronquer } from '@/lib/academie/http'
+import { etatQuestions, vueQuestions, type EtatQuestions } from '@/lib/academie/questions-entree'
 import { noterConnexion, progressionDuCompte, type ProgressionLecon } from '@/lib/academie/suivi'
 import { messageErreur, relationAbsente } from '@/lib/liveclub/pur'
 
@@ -19,6 +21,9 @@ import { messageErreur, relationAbsente } from '@/lib/liveclub/pur'
  *     compte: { admin, etm, live_club },   live_club : oui, non, inconnu, non_lu (pas demande)
  *     incomplet,                            true = une source illisible (Stripe) : des contenus sont « inconnu »
  *     continuer: { lecon, module, reprise_s, derniere_vue_le, acces, etat } | null,   la derniere lecon ouverte
+ *     questions_entree: { poser, version, questions: [texte, texte] },   les questions d'entree (30/10/2026,
+ *                           questions-entree.ts) : poser = compte non admin qui n'a ni repondu ni passe
+ *                           (faux si la table est absente ou illisible : /moi ne tombe jamais pour elles)
  *     modules: [{ id, slug, titre, resume, parcours, ordre, statut, auteur, image,
  *                 prix_eur,                 prix du module vendu seul, null = pas vendu seul
  *                 lien_externe,             https vers un autre site (Masterclass) ou null ; rempli =
@@ -74,6 +79,12 @@ export async function GET(req: NextRequest) {
   }
   if (!userId) return refus('jeton', 401)
 
+  // Les questions d'entree : une panne ou la table absente ne fait jamais tomber /moi (rien n'est pose).
+  const questions: Promise<EtatQuestions> = etatQuestions(prisma, userId).catch((err: unknown) => {
+    if (!relationAbsente(err)) console.warn(`[academie/moi] questions d'entree illisibles compte=${tronquer(userId)} : ${messageErreur(err)}`)
+    return 'indisponible' as const
+  })
+
   let droits: DroitsAcademie
   let catalogue: Catalogue
   let progression: Map<string, ProgressionLecon>
@@ -107,6 +118,7 @@ export async function GET(req: NextRequest) {
       incomplet: droits.incomplet,
       continuer,
       modules,
+      questions_entree: vueQuestions(await questions, droits.admin),
     },
     { headers },
   )
