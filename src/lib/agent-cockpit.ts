@@ -464,7 +464,7 @@ const OUTILS: Anthropic.Tool[] = [
       type: 'object',
       properties: {
         compte: { type: 'string', enum: ['aoknowledge', 'melanie'] },
-        charge_id: { type: 'string', description: 'ch_..., depuis cockpit_paiements.paiement_id.' },
+        charge_id: { type: 'string', description: 'ch_... ou py_..., depuis cockpit_paiements.paiement_id.' },
         montant: { type: 'number', description: 'Montant partiel en devise du paiement. Vide = remboursement intégral.' },
       },
       required: ['compte', 'charge_id'],

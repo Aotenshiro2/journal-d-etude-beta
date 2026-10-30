@@ -799,10 +799,10 @@ export function validerAction(brut: unknown): ActionAgent | string {
   }
 
   if (a.type === 'remboursement') {
-    // Nos paiement_id sont "stripe:ch_..." : on tolere le prefixe.
+    // Nos paiement_id sont "stripe:ch_..." ou "stripe:py_..." (Stripe prefixe py_ les charges de certains moyens de paiement, remboursables pareil) : on tolere le prefixe.
     const charge = String(p.charge_id ?? '').replace(/^stripe:/, '')
-    if (!/^ch_[A-Za-z0-9]{8,}$/.test(charge)) {
-      return 'charge_id invalide (attendu ch_..., depuis cockpit_paiements).'
+    if (!/^(ch|py)_[A-Za-z0-9]{8,}$/.test(charge)) {
+      return 'charge_id invalide (attendu ch_... ou py_..., depuis cockpit_paiements).'
     }
     const montant = p.montant == null ? null : Number(p.montant)
     if (montant != null && !(montant > 0 && montant <= 10000)) {
