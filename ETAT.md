@@ -3,6 +3,25 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
+## Autres adresses email confirmees par code, Mon espace (31/10/2026, GO de Brice du 31/10 ; LOCAL, commite, NON pousse ; migration 20261031190000 A APPLIQUER)
+
+- Routes (Bearer obligatoire, CORS de l'academie) : POST /api/compte/emails/ajouter { email } (aussi « Renvoyer le code »)
+  et POST /api/compte/emails/confirmer { email, code }. Serveur : src/lib/emails-confirmation.ts ; regles pures et email :
+  emails-confirmation-pur.ts ; scripts/verifier-emails-confirmation.mjs (16 blocs).
+- Code a 6 chiffres garde en HMAC-SHA256 (cle derivee de SUPABASE_SERVICE_ROLE_KEY, liee au compte et a l'adresse),
+  15 min, 5 essais, comparaison a temps constant. Envois : 5/h et 10/24 h par compte, 3/h et 5/24 h par adresse
+  (HMAC de l'adresse, tous comptes), 100/h au total. Email Resend (RESEND_API_KEY_LIVECLUB sinon RESEND_API_KEY),
+  « AO Knowledge <support@...> », aucun lien, seul texte du membre = l'adresse echappee. Logs : compte tronque + ref (8 car. du HMAC).
+- Tables (migration du depot workspace) : profile_emails_attente (une ligne par compte et adresse, le membre lit email et
+  dates et peut retirer, code_hmac et essais serveur seul), profile_emails_envois (compteur ferme, purge a 2 jours).
+  profile_emails : plus d'insertion depuis le navigateur ; l'unicite sur email NE CHANGE PAS (adresse verifiee = un seul
+  titulaire, jamais deplacee). Confirmation juste : lignes NON verifiees des autres comptes (squat) et attentes de
+  l'adresse supprimees, ligne du compte posee verified (source 'code').
+- A FAIRE sur GO : appliquer la migration, pousser le journal, puis le site (ordre impose : l'ancien bouton du site echoue
+  une fois le droit d'insertion retire). Premier essai reel sur un compte de test (le mail part vraiment).
+- Non couvert : le bot Live Club (droitLiveClub, « Mon abonnement ») ne lit pas profile_emails ; une adresse confirmee
+  sur le site ne relie pas Telegram (le bot garde sa propre preuve par code). trouver-cours la voit (compte du site).
+
 ## Emails du Live Club qui n'arrivent pas : webhook Resend (31/10/2026, LOCAL, non commite ; aucune migration ; webhook et variable A POSER)
 
 - Cas reel du 31/10 : l'invitation d'acces broker de Fabien (@libertysurf.fr) acceptee par Resend, puis « Bounced »
