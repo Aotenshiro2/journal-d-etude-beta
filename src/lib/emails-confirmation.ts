@@ -117,7 +117,8 @@ export async function demanderCode(userId: string, email: string): Promise<Issue
           exists (select 1 from public.profile_emails pe
                    where pe.profile_id <> ${userId}::uuid and lower(btrim(pe.email)) = ${email} and pe.verified) as verifiee_ailleurs,
           exists (select 1 from auth.users u
-                   where u.id <> ${userId}::uuid and lower(btrim(u.email)) = ${email}) as connexion_ailleurs,
+                   where u.id <> ${userId}::uuid and lower(btrim(u.email)) = ${email}
+                     and u.email_confirmed_at is not null) as connexion_ailleurs,
           (select count(*)::int from public.profile_emails_envois e
             where e.profile_id = ${userId}::uuid and e.envoye_le > now() - interval '1 hour') as compte_heure,
           (select count(*)::int from public.profile_emails_envois e
@@ -255,7 +256,8 @@ export async function confirmerCode(userId: string, email: string, code: string)
           exists (select 1 from public.profile_emails pe
                    where pe.profile_id <> ${userId}::uuid and lower(btrim(pe.email)) = ${email} and pe.verified) as verifiee_ailleurs,
           exists (select 1 from auth.users u
-                   where u.id <> ${userId}::uuid and lower(btrim(u.email)) = ${email}) as connexion_ailleurs`)[0]
+                   where u.id <> ${userId}::uuid and lower(btrim(u.email)) = ${email}
+                     and u.email_confirmed_at is not null) as connexion_ailleurs`)[0]
       if (!s || decisionConfirmation({ verifieeAilleurs: s.verifiee_ailleurs, connexionAilleurs: s.connexion_ailleurs }) === 'rattachee') {
         await tx.$executeRaw`
           delete from public.profile_emails_attente where profile_id = ${userId}::uuid and email = ${email}`
