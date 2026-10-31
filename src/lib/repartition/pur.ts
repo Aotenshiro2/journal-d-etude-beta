@@ -1351,10 +1351,16 @@ export function lireParamsRepartition(
     const id = String(p.commission_id ?? '').trim().toLowerCase()
     if (!UUID.test(id)) return 'commission_id : l\'identifiant exact, depuis cockpit_commissions.'
     const etat = String(p.etat ?? '').trim()
-    if (!['lots_faits', 'recue', 'perdue'].includes(etat)) return 'etat : lots_faits, recue ou perdue.'
+    // (31/10) 'attendue' : remettre en attendue une commission PERDUE (regularisation).
+    if (!['lots_faits', 'recue', 'perdue', 'attendue'].includes(etat)) return 'etat : lots_faits, recue, perdue, ou attendue (régulariser une commission perdue).'
     const jour = lireJour(p.le, 'le', ctx.aujourdhui, ctx.aujourdhui)
     if (typeof jour === 'string') return jour
     const qui = texteCourt(p.qui, 80)
+    // (31/10) Pose par le controle du serveur (controlerActionRepartition)
+    // quand la commission est PERDUE : la carte regularise. Jamais pris d'un
+    // autre appelant (le clic « Oui, lots tradés » ne regularise rien).
+    const regulariser = p.regulariser === true && (etat === 'attendue' || etat === 'lots_faits')
+    if (etat === 'attendue') return { commission_id: id, etat, le: jour[0], qui, note, ...(regulariser ? { regulariser } : {}) }
     if (etat === 'recue') {
       const montant = lireEuros(p.montant, 'montant (reçu)', { max: 10000000, zeroAccepte: true })
       if (typeof montant === 'string') return `${montant} Demande le montant réellement reçu.`
@@ -1363,7 +1369,7 @@ export function lireParamsRepartition(
       if (!encaissePar) return 'encaisse_par : brice ou mel (Mel par défaut).'
       return { commission_id: id, etat, montant, le: jour[0], encaisse_par: encaissePar, qui, note }
     }
-    return { commission_id: id, etat, le: jour[0], qui, note }
+    return { commission_id: id, etat, le: jour[0], qui, note, ...(regulariser ? { regulariser } : {}) }
   }
 
   if (type === 'taux_partenaire') {
@@ -1543,6 +1549,11 @@ export function resumeRepartition(type: TypeRepartition, p: Record<string, unkno
       return `Inscrire une commission d'affiliation ${p.partenaire_nom} pour ${p.client}, le ${libelleJour(String(p.le))}`
         + `${p.montant !== null && p.montant !== undefined ? `, sur une vente de ${eur(p.montant)}` : ''}.${note}`
     case 'marquer_commission':
+      // (31/10) Regularisation d'une commission perdue : elle redevient attendue.
+      if (p.etat === 'attendue') return `Remettre la commission${p.qui ? ` de ${p.qui}` : ''} en attendue (régularisation) : elle revient dans les commissions attendues.${note}`
+      if (p.etat === 'lots_faits' && p.regulariser === true) {
+        return `Régulariser la commission${p.qui ? ` de ${p.qui}` : ''} : de nouveau attendue, lots faits le ${libelleJour(String(p.le))}.${note}`
+      }
       if (p.etat === 'lots_faits') return `Noter que ${p.qui ?? 'le client'} a fait ses lots le ${libelleJour(String(p.le))}.${note}`
       if (p.etat === 'recue') {
         return `Marquer la commission${p.qui ? ` de ${p.qui}` : ''} reçue : ${eur(p.montant)} le ${libelleJour(String(p.le))}, `
@@ -1634,6 +1645,8 @@ export function resumeCourtRepartition(type: TypeRepartition, p: Record<string, 
     case 'commission_affiliation':
       return `Affiliation ${p.partenaire_nom} : ${p.client}, le ${jour(p.le)}${p.montant !== null && p.montant !== undefined ? `, vente de ${eur(p.montant)}` : ''}.`
     case 'marquer_commission':
+      if (p.etat === 'attendue') return `Commission de nouveau attendue${p.qui ? ` : ${p.qui}` : ''} (régularisation).`
+      if (p.etat === 'lots_faits' && p.regulariser === true) return `Régularisation : lots faits le ${jour(p.le)}, commission de nouveau attendue${p.qui ? ` (${p.qui})` : ''}.`
       if (p.etat === 'lots_faits') return `Lots faits le ${jour(p.le)} : ${p.qui ?? 'le client'}.`
       if (p.etat === 'recue') return `Commission reçue : ${eur(p.montant)} le ${jour(p.le)}${p.qui ? ` (${p.qui})` : ''}, encaissée par ${NOM_COTE[p.encaisse_par as Cote]}.`
       return `Commission perdue${p.qui ? ` : ${p.qui}` : ''}.`

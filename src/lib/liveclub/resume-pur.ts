@@ -179,6 +179,8 @@ export function evenementDeGeste(
       if (regle === 'changement_compte') return { rubrique: 'sorties', detail: 'sorti du groupe : son abonnement est passé sur un autre compte Telegram' }
       // (31/10) Suivi des lots (lots-pur.ts) : pause, pas un bannissement.
       if (regle === 'lots_non_faits') return { rubrique: 'sorties', detail: 'accès broker en pause : premiers lots pas tradés dans le délai, sorti du groupe sans blocage' }
+      // (31/10) « Pas de commission, pas d'accès » (lots-pur.ts) : fermé, pas un bannissement.
+      if (regle === 'depot_perdu') return { rubrique: 'sorties', detail: 'accès broker fermé : dépôt pas activé (commission perdue), sorti du groupe sans blocage' }
       return { rubrique: 'sorties', detail: "sorti du groupe par l'équipe" }
     case 'fin_acces':
       return regle === 'fin_exemption' || d.motif === 'fin_exemption'
@@ -208,6 +210,7 @@ export function evenementDeGeste(
         return { rubrique: 'impayes', detail: `paiement passé : accès rouvert, lien envoyé${d.canal === 'email' ? ' par email' : ''}` }
       }
       if (regle === 'retour_lots') return { rubrique: 'sorties', detail: 'premiers lots vus chez le broker : accès rouvert, lien envoyé' }
+      if (regle === 'retour_depot') return { rubrique: 'sorties', detail: 'situation régularisée avec le broker : accès rouvert, lien envoyé' }
       return null
     default:
       return null

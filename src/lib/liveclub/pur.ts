@@ -1277,6 +1277,33 @@ export type GesteLu = {
   details?: Record<string, unknown> | null
 }
 
+/** (31/10) = NOMS_TIPS (tips-accueil-pur.ts ; ce module n'importe rien, verifier-tips-accueil.mjs compare). */
+const NOMS_TIPS_ACCUEIL: Readonly<Record<string, string>> = {
+  academie: "l'académie",
+  sujets: 'les autres sujets du groupe',
+  liens: 'les liens utiles',
+  abonnement: "l'abonnement et les adresses email",
+}
+
+/**
+ * (31/10, Brice : « tu peux en avoir plusieurs », au moment ou ca sert) La
+ * phrase des adresses multiples, quand aucun abonnement n'est trouve.
+ */
+export const PHRASE_AUTRE_ADRESSE = 'Tu as peut-être payé avec une autre adresse ? Donne-la-moi, tu peux en avoir plusieurs.'
+
+/**
+ * (31/10) La ligne discrete de « Mon abonnement » : les adresses email que le
+ * bot connait pour lui (les siennes), 5 au plus, sans ponctuation collee a une
+ * adresse. null : aucune lisible.
+ */
+export function ligneAdresses(emails: readonly (string | null | undefined)[]): string | null {
+  const l = [...new Set(emails
+    .map(e => (typeof e === 'string' ? e.trim().toLowerCase() : ''))
+    .filter(e => /^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/.test(e)))].slice(0, 5)
+  if (l.length === 0) return null
+  return l.length === 1 ? `Adresse email reliée : ${l[0]}` : `Adresses email reliées : ${l.join(', ')}`
+}
+
 /**
  * La ligne « [système] » d'un geste du bot (sans le prefixe), ou null s'il
  * ne va pas au fil : 'simule' et 'echec' restent dans le journal. Une regle
@@ -1301,6 +1328,7 @@ export function phraseGeste(g: GesteLu): string | null {
     case 'entree_refusee':
       if (fait && regle === 'impaye_ouvert') return 'Entrée dans le groupe refusée (paiement en retard, facture à régler).'
       if (fait && regle === 'lots_non_faits') return 'Entrée dans le groupe refusée (accès broker en pause : premiers lots pas tradés).'
+      if (fait && regle === 'depot_perdu') return 'Entrée dans le groupe refusée (accès broker fermé : dépôt pas activé).'
       return fait ? "Entrée dans le groupe refusée (pas de droit ouvert)." : "Refus d'entrée non appliqué."
     case 'invitation': {
       const canal = d.canal === 'email' ? ' par email' : ''
@@ -1311,11 +1339,14 @@ export function phraseGeste(g: GesteLu): string | null {
         if (regle === 'impaye_ouvert') return 'Lien vers le groupe non envoyé : paiement en retard, facture à régler.'
         if (regle === 'lots_non_faits') return 'Lien vers le groupe non envoyé : accès broker en pause (premiers lots pas tradés).'
         if (regle === 'retour_lots') return 'Lots faits : déjà revenu dans le groupe.'
+        if (regle === 'depot_perdu') return 'Lien vers le groupe non envoyé : accès broker fermé (dépôt pas activé).'
+        if (regle === 'retour_depot') return 'Situation régularisée : déjà revenu dans le groupe.'
         if (regle === 'reouverture_impaye') return 'Paiement passé : déjà revenu dans le groupe.'
         return 'Lien vers le groupe non envoyé.'
       }
       if (regle === 'retour_groupe') return 'Lien de retour vers le groupe envoyé.'
       if (regle === 'retour_lots') return `Lots faits : accès rouvert, lien de retour envoyé${canal}.`
+      if (regle === 'retour_depot') return `Situation régularisée avec le broker : accès rouvert, lien de retour envoyé${canal}.`
       if (regle === 'sortie_abusive_metricgram') return 'Bannissement levé, lien de retour envoyé.'
       if (regle === 'broker_renvoi') return "Lien d'accès broker renvoyé par email."
       if (regle === 'reouverture_impaye') return `Paiement passé : accès réouvert, lien de retour envoyé${canal}.`
@@ -1330,6 +1361,7 @@ export function phraseGeste(g: GesteLu): string | null {
       if (regle === 'desabonne') return 'Sortie du groupe (abonnement terminé).'
       if (regle === 'impaye_5j') return 'Sortie du groupe (paiement en retard depuis plus de 5 jours).'
       if (regle === 'lots_non_faits') return 'Sortie du groupe, sans blocage : accès broker en pause, premiers lots pas tradés dans le délai.'
+      if (regle === 'depot_perdu') return 'Sortie du groupe, sans blocage : accès broker fermé, dépôt pas activé chez le broker (commission perdue).'
       if (regle === 'changement_compte') return "Sortie du groupe, sans blocage : l'abonnement est passé sur un autre compte Telegram de son titulaire."
       return "Sorti du groupe par l'équipe."
     case 'fin_acces':
@@ -1372,6 +1404,13 @@ export function phraseGeste(g: GesteLu): string | null {
       if (regle === 'pause_deja_revenu') return 'Retour après la pause : déjà revenu dans le groupe.'
       return 'Retour après la pause : lien de retour envoyé.'
     case 'rappel': {
+      // (31/10) L'accueil etale en conseils (tips-accueil-pur.ts, NOMS_TIPS).
+      if (regle === 'tip_accueil') {
+        const nom = typeof d.tip === 'string' ? NOMS_TIPS_ACCUEIL[d.tip] : undefined
+        return fait
+          ? `Conseil d'accueil envoyé${nom ? ` (${nom})` : ''}.`
+          : `Conseil d'accueil sauté${nom ? ` (${nom})` : ''} : sujet déjà abordé avec le bot.`
+      }
       if (!fait) return 'Rappel non envoyé.'
       const canal = d.canal === 'email' ? ' par email' : ''
       if (regle === 'prelevement_j3') {
@@ -1392,6 +1431,8 @@ export function phraseGeste(g: GesteLu): string | null {
       if (regle === 'lots_relance_1') return `Première relance des lots chez le broker envoyée${canal}.`
       if (regle === 'lots_relance_2') return `Seconde relance des lots chez le broker envoyée${canal} (quelques jours avant la fin du délai).`
       if (regle === 'lots_suspension_message') return `Message de pause de l'accès broker (premiers lots pas tradés) envoyé${canal}.`
+      // (31/10) L'acces ferme pour un depot perdu (lots-pur.ts).
+      if (regle === 'depot_perdu_message') return `Message de fermeture de l'accès broker (dépôt pas activé, comment régulariser) envoyé${canal}.`
       return `Rappel envoyé${canal}.`
     }
     case 'refus':
@@ -1402,6 +1443,7 @@ export function phraseGeste(g: GesteLu): string | null {
       if (fait && regle === 'lots_declares') return "A dit avoir tradé ses premiers lots : l'équipe vérifie chez le broker."
       if (fait && regle === 'lots_confirmes') return "Premiers lots vus par l'équipe chez le broker : notés faits."
       if (fait && regle === 'lots_pas_vus') return "Premiers lots pas encore vus par l'équipe chez le broker : prévenu."
+      if (fait && regle === 'depot_perdu_alerte') return "Commission perdue : accès broker fermé, l'équipe est prévenue."
       const jusqua = date('jusquau')
       return fait ? `Accès broker ouvert${jusqua ? ` jusqu'au ${jusqua}` : ''}.` : 'Accès broker non ouvert.'
     }
@@ -1495,11 +1537,25 @@ export type DroitLu = {
    * `limite` (droit 'oui'), ou en retard, acces en pause (droit 'non').
    */
   lots?: { etat: 'a_faire' | 'en_retard'; limite: string; declare: boolean }
+  /**
+   * (31/10) Un acces broker FERME parce que son depot est marque perdu
+   * (lots-pur.ts, « pas de commission, pas d'acces ») : droit 'non'.
+   */
+  depotPerdu?: { commissionId: string }
 }
 
 /** (31/10) Un acces broker en pause pour ses lots (droit 'non') : sa situation se dit comme un acces offert. */
 export function accesEnPauseLots(droit: DroitLu): boolean {
   return droit.statut === 'non' && droit.lots?.etat === 'en_retard'
+}
+
+/**
+ * (31/10) Un acces broker ferme pour un depot perdu (droit 'non') : sa
+ * situation dit pourquoi et comment revenir, jamais « envoie ton email ».
+ * Une pause des lots (un autre acces) passe avant : le membre la leve seul.
+ */
+export function accesFermeDepot(droit: DroitLu): boolean {
+  return droit.statut === 'non' && Boolean(droit.depotPerdu) && !accesEnPauseLots(droit)
 }
 
 export type AccesSansAbonnement = {
@@ -1533,6 +1589,8 @@ const TEXTE_RIEN_A_GERER = "Il n'y a rien à mettre en pause ni à arrêter : tu
 export type TextesLotsSituation = {
   enPause: () => string
   aFaire: (limite: string, declare: boolean) => string
+  /** (31/10) L'acces ferme pour un depot perdu ; texteAbonnement : les deux portes d'abonnement. */
+  depotPerdu?: (texteAbonnement: string) => string
 }
 
 export function accesSansAbonnement(droit: DroitLu, o: { texteAbonnement: string; lots?: TextesLotsSituation }): AccesSansAbonnement | null {
@@ -1546,6 +1604,20 @@ export function accesSansAbonnement(droit: DroitLu, o: { texteAbonnement: string
         retour: "dès que l'équipe voit ses lots chez le broker", rien_a_payer: true,
       },
       rienAGerer: TEXTE_RIEN_A_GERER,
+    }
+  }
+  // (31/10) Acces broker ferme pour un depot perdu : pourquoi, et les deux
+  // portes (regulariser avec l'equipe, ou s'abonner). Rien a mettre en pause.
+  if (accesFermeDepot(droit)) {
+    return {
+      texte: o.lots?.depotPerdu?.(o.texteAbonnement)
+        ?? `Ton accès au Live Club par le broker n'est plus valide. Écris-moi ici pour savoir comment revenir.\n\n${o.texteAbonnement}`,
+      faits: {
+        acces: 'offert_broker_ferme', raison: "dépôt pas activé chez le broker : l'accès par le broker n'est plus valide",
+        revenir: "régulariser avec l'équipe (un nouveau dépôt activé chez le broker, puis ses premiers lots tradés), ou s'abonner",
+        regulariser: "bouton « Contacter l'équipe » : l'équipe répond dans cette conversation",
+      },
+      rienAGerer: "Il n'y a rien à mettre en pause ni à arrêter : tu n'as pas d'abonnement, et ton accès par le broker n'est plus valide.",
     }
   }
   if (droit.statut !== 'oui' || !RAISONS_SANS_ABONNEMENT.has(droit.raison)) return null
@@ -1602,6 +1674,8 @@ export function parcoursSansRattachement(rattachement: 'aucun' | 'illisible', dr
   // (31/10) Un acces broker en pause pour ses lots reste un acces offert : sa
   // situation dit pourquoi et comment revenir, jamais « envoie ton email ».
   if (accesEnPauseLots(droit)) return 'acces_offert'
+  // (31/10) Un acces broker ferme pour un depot perdu : meme chose.
+  if (accesFermeDepot(droit)) return 'acces_offert'
   if (rattachement === 'illisible' || droit.statut === 'inconnu') return 'panne'
   return 'non_rattache'
 }

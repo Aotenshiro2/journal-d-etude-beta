@@ -192,6 +192,28 @@ export function suiviLotsActif(): boolean {
 }
 
 /**
+ * (31/10, Brice : « pas de commission pas d'acces ») Un acces broker dont le
+ * depot est marque perdu est FERME (lots-pur.ts, DEPOT_PERDU_DEPUIS) : le
+ * droit dit 'non', le passage sort le membre sans ban et previent l'equipe.
+ * Actif par defaut ; LIVECLUB_DEPOT_PERDU=0 le coupe (le droit ignore alors
+ * les depots perdus, rien ne part). La sortie suit aussi sortiesActives().
+ */
+export function fermetureDepotPerduActive(): boolean {
+  return process.env.LIVECLUB_DEPOT_PERDU?.trim() !== '0'
+}
+
+/**
+ * (31/10, Brice : « etaler les messages d'infos du bot ») L'ACCUEIL ETALE EN
+ * CONSEILS (tips-accueil-pur.ts) : message de l'admission court pour un
+ * nouveau, puis un conseil par jour au plus (J+1, J+2, J+4, J+7) depuis le
+ * passage quotidien. Actif par defaut ; LIVECLUB_TIPS_ACCUEIL=0 le coupe (le
+ * message de l'admission redevient le tour complet, aucun conseil ne part).
+ */
+export function tipsAccueilActifs(): boolean {
+  return process.env.LIVECLUB_TIPS_ACCUEIL?.trim() !== '0'
+}
+
+/**
  * Plafond de resiliations REELLES par passage (fenetre de 30 jours) : un
  * garde-fou si une lecture fausse faisait croire a une serie d'impayes.
  */

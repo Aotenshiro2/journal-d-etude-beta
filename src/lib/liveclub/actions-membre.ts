@@ -27,6 +27,7 @@
 // montants et les gestes lui repondent (rien a payer, rien a mettre en pause).
 
 import { journaliserGesteLiveClub, type GesteJournal } from '@/lib/stripe-actions'
+import { prisma } from '@/lib/db'
 import { SUPPORT, URLS_ABONNEMENT, URL_PORTAIL_CARTE, texteAbonnement } from './config'
 import { droitLiveClub, type Droit } from './droits'
 import { rattachementActif, type Rattachement } from './rattacher'
@@ -38,7 +39,7 @@ import {
 import {
   abonnementOuvreLeGroupe, accesSansAbonnement, calculerReprisePause, enRetardDePaiement, etatImpaye, faitsImpaye, faitsMontants,
   formaterDateFr, messageErreur, nbMoisPauseValide, parcoursSansRattachement, peutAvoirUnImpaye, phraseImpaye, statutDonneDroit,
-  statutTermine,
+  statutTermine, PHRASE_AUTRE_ADRESSE, ligneAdresses, normaliserEmail,
   type AccesSansAbonnement, type EntreeImpaye, type EntreeMontants, type FaitsMontants,
 } from './pur'
 import type { ActionMembre } from './conversations'
@@ -199,12 +200,17 @@ export async function situationDuMembre(telegramId: number): Promise<Situation> 
     return { etat: 'illisible' }
   }
 
+  // (31/10, Brice) Une ligne discrete : les adresses email que le bot connait
+  // pour lui (il peut en avoir plusieurs). Lecture ratee = pas de ligne.
+  const adresses = await adressesDuMembre(r)
+  const ligne = ligneAdresses(adresses)
   const vivants = abonnements.filter(abonnementEnCours)
   if (vivants.length) {
     return {
       etat: 'ok',
-      texte: vivants.map(phraseAbonnement).join('\n\n'),
+      texte: `${vivants.map(phraseAbonnement).join('\n\n')}${ligne ? `\n\n${ligne}` : ''}`,
       faits: {
+        ...(adresses.length ? { adresses_email_reliees: adresses } : {}),
         abonnements: vivants.map(a => ({
           statut: statutDesFaits(a),
           fin_periode: a.finPeriode ? formaterDateFr(a.finPeriode) : null,
@@ -239,9 +245,43 @@ export async function situationDuMembre(telegramId: number): Promise<Situation> 
   const dernier = abonnements[0]
   return {
     etat: 'ok',
-    texte: `${dernier ? phraseAbonnement(dernier) : "Je ne trouve pas d'abonnement Live Club à ton nom."}\n\n${texteAbonnement()}`,
-    faits: { acces: 'aucun', abonnement_termine: Boolean(dernier) },
+    // (31/10) Aucun abonnement trouve : il a peut-etre paye avec une autre adresse.
+    texte: `${dernier ? phraseAbonnement(dernier) : `Je ne trouve pas d'abonnement Live Club à ton nom. ${PHRASE_AUTRE_ADRESSE}`}`
+      + `${ligne ? `\n\n${ligne}` : ''}\n\n${texteAbonnement()}`,
+    faits: {
+      acces: 'aucun', abonnement_termine: Boolean(dernier),
+      ...(adresses.length ? { adresses_email_reliees: adresses } : {}),
+      ...(dernier ? {} : { autre_adresse: "il a peut-être payé avec une autre adresse : il peut en avoir plusieurs ; s'il la donne, tu transmets à l'équipe (demander_un_humain), qui la vérifie et la relie" }),
+    },
   }
+}
+
+/**
+ * (31/10) Les adresses email que le bot connait pour ce membre : celle de son
+ * rattachement, puis celles de sa fiche du cockpit (cockpit_membre_emails),
+ * 5 au plus. Les siennes seulement (rattachement a son compte Telegram).
+ * Ne jette pas : une lecture ratee rend ce qui est deja connu.
+ */
+async function adressesDuMembre(r: Rattachement): Promise<string[]> {
+  const emails = new Set<string>()
+  const principale = normaliserEmail(r.email)
+  if (principale) emails.add(principale)
+  if (r.membre_id) {
+    try {
+      const lignes = await prisma.$queryRaw<{ email: string }[]>`
+        select email from public.cockpit_membre_emails
+        where membre_id = ${r.membre_id}::uuid
+        order by principal desc, email
+        limit 5`
+      for (const l of lignes) {
+        const e = normaliserEmail(l.email)
+        if (e) emails.add(e)
+      }
+    } catch (err) {
+      console.warn(`[liveclub/bot] adresses du membre illisibles : ${messageErreur(err).slice(0, 120)}`)
+    }
+  }
+  return [...emails].slice(0, 5)
 }
 
 // ---------------------------------------------------------------------------

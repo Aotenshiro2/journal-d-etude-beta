@@ -107,10 +107,10 @@
 
 import { journaliserGesteLiveClub } from '@/lib/stripe-actions'
 import { prisma } from '@/lib/db'
-import { TEXTE_PAUSE_AVANT_ARRET, chatId, texteAbonnement, texteRaisonSortie } from './config'
+import { TEXTE_PAUSE_AVANT_ARRET, chatId, texteAbonnement, texteRaisonSortie, tipsAccueilActifs } from './config'
 import { droitLiveClub, type Droit } from './droits'
 import { genreEntree, texteAdmission, type GenreEntree } from './accueil-groupe'
-import { BOUTON_LOTS, texteAccesEnPauseLots } from './lots-pur'
+import { BOUTON_LOTS, texteAccesEnPauseLots, texteAccesFermeDepot } from './lots-pur'
 import { declarerLots } from './lots'
 import { consommerJeton, ErreurTableLiveClub } from './jetons'
 import { rattacherTelegram, type Rattachement } from './rattacher'
@@ -163,6 +163,7 @@ import {
   sortieAExpliquer, texteDette, texteTarifReserve, type GesteDate,
   COMMANDE_BOT_MEMBRE, aiguillageMessagePrive, TEXTE_TRANSMIS_AU_COCKPIT, TEXTE_NON_TRANSMIS_AU_COCKPIT,
   BOUTON_REGLE, TEXTE_LIEN_DEJA_DONNE, decisionBoutonRegle, texteReglementPasVu, texteReglementSansAbonnement,
+  PHRASE_AUTRE_ADRESSE,
 } from './pur'
 import {
   compteCockpitTelegram, telechargerImageTelegram, traiterTexteAgentTelegram, type CompteCockpitTelegram,
@@ -479,7 +480,7 @@ export async function traiterDemandeAdhesion(demande: DemandeAdhesionTg, updateI
     const r = await approuverDemande(u.id)
     await journaliserGesteLiveClub(
       r.ok
-        ? { geste: 'entree_acceptee', resultat: 'fait', regle: droit.raison, details: {} }
+        ? { geste: 'entree_acceptee', resultat: 'fait', regle: droit.raison, details: detailsEntree(entree) }
         : { geste: 'entree_acceptee', resultat: 'echec', regle: 'telegram', details: { etape: 'approveChatJoinRequest', erreur: r.erreur } },
       contexte,
     )
@@ -491,12 +492,16 @@ export async function traiterDemandeAdhesion(demande: DemandeAdhesionTg, updateI
   // montant et le lien de sa facture, pas les liens d'un nouvel abonnement.
   // (31/10) Un acces broker en pause pour ses lots : pourquoi, et le bouton.
   const enPauseLots = !droit.dette && droit.lots?.etat === 'en_retard'
+  // (31/10, « pas de commission, pas d'acces ») Un acces broker ferme pour
+  // un depot perdu : pourquoi, les deux portes, et le bouton de l'equipe.
+  const fermeDepot = !droit.dette && !enPauseLots && Boolean(droit.depotPerdu)
   if (enPauseLots) await envoyer(ecrireA, texteAccesEnPauseLots(), [[{ texte: BOUTON_LOTS.texte, data: BOUTON_LOTS.data }]])
+  else if (fermeDepot) await envoyer(ecrireA, texteAccesFermeDepot(texteAbonnement()), clavierEquipe())
   else await envoyer(ecrireA, droit.dette ? texteDette(droit.dette) : messageRefus())
   const r = await refuserDemande(u.id)
   await journaliserGesteLiveClub(
     r.ok
-      ? { geste: 'entree_refusee', resultat: 'fait', regle: droit.dette ? 'impaye_ouvert' : enPauseLots ? 'lots_non_faits' : 'sans_droit', details: {} }
+      ? { geste: 'entree_refusee', resultat: 'fait', regle: droit.dette ? 'impaye_ouvert' : enPauseLots ? 'lots_non_faits' : fermeDepot ? 'depot_perdu' : 'sans_droit', details: {} }
       : { geste: 'entree_refusee', resultat: 'echec', regle: 'telegram', details: { etape: 'declineChatJoinRequest', erreur: r.erreur } },
     contexte,
   )
@@ -556,7 +561,17 @@ function texteAdmissionPour(entree: GenreEntree, droit: Droit): string {
   // declares faits) : le paragraphe des lots, avec le delai.
   const lots = droit.raison === 'acces_broker' && droit.lots?.etat === 'a_faire' && !droit.lots.declare
     ? { limite: droit.lots.limite } : null
-  return texteAdmission(entree, { chat: chatId(), accesOffert: droit.raison !== 'abonnement', lots })
+  // (31/10, Brice) Les conseils des jours suivants (tips-accueil-pur.ts) : le message court pour un nouveau.
+  return texteAdmission(entree, { chat: chatId(), accesOffert: droit.raison !== 'abonnement', lots, tips: tipsAccueilActifs() })
+}
+
+/**
+ * (31/10) Les details de la ligne entree_acceptee : qui entre (genre), et pour
+ * un nouveau avec les conseils actifs, `tips` (le passage les lui enverra,
+ * tips-accueil-pur.ts). Seule une entree acceptee par ce code en porte.
+ */
+function detailsEntree(entree: GenreEntree, extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return { ...extra, genre: entree, ...(entree === 'nouveau' && tipsAccueilActifs() ? { tips: true } : {}) }
 }
 
 /** (31/10) Une demande en attente approuvee a la reprise : le droit lu, et qui entre (lu avant l'approbation). */
@@ -592,7 +607,7 @@ async function reprendreDemandeEnAttente(u: Utilisateur, updateId: number, droit
   const r = await approuverDemande(u.id)
   if (r.ok) {
     await journaliserGesteLiveClub(
-      { geste: 'entree_acceptee', resultat: 'fait', regle: droit.raison, details: { reprise: true } },
+      { geste: 'entree_acceptee', resultat: 'fait', regle: droit.raison, details: detailsEntree(entree, { reprise: true }) },
       { ...contexte, updateId },
     )
     return { droit, entree }
@@ -704,6 +719,16 @@ async function proposerRetourAuGroupe(chat: number, u: Utilisateur, updateId: nu
       await envoyer(chat, `${avant}${texteAccesEnPauseLots()}`, [[{ texte: BOUTON_LOTS.texte, data: BOUTON_LOTS.data }], ...(o.boutons ?? [])])
       await journaliserGesteLiveClub(
         { geste: 'invitation', resultat: 'refuse', regle: 'lots_non_faits', details },
+        { ...contexte, updateId: null },
+      )
+      return true
+    }
+    // (31/10) Un acces broker ferme pour un depot perdu : pourquoi, et comment
+    // revenir (regulariser avec l'equipe, ou s'abonner). Pas sur un clic de bouton.
+    if (!droit.dette && droit.depotPerdu && o.declencheur !== 'bouton') {
+      await envoyer(chat, `${avant}${texteAccesFermeDepot(texteAbonnement())}`, avecEquipe(o.boutons))
+      await journaliserGesteLiveClub(
+        { geste: 'invitation', resultat: 'refuse', regle: 'depot_perdu', details },
         { ...contexte, updateId: null },
       )
       return true
@@ -967,6 +992,12 @@ async function traiterStartJeton(chat: number, u: Utilisateur, jeton: string, up
       await journal({ geste: 'invitation', resultat: 'refuse', regle: 'lots_non_faits', details: { usage: ligne.usage } }, extra)
       return
     }
+    // (31/10) Un acces broker ferme pour un depot perdu : pourquoi, et comment revenir.
+    if (droit.depotPerdu) {
+      await envoyer(chat, texteAccesFermeDepot(texteAbonnement()), clavierAccesOffert())
+      await journal({ geste: 'invitation', resultat: 'refuse', regle: 'depot_perdu', details: { usage: ligne.usage } }, extra)
+      return
+    }
     await envoyer(chat, `Ton lien est bon, mais je ne vois pas d'abonnement actif en ce moment, donc je ne peux pas t'ouvrir le groupe.\n\n`
       + `Si tu viens de payer, attends une minute et rouvre ton lien.\n\n${texteAbonnement()}`, clavierMenu())
     await journal({ geste: 'invitation', resultat: 'refuse', regle: 'sans_droit', details: { usage: ligne.usage } }, extra)
@@ -1017,7 +1048,13 @@ const TEXTE_DEMANDE_EMAIL = `Envoie-moi ici l'adresse email de ton paiement, en 
  * quelqu'un si une adresse est celle d'un abonne.
  */
 const TEXTE_CODE_DEMANDE = `C'est noté. Si cette adresse est celle d'un paiement Live Club, tu vas recevoir un code à 6 chiffres par email d'ici quelques minutes (regarde aussi dans les spams).\n\n`
-  + `Tape-le ici. Il marche ${CODE_VALIDITE_MINUTES} minutes.`
+  + `Tape-le ici. Il marche ${CODE_VALIDITE_MINUTES} minutes.\n\n`
+  // (31/10, Brice) Plusieurs adresses, au moment ou ca sert : rien ne vient =
+  // une autre adresse (une adresse ne se relie qu'avec le code envoye a elle).
+  // Un acces offert par un broker dont l'email n'arrive pas (cas du 31/10) :
+  // l'equipe, par le bouton joint.
+  + `Rien ne vient ? Tu as peut-être payé avec une autre adresse : envoie-la-moi, tu peux en avoir plusieurs. `
+  + `Ton accès vient d'un broker partenaire et rien n'arrive ? Appuie sur « Contacter l'équipe » : elle te répond ici.`
 
 function texteIssueCode(issue: Exclude<IssueCode, { etat: 'ok' }>): string {
   if (issue.etat === 'aucun') {
@@ -1089,7 +1126,8 @@ async function suiteApresRattachement(chat: number, u: Utilisateur, email: strin
     ? `Tu es déjà dans le groupe, tout est bon. Que veux-tu faire ?`
     : droit.dette
       ? texteDette(droit.dette)
-      : `Mais je ne vois pas d'abonnement Live Club actif en ce moment, donc je ne peux pas t'ouvrir le groupe.\n\n${texteAbonnement()}`
+      // (31/10) Aucun abonnement actif a cette adresse : il en a peut-etre une autre.
+      : `Mais je ne vois pas d'abonnement Live Club actif en ce moment, donc je ne peux pas t'ouvrir le groupe. ${PHRASE_AUTRE_ADRESSE}\n\n${texteAbonnement()}`
   await repondeur(chat, u.id, r)(`${entete}\n\n${suite}`, clavierMenu())
 }
 
@@ -1256,7 +1294,7 @@ async function traiterNonRattache(
     }
     // La reponse part AVANT de regarder si l'adresse est connue : ni le texte
     // ni le delai ne le disent.
-    await repondre(TEXTE_CODE_DEMANDE)
+    await repondre(TEXTE_CODE_DEMANDE, clavierEquipe())
     if (await envoyerCodeSiConnu(u.id, email, code) === 'panne') {
       console.warn(`[liveclub/bot] code non envoye pour u${u.id} : panne (adresse non loggee)`)
     }

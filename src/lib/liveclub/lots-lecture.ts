@@ -6,8 +6,8 @@
 
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db'
-import { suiviLotsActif } from './config'
-import { etatLots, type EtatLots, type SuiviLots } from './lots-pur'
+import { fermetureDepotPerduActive, suiviLotsActif } from './config'
+import { DEPOT_PERDU_DEPUIS, etatLots, type EtatLots, type SuiviLots } from './lots-pur'
 import { jourParis } from './passage-regles'
 import { messageErreur, relationAbsente } from './pur'
 
@@ -137,6 +137,113 @@ export async function lotsDesAcces(accesIds: readonly string[], maintenant: Date
     console.warn(`[liveclub/lots] suivi des lots illisible (droit garde) : ${relationAbsente(err) ? 'table absente' : messageErreur(err)}`)
   }
   return etats
+}
+
+// ---------------------------------------------------------------------------
+// (31/10) Le DEPOT PERDU (lots-pur.ts) : « pas de commission, pas d'acces »
+// ---------------------------------------------------------------------------
+
+/** Un acces broker FERME par un depot perdu, et ce depot (le dernier marque perdu). */
+export type LigneDepotPerdu = {
+  accesId: string
+  email: string
+  telegramId: number | null
+  commissionId: string
+  /** 'YYYY-MM-DD' : le jour du depot. */
+  depotLe: string
+  /** Euros (le depot), null si inconnu. */
+  montantBase: number | null
+  client: string | null
+  partenaire: string
+}
+
+type LigneSqlPerdu = {
+  acces_id: string; email: string; telegram_id: bigint | null; commission_id: string; depot_le: string
+  montant_base: number | null; client: string | null; partenaire: string
+}
+
+/**
+ * Les acces broker ACTIFS FERMES par un depot perdu : un depot marque perdu
+ * (maj_le, jour de Paris) depuis DEPOT_PERDU_DEPUIS, et AUCUN depot attendu
+ * (lots faits ou non) ni recu sur cet acces. Un nouveau depot inscrit, ou la
+ * commission remise en attendue, le rouvre : c'est un etat lu, rien n'est
+ * ecrit sur l'acces. `filtre` : la condition sur l'acces (alias a).
+ */
+async function lireFermes(filtre: Prisma.Sql): Promise<LigneDepotPerdu[]> {
+  const lignes = await prisma.$queryRaw<LigneSqlPerdu[]>`
+    select a.acces_id::text as acces_id, a.email, a.telegram_id,
+           c.commission_id::text as commission_id, c.le::text as depot_le, c.montant_base::float8 as montant_base,
+           c.client, p.nom as partenaire
+    from public.cockpit_liveclub_acces a
+    join lateral (
+      select c1.commission_id, c1.partenaire_id, c1.le, c1.montant_base, c1.client
+      from public.cockpit_commissions c1
+      where c1.acces_id = a.acces_id and c1.nature = 'depot' and c1.statut = 'perdue'
+        and (coalesce(c1.maj_le, c1.pose_le) at time zone 'Europe/Paris')::date >= ${DEPOT_PERDU_DEPUIS}::date
+      order by coalesce(c1.maj_le, c1.pose_le) desc
+      limit 1
+    ) c on true
+    join public.cockpit_partenaires p on p.partenaire_id = c.partenaire_id
+    where a.motif = 'broker' and a.retire_le is null and a.sorti_le is null and a.jusquau >= current_date
+      and not exists (
+        select 1 from public.cockpit_commissions c2
+        where c2.acces_id = a.acces_id and c2.nature = 'depot' and c2.statut in ('attendue', 'recue'))
+      and ${filtre}
+    order by a.debut`
+  return lignes.map(l => ({
+    accesId: l.acces_id,
+    email: l.email,
+    telegramId: l.telegram_id === null ? null : Number(l.telegram_id),
+    commissionId: l.commission_id,
+    depotLe: l.depot_le,
+    montantBase: l.montant_base,
+    client: l.client,
+    partenaire: l.partenaire,
+  }))
+}
+
+/** Tous les acces fermes par un depot perdu (passage quotidien). Jette sur une panne. */
+export function accesFermesParDepot(): Promise<LigneDepotPerdu[]> {
+  return lireFermes(Prisma.sql`true`)
+}
+
+/** L'acces de CETTE commission, s'il est ferme par elle (relu juste avant d'agir). Jette sur une panne. */
+export async function accesFermeDeCommission(commissionId: string): Promise<LigneDepotPerdu | null> {
+  const lignes = await lireFermes(Prisma.sql`exists (
+    select 1 from public.cockpit_commissions c3 where c3.acces_id = a.acces_id and c3.commission_id = ${commissionId}::uuid)`)
+  return lignes[0] ?? null
+}
+
+/** L'acces de cette commission, ferme ou non : pour la carte et le resultat d'Agent AOK. Jette sur une panne. */
+export async function accesDeCommission(commissionId: string): Promise<{ accesId: string; telegramId: number | null; ferme: boolean } | null> {
+  const lignes = await prisma.$queryRaw<{ acces_id: string; telegram_id: bigint | null }[]>`
+    select a.acces_id::text as acces_id, a.telegram_id
+    from public.cockpit_commissions c
+    join public.cockpit_liveclub_acces a on a.acces_id = c.acces_id
+    where c.commission_id = ${commissionId}::uuid and c.nature = 'depot'
+      and a.motif = 'broker' and a.retire_le is null and a.sorti_le is null and a.jusquau >= current_date`
+  const l = lignes[0]
+  if (!l) return null
+  const ferme = fermetureDepotPerduActive() && (await lireFermes(Prisma.sql`a.acces_id = ${l.acces_id}::uuid`)).length > 0
+  return { accesId: l.acces_id, telegramId: l.telegram_id === null ? null : Number(l.telegram_id), ferme }
+}
+
+/**
+ * (31/10) Pour droitLiveClub : les acces donnes qui sont FERMES par un depot
+ * perdu (acces_id -> commission). NE JETTE JAMAIS : une lecture ratee (ou la
+ * regle coupee) rend une table vide, et l'acces garde son droit (un
+ * 'inconnu' ne ferme rien).
+ */
+export async function depotsPerdusDesAcces(accesIds: readonly string[]): Promise<Map<string, { commissionId: string }>> {
+  const fermes = new Map<string, { commissionId: string }>()
+  if (!fermetureDepotPerduActive() || accesIds.length === 0) return fermes
+  try {
+    const lignes = await lireFermes(Prisma.sql`a.acces_id::text = any(${[...accesIds]}::text[])`)
+    for (const l of lignes) if (!fermes.has(l.accesId)) fermes.set(l.accesId, { commissionId: l.commissionId })
+  } catch (err) {
+    console.warn(`[liveclub/lots] depots perdus illisibles (droit garde) : ${relationAbsente(err) ? 'table absente' : messageErreur(err)}`)
+  }
+  return fermes
 }
 
 /**

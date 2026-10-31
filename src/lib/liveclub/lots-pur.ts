@@ -298,8 +298,13 @@ export function ligneLotsAFaire(limite: string, declare: boolean): string {
     : `Tes premiers lots chez le broker sont à faire d'ici le ${dateLots(limite)} (${EXEMPLE}, par exemple). Quand c'est fait, dis-le-moi ici.`
 }
 
-/** Les deux textes de situation, pour accesSansAbonnement (pur.ts, qui n'importe rien). */
-export const TEXTES_LOTS_SITUATION = { enPause: texteAccesEnPauseLots, aFaire: ligneLotsAFaire } as const
+/**
+ * Les textes de situation, pour accesSansAbonnement (pur.ts, qui n'importe
+ * rien). (31/10) depotPerdu : l'acces ferme pour un depot perdu (plus bas).
+ */
+export const TEXTES_LOTS_SITUATION = {
+  enPause: texteAccesEnPauseLots, aFaire: ligneLotsAFaire, depotPerdu: (t: string) => texteAccesFermeDepot(t),
+} as const
 
 /** Apres le « Oui » de l'equipe, s'il est (ou semble) dans le groupe. */
 export const TEXTE_LOTS_CONFIRMES = "Bonne nouvelle : l'équipe a bien vu tes lots chez le broker. Merci !"
@@ -373,3 +378,135 @@ export function texteLotsDejaDecides(regle: string | null, par: string | null): 
 
 /** Le marqueur de l'historique d'Agent AOK : la carte n'est pas une question de l'equipe. */
 export const MARQUEUR_CARTE_LOTS = "[système] Carte « lots à vérifier », envoyée automatiquement par le bot des membres (ce n'est pas une question de l'équipe)."
+
+// ---------------------------------------------------------------------------
+// (31/10) LE DEPOT PERDU : pas de commission, pas d'acces
+// ---------------------------------------------------------------------------
+// Brice, 31/10 : « pas de commission pas d'acces, s'il y a un souci tu nous le
+// fais remonter a moi et Mel et le membre doit regulariser sa situation. s'il
+// a retire ses fonds sans activer son depot c'est comme annuler son
+// abonnement ».
+//
+// La regle (lots-lecture.ts, lireFermes) : un acces broker actif dont un
+// depot est marque PERDU (statut 'perdue', le broker ne paiera pas : fonds
+// retires sans activer le depot, depot refuse...) depuis DEPOT_PERDU_DEPUIS,
+// et dont AUCUN depot n'est attendu ni recu, est FERME, comme une fin
+// d'abonnement : le droit dit 'non' (droits.ts, depotPerdu). C'est un ETAT
+// LU, rien n'est ecrit sur l'acces :
+// - le passage quotidien (passage.ts, tache p) le sort du groupe SANS ban,
+//   lui ecrit une fois (texteFermetureDepot, en prive sinon par email), et
+//   previent Brice et Melanie dans Agent AOK une fois par commission ;
+// - la REGULARISATION le rouvre d'elle-meme : la commission remise en
+//   attendue ou en lots faits par la carte d'Agent AOK (proposer_marquer_
+//   commission, etat attendue ou lots_faits), ou un nouveau depot inscrit sur
+//   le meme acces. Sur le modele du retour apres les lots : le lien de retour
+//   part au clic de l'equipe s'il est hors du groupe, et le passage du
+//   lendemain sert de filet (regle retour_depot, une fois par commission) ;
+// - un depot douteux NON marque perdu : rien d'automatique, le suivi des lots
+//   s'applique (pause apres le delai) ;
+// - LIVECLUB_DEPOT_PERDU=0 coupe tout (config.ts, fermetureDepotPerduActive).
+
+/**
+ * (31/10) Les commissions marquees perdues AVANT ce jour (maj_le, jour de
+ * Paris) ne ferment rien : pas de fermeture retroactive surprise, comme
+ * SUIVI_LOTS_DEPUIS. A poser au jour du deploiement (ou avant, si l'equipe
+ * veut fermer aussi les anciennes).
+ */
+export const DEPOT_PERDU_DEPUIS = '2026-10-31'
+
+/** Le bouton qui transmet a l'equipe (le meme que « Contacter l'équipe » du menu). */
+export const BOUTON_EQUIPE_DEPOT = { texte: "Contacter l'équipe", data: 'm:equipe' } as const
+
+/** Le constat, sans reproche (Brice : le depot n'a pas ete active). */
+const CONSTAT_DEPOT = "Ton accès au Live Club par le broker n'est plus valide : ton dépôt chez lui n'a pas été activé."
+
+/** Les deux portes, puis comment regulariser. */
+const PORTES_DEPOT = "Pour revenir, deux possibilités : régulariser avec l'équipe (un nouveau dépôt activé chez le broker, puis tes premiers lots tradés), ou t'abonner au Live Club. "
+  + `Pour régulariser, appuie sur « ${BOUTON_EQUIPE_DEPOT.texte} » : l'équipe te répond ici.`
+
+/**
+ * Le message prive de la fermeture : le passage vient de le sortir du groupe
+ * (sans ban), ou il n'y etait pas. texteAbonnement : la phrase des deux portes
+ * d'abonnement (config.ts), passee par l'appelant (ce module n'importe rien).
+ */
+export function texteFermetureDepot(texteAbonnement: string): string {
+  return [
+    `Salut ! ${CONSTAT_DEPOT} Ton accès au groupe Telegram est donc fermé pour le moment.`,
+    PORTES_DEPOT,
+    texteAbonnement,
+  ].join('\n\n')
+}
+
+/** Sa situation quand l'acces est ferme (/start, /menu, « Mon abonnement », demande d'adhesion, outil mon_abonnement). */
+export function texteAccesFermeDepot(texteAbonnement: string): string {
+  return [CONSTAT_DEPOT, PORTES_DEPOT, texteAbonnement].join('\n\n')
+}
+
+/** Apres la regularisation, hors du groupe : le lien suit sur un bouton. */
+export const TEXTE_DEPOT_REGULARISE_RETOUR = 'Bonne nouvelle : ta situation avec le broker est régularisée, ton accès au groupe est rouvert. '
+  + "Appuie sur le bouton ci-dessous et demande à rejoindre le groupe : c'est accepté tout seul."
+
+/** Apres la regularisation, hors du groupe, sans lien possible la, tout de suite. */
+export const TEXTE_DEPOT_REGULARISE_SANS_LIEN = 'Bonne nouvelle : ta situation avec le broker est régularisée, ton accès au groupe est rouvert. '
+  + 'Écris-moi /menu pour avoir ton lien vers le groupe.'
+
+/** Ce qui est arrive au membre au passage (la ligne 2 de l'alerte). */
+export type IssueFermetureDepot = 'sorti' | 'absent' | 'sans_compte' | 'garde'
+
+/**
+ * L'ALERTE a Brice et Melanie dans Agent AOK (une fois par commission), trois
+ * lignes courtes (Melanie : « pas la patience des messages detailles »).
+ * Montant deja mis en forme ; message = le canal du message au membre, null
+ * s'il n'a pas pu partir (ou rien a lui dire : 'garde').
+ */
+export function texteAlerteDepotPerdu(o: {
+  qui: string
+  email: string | null
+  partenaire: string
+  depot: string | null
+  depotLe: string
+  issue: IssueFermetureDepot
+  message: 'prive' | 'email' | null
+}): string {
+  const email = o.email && o.email !== o.qui ? ` (${o.email})` : ''
+  const message = o.message === 'prive' ? 'il a reçu en privé le message pour régulariser'
+    : o.message === 'email' ? 'il a reçu par email le message pour régulariser'
+      : "je n'ai pas pu lui écrire (bot pas ouvert, email qui ne passe pas)"
+  const issue = o.issue === 'sorti' ? `Il est sorti du groupe, sans blocage, et ${message}.`
+    : o.issue === 'absent' ? `Il n'était pas dans le groupe ; ${message}.`
+      : o.issue === 'sans_compte' ? `Il n'est pas encore entré dans le groupe ; ${message}.`
+        : "Il garde le groupe par un autre accès (abonnement ou accès offert) : rien n'a changé pour lui."
+  return [
+    `Commission perdue chez ${o.partenaire} : l'accès broker de ${o.qui}${email} est fermé (pas de commission, pas d'accès). Dépôt${o.depot ? ` de ${o.depot}` : ''} du ${dateLots(o.depotLe)}.`,
+    issue,
+    "S'il régularise (nouveau dépôt activé, lots tradés), dis-le-moi : je remets sa commission en attendue ou en lots faits, et son accès rouvre.",
+  ].join('\n')
+}
+
+/** Le marqueur de l'historique d'Agent AOK : l'alerte n'est pas une question de l'equipe. */
+export const MARQUEUR_ALERTE_DEPOT = "[système] Alerte « commission perdue, accès broker fermé », envoyée automatiquement par le passage du matin (ce n'est pas une question de l'équipe)."
+
+/** La carte « marquer perdue » d'un depot dont l'acces se ferme (avant la confirmation). */
+export const PHRASE_CARTE_PERTE_FERME = "Son accès broker au Live Club se ferme (pas de commission, pas d'accès) : au passage du matin, il sort du groupe sans blocage et reçoit un message pour régulariser ; Brice et Mel sont prévenus."
+
+/** La meme, en court (carte de Melanie). */
+export const ALERTE_CARTE_PERTE_FERME = 'Son accès broker au Live Club se ferme.'
+
+/** La carte de regularisation d'une commission perdue (avant la confirmation). */
+export const PHRASE_CARTE_REGULARISATION = 'Régularisation : la commission était perdue, elle redevient attendue, et son accès broker au Live Club rouvre (lien de retour vers le groupe s\'il en est sorti).'
+
+/** Ce que le resultat dit apres la regularisation, selon ce qui s'est passe pour le membre. */
+export type IssueRegularisation = 'lien' | 'lien_deja' | 'dans_le_groupe' | 'sans_lien' | 'pas_prevenu' | 'encore_ferme' | 'en_pause_lots' | 'panne'
+
+export function phraseApresRegularisation(issue: IssueRegularisation): string {
+  switch (issue) {
+    case 'lien': return "Son accès broker au Live Club est rouvert : je l'ai prévenu et lui ai redonné son lien vers le groupe."
+    case 'lien_deja': return 'Son accès broker au Live Club est rouvert ; son lien de retour était déjà parti.'
+    case 'dans_le_groupe': return "Son accès broker au Live Club est rouvert ; il est toujours dans le groupe, rien d'autre à faire."
+    case 'sans_lien': return "Son accès broker au Live Club est rouvert ; je n'ai pas pu lui envoyer son lien, le passage de demain matin réessaie."
+    case 'pas_prevenu': return "Son accès broker au Live Club est rouvert (il n'avait pas encore été prévenu de la fermeture)."
+    case 'encore_ferme': return "Son accès broker reste fermé : un autre dépôt de son accès est encore marqué perdu, sans dépôt attendu."
+    case 'en_pause_lots': return 'Sa commission est de nouveau attendue, mais ses premiers lots ne sont pas notés faits et le délai est passé : son accès reste en pause tant que ses lots ne le sont pas.'
+    case 'panne': return "Son accès broker devrait rouvrir, mais je n'ai pas pu le vérifier : le passage de demain matin s'en occupe."
+  }
+}

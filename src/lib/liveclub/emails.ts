@@ -23,7 +23,9 @@ import {
   BOUTON_REGLE, echapperHtml, formaterDateFr, formaterMontant, messageErreur, normaliserEmail, phraseARegler, phraseQuestion,
   phraseRetourApresReglement, type FactureARegler,
 } from './pur'
-import { BOUTON_LOTS, EXEMPLE_LOTS, TENUE_LOTS, texteRelanceLots1, texteRelanceLots2, texteSuspensionLots } from './lots-pur'
+import {
+  BOUTON_EQUIPE_DEPOT, BOUTON_LOTS, EXEMPLE_LOTS, TENUE_LOTS, texteFermetureDepot, texteRelanceLots1, texteRelanceLots2, texteSuspensionLots,
+} from './lots-pur'
 
 export type ResultatEmail = { ok: true; id: string | null } | { ok: false; erreur: string }
 
@@ -483,6 +485,36 @@ export function emailRelanceLots(email: string, n: 1 | 2, limite: string): Promi
 
 export function emailSuspensionLots(email: string): Promise<ResultatEmail> {
   return envoyerModele(email, modeleSuspensionLots('email'))
+}
+
+/**
+ * (31/10, Brice : « pas de commission pas d'acces ») L'acces broker ferme
+ * parce que le depot n'a pas ete active (lots-pur.ts) : pourquoi, sans
+ * reproche, et les deux portes (regulariser avec l'equipe, ou s'abonner). En
+ * prive, le bouton « Contacter l'équipe » ; par email, repondre a l'email.
+ */
+export function modeleFermetureDepot(canal: Canal = 'telegram'): ModeleMessage {
+  if (canal === 'telegram') {
+    return {
+      sujet: "Ton accès au Live Club par le broker n'est plus valide",
+      paragraphes: texteFermetureDepot(texteAbonnement()).split('\n\n'),
+      boutonBot: { texte: BOUTON_EQUIPE_DEPOT.texte, data: BOUTON_EQUIPE_DEPOT.data },
+    }
+  }
+  return {
+    sujet: "Votre accès au Live Club par le broker n'est plus valide",
+    paragraphes: [
+      'Bonjour,',
+      "Votre accès au Live Club par le broker n'est plus valide : votre dépôt chez lui n'a pas été activé. Votre accès au groupe Telegram est donc fermé pour le moment.",
+      "Pour revenir, deux possibilités : régulariser avec l'équipe (un nouveau dépôt activé chez le broker, puis vos premiers lots tradés), ou vous abonner au Live Club. "
+        + "Pour régulariser, répondez à cet email : l'équipe vous répond.",
+      texteAbonnement(true),
+    ],
+  }
+}
+
+export function emailFermetureDepot(email: string): Promise<ResultatEmail> {
+  return envoyerModele(email, modeleFermetureDepot('email'))
 }
 
 // ---------------------------------------------------------------------------

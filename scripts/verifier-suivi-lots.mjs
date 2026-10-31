@@ -361,7 +361,8 @@ bloc('cablage : droit, bot, passage, clic de l equipe, prudence (lecture des sou
   assert.match(lecture, /if \(!suiviLotsActif\(\) \|\| accesIds\.length === 0\) return etats/)
   const bot = lire('src/lib/liveclub/bot-membre.ts')
   assert.match(bot, /if \(data === BOUTON_LOTS\.data\) \{\n\s+await repondreBouton\(bouton\.id\)\n\s+const d = await declarerLots\(u\.id, \{ origine: 'bouton' \}\)/)
-  assert.match(bot, /regle: droit\.dette \? 'impaye_ouvert' : enPauseLots \? 'lots_non_faits' : 'sans_droit'/)
+  // (31/10) Le depot perdu s'ajoute apres les lots (verifier-depot-perdu.mjs).
+  assert.match(bot, /regle: droit\.dette \? 'impaye_ouvert' : enPauseLots \? 'lots_non_faits' : fermeDepot \? 'depot_perdu' : 'sans_droit'/)
   assert.match(bot, /droit\.lots\?\.etat === 'en_retard' && o\.declencheur !== 'bouton'/)
   assert.match(bot, /droit\.raison === 'acces_broker' && droit\.lots\?\.etat === 'a_faire' && !droit\.lots\.declare/)
   const clic = lire('src/lib/agent-cockpit-telegram.ts')

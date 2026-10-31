@@ -126,3 +126,71 @@ export function reponsePartielle(o: { brouillons: readonly string[] }): string {
     suite,
   ].join('\n\n')
 }
+
+// ---------------------------------------------------------------------------
+// (31/10, Brice) PAS DE NOM D'OUTIL DANS UNE REPONSE. Constate le 31/10 :
+// « je proposerai alors la carte proposer_taux_partenaire pour enregistrer
+// l'accord date ». La consigne est dans le prompt (agent-cockpit.ts, « TES
+// OUTILS SONT INTERNES ») ; ce filet du serveur remplace, dans le texte
+// envoye a l'equipe (reponse et carte), un nom d'outil connu par ce qu'il fait.
+// ---------------------------------------------------------------------------
+
+/**
+ * Chaque outil d'Agent AOK et ce qu'il fait, dit en francais (avec son
+ * article). Tout outil ajoute a OUTILS doit y entrer : verifier-depot-perdu.mjs
+ * compare les deux listes.
+ */
+export const DESCRIPTIONS_OUTILS: Readonly<Record<string, string>> = {
+  requete_sql: 'une lecture de la base',
+  proposer_code_promo: 'la carte de code promo',
+  proposer_remboursement: 'la carte de remboursement',
+  proposer_revoquer_code: 'la carte qui désactive le code',
+  proposer_pause_abonnement: "la carte de pause de l'abonnement",
+  proposer_reprise_abonnement: "la carte de reprise de l'abonnement",
+  proposer_annulation_abonnement: "la carte d'arrêt de l'abonnement",
+  proposer_retirer_telegram: 'la carte de sortie du groupe',
+  proposer_reintegrer_telegram: 'la carte de retour dans le groupe',
+  proposer_acces_broker: "la carte d'accès broker",
+  proposer_exemption: "la carte d'accès offert",
+  proposer_depot_broker: 'la carte de dépôt broker',
+  proposer_commission_affiliation: "la carte de commission d'affiliation",
+  proposer_marquer_commission: 'la carte de suivi de la commission',
+  proposer_taux_partenaire: "la carte d'accord du broker",
+  proposer_intervenant: "la carte de tarif de l'intervenant",
+  proposer_lives_du_mois: 'la carte des lives du mois',
+  proposer_depense: 'la carte de dépense',
+  proposer_reglement: 'la carte de règlement entre Brice et Mel',
+  repartition_du_mois: 'le calcul de la répartition du mois',
+  fiche_personne: 'la fiche de la personne',
+  noter_demande: 'la note dans les demandes du Cockpit',
+  proposer_produit: 'la carte de produit',
+  proposer_lien_paiement: 'la carte de lien de paiement',
+  proposer_marquer_live_club: 'la carte qui fait ouvrir le Live Club à ce produit',
+  proposer_abonnement_reserve: 'la carte de tarif réservé',
+  proposer_retirer_tarif_reserve: 'la carte qui retire le tarif réservé',
+  proposer_effacement: "la carte d'effacement",
+  proposer_reponse_membre: 'la carte de réponse au membre',
+  rendre_la_main_au_bot: 'la main rendue au bot',
+  demandes_en_suspens: 'la liste des demandes en suspens',
+  reprendre_demande: 'la relance de la demande',
+  poser_question_equipe: "la question à l'équipe",
+  rapporter_reponse_equipe: 'la réponse rapportée',
+  generer_post: 'un brouillon de post',
+}
+
+const NOMS_OUTILS = Object.keys(DESCRIPTIONS_OUTILS).sort((a, b) => b.length - a.length)
+
+/**
+ * Un nom d'outil (avec ou sans accents graves, avec ou sans « la carte »,
+ * « l'outil », « la fonction » devant) remplace par ce qu'il fait. Le reste du
+ * texte ne bouge pas. Pur, sans effet sur un texte qui n'en contient pas.
+ */
+export function sansNomsOutils(texte: string): string {
+  if (!texte || !/[a-z]_[a-z]/.test(texte)) return texte
+  const motif = new RegExp(
+    // l' ou l + apostrophe typographique (U+2019, ecrite en echappement).
+    `(?:\\b(?:la|une|ta|cette|l'|l\\u2019)\\s*(?:carte|outil|fonction)\\s+(?:de\\s+)?)?\`?\\b(${NOMS_OUTILS.join('|')})\\b\`?(?:\\(\\))?`,
+    'g',
+  )
+  return texte.replace(motif, (_m, nom: string) => DESCRIPTIONS_OUTILS[nom] ?? nom)
+}

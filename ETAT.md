@@ -3,6 +3,38 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
+## Depot perdu = acces ferme, Agent AOK sans noms d'outils, accueil etale en conseils, adresses multiples (31/10/2026, LOCAL, non commite ; aucune migration)
+
+- (1) Brice, 31/10 : « pas de commission pas d'acces ». Regle et textes : fin de `src/lib/liveclub/lots-pur.ts` ; lecture :
+  `lots-lecture.ts` (lireFermes). Un acces broker actif dont un depot est marque PERDU (maj_le, jour de Paris, depuis
+  DEPOT_PERDU_DEPUIS = '2026-10-31', pas de fermeture retroactive) et dont AUCUN depot n'est attendu ni recu est FERME :
+  etat LU, rien n'est ecrit sur l'acces. droitLiveClub rend 'non' avec `depotPerdu` (lecture ratee = acces garde).
+  Situation au membre (/start, /menu, Mon abonnement, demande d'adhesion, jeton) : texteAccesFermeDepot + bouton de l'equipe.
+- Passage, tache (p) apres les lots : present, ni admin ni autre droit = sortie SANS ban (regle depot_perdu, simulee sans
+  sortiesActives) ; message de fermeture une fois par commission (prive sinon email) ; alerte a Brice et Mel dans Agent AOK une
+  fois par commission (acces_broker depot_perdu_alerte, historique de l'agent) ; rappel J-7 de fin d'acces epargne a un acces ferme.
+- REGULARISATION (choix) : par la carte d'Agent AOK, proposer_marquer_commission sur la commission perdue, etat `attendue` (nouveau)
+  ou `lots_faits` ; le controle pose `regulariser` (seule une commission perdue) ; l'ecriture remet statut 'attendue' ; le
+  resultat appelle apresMarquageDepot (lots.ts, import dynamique) : lien de retour tout de suite s'il avait ete prevenu et est
+  hors du groupe (retour_depot, une fois par commission), filet au passage du lendemain (retoursApresRegularisation). Un
+  nouveau depot inscrit sur le meme acces le rouvre aussi. Le clic « Oui, lots tradés » sur une commission perdue ne regularise
+  rien (decision annulee, l'equipe le sait). LIVECLUB_DEPOT_PERDU=0 coupe tout.
+- (2) Agent AOK : consigne « TES OUTILS SONT INTERNES » (prompt) + filet du serveur sansNomsOutils (agent-cockpit-pur.ts,
+  DESCRIPTIONS_OUTILS, un nom par outil, verifie contre OUTILS) sur la reponse et le complement des cartes ; le texte de carte
+  « (proposer_depot_broker, commission) » de repartition/serveur.ts est reecrit.
+- (3) Accueil etale (tips-accueil-pur.ts, memoire bot-infos-en-tips-etales) : J0 court (essentiel, Bla-bla, lots), puis
+  conseils J+1 academie, J+2 autres sujets et challenge, J+4 liens utiles, J+7 abonnement et adresses ; tache (q) du passage,
+  apres les lots ; un par jour, une fois, etat relu (present, droit oui, fil sans attente ni equipe a la main), saute si deja
+  aborde, decale par une relance des lots. Nouveaux entres depuis TIPS_ACCUEIL_DEPUIS = '2026-10-31' et acceptes par ce code
+  (details.genre/tips de entree_acceptee). LIVECLUB_TIPS_ACCUEIL=0 = tour complet d'avant, aucun conseil.
+- (4) Adresses multiples, au moment ou ca sert : phrase quand aucun abonnement n'est trouve (PHRASE_AUTRE_ADRESSE), code qui
+  n'arrive pas (autre adresse, ou l'equipe pour un acces broker, bouton joint), ligne des adresses dans « Mon abonnement »
+  (rattachement + cockpit_membre_emails), consigne de l'agent des membres (il transmet, ne relie rien lui-meme).
+- Verifs : tsc, eslint ; verifier-depot-perdu (12 blocs), verifier-tips-accueil (7), -suivi-lots (18, une regex mise a jour),
+  -accueil-groupe, -liveclub, -repartition, -securite-bots, -agent-equipe, -effacement, -relais-accueil et voisins : ok.
+  verifier-fiche-personne echoue comme avant (src/lib/tab/lectures.ts). Aucun appel d'eval, aucune lecture de la base.
+- A FAIRE : poser DEPOT_PERDU_DEPUIS et TIPS_ACCUEIL_DEPUIS au jour du deploiement ; commit puis push du journal sur GO (= prod).
+
 ## Suivi des LOTS d'un acces broker, ton d'Agent AOK, challenge Core content (31/10/2026, LOCAL, non commite ; aucune migration)
 
 - Echanges de Brice et Mel du 31/10. Regles et textes : `src/lib/liveclub/lots-pur.ts` (aucun import) ; lectures :

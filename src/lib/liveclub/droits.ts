@@ -14,7 +14,7 @@ import { exemptionActive } from '@/lib/stripe-actions'
 import { rattachementActif, membreParEmail } from './rattacher'
 import { abonnementsLiveClubDuClient, abonnementsLiveClubParEmail, type AbonnementResume } from './stripe'
 import { lireProduitsLiveClub } from './produits'
-import { lotsDesAcces } from './lots-lecture'
+import { depotsPerdusDesAcces, lotsDesAcces } from './lots-lecture'
 import type { EtatLots } from './lots-pur'
 import { dateIso, detteOuverte, finDuDroit, meilleurAbonnement, messageErreur, relationAbsente, type Dette } from './pur'
 
@@ -44,6 +44,13 @@ export type Droit = {
    * impaye. Absent : pas de suivi (pas de depot inscrit, lots faits, suivi coupe).
    */
   lots?: EtatLots & { commissionId: string }
+  /**
+   * (31/10, Brice : « pas de commission pas d'acces ») 'non' seulement : un
+   * acces broker FERME parce que son depot est marque perdu (lots-pur.ts),
+   * le seul acces broker du compte, aucun autre droit. Le bot dit pourquoi
+   * et comment revenir (regulariser avec l'equipe, ou s'abonner).
+   */
+  depotPerdu?: { commissionId: string }
   /** Sources illisibles (codes courts, sans donnee personnelle), pour les logs. */
   erreurs?: string[]
 }
@@ -132,6 +139,9 @@ export async function droitLiveClub(telegramId: number, opts: { exemptionIgnoree
   // (acces manuel), puis le 'non' porte `lots` (le bot dit pourquoi). Le
   // suivi illisible ne met personne en pause (lotsDesAcces ne jette pas).
   let lotsEnPause: Droit['lots'] | undefined
+  // (31/10) Un acces dont le depot est marque perdu est FERME (lots-pur.ts) :
+  // il n'ouvre plus le groupe. Lecture ratee = acces garde (ne jette pas).
+  let depotPerdu: Droit['depotPerdu'] | undefined
   try {
     const email = rattachement?.email ?? null
     const lignes = await prisma.$queryRaw<LigneAcces[]>`
@@ -141,8 +151,14 @@ export async function droitLiveClub(telegramId: number, opts: { exemptionIgnoree
           or (${email}::text is not null and lower(email) = lower(${email})))
       order by jusquau desc
       limit 3`
+    const fermes = lignes.length ? await depotsPerdusDesAcces(lignes.map(l => l.acces_id)) : new Map<string, { commissionId: string }>()
     const lots = lignes.length ? await lotsDesAcces(lignes.map(l => l.acces_id)) : new Map()
     for (const l of lignes) {
+      const ferme = fermes.get(l.acces_id)
+      if (ferme) {
+        depotPerdu ??= ferme
+        continue
+      }
       const etat = lots.get(l.acces_id)
       if (etat?.etat === 'en_retard') {
         lotsEnPause ??= etat
@@ -196,5 +212,8 @@ export async function droitLiveClub(telegramId: number, opts: { exemptionIgnoree
     return { statut: 'inconnu', raison: null, ...base, erreurs }
   }
   const dette = detteOuverte(lus)
-  return { statut: 'non', raison: null, ...base, ...(dette ? { dette } : {}), ...(lotsEnPause ? { lots: lotsEnPause } : {}) }
+  return {
+    statut: 'non', raison: null, ...base, ...(dette ? { dette } : {}), ...(lotsEnPause ? { lots: lotsEnPause } : {}),
+    ...(depotPerdu ? { depotPerdu } : {}),
+  }
 }

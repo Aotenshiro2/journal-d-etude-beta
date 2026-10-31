@@ -35,17 +35,19 @@ import { RefusAction, journaliserGesteLiveClub, validerAction } from '@/lib/stri
 import { executerActionRepartition } from '@/lib/repartition/serveur'
 import { centimes, euros } from '@/lib/repartition/pur'
 import { rendreVisible } from '@/lib/securite/injection-pur'
-import { chatId, suiviLotsActif } from './config'
+import { chatId, fermetureDepotPerduActive, suiviLotsActif } from './config'
 import { droitLiveClub } from './droits'
 import { rattachementActif } from './rattacher'
 import { appelTelegram, envoyer, estDansLeGroupe, lienDemandeAdhesion, type Bouton } from './telegram'
 import { tracerGeste, tracerMessageBot } from './support-pont'
-import { lotsDejaFaits, suivisLotsDuCompte, type LigneSuiviLots } from './lots-lecture'
+import { accesDeCommission, lotsDejaFaits, suivisLotsDuCompte, type LigneDepotPerdu, type LigneSuiviLots } from './lots-lecture'
 import {
-  BOUTON_LOTS, MARQUEUR_CARTE_LOTS, TEXTE_LOTS_CONFIRMES, TEXTE_LOTS_CONFIRMES_RETOUR, TEXTE_LOTS_CONFIRMES_SANS_LIEN,
-  clavierCarteLots, decisionDeclarationLots, etatLots, lotsEnRetard, texteCarteLots, texteDeclarationLots,
-  texteLotsDejaDecides, texteLotsPasVus,
-  type EtatLots, type IssueDeclarationLots, type VerbeLots,
+  BOUTON_LOTS, MARQUEUR_ALERTE_DEPOT, MARQUEUR_CARTE_LOTS, PHRASE_CARTE_PERTE_FERME,
+  TEXTE_DEPOT_REGULARISE_RETOUR, TEXTE_DEPOT_REGULARISE_SANS_LIEN,
+  TEXTE_LOTS_CONFIRMES, TEXTE_LOTS_CONFIRMES_RETOUR, TEXTE_LOTS_CONFIRMES_SANS_LIEN,
+  clavierCarteLots, decisionDeclarationLots, etatLots, lotsEnRetard, phraseApresRegularisation, texteAlerteDepotPerdu,
+  texteCarteLots, texteDeclarationLots, texteLotsDejaDecides, texteLotsPasVus,
+  type EtatLots, type IssueDeclarationLots, type IssueFermetureDepot, type VerbeLots,
 } from './lots-pur'
 import { jourParis } from './passage-regles'
 import { messageErreur, relationAbsente } from './pur'
@@ -306,6 +308,25 @@ async function annulerDecision(decisionId: number): Promise<void> {
 }
 
 async function apresOui(d: Extract<Decision, { genre: VerbeLots }>, compte: CompteCockpitTelegram): Promise<{ ok: boolean; texte: string }> {
+  // (31/10) Une commission marquee PERDUE depuis la declaration : « lots
+  // tradés » ne la regularise pas (ce clic ne passe pas par la carte de
+  // regularisation) et ne dit rien au membre : son acces reste ferme. La
+  // decision ne compte pas, la carte reste valable.
+  try {
+    const [c] = await prisma.$queryRaw<{ statut: string }[]>`
+      select statut from public.cockpit_commissions where commission_id = ${d.commissionId}::uuid`
+    if (c?.statut === 'perdue') {
+      await annulerDecision(d.decisionId)
+      return {
+        ok: false,
+        texte: "Sa commission est marquée perdue : rien n'a été noté et je ne l'ai pas prévenu (son accès broker est fermé). "
+          + "S'il a régularisé, dis-le-moi : je remets sa commission en attendue ou en lots faits.",
+      }
+    }
+  } catch (err) {
+    await annulerDecision(d.decisionId)
+    return { ok: false, texte: `Rien n'a été noté (${messageErreur(err).slice(0, 200)}). Réessaie dans un instant : la carte reste valable.` }
+  }
   // La MEME ecriture que la carte proposer_marquer_commission (etat lots_faits).
   const action = validerAction({
     type: 'marquer_commission', compte: 'cockpit',
@@ -323,7 +344,7 @@ async function apresOui(d: Extract<Decision, { genre: VerbeLots }>, compte: Comp
       await annulerDecision(d.decisionId)
       return { ok: false, texte: `Rien n'a été noté (${messageErreur(err).slice(0, 200)}). Réessaie dans un instant : la carte reste valable.` }
     }
-    // Plus attendue (deja recue, ou perdue) : rien a marquer, ses lots sont bien vus.
+    // Plus attendue (deja recue ; perdue est traitee plus haut) : rien a marquer, ses lots sont bien vus.
     resultat = err.message
   }
   if (d.membre === null) return { ok: true, texte: `${resultat}\nJe n'ai pas pu le prévenir : compte Telegram inconnu.` }
@@ -373,18 +394,33 @@ async function prevenirLotsVus(telegramId: number, commissionId: string, acteur:
  * 'deja' : deja envoye (ou deja revenu) ; 'echec' : rien n'est parti, la
  * reservation est rendue (le passage du lendemain reessaie). Ne jette pas.
  */
-export async function retourApresLots(telegramId: number, o: { commissionId: string; acteur: string }): Promise<'envoye' | 'deja' | 'echec'> {
+export function retourApresLots(telegramId: number, o: { commissionId: string; acteur: string }): Promise<'envoye' | 'deja' | 'echec'> {
+  return retourAuGroupe(telegramId, { ...o, regle: 'retour_lots', texte: TEXTE_LOTS_CONFIRMES_RETOUR })
+}
+
+/**
+ * (31/10) Le meme lien de retour apres la REGULARISATION d'un depot perdu
+ * (acces broker qui etait ferme), une fois par commission (regle retour_depot).
+ */
+export function retourApresRegularisation(telegramId: number, o: { commissionId: string; acteur: string }): Promise<'envoye' | 'deja' | 'echec'> {
+  return retourAuGroupe(telegramId, { ...o, regle: 'retour_depot', texte: TEXTE_DEPOT_REGULARISE_RETOUR })
+}
+
+/** Le lien de retour, une fois par commission et par regle (retourApresLots, retourApresRegularisation). */
+async function retourAuGroupe(
+  telegramId: number, o: { commissionId: string; acteur: string; regle: 'retour_lots' | 'retour_depot'; texte: string },
+): Promise<'envoye' | 'deja' | 'echec'> {
   let reserve: bigint | null
   try {
     const lignes = await prisma.$transaction(async tx => {
       await tx.$queryRaw`
-        select count(*)::int as n from (select pg_advisory_xact_lock(hashtextextended(${`liveclub:retour_lots:${o.commissionId}`}::text, 0))) as verrou`
+        select count(*)::int as n from (select pg_advisory_xact_lock(hashtextextended(${`liveclub:${o.regle}:${o.commissionId}`}::text, 0))) as verrou`
       return tx.$queryRaw<{ geste_id: bigint }[]>`
         insert into public.cockpit_liveclub_gestes (telegram_id, geste, resultat, acteur, regle, details)
-        select ${telegramId}::bigint, 'invitation', 'fait', ${o.acteur}, 'retour_lots', ${JSON.stringify({ commission_id: o.commissionId })}::jsonb
+        select ${telegramId}::bigint, 'invitation', 'fait', ${o.acteur}, ${o.regle}, ${JSON.stringify({ commission_id: o.commissionId })}::jsonb
         where not exists (
           select 1 from public.cockpit_liveclub_gestes r
-          where r.geste = 'invitation' and r.regle = 'retour_lots' and r.resultat in ('fait', 'refuse')
+          where r.geste = 'invitation' and r.regle = ${o.regle} and r.resultat in ('fait', 'refuse')
             and r.details->>'commission_id' = ${o.commissionId}::text)
         returning geste_id`
     })
@@ -406,26 +442,135 @@ export async function retourApresLots(telegramId: number, o: { commissionId: str
   if (!leve.ok) return rendre()
   let lien: string
   try {
-    lien = await lienDemandeAdhesion(`retour lots u${telegramId}`)
+    lien = await lienDemandeAdhesion(`${o.regle === 'retour_lots' ? 'retour lots' : 'retour depot'} u${telegramId}`)
   } catch {
     return rendre()
   }
   const boutons: Bouton[][] = [[{ texte: BOUTON_RETOUR, url: lien }]]
-  const r = await envoyer(telegramId, TEXTE_LOTS_CONFIRMES_RETOUR, boutons)
+  const r = await envoyer(telegramId, o.texte, boutons)
   if (!r.ok) return rendre()
   // Au fil Support : le texte et le libelle du bouton, jamais le lien.
-  await tracerMessageBot(telegramId, TEXTE_LOTS_CONFIRMES_RETOUR, { boutons })
-  await tracerGeste(telegramId, { geste: 'invitation', resultat: 'fait', regle: 'retour_lots', details: { commission_id: o.commissionId } })
+  await tracerMessageBot(telegramId, o.texte, { boutons })
+  await tracerGeste(telegramId, { geste: 'invitation', resultat: 'fait', regle: o.regle, details: { commission_id: o.commissionId } })
   return 'envoye'
 }
 
 /**
  * Pour le passage quotidien : le retour est inutile (deja dans le groupe).
- * La boucle se ferme une fois ('invitation' 'refuse' retour_lots). Ne jette pas.
+ * La boucle se ferme une fois ('invitation' 'refuse' retour_lots, ou
+ * retour_depot pour une regularisation). Ne jette pas.
  */
-export async function fermerRetourLots(telegramId: number, commissionId: string, acteur: string): Promise<void> {
+export async function fermerRetourLots(
+  telegramId: number, commissionId: string, acteur: string, regle: 'retour_lots' | 'retour_depot' = 'retour_lots',
+): Promise<void> {
   await journaliserGesteLiveClub(
-    { geste: 'invitation', resultat: 'refuse', regle: 'retour_lots', details: { commission_id: commissionId, motif: 'deja_dans_le_groupe' } },
+    { geste: 'invitation', resultat: 'refuse', regle, details: { commission_id: commissionId, motif: 'deja_dans_le_groupe' } },
     { telegramId, acteur },
   )
+}
+
+// ---------------------------------------------------------------------------
+// (31/10) LE DEPOT PERDU (lots-pur.ts) : « pas de commission, pas d'acces »
+// ---------------------------------------------------------------------------
+
+/**
+ * L'alerte a Brice et Melanie dans Agent AOK (comptes de
+ * cockpit_telegram_comptes, comme l'alerte « un membre demande un humain » et
+ * celle des comptes Telegram), ajoutee a l'historique de leur conversation
+ * avec l'agent (« il a regularise » juste en dessous s'y rapporte). Le nombre
+ * de comptes qui l'ont recue. Ne jette pas.
+ */
+export async function alerterEquipeDepotPerdu(texte: string, id: string): Promise<number> {
+  try {
+    const equipe = await prisma.$queryRaw<{ telegram_id: bigint }[]>`
+      select telegram_id from public.cockpit_telegram_comptes order by cree_le`
+    let livres = 0
+    for (const dest of equipe) {
+      const chat = Number(dest.telegram_id)
+      if (!Number.isSafeInteger(chat) || chat <= 0) continue
+      if (!await tgCockpit('sendMessage', { chat_id: chat, text: texte.slice(0, 4000), link_preview_options: { is_disabled: true } })) continue
+      livres++
+      await ajouterAHistoriqueAgent(chat, chat, [
+        { role: 'user', content: MARQUEUR_ALERTE_DEPOT, id },
+        { role: 'assistant', content: texte, id: `${id}-texte` },
+      ]).catch(() => false)
+    }
+    console.log(`[liveclub/lots] alerte depot perdu : ${livres}/${equipe.length} destinataire(s)`)
+    return livres
+  } catch (err) {
+    console.warn(`[liveclub/lots] alerte depot perdu non envoyee : ${messageErreur(err).slice(0, 160)}`)
+    return 0
+  }
+}
+
+/** Le texte de l'alerte pour un acces ferme (nom et montant mis en forme ici). Ne jette pas. */
+export async function texteAlerteDepot(
+  l: LigneDepotPerdu, o: { issue: IssueFermetureDepot; message: 'prive' | 'email' | null },
+): Promise<string> {
+  const nom = l.client ?? (l.telegramId !== null ? await nomTelegram(l.telegramId).catch(() => null) : null)
+  return texteAlerteDepotPerdu({
+    qui: rendreVisible(nom ?? l.email),
+    email: l.email,
+    partenaire: l.partenaire,
+    depot: l.montantBase === null ? null : euros(centimes(l.montantBase) ?? 0),
+    depotLe: l.depotLe,
+    issue: o.issue,
+    message: o.message,
+  })
+}
+
+/**
+ * (31/10) Apres le clic d'une carte proposer_marquer_commission
+ * (executerActionRepartition), la ligne du resultat qui dit ce que devient
+ * l'acces broker. Appelee par import dynamique (repartition/serveur.ts est
+ * importe par ce module). Ne jette pas ; null = rien a dire (pas d'acces
+ * broker, regle coupee).
+ * - 'perdue' : l'acces se ferme (le passage du matin le sort et ecrit) ;
+ * - 'regularisee' : l'acces rouvre ; s'il avait ete prevenu de la fermeture
+ *   et qu'il est hors du groupe, son lien de retour part TOUT DE SUITE (le
+ *   passage du lendemain sert de filet), comme apres le « Oui » des lots.
+ */
+export async function apresMarquageDepot(commissionId: string, etat: 'perdue' | 'regularisee', acteur: string): Promise<string | null> {
+  if (!fermetureDepotPerduActive()) return null
+  let acces: Awaited<ReturnType<typeof accesDeCommission>>
+  try {
+    acces = await accesDeCommission(commissionId)
+  } catch (err) {
+    console.warn(`[liveclub/lots] acces de la commission illisible : ${messageErreur(err).slice(0, 160)}`)
+    return etat === 'perdue' ? null : phraseApresRegularisation('panne')
+  }
+  if (!acces) return null
+  if (etat === 'perdue') {
+    return acces.ferme ? PHRASE_CARTE_PERTE_FERME : "Son accès broker reste ouvert : un autre dépôt de son accès est encore attendu ou reçu."
+  }
+  if (acces.ferme) return phraseApresRegularisation('encore_ferme')
+  const tid = acces.telegramId
+  if (tid === null) return phraseApresRegularisation('pas_prevenu')
+  let prevenu: boolean
+  try {
+    const lignes = await prisma.$queryRaw<{ n: number }[]>`
+      select 1 as n from public.cockpit_liveclub_gestes
+      where telegram_id = ${tid}::bigint and resultat = 'fait'
+        and ((geste = 'retrait' and regle = 'depot_perdu') or (geste = 'rappel' and regle = 'depot_perdu_message'))
+        and details->>'commission_id' = ${commissionId}::text
+      limit 1`
+    prevenu = lignes.length > 0
+  } catch {
+    return phraseApresRegularisation('panne')
+  }
+  if (!prevenu) return phraseApresRegularisation('pas_prevenu')
+  const presence = await estDansLeGroupe(tid)
+  if (presence === 'oui') {
+    await fermerRetourLots(tid, commissionId, acteur, 'retour_depot')
+    return phraseApresRegularisation('dans_le_groupe')
+  }
+  if (presence !== 'non') return phraseApresRegularisation('sans_lien')
+  const droit = await droitLiveClub(tid)
+  if (droit.statut === 'non' && droit.lots?.etat === 'en_retard') return phraseApresRegularisation('en_pause_lots')
+  if (droit.statut !== 'oui') return phraseApresRegularisation('sans_lien')
+  const r = await retourApresRegularisation(tid, { commissionId, acteur })
+  if (r === 'envoye') return phraseApresRegularisation('lien')
+  if (r === 'deja') return phraseApresRegularisation('lien_deja')
+  const parti = await direAuMembre(tid, TEXTE_DEPOT_REGULARISE_SANS_LIEN)
+  return parti ? "Son accès broker au Live Club est rouvert : je l'ai prévenu, il aura son lien vers le groupe avec /menu." : phraseApresRegularisation('sans_lien')
 }

@@ -41,6 +41,13 @@
 //       PAUSE de l'acces (sortie SANS ban, message), le filet du retour des
 //       que les lots sont notes faits. Une declaration en cours arrete tout.
 //       Pause SIMULEE sans la bascule ; LIVECLUB_SUIVI_LOTS=0 coupe la tache ;
+//   (p) DEPOT PERDU (Brice, 31/10, « pas de commission pas d'acces ») : un
+//       acces broker ferme sort SANS ban, recoit un message une fois, l'equipe
+//       est prevenue une fois ; filet du retour apres une regularisation.
+//       LIVECLUB_DEPOT_PERDU=0 coupe la tache ;
+//   (q) CONSEILS D'ACCUEIL (Brice, 31/10, tips-accueil-pur.ts) : un nouveau
+//       membre recoit un conseil par jour au plus (J+1, J+2, J+4, J+7), apres
+//       les relances des lots. LIVECLUB_TIPS_ACCUEIL=0 coupe la tache ;
 //   (d) purge des conversations privees de plus de 7 jours ;
 //   (m) RESUME DU MATIN (Brice, 15/10, resume.ts) : en dernier, Agent AOK
 //       envoie en prive a l'equipe (cockpit_telegram_comptes) ce qui a bouge
@@ -83,12 +90,15 @@ import {
   type EntreeJournalLiveClub, type GesteJournal,
 } from '@/lib/stripe-actions'
 import {
-  GRACE_JOURS, PLAFOND_RESILIATIONS_PASSAGE, PLAFOND_SORTIES_PASSAGE, chatId, cleStripeLecture, lienBot,
-  sortiesActives, sortiesImpayesActives, suiviLotsActif,
+  GRACE_JOURS, PLAFOND_RESILIATIONS_PASSAGE, PLAFOND_SORTIES_PASSAGE, chatId, cleStripeLecture, fermetureDepotPerduActive, lienBot,
+  sortiesActives, sortiesImpayesActives, suiviLotsActif, tipsAccueilActifs,
 } from './config'
-import { suiviLotsDeCommission, suivisLotsATraiter, type LigneSuiviLots } from './lots-lecture'
-import { limiteAnnonceeRelance2, limiteEffectiveLots, limiteLots, phaseLots } from './lots-pur'
-import { fermerRetourLots, retourApresLots } from './lots'
+import {
+  accesFermeDeCommission, accesFermesParDepot, depotsPerdusDesAcces, suiviLotsDeCommission, suivisLotsATraiter,
+  type LigneDepotPerdu, type LigneSuiviLots,
+} from './lots-lecture'
+import { limiteAnnonceeRelance2, limiteEffectiveLots, limiteLots, phaseLots, type IssueFermetureDepot } from './lots-pur'
+import { alerterEquipeDepotPerdu, fermerRetourLots, retourApresLots, retourApresRegularisation, texteAlerteDepot } from './lots'
 import {
   listerAbonnementsLiveClub, clientsStripeParEmail, abonnementsLiveClubParEmail, abonnementsLiveClubDuClient, adopterPause,
   effacerMetadonneesPause,
@@ -103,11 +113,17 @@ import { rapprocherTarifsReserves } from './reserves'
 import { resumeDuMatin } from './resume'
 import { relaisDuMatin } from './relais'
 import { appelTelegram, envoyer, lienDemandeAdhesion } from './telegram'
-import { tracerGeste, tracerMessageBot } from './support-pont'
+import { lireEtatFil, tracerGeste, tracerMessageBot } from './support-pont'
+import { quiRepond } from './support-pont-pur'
+import { lireHistorique } from './conversations'
+import {
+  TIPS_ACCUEIL_DEPUIS, TIPS_FENETRE_JOURS, boutonsTip, dejaParle, estCleTip, texteTip, tipsDus,
+} from './tips-accueil-pur'
 import {
   emailRappelPause, emailDebutPauseSansReprise, emailRetour, emailRappelFinBroker, emailFinBroker,
   emailSortieDesabonne, emailRappelPrelevement, emailSortieImpaye, emailReouverture, emailFinFenetre, emailBienvenue,
   emailRappelFinExemption, emailFinExemption, emailRelanceLots, emailSuspensionLots, modeleRelanceLots, modeleSuspensionLots,
+  emailFermetureDepot, modeleFermetureDepot,
   modeleRappelPause, modeleDebutPauseSansReprise, modeleRetour, modeleRappelFinBroker, modeleFinBroker,
   modeleSortieDesabonne, modeleRappelPrelevement, modeleRetourSortieAbusive, modeleSortieImpaye, modeleReouverture,
   modeleFinFenetre, modeleRappelFinExemption, modeleFinExemption, boutonsTelegram,
@@ -206,6 +222,26 @@ export type SynthesePassage = {
     relances_1: number; relances_2: number; pauses: number; simulees: number; messages: number; retours: number
     deja_revenus: number; deja_faits: number; declares: number; absents: number; gardes: number; sans_compte: number
     inconnus: number; echecs: number; coupe: boolean
+  }
+  /**
+   * (p) Depot perdu (31/10, « pas de commission, pas d'acces ») : sorties
+   * reelles (sans ban), simulees sans sortiesActives(), messages de fermeture,
+   * alertes a l'equipe, liens de retour apres une regularisation ; gardes :
+   * admin, ou autre droit ; coupe : LIVECLUB_DEPOT_PERDU=0.
+   */
+  depots_perdus: {
+    sorties: number; simulees: number; messages: number; alertes: number; retours: number; deja_revenus: number
+    absents: number; gardes: number; sans_compte: number; inconnus: number; echecs: number; coupe: boolean
+  }
+  /**
+   * (q) Conseils d'accueil (31/10, tips-accueil-pur.ts) : envoyes ; sautes
+   * (sujet deja aborde) ; decales (relance des lots partie aujourd'hui) ;
+   * absents, sans_droit, equipe (fil qui attend l'equipe ou equipe a la main) :
+   * rien aujourd'hui ; coupe : LIVECLUB_TIPS_ACCUEIL=0.
+   */
+  tips: {
+    envoyes: number; sautes: number; decales: number; absents: number; sans_droit: number; equipe: number
+    deja_faits: number; inconnus: number; echecs: number; coupe: boolean
   }
   purge: { conversations: number }
   /**
@@ -990,6 +1026,9 @@ async function tacheBroker(ctx: Contexte) {
     // 1. Rappel J-7 (avec le lien d'abonnement), une fois.
     if (brokerAPrevenir(jusquau, ctx.maintenant)) {
       if (l.rappel_envoye_le) continue
+      // (31/10) Acces deja ferme pour un depot perdu (tache p) : il a eu son
+      // message, pas de « ton acces se termine bientot » en plus.
+      if ((await depotsPerdusDesAcces([l.acces_id])).has(l.acces_id)) { s.ignores++; continue }
       // Deja abonne (ou autre droit) : pas de rappel « abonne-toi ».
       try {
         const abonnements = await abonnementsLiveClubParEmail(l.email)
@@ -2934,6 +2973,378 @@ async function retoursApresLots(ctx: Contexte) {
 }
 
 // ---------------------------------------------------------------------------
+// (p) Le DEPOT PERDU (Brice, 31/10 : « pas de commission pas d'acces »,
+// lots-pur.ts)
+// ---------------------------------------------------------------------------
+
+/**
+ * Pour chaque acces broker FERME par un depot perdu (lots-lecture.ts) :
+ * - l'etat relu juste avant (regularise entre-temps = rien) ;
+ * - present dans le groupe, ni admin ni createur, sans autre droit (relu en
+ *   direct) : sortie SANS ban par sortir() (plafond du passage). SIMULEE sans
+ *   sortiesActives() (une ligne 'simule' par commission), rien d'autre ;
+ * - puis le message de la fermeture, une fois par commission (en prive, sinon
+ *   par email), sauf s'il garde le groupe par un autre droit ;
+ * - puis l'alerte a Brice et Melanie dans Agent AOK, une fois par commission ;
+ * - le filet du retour (retoursApresRegularisation) d'abord.
+ * LIVECLUB_DEPOT_PERDU=0 coupe la tache.
+ */
+async function tacheDepotsPerdus(ctx: Contexte) {
+  const s = ctx.s.depots_perdus
+  if (!fermetureDepotPerduActive()) {
+    s.coupe = true
+    return
+  }
+  await retoursApresRegularisation(ctx)
+  let fermes: LigneDepotPerdu[]
+  try {
+    fermes = await accesFermesParDepot()
+  } catch (err) {
+    erreur(ctx, relationAbsente(err) ? 'depots_perdus_table_absente' : 'depots_perdus_illisibles', err)
+    return
+  }
+  for (const l of fermes) {
+    if (tempsEcoule(ctx)) return
+    await fermerAccesDepot(ctx, l)
+  }
+}
+
+/** Le message et l'alerte de CETTE commission sont-ils deja partis ? Jette si le journal ne repond pas. */
+async function fermetureDejaTraitee(l: LigneDepotPerdu): Promise<boolean> {
+  const detail = { cle: 'commission_id', valeur: l.commissionId }
+  return await gesteExiste({ geste: 'rappel', regle: 'depot_perdu_message', resultats: ['fait'], detail })
+    && await gesteExiste({ geste: 'acces_broker', regle: 'depot_perdu_alerte', resultats: ['fait'], detail })
+}
+
+async function fermerAccesDepot(ctx: Contexte, l: LigneDepotPerdu) {
+  const s = ctx.s.depots_perdus
+  let relu: LigneDepotPerdu | null
+  try {
+    relu = await accesFermeDeCommission(l.commissionId)
+  } catch (err) {
+    erreur(ctx, 'depots_perdus_illisibles', err)
+    s.inconnus++
+    return
+  }
+  // Regularise entre la liste et maintenant (commission remise en attendue, nouveau depot) : rien.
+  if (!relu) return
+  const tid = l.telegramId !== null && Number.isSafeInteger(l.telegramId) ? l.telegramId : null
+  let issue: IssueFermetureDepot
+  if (tid !== null) {
+    const p = await presence(tid)
+    if (p.etat === 'inconnu') { s.inconnus++; return }
+    if (p.etat === 'oui') {
+      if (estIntouchable(p)) { s.gardes++; return }
+      const droit = await droitAvantSortie(tid, [l.email])
+      if (droit === 'inconnu') { s.inconnus++; return }
+      if (droit === 'oui') {
+        issue = 'garde'
+      } else {
+        const details = { acces_id: l.accesId, commission_id: l.commissionId, statut_tg: p.statut }
+        if (!sortiesActives()) {
+          let deja: boolean
+          try {
+            deja = await gesteExiste({
+              geste: 'retrait', regle: 'depot_perdu', resultats: ['simule'], telegramId: tid,
+              detail: { cle: 'commission_id', valeur: l.commissionId },
+            })
+          } catch (err) {
+            erreur(ctx, 'journal_illisible', err)
+            s.inconnus++
+            return
+          }
+          if (!deja) {
+            await tracer(ctx, { geste: 'retrait', resultat: 'simule', regle: 'depot_perdu', details }, { telegramId: tid })
+            s.simulees++
+          }
+          return
+        }
+        const r = await sortir(ctx, tid, { geste: 'retrait', regle: 'depot_perdu', details })
+        if (r === 'plafond') return
+        if (r !== 'fait') { s.echecs++; return }
+        s.sorties++
+        issue = 'sorti'
+      }
+    } else {
+      // Deja hors du groupe : le droit refuse son entree et dit pourquoi.
+      // Message et alerte deja partis : rien a relire (pas d'appel Stripe).
+      try {
+        if (await fermetureDejaTraitee(l)) { s.absents++; return }
+      } catch (err) {
+        erreur(ctx, 'journal_illisible', err)
+        s.inconnus++
+        return
+      }
+      const droit = await droitAvantSortie(tid, [l.email])
+      if (droit === 'inconnu') { s.inconnus++; return }
+      issue = droit === 'oui' ? 'garde' : 'absent'
+      if (issue === 'absent') s.absents++
+    }
+  } else {
+    // Jamais entre (lien personnel pas ouvert) : rien a sortir ; message par email.
+    try {
+      if (await fermetureDejaTraitee(l)) { s.sans_compte++; return }
+      const abonnements = await abonnementsLiveClubParEmail(l.email)
+      issue = abonnements.some(abonnementOuvreLeGroupe) ? 'garde' : 'sans_compte'
+    } catch (err) {
+      erreur(ctx, 'depots_perdus_illisibles', err)
+      s.inconnus++
+      return
+    }
+    if (issue === 'sans_compte') s.sans_compte++
+  }
+  if (issue === 'garde') s.gardes++
+
+  // Le message au membre, une fois par commission (rien a lui dire s'il garde le groupe).
+  const message = issue === 'garde' ? null : await messageFermetureDepot(ctx, l, tid)
+  if (message === 'deja') {
+    // Deja prevenu (un passage precedent) : l'alerte suit son propre « une fois ».
+  } else if (message) {
+    s.messages++
+  }
+  await alerteDepotPerdu(ctx, l, tid, issue, message === 'deja' ? null : message)
+}
+
+/** Le message de la fermeture, une fois par commission, reserve avant l'envoi. 'deja' = deja parti. */
+async function messageFermetureDepot(ctx: Contexte, l: LigneDepotPerdu, tid: number | null): Promise<'prive' | 'email' | null | 'deja'> {
+  let reserve: bigint | null
+  try {
+    reserve = await reserverGeste({
+      cle: `liveclub:depot_perdu_message:${l.commissionId}`,
+      deja: Prisma.sql`
+        select 1 from public.cockpit_liveclub_gestes d
+        where d.geste = 'rappel' and d.regle = 'depot_perdu_message' and d.resultat = 'fait'
+          and d.details->>'commission_id' = ${l.commissionId}`,
+      geste: 'rappel', regle: 'depot_perdu_message', telegramId: tid, abonnementId: null,
+      details: { acces_id: l.accesId, commission_id: l.commissionId },
+    })
+  } catch (err) {
+    erreur(ctx, 'journal_reservation', err)
+    return null
+  }
+  if (reserve === null) return 'deja'
+  const envoi = await prevenir(ctx, tid !== null ? [tid] : [], l.email, modeleFermetureDepot(), e => emailFermetureDepot(e))
+  await cloreReservation(ctx, reserve, envoi)
+  if (!envoi) ctx.s.depots_perdus.echecs++
+  return envoi?.canal ?? null
+}
+
+/** L'alerte a Brice et Melanie (Agent AOK), une fois par commission. Rien n'est livre = la reservation est rendue (demain). */
+async function alerteDepotPerdu(
+  ctx: Contexte, l: LigneDepotPerdu, tid: number | null, issue: IssueFermetureDepot, message: 'prive' | 'email' | null,
+) {
+  let reserve: bigint | null
+  try {
+    reserve = await reserverGeste({
+      cle: `liveclub:depot_perdu_alerte:${l.commissionId}`,
+      deja: Prisma.sql`
+        select 1 from public.cockpit_liveclub_gestes d
+        where d.geste = 'acces_broker' and d.regle = 'depot_perdu_alerte' and d.resultat = 'fait'
+          and d.details->>'commission_id' = ${l.commissionId}`,
+      geste: 'acces_broker', regle: 'depot_perdu_alerte', telegramId: tid, abonnementId: null,
+      details: { acces_id: l.accesId, commission_id: l.commissionId, issue },
+    })
+  } catch (err) {
+    erreur(ctx, 'journal_reservation', err)
+    return
+  }
+  if (reserve === null) return
+  const texte = await texteAlerteDepot(l, { issue, message })
+  const livres = await alerterEquipeDepotPerdu(texte, `depot-perdu-${l.commissionId}`)
+  if (livres === 0) {
+    await noterGeste(ctx, reserve, { resultat: 'echec', details: { livres: 0 }, fil: false })
+    ctx.s.depots_perdus.echecs++
+    return
+  }
+  await noterGeste(ctx, reserve, { resultat: 'fait', details: { livres } })
+  ctx.s.depots_perdus.alertes++
+}
+
+/**
+ * Le filet du retour apres une REGULARISATION : un membre sorti ou prevenu
+ * pour un depot perdu (moins de 120 jours) dont l'acces n'est plus ferme (la
+ * commission remise en attendue ou en lots faits, ou un autre depot attendu
+ * ou recu sur le meme acces), sans lien de retour encore parti. Absent et
+ * droit 'oui' : le lien (retourApresRegularisation, le meme qu'au clic de
+ * l'equipe, une fois par commission). Deja dans le groupe : la boucle se ferme.
+ */
+async function retoursApresRegularisation(ctx: Contexte) {
+  const s = ctx.s.depots_perdus
+  let lignes: { telegram_id: bigint; commission_id: string }[]
+  try {
+    lignes = await prisma.$queryRaw`
+      select distinct on (g.details->>'commission_id') g.telegram_id, g.details->>'commission_id' as commission_id
+      from public.cockpit_liveclub_gestes g
+      join public.cockpit_commissions c on c.commission_id::text = g.details->>'commission_id'
+      where ((g.geste = 'retrait' and g.regle = 'depot_perdu') or (g.geste = 'rappel' and g.regle = 'depot_perdu_message'))
+        and g.resultat = 'fait' and g.telegram_id is not null
+        and g.fait_le > now() - interval '120 days'
+        and exists (
+          select 1 from public.cockpit_commissions c2
+          where c2.acces_id = c.acces_id and c2.nature = 'depot' and c2.statut in ('attendue', 'recue'))
+        and not exists (
+          select 1 from public.cockpit_liveclub_gestes r
+          where r.geste = 'invitation' and r.regle = 'retour_depot' and r.resultat in ('fait', 'refuse')
+            and r.details->>'commission_id' = g.details->>'commission_id')
+      order by g.details->>'commission_id', g.fait_le desc
+      limit 100`
+  } catch (err) {
+    erreur(ctx, relationAbsente(err) ? 'depots_perdus_table_absente' : 'depots_perdus_illisibles', err)
+    return
+  }
+  for (const l of lignes) {
+    if (tempsEcoule(ctx)) return
+    const tid = Number(l.telegram_id)
+    if (!Number.isSafeInteger(tid)) continue
+    const p = await presence(tid)
+    if (p.etat === 'inconnu') { s.inconnus++; continue }
+    if (p.etat === 'oui') {
+      await fermerRetourLots(tid, l.commission_id, ACTEUR, 'retour_depot')
+      s.deja_revenus++
+      continue
+    }
+    const droit = await droitLiveClub(tid)
+    if (droit.statut === 'inconnu') { s.inconnus++; continue }
+    // 'non' : encore ferme par un autre depot, ou en pause pour ses lots (le suivi des lots s'en charge).
+    if (droit.statut === 'non') continue
+    const r = await retourApresRegularisation(tid, { commissionId: l.commission_id, acteur: ACTEUR })
+    if (r === 'envoye') s.retours++
+    else if (r === 'echec') s.echecs++
+  }
+}
+
+// ---------------------------------------------------------------------------
+// (q) L'ACCUEIL ETALE EN CONSEILS (Brice, 31/10, tips-accueil-pur.ts)
+// ---------------------------------------------------------------------------
+
+/**
+ * Pour chaque NOUVEAU membre entre depuis TIPS_ACCUEIL_DEPUIS (ligne
+ * entree_acceptee, details.genre 'nouveau' et tips), dans la fenetre : le
+ * conseil du jour s'il est du, un par jour au plus, une fois chacun, APRES les
+ * relances des lots (une relance partie aujourd'hui le decale a demain).
+ * L'etat relu juste avant : present dans le groupe, droit 'oui', fil qui
+ * n'attend pas l'equipe et ou l'equipe n'a pas la main ; un conseil dont il a
+ * deja parle est saute. En prive seulement : sans bot ouvert, rien.
+ * LIVECLUB_TIPS_ACCUEIL=0 coupe la tache.
+ */
+async function tacheTipsAccueil(ctx: Contexte) {
+  const s = ctx.s.tips
+  if (!tipsAccueilActifs()) {
+    s.coupe = true
+    return
+  }
+  let entrees: { telegram_id: bigint; entre_le: string }[]
+  try {
+    entrees = await prisma.$queryRaw`
+      select distinct on (g.telegram_id) g.telegram_id,
+             to_char((g.fait_le at time zone 'Europe/Paris')::date, 'YYYY-MM-DD') as entre_le
+      from public.cockpit_liveclub_gestes g
+      where g.geste = 'entree_acceptee' and g.resultat = 'fait' and g.telegram_id is not null
+        and g.details->>'genre' = 'nouveau' and g.details->>'tips' = 'true'
+        and (g.fait_le at time zone 'Europe/Paris')::date >= ${TIPS_ACCUEIL_DEPUIS}::date
+        and g.fait_le > now() - make_interval(days => ${TIPS_FENETRE_JOURS + 1})
+      order by g.telegram_id, g.fait_le desc
+      limit 300`
+  } catch (err) {
+    erreur(ctx, relationAbsente(err) ? 'tips_table_absente' : 'tips_illisibles', err)
+    return
+  }
+  const aujourdhui = jourParis(ctx.maintenant.toISOString())
+  for (const e of entrees) {
+    if (tempsEcoule(ctx)) return
+    const tid = Number(e.telegram_id)
+    if (!Number.isSafeInteger(tid) || ctx.sortis.has(tid)) continue
+    await tipDuMembre(ctx, tid, e.entre_le, aujourdhui)
+  }
+}
+
+async function tipDuMembre(ctx: Contexte, tid: number, entreLe: string, aujourdhui: string) {
+  const s = ctx.s.tips
+  let lignes: { regle: string; resultat: string; tip: string | null; jour: string }[]
+  try {
+    lignes = await prisma.$queryRaw`
+      select regle, resultat, details->>'tip' as tip,
+             to_char((fait_le at time zone 'Europe/Paris')::date, 'YYYY-MM-DD') as jour
+      from public.cockpit_liveclub_gestes
+      where telegram_id = ${tid}::bigint and geste = 'rappel'
+        and regle in ('tip_accueil', 'lots_relance_1', 'lots_relance_2')
+        and resultat in ('fait', 'refuse')
+        and fait_le > now() - interval '40 days'`
+  } catch (err) {
+    erreur(ctx, 'journal_illisible', err)
+    s.inconnus++
+    return
+  }
+  const tips = lignes.filter(l => l.regle === 'tip_accueil')
+  const relance = lignes.some(l => l.regle !== 'tip_accueil' && l.resultat === 'fait' && l.jour === aujourdhui)
+  const dus = tipsDus({
+    entreLe, aujourdhui,
+    traites: new Set(tips.map(l => l.tip).filter(estCleTip)),
+    envoyeAujourdhui: tips.some(l => l.resultat === 'fait' && l.jour === aujourdhui),
+    relanceLotsAujourdhui: relance,
+  })
+  if (dus.length === 0) {
+    if (relance) s.decales++
+    return
+  }
+  // L'etat relu juste avant (grille de Brice) : dans le groupe, droit ouvert,
+  // et l'equipe ni attendue ni en train de lui repondre.
+  const p = await presence(tid)
+  if (p.etat === 'inconnu') { s.inconnus++; return }
+  if (p.etat === 'non') { s.absents++; return }
+  const droit = await droitLiveClub(tid)
+  if (droit.statut === 'inconnu') { s.inconnus++; return }
+  if (droit.statut !== 'oui') { s.sans_droit++; return }
+  const fil = await lireEtatFil(tid)
+  if (fil && (fil.attend || quiRepond(fil.messages, Date.now()) === 'equipe')) { s.equipe++; return }
+  // Ce qu'il a deja ecrit : au bot (7 derniers jours) et au fil Support.
+  const historique = await lireHistorique(tid).catch(() => [])
+  const textes = [
+    ...historique.filter(m => m.role === 'user').map(m => m.content),
+    ...(fil?.messages ?? []).map(m => (m && typeof m === 'object' ? m as { role?: unknown; content?: unknown } : {}))
+      .filter(m => m.role === 'user' && typeof m.content === 'string').map(m => String(m.content)),
+  ]
+  for (const cle of dus) {
+    let reserve: bigint | null
+    try {
+      reserve = await reserverGeste({
+        cle: `liveclub:tip_accueil:${tid}:${cle}`,
+        deja: Prisma.sql`
+          select 1 from public.cockpit_liveclub_gestes d
+          where d.geste = 'rappel' and d.regle = 'tip_accueil' and d.resultat in ('fait', 'refuse')
+            and d.telegram_id = ${tid}::bigint and d.details->>'tip' = ${cle}`,
+        geste: 'rappel', regle: 'tip_accueil', telegramId: tid, abonnementId: null,
+        details: { tip: cle },
+      })
+    } catch (err) {
+      erreur(ctx, 'journal_reservation', err)
+      s.inconnus++
+      return
+    }
+    if (reserve === null) { s.deja_faits++; return }
+    // Il en a deja parle : le conseil est saute, le suivant peut partir aujourd'hui.
+    if (dejaParle(cle, textes)) {
+      await noterGeste(ctx, reserve, { resultat: 'refuse', details: { motif: 'deja_parle' }, fil: false })
+      s.sautes++
+      continue
+    }
+    const texte = texteTip(cle, { chat: chatId(), accesOffert: droit.raison !== 'abonnement' })
+    const boutons = boutonsTip(cle)
+    const r = await envoyer(tid, texte, boutons)
+    if (!r.ok) {
+      await cloreReservation(ctx, reserve, null)
+      s.echecs++
+      return
+    }
+    // Au fil Support : le texte et ses boutons ; la ligne du journal suit (cloreReservation).
+    await tracerMessageBot(tid, texte, { boutons })
+    await cloreReservation(ctx, reserve, { canal: 'prive', telegramId: tid })
+    s.envoyes++
+    return
+  }
+}
+
+// ---------------------------------------------------------------------------
 // (d) Purge des conversations privees
 // ---------------------------------------------------------------------------
 
@@ -2989,6 +3400,11 @@ function nouveauContexte(maintenant: Date): Contexte {
         relances_1: 0, relances_2: 0, pauses: 0, simulees: 0, messages: 0, retours: 0, deja_revenus: 0, deja_faits: 0,
         declares: 0, absents: 0, gardes: 0, sans_compte: 0, inconnus: 0, echecs: 0, coupe: false,
       },
+      depots_perdus: {
+        sorties: 0, simulees: 0, messages: 0, alertes: 0, retours: 0, deja_revenus: 0,
+        absents: 0, gardes: 0, sans_compte: 0, inconnus: 0, echecs: 0, coupe: false,
+      },
+      tips: { envoyes: 0, sautes: 0, decales: 0, absents: 0, sans_droit: 0, equipe: 0, deja_faits: 0, inconnus: 0, echecs: 0, coupe: false },
       purge: { conversations: 0 },
       tarifs_reserves: { payees: 0, en_attente: 0, illisibles: 0 },
       resume: { etat: 'pas_lance', lignes: 0, livres: 0 },
@@ -3128,6 +3544,12 @@ export async function passageQuotidien(maintenant: Date = new Date()): Promise<S
   // (une seule sortie par compte, le message le plus precis d'abord). Le droit
   // s'y relit en direct : une panne Stripe donne 'inconnu', rien ne part.
   await etape('lots', () => tacheLots(ctx))
+  // (p) Depot perdu (31/10), juste apres les lots : un acces ferme sort sans
+  // ban, recoit son message, et l'equipe est prevenue. Droit relu en direct.
+  await etape('depots_perdus', () => tacheDepotsPerdus(ctx))
+  // (q) L'accueil etale en conseils (31/10), APRES les relances des lots (une
+  // relance partie aujourd'hui decale le conseil a demain).
+  await etape('tips', () => tacheTipsAccueil(ctx))
   // Le droit s'y relit en direct (droitLiveClub) : la liste Stripe du passage
   // n'est pas necessaire, une panne Stripe donne 'inconnu' et rien ne part.
   await etape('metricgram', () => tacheSortiesMetricgram(ctx, rattaches, abonnements))

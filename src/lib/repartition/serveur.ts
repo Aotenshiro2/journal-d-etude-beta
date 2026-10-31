@@ -17,7 +17,8 @@
 import { prisma } from '@/lib/db'
 import { RefusAction, type ActionAgent } from '@/lib/stripe-actions'
 import { accorderAccesBroker, prerequisAccesBroker } from '@/lib/liveclub/acces'
-import { nomBot } from '@/lib/liveclub/config'
+import { fermetureDepotPerduActive, nomBot } from '@/lib/liveclub/config'
+import { ALERTE_CARTE_PERTE_FERME, PHRASE_CARTE_PERTE_FERME, PHRASE_CARTE_REGULARISATION } from '@/lib/liveclub/lots-pur'
 import { relationAbsente, uuidDeActeur } from '@/lib/liveclub/pur'
 import {
   type Commission, type Cote, type Depense, type DepenseLives, type Litige, type NatureReglement, type Reglement, type Repartition,
@@ -916,18 +917,43 @@ export async function controlerActionRepartition(a: ActionAgent): Promise<Contro
     if (type === 'marquer_commission') {
       const c = await commissionParId(String(p.commission_id))
       if (!c) return { erreur: 'commission_id introuvable dans cockpit_commissions : relis la table et donne l\'identifiant exact.' }
-      if (c.statut !== 'attendue') {
-        return { erreur: `Cette commission est déjà ${c.statut === 'recue' ? `reçue (${euros(centimes(c.montant_recu) ?? 0)} le ${libelleJour(c.recue_le ?? '')})` : 'perdue'} : rien à marquer. Une correction se fait dans le cockpit (onglet Revenus).` }
+      // (31/10, Brice : « pas de commission pas d'acces ») Une commission PERDUE
+      // se REGULARISE : etat attendue, ou lots_faits (le membre a refait un
+      // depot active, ses lots sont tradés). La carte le dit, et son acces
+      // broker au Live Club rouvre (lien de retour au clic, lots.ts).
+      const regularisation = c.statut === 'perdue' && (p.etat === 'attendue' || p.etat === 'lots_faits')
+      if (c.statut !== 'attendue' && !regularisation) {
+        return {
+          erreur: c.statut === 'recue'
+            ? `Cette commission est déjà reçue (${euros(centimes(c.montant_recu) ?? 0)} le ${libelleJour(c.recue_le ?? '')}) : rien à marquer. Une correction se fait dans le cockpit (onglet Revenus).`
+            : "Cette commission est déjà perdue. Pour la régulariser (le membre a refait un dépôt activé, ou ses lots sont tradés) : etat attendue, ou lots_faits avec la date des lots.",
+        }
       }
-      const enrichie: ActionAgent = { ...a, params: { ...p, qui: p.qui ?? qui(c) } }
+      if (c.statut === 'attendue' && p.etat === 'attendue') {
+        return { erreur: 'Cette commission est déjà attendue : rien à remettre. etat attendue ne sert qu\'à régulariser une commission perdue.' }
+      }
+      const enrichie: ActionAgent = { ...a, params: { ...p, qui: p.qui ?? qui(c), ...(regularisation ? { regulariser: true } : {}) } }
       const attendue = centimes(c.commission_attendue) ?? 0
       let complement = `${qui(c)}, ${c.nature === 'depot' ? `dépôt de ${euros(centimes(c.montant_base) ?? 0)}` : 'affiliation'} chez ${c.partenaire} du ${libelleJour(c.le)}, commission attendue ${euros(attendue)}.`
+      let alerte: string | null = null
       if (p.etat === 'recue') {
         const recue = centimes(p.montant) ?? 0
         const parts = partsCommission(recue)
         complement += ` Reçue : ${euros(recue)}, part de Mel ${euros(parts.mel)}, part de Brice ${euros(parts.brice)}.`
       }
-      return { action: enrichie, complement, manque: null }
+      if (regularisation && c.acces_id) complement += ` ${PHRASE_CARTE_REGULARISATION}`
+      // (31/10) Perdue : l'acces broker se ferme s'il n'a pas d'autre depot attendu ou recu.
+      if (p.etat === 'perdue' && c.nature === 'depot' && c.acces_id && fermetureDepotPerduActive()) {
+        const vivants = await prisma.$queryRaw<{ n: number }[]>`
+          select count(*)::int as n from public.cockpit_commissions
+          where acces_id = ${c.acces_id}::uuid and nature = 'depot' and statut in ('attendue', 'recue')
+            and commission_id <> ${c.commission_id}::uuid`
+        if ((vivants[0]?.n ?? 0) === 0) {
+          complement += ` ${PHRASE_CARTE_PERTE_FERME}`
+          alerte = ALERTE_CARTE_PERTE_FERME
+        }
+      }
+      return { action: enrichie, complement, manque: null, alerte }
     }
 
     if (type === 'taux_partenaire') {
@@ -958,7 +984,8 @@ export async function controlerActionRepartition(a: ActionAgent): Promise<Contro
         }
         return {
           action: a,
-          complement: `Nouveau partenaire (${p.nature}), sans taux général : chaque dépôt devra porter sa commission (proposer_depot_broker, commission)${p.accord ? ", calculée d'après cet accord" : " tant qu'un taux n'est pas posé"}.`,
+          // (31/10) Texte de CARTE (lu par l'equipe) : l'action en francais, pas le nom d'un outil.
+          complement: `Nouveau partenaire (${p.nature}), sans taux général : chaque dépôt devra porter sa commission, donnée avec le dépôt${p.accord ? ", calculée d'après cet accord" : " tant qu'un taux n'est pas posé"}.`,
           manque: null,
         }
       }
@@ -1249,9 +1276,34 @@ async function executer(a: ActionAgent, posePar: string, acteur: string): Promis
     const id = String(p.commission_id)
     const c = await commissionParId(id)
     if (!c) throw new RefusAction('Commission introuvable : rien n\'a été fait.')
-    const etat = String(p.etat) as 'lots_faits' | 'recue' | 'perdue'
+    const etat = String(p.etat) as 'lots_faits' | 'recue' | 'perdue' | 'attendue'
     const le = String(p.le)
     let n: number
+    // (31/10) La REGULARISATION d'une commission perdue (carte d'Agent AOK
+    // seulement : `regulariser` est pose par son controle). Elle redevient
+    // attendue (lots faits ce jour-la pour etat lots_faits), et l'acces
+    // broker rouvre : le lien de retour part tout de suite (lots.ts).
+    const regularisation = p.regulariser === true && c.statut === 'perdue' && (etat === 'attendue' || etat === 'lots_faits')
+    if (etat === 'attendue' && !regularisation) {
+      throw new RefusAction(`La commission de ${qui(c)} n'est pas perdue (${c.statut}) : rien à remettre en attendue.`)
+    }
+    if (regularisation) {
+      n = await prisma.$executeRaw`
+        update public.cockpit_commissions
+        set statut = 'attendue',
+            lots_faits_le = case when ${etat === 'lots_faits'} then ${le}::date else lots_faits_le end,
+            maj_par = ${posePar}::uuid, note = coalesce(${note}, note)
+        where commission_id = ${id}::uuid and statut = 'perdue'`
+      if (n === 0) throw new RefusAction(`La commission de ${qui(c)} n'est plus perdue : rien n'a été changé.`)
+      const { apresMarquageDepot } = await import('@/lib/liveclub/lots')
+      const acces = c.acces_id ? await apresMarquageDepot(id, 'regularisee', acteur).catch(() => null) : null
+      const lotsFaits = etat === 'lots_faits' ? le : c.lots_faits_le
+      const prevu = moisPrevuCommission({ statut: 'attendue', le: c.le, lotsFaitsLe: lotsFaits }, moisCourant) ?? moisCourant
+      return `Commission de ${qui(c)} (${c.partenaire}) régularisée : de nouveau attendue`
+        + `${etat === 'lots_faits' ? `, lots faits le ${libelleJour(le)}` : ''}, ${euros(centimes(c.commission_attendue) ?? 0)} attendus fin ${libelleMois(prevu)}.`
+        + `${acces ? `\n${acces}` : ''}\n`
+        + (lotsFaits ? etapeApresMarquage('lots_faits', c.partenaire) : `Dis-moi quand ${qui(c)} a fait ses lots chez ${c.partenaire}.`)
+    }
     if (etat === 'lots_faits') {
       n = await prisma.$executeRaw`
         update public.cockpit_commissions
@@ -1286,7 +1338,10 @@ async function executer(a: ActionAgent, posePar: string, acteur: string): Promis
         + `. Part de Mel : ${euros(parts.mel)}, part de Brice : ${euros(parts.brice)}.\n`
         + etapeApresMarquage('recue', c.partenaire, moisDe(le))
     }
-    return `Commission de ${qui(c)} (${c.partenaire}) marquée perdue.\n${etapeApresMarquage('perdue', c.partenaire)}`
+    // (31/10) Perdue : son acces broker se ferme s'il n'a pas d'autre depot vivant (lots.ts).
+    const { apresMarquageDepot } = await import('@/lib/liveclub/lots')
+    const acces = c.nature === 'depot' && c.acces_id ? await apresMarquageDepot(id, 'perdue', acteur).catch(() => null) : null
+    return `Commission de ${qui(c)} (${c.partenaire}) marquée perdue.\n${acces ? `${acces}\n` : ''}${etapeApresMarquage('perdue', c.partenaire)}`
   }
 
   if (type === 'taux_partenaire') {

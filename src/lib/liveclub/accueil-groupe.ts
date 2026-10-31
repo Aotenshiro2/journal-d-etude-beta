@@ -272,6 +272,31 @@ export type OptionsAdmission = {
    * pas de paragraphe des lots.
    */
   lots?: { limite: string } | null
+  /**
+   * (31/10, Brice : « etaler les messages d'infos ») Les conseils des jours
+   * suivants sont actifs (tips-accueil-pur.ts, tipsAccueilActifs) : pour un
+   * NOUVEAU, le message est RACCOURCI a l'essentiel (texteAdmissionCourte) ;
+   * l'academie, les autres sujets, les liens utiles et l'abonnement viennent
+   * ensuite, un par jour. Absent ou false : le tour complet d'avant.
+   */
+  tips?: boolean
+}
+
+/**
+ * (31/10, Brice) Le message de l'admission d'un NOUVEAU quand les conseils
+ * suivent : bienvenue, l'essentiel avec les liens (Annonce, Replay, Trading
+ * chat), l'invitation a se presenter dans Bla-bla avec les idees, et pour un
+ * acces broker le paragraphe des lots (la date limite). Le reste arrive « un
+ * conseil a la fois », il le sait.
+ */
+function texteAdmissionCourte(o: OptionsAdmission, lots: string | null): string {
+  const blabla = lienSujet(o.chat, SUJETS_LIVECLUB.blabla)
+  return `Bienvenue dans le Live Club ! Ta demande est acceptée, le groupe s'ouvre à l'instant.\n\n`
+    + (lots ? `${lots}\n\n` : '')
+    + `L'essentiel pour commencer :\n${TOUR_ESSENTIEL.map(s => ligneSujet(s, o.chat)).join('\n')}\n\n`
+    + `Pour briser la glace, présente-toi en deux mots dans Bla-bla, pas besoin d'en faire un roman${blabla ? ` : ${blabla}` : '.'}\n`
+    + `Si tu ne sais pas quoi dire, quelques idées :\n${IDEES_PRESENTATION.map(i => `- ${i}`).join(' ;\n')}.\n\n`
+    + `Le reste, je te le donne petit à petit ces prochains jours, un conseil à la fois. Et si tu as une question d'ici là, écris-moi ici.`
 }
 
 /**
@@ -312,6 +337,8 @@ export function texteAdmission(genre: GenreEntree, o: OptionsAdmission): string 
       + (lots ? `${lots}\n\n` : '')
       + fin
   }
+  // (31/10) Les conseils des jours suivants : le message court.
+  if (o.tips) return texteAdmissionCourte(o, lots)
   const questions = o.accesOffert
     ? `Et si tu as la moindre question, sur l'académie ou sur ton accès, écris-moi ici.`
     : `Et si tu as la moindre question, sur l'académie ou sur ton abonnement (le voir, une pause, un arrêt), écris-moi ici.`

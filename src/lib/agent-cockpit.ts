@@ -11,6 +11,7 @@ import { cleStripeLecture } from '@/lib/liveclub/config'
 import {
   DUREE_GENERATION_MS, MARGE_APPEL_MODELE_MS, MAX_GENERATIONS_PAR_TOUR, TEXTE_PLUS_LE_TEMPS_BROUILLON, TEXTE_TROP_DE_BROUILLONS,
   estMelanie, lireDemande, reponsePartielle, type SourceDemande,
+  sansNomsOutils,
 } from '@/lib/agent-cockpit-pur'
 import { estTypeRepartition, resumeCourtRepartition } from '@/lib/repartition/pur'
 import { DELAI_LOTS_JOURS, EXEMPLE_LOTS, RELANCE_LOTS_1_JOURS, TENUE_LOTS } from '@/lib/liveclub/lots-pur'
@@ -306,6 +307,7 @@ LA RÉPARTITION BRICE / MÉLANIE (règles de Brice, 08/10) :
   - Broker ou taux inconnu (l'outil te le dit) : demande à ton interlocuteur, dans ce fil, le taux du broker (en % du dépôt, par exemple 50 ou 100, ou un montant fixe par client) et depuis quand, ou la commission de ce seul dépôt ; propose proposer_taux_partenaire, puis seulement le dépôt. N'invente jamais un taux. Un nouveau partenaire demande sa nature (broker ou affiliation), un partenaire déjà en base jamais. Un taux ou un accord change par proposer_taux_partenaire (voir « UN ACCORD QUI CHANGE ») : une nouvelle ligne datée, les dépôts déjà inscrits gardent le leur sauf rétroactivité dite explicitement.
   - Une commission broker est du côté de Mel, donc partagée 70 % Mel, 30 % Brice (règle de l'apporteur), jamais 50/50 par défaut : repartition_du_mois fait le calcul.
   - « X a fait ses lots » = proposer_marquer_commission, etat lots_faits. « RaiseFx a payé 240 pour X » = etat recue, avec le montant réellement reçu et sa date (encaissée par Mel sauf indication). « C'est perdu » = perdue. Retrouve commission_id par requête (cockpit_commissions joint à cockpit_liveclub_acces pour l'email).
+  - PAS DE COMMISSION, PAS D'ACCÈS (règle de Brice, 31/10) : une commission de dépôt marquée perdue (fonds retirés sans activer le dépôt, dépôt refusé...) FERME l'accès broker du membre au Live Club, comme une fin d'abonnement, s'il n'a pas d'autre dépôt attendu ou reçu. Au passage du matin, le bot le sort du groupe sans bannissement, lui explique en privé comment revenir (régulariser avec l'équipe ou s'abonner), et Brice et Mélanie reçoivent ici l'alerte « Commission perdue ». La carte le dit avant la confirmation : rien à ajouter. RÉGULARISER (il a refait un dépôt activé, ou ses lots sont tradés) = proposer_marquer_commission sur la commission perdue, etat attendue, ou lots_faits avec la date des lots : son accès rouvre, et son lien de retour part tout de suite. Un nouveau dépôt inscrit sur son accès le rouvre aussi. Un dépôt seulement douteux, non marqué perdu : rien d'automatique, le suivi des lots s'applique.
   - LES LOTS DES MEMBRES ENTRÉS PAR UN ACCÈS BROKER (Brice et Mel, 31/10) : le bot des membres suit leurs premiers lots, pour un accès avec un dépôt inscrit. Il leur dit, sans forcer, que l'affiliation ne nous paie qu'une fois les premiers lots tradés (exemple donné : ${EXEMPLE_LOTS}, position tenue ${TENUE_LOTS}). Délai : ${DELAI_LOTS_JOURS} jours après son entrée (au plus tôt depuis le déploiement, pour ceux déjà entrés), une relance en privé à J+${RELANCE_LOTS_1_JOURS}, une autre quelques jours avant la fin. Lots pas faits à la fin du délai : son accès au groupe est EN PAUSE (sortie sans ban, message clair), et il revient dès que ses lots sont notés faits. Quand un membre dit au bot qu'il a tradé ses lots, une carte « Lots à vérifier » arrive ici avec deux boutons, « Oui, lots tradés » et « Non, pas encore » : le clic fait tout (lots notés comme proposer_marquer_commission, membre prévenu, lien de retour s'il était en pause). Ne propose pas de carte en plus pour cette déclaration. La commission est prévue à la fin du mois des lots, et elle compte dans la répartition le mois où elle est reçue.
   - Une commission d'affiliation d'un autre partenaire = proposer_commission_affiliation.
   - « Adrien prend 50 EUR par live sur le Live Club à partir d'octobre » = proposer_intervenant (offre_id lu dans cockpit_offres, montant_par_live, « à partir d'octobre » = le 1er du mois). Un nouveau tarif = une nouvelle ligne datée : les mois déjà déclarés gardent le leur. N'invente jamais un tarif.
@@ -346,6 +348,7 @@ Règles :
 - Réponds en TEXTE BRUT : l'écran n'interprète pas le markdown. Jamais de **, de tableaux avec |, de titres #. Pour aligner des données, fais des lignes simples : « Tristan Gautier · 6 tentatives · prochaine le 29/08 ».
 - La base est en LECTURE SEULE : requete_sql ne modifie jamais rien. Les seules écritures sont les outils proposer_*, qui passent par confirmation humaine, et noter_demande, une note sans effet en production.
 - Ne montre le SQL que si on te le demande.
+- TES OUTILS SONT INTERNES (règle de Brice, 31/10) : dans tes réponses, décris l'action en français, jamais par le nom d'un outil ni d'un paramètre. Dis « je te propose la carte pour noter l'accord de RaiseFx », « je lis la base », « la carte de dépôt », jamais « proposer_taux_partenaire », « requete_sql », « fiche_personne », « montant_fixe ». Ça vaut pour tous tes outils.
 - Si une question est ambiguë (quel mois ? quel compte ?), pose la question plutôt que de choisir en silence.`
 
 // L'outil unique : du SQL en lecture seule, borne par le code (pas par le
@@ -649,12 +652,12 @@ const OUTILS: Anthropic.Tool[] = [
   {
     name: 'proposer_marquer_commission',
     description:
-      "Propose de marquer une commission ATTENDUE : lots_faits (le client a fait ses lots), recue (montant réellement reçu et date : elle comptera dans ce mois-là) ou perdue. N'exécute rien : carte de confirmation. Retrouve d'abord commission_id dans cockpit_commissions (joint à cockpit_liveclub_acces pour l'email).",
+      "Propose de marquer une commission ATTENDUE : lots_faits (le client a fait ses lots), recue (montant réellement reçu et date : elle comptera dans ce mois-là) ou perdue (le broker ne paiera pas : son accès broker au Live Club se ferme). Une commission PERDUE se régularise : attendue (elle redevient attendue) ou lots_faits (attendue, lots faits ce jour-là) ; son accès broker rouvre. N'exécute rien : carte de confirmation. Retrouve d'abord commission_id dans cockpit_commissions (joint à cockpit_liveclub_acces pour l'email).",
     input_schema: {
       type: 'object',
       properties: {
         commission_id: { type: 'string', description: 'Identifiant exact, depuis cockpit_commissions.' },
-        etat: { type: 'string', enum: ['lots_faits', 'recue', 'perdue'] },
+        etat: { type: 'string', enum: ['lots_faits', 'recue', 'perdue', 'attendue'], description: 'attendue : seulement pour régulariser une commission perdue.' },
         montant: { type: 'number', description: 'recue seulement : le montant reçu, en euros.' },
         le: { type: 'string', description: "Facultatif : jour des lots ou de la réception, AAAA-MM-JJ, aujourd'hui ou avant. Vide = aujourd'hui." },
         encaisse_par: { type: 'string', enum: ['mel', 'brice'], description: 'recue seulement : qui a touché l\'argent. Défaut mel.' },
@@ -1317,7 +1320,8 @@ export async function boucleAgent(
       if (!canal.essai) await logAiUsage(userId, 'cockpit', model, response.usage, null, { usage: poste, echange })
 
       if (response.stop_reason !== 'tool_use') {
-        return avecRelances({ reply: textOf(response) || 'Je n’ai pas de réponse.', etapes })
+        // (31/10) Filet du serveur : aucun nom d'outil dans la reponse (sansNomsOutils).
+        return avecRelances({ reply: sansNomsOutils(textOf(response)) || 'Je n’ai pas de réponse.', etapes })
       }
 
       messages.push({ role: 'assistant', content: response.content })
@@ -1430,14 +1434,17 @@ export async function boucleAgent(
           const court = !carte && estMelanie(qui) && estTypeRepartition(action.type)
             ? resumeCourtRepartition(action.type, action.params) : null
           return avecRelances({
-            reply: (textOf(response)
+            // (31/10) Filet du serveur : aucun nom d'outil dans la reponse ni
+            // dans la carte (sansNomsOutils). Une carte composee par le serveur
+            // (effacement, reponse a un membre : le texte EXACT) n'est pas touchee.
+            reply: (sansNomsOutils(textOf(response))
               // (31/10) Sans tiret long (regle de Brice), court.
               || 'À toi de confirmer :')
               + (avant ? `\n\n${avant}` : ''),
             etapes,
             action: {
               ...action,
-              resume: carte ?? (resumeAction(action) + (complement ? ` ${complement}` : '')),
+              resume: carte ?? (resumeAction(action) + (complement ? ` ${sansNomsOutils(complement)}` : '')),
               ...(court ? { resume: alerte ? `${court} ${alerte}` : court } : {}),
               // Acces broker : il faut Resend et la lecture Stripe, pas le
               // bot (l'email porte le lien du bot, rien n'est fait sur le groupe).
