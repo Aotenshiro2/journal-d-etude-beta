@@ -40,6 +40,14 @@ import { LIGNE_CHALLENGE_CORE_CONTENT, SUJETS_LIVECLUB, lienSujet } from './accu
 import { jourPlus } from './lots-pur'
 
 /**
+ * (31/10, Brice) Les autres adresses email s'ajoutent au profil, confirmees par
+ * un code (Mon espace, Parametres, Comptes lies). Une adresse confirmee ouvre
+ * les cours et les achats payes avec elle a l'academie, PAS le droit au groupe
+ * Telegram (droitLiveClub ne lit pas profile_emails) : le conseil J+7 le dit.
+ */
+export const URL_PROFIL_ADRESSES = 'https://aoknowledge.com/mon-espace/parametres/comptes'
+
+/**
  * (31/10) Les membres entres AVANT ce jour (jour de Paris) ne recoivent aucun
  * conseil. A poser au jour du deploiement (le message de l'admission change
  * le meme jour).
@@ -182,10 +190,14 @@ export function texteTip(cle: CleTip, o: OptionsTip): string {
       return o.accesOffert
         ? `Dernier petit conseil, et après je te laisse tranquille : ton accès au Live Club t'est offert, donc rien à payer ni à gérer de ton côté. `
           + `Pour voir jusqu'à quand il court, appuie sur « Mon abonnement » ou demande-moi.\n`
-          + `Tu utilises une autre adresse email que celle que l'équipe connaît ? Dis-le-moi, tu peux en avoir plusieurs.`
+          + `Tu utilises une autre adresse email ? Ajoute-la à ton profil : une fois confirmée par un code, les cours et les achats faits avec elle s'ouvrent sur l'académie. `
+          + `C'est ici : ${URL_PROFIL_ADRESSES}\n`
+          + `Pour ton accès au groupe, dis-le-moi aussi.`
         : `Dernier petit conseil, et après je te laisse tranquille : ton abonnement se gère ici, avec moi. `
           + `Le voir, le mettre en pause de 1 à 6 mois ou l'arrêter : appuie sur « Mon abonnement », ou écris-le-moi simplement.\n`
-          + `Et si tu as payé avec plusieurs adresses email, pas de souci, tu peux en avoir plusieurs : « Mon abonnement » te montre celles que je connais, et s'il en manque une, dis-le-moi.`
+          + `Tu as payé avec plusieurs adresses email ? Ajoute-les à ton profil : une fois confirmées par un code, tes cours et tes achats faits avec elles s'ouvrent sur l'académie. `
+          + `C'est ici : ${URL_PROFIL_ADRESSES}\n`
+          + `Pour ton abonnement au groupe, « Mon abonnement » te montre celles que je connais : s'il en manque une, dis-le-moi.`
   }
 }
 

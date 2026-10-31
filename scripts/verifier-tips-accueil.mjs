@@ -109,7 +109,10 @@ bloc('les conseils : courts, detendus, une ouverture pour lui repondre', () => {
   assert.ok(!T.texteTip('liens', { chat: null, accesOffert: false }).includes('t.me'))
   const abo = T.texteTip('abonnement', { chat: CHAT, accesOffert: false })
   assert.match(abo, /le mettre en pause de 1 à 6 mois ou l'arrêter/)
-  assert.match(abo, /tu peux en avoir plusieurs : « Mon abonnement » te montre celles que je connais/)
+  // (31/10) Les autres adresses s'ajoutent au profil : elles ouvrent les cours et achats, pas le groupe.
+  assert.ok(abo.includes(`Ajoute-les à ton profil : une fois confirmées par un code, tes cours et tes achats faits avec elles s'ouvrent sur l'académie. C'est ici : ${T.URL_PROFIL_ADRESSES}\n`))
+  assert.match(abo, /Pour ton abonnement au groupe, « Mon abonnement » te montre celles que je connais : s'il en manque une, dis-le-moi\.$/)
+  assert.ok(T.texteTip('abonnement', { chat: CHAT, accesOffert: true }).includes(`Ajoute-la à ton profil : une fois confirmée par un code`))
   assert.match(T.texteTip('abonnement', { chat: CHAT, accesOffert: true }), /t'est offert, donc rien à payer ni à gérer/)
   assert.deepEqual(T.boutonsTip('abonnement'), [[{ texte: 'Mon abonnement', data: 'm:abo' }]])
   assert.equal(P.libelleBouton('m:abo'), 'Mon abonnement')
