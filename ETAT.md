@@ -3,7 +3,7 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
-## Depot perdu = acces ferme, Agent AOK sans noms d'outils, accueil etale en conseils, adresses multiples (31/10/2026, LOCAL, non commite ; aucune migration)
+## Depot perdu = acces ferme, Agent AOK sans noms d'outils, accueil etale en conseils, adresses multiples (31/10/2026, DEPLOYE le 31/10 a 17:00, commit 84a3839 ; aucune migration)
 
 - (1) Brice, 31/10 : « pas de commission pas d'acces ». Regle et textes : fin de `src/lib/liveclub/lots-pur.ts` ; lecture :
   `lots-lecture.ts` (lireFermes). Un acces broker actif dont un depot est marque PERDU (maj_le, jour de Paris, depuis
