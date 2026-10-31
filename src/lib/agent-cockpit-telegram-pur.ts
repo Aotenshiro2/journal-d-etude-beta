@@ -328,6 +328,201 @@ export function erreurDImage(err: unknown): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// LES MESSAGES VOCAUX (31/10/2026, Brice : Agent AOK doit comprendre les
+// vocaux). Un message vocal (voice), ou un fichier audio (audio), est
+// telecharge chez Telegram puis transcrit (transcription-pur.ts), et traite
+// comme un message ECRIT de la meme personne : meme analyse de securite que
+// ses mots (partsDuTour, niveau 'cache'), memes cartes a un clic, rien de
+// plus. Un vocal TRANSFERE garde son origine en tete (« Message transféré de
+// X : ») : la voix d'un tiers, une DONNEE, jamais un ordre (niveau 'tiers'),
+// comme un texte transfere.
+// lireMessageTelegram n'est pas touchee : le bot des membres (bot-membre.ts)
+// garde son parcours d'avant pour un vocal ; seule la route d'Agent AOK lit
+// les vocaux, par lireVocalTelegram, avant le reste.
+// ---------------------------------------------------------------------------
+
+/** 5 minutes au plus (Brice, 31/10), d'apres la duree donnee par Telegram : au-dela, dit en clair, rien n'est telecharge. */
+export const DUREE_MAX_VOCAL_S = 300
+/** 20 Mo : ce que l'API des bots sert (getFile), sous les 25 Mo acceptes par le service de transcription. */
+export const MAX_OCTETS_VOCAL = 20_000_000
+/** Une transcription plus longue est coupee (5 minutes de parole font environ 4 500 caracteres). */
+export const MAX_TRANSCRIPTION = 6000
+/** Le texte d'un tour vocal : en-tete de transfert, trace, transcription, legende. */
+export const MAX_TEXTE_TOUR_VOCAL = 7500
+/** La trace d'un vocal dans le texte du tour ET dans l'historique : la transcription suit, sur la ligne d'apres. */
+export const TRACE_VOCAL = '[message vocal, transcrit ci-dessous]'
+/** L'extrait de la transcription dans la ligne « J'ai entendu » (coupe au mot au-dela). */
+export const MAX_LIGNE_ENTENDU = 400
+
+/** Un vocal ou un fichier audio Telegram (Voice, Audio). */
+export type FichierAudioTg = { file_id?: string; duration?: number; mime_type?: string; file_size?: number; file_name?: string }
+
+/** Les formats acceptes par le service de transcription (API compatible OpenAI), par leur extension. */
+export const EXTENSIONS_AUDIO = ['flac', 'mp3', 'mp4', 'mpeg', 'mpga', 'm4a', 'ogg', 'opus', 'wav', 'webm'] as const
+
+const EXTENSION_PAR_MIME: Record<string, string> = {
+  'audio/ogg': 'ogg', 'audio/opus': 'opus', 'audio/mpeg': 'mp3', 'audio/mp3': 'mp3', 'audio/mpga': 'mpga',
+  'audio/mp4': 'm4a', 'audio/m4a': 'm4a', 'audio/x-m4a': 'm4a', 'audio/wav': 'wav', 'audio/x-wav': 'wav',
+  'audio/wave': 'wav', 'audio/vnd.wave': 'wav', 'audio/flac': 'flac', 'audio/x-flac': 'flac', 'audio/webm': 'webm',
+}
+
+/** Le vocal a recuperer chez Telegram (getFile), puis a transcrire. */
+export type VocalALire = {
+  fileId: string
+  source: 'voice' | 'audio'
+  /** La duree donnee par Telegram (secondes) : limite et cout. */
+  duree: number | null
+  taille: number | null
+  /** Le nom envoye au service : son extension dit le format (« vocal.ogg »). */
+  nomFichier: string
+  mime: string
+}
+
+/** Ce qui se refuse a la lecture, sans rien telecharger. */
+export type RaisonRefusVocal = 'trop_long' | 'trop_gros' | 'format' | 'illisible'
+/** Toutes les raisons d'un vocal non transcrit, dites en clair par texteEchecVocal. */
+export type RaisonEchecVocal = RaisonRefusVocal | 'sans_cle' | 'cle_refusee' | 'delai' | 'echec' | 'vide'
+
+/**
+ * Ce qu'apporte un vocal : 'vocal' (a telecharger et transcrire) ou 'refus'
+ * (dit en clair, sans rien telecharger). null : le message n'est ni un vocal
+ * ni un fichier audio.
+ */
+export type LectureVocal =
+  | { genre: 'vocal'; vocal: VocalALire; transfert: string | null; legende: string }
+  | { genre: 'refus'; raison: RaisonRefusVocal; texte: string }
+
+/** Une duree en clair : « 45 s », « 5 min », « 6 min 12 s ». */
+export function formaterDuree(secondes: number | null | undefined): string {
+  if (typeof secondes !== 'number' || !Number.isFinite(secondes) || secondes < 0) return 'une durée inconnue'
+  const s = Math.round(secondes)
+  if (s < 60) return `${s} s`
+  const min = Math.floor(s / 60)
+  const reste = s % 60
+  return reste ? `${min} min ${reste} s` : `${min} min`
+}
+
+/**
+ * Un vocal non transcrit, en clair : jamais le silence. `source` choisit « ce
+ * vocal » ou « ce fichier audio ». Sans cle : l'esprit du message d'avant
+ * (« je ne sais pas encore écouter les vocaux, écris-le-moi »).
+ */
+export function texteEchecVocal(
+  raison: RaisonEchecVocal,
+  o: { source?: 'voice' | 'audio'; duree?: number | null; taille?: number | null; dureeMax?: number; max?: number } = {},
+): string {
+  const ce = o.source === 'audio' ? 'ce fichier audio' : 'ce vocal'
+  const Ce = o.source === 'audio' ? 'Ce fichier audio' : 'Ce vocal'
+  switch (raison) {
+    case 'trop_long':
+      return `${Ce} dure ${formaterDuree(o.duree)} : j'écoute ${formaterDuree(o.dureeMax ?? DUREE_MAX_VOCAL_S)} au plus. `
+        + 'Coupe-le en plusieurs vocaux plus courts, ou écris-le-moi.'
+    case 'trop_gros':
+      return `${typeof o.taille === 'number' && o.taille > 0 ? `${Ce} pèse ${formaterMo(o.taille)}` : `${Ce} est trop lourd`} : `
+        + `j'écoute les fichiers de ${formaterMo(o.max ?? MAX_OCTETS_VOCAL)} au plus. Envoie un vocal plus court, ou écris-le-moi.`
+    case 'format':
+      return `${Ce} n'est pas dans un format que je sais écouter (MP3, M4A, OGG, OPUS, WAV, FLAC ou WEBM) : `
+        + 'envoie-le plutôt en message vocal, ou écris-le-moi.'
+    case 'illisible':
+      return `Je n'ai pas pu récupérer ${ce} chez Telegram : renvoie-le dans un instant, ou écris-le-moi.`
+    case 'sans_cle':
+      return "Je ne sais pas encore écouter les vocaux ici (la transcription n'est pas branchée) : écris-le-moi."
+    case 'cle_refusee':
+      return `Je n'ai pas pu écouter ${ce} : le service de transcription refuse sa clé (à vérifier par Brice). En attendant, écris-le-moi.`
+    case 'delai':
+      return `La transcription de ${ce} a pris trop de temps : renvoie-le dans un instant, ou écris-le-moi.`
+    case 'echec':
+      return `La transcription de ${ce} a échoué (service indisponible) : renvoie-le dans un instant, ou écris-le-moi.`
+    case 'vide':
+      return `Je n'ai entendu aucune parole dans ${ce} : renvoie-le en parlant plus près du micro, ou écris-le-moi.`
+  }
+}
+
+function extensionAudio(source: 'voice' | 'audio', f: FichierAudioTg): string | null {
+  const mime = typeof f.mime_type === 'string' ? f.mime_type.toLowerCase().split(';')[0].trim() : ''
+  if (EXTENSION_PAR_MIME[mime]) return EXTENSION_PAR_MIME[mime]
+  const ext = typeof f.file_name === 'string' ? f.file_name.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] : undefined
+  if (ext && (EXTENSIONS_AUDIO as readonly string[]).includes(ext)) return ext
+  // Un message vocal Telegram est un OGG/Opus, meme sans type annonce.
+  return source === 'voice' ? 'ogg' : null
+}
+
+/**
+ * Le vocal (voice) ou le fichier audio (audio) d'un message, avec ses limites :
+ * plus de `dureeMax` secondes ou plus de `max` octets annonces = refus, sans
+ * rien telecharger. La legende est le texte du message (caption) ; un
+ * transfert garde son origine (nomTransfert). null = ni vocal ni audio.
+ */
+export function lireVocalTelegram(brut: unknown, o: { dureeMax?: number; max?: number } = {}): LectureVocal | null {
+  if (!brut || typeof brut !== 'object') return null
+  const m = brut as MessageTgLu
+  const source: 'voice' | 'audio' | null = m.voice !== undefined && m.voice !== null ? 'voice'
+    : m.audio !== undefined && m.audio !== null ? 'audio' : null
+  if (!source) return null
+  const dureeMax = o.dureeMax ?? DUREE_MAX_VOCAL_S
+  const max = o.max ?? MAX_OCTETS_VOCAL
+  const champ = source === 'voice' ? m.voice : m.audio
+  const f = (champ && typeof champ === 'object' ? champ : {}) as FichierAudioTg
+  const refus = (raison: RaisonRefusVocal, x: { duree?: number; taille?: number } = {}): LectureVocal =>
+    ({ genre: 'refus', raison, texte: texteEchecVocal(raison, { source, dureeMax, max, ...x }) })
+
+  const duree = tailleConnue(f.duration)
+  if (duree !== null && duree > dureeMax) return refus('trop_long', { duree })
+  const taille = tailleConnue(f.file_size)
+  if (taille !== null && taille > max) return refus('trop_gros', { taille })
+  if (typeof f.file_id !== 'string' || !f.file_id) return refus('illisible')
+  const ext = extensionAudio(source, f)
+  if (!ext) return refus('format')
+  const mime = typeof f.mime_type === 'string' && /^audio\/[\w.+-]+$/i.test(f.mime_type.trim()) ? f.mime_type.trim().toLowerCase() : 'application/octet-stream'
+
+  const legende = (typeof m.caption === 'string' ? m.caption : '').slice(0, MAX_TEXTE_MESSAGE).trim()
+  return {
+    genre: 'vocal',
+    vocal: { fileId: f.file_id, source, duree, taille, nomFichier: `${source === 'voice' ? 'vocal' : 'audio'}.${ext}`, mime },
+    transfert: nomTransfert(m),
+    legende,
+  }
+}
+
+/** Un texte coupe au dernier mot qui tient dans `max` caracteres, trois points a la fin s'il est coupe. */
+export function couperAuMot(texte: string, max: number): string {
+  const t = texte.trim()
+  if (t.length <= max) return t
+  const coupe = t.slice(0, Math.max(1, max - 3))
+  const espace = coupe.lastIndexOf(' ')
+  const net = (espace >= coupe.length * 0.6 ? coupe.slice(0, espace) : coupe).replace(/[\s,;:.!?-]+$/, '')
+  return `${net}...`
+}
+
+/**
+ * Le texte d'un tour vocal, tel qu'il part au modele ET tel qu'il est garde
+ * dans l'historique : l'origine d'un transfert en tete, la trace du vocal,
+ * la transcription, puis la legende s'il y en a une. Les tours suivants
+ * savent ainsi ce qui a ete dit, et que c'etait un vocal.
+ */
+export function texteDuTourVocal(l: Extract<LectureVocal, { genre: 'vocal' }>, transcription: string): string {
+  const lignes: string[] = []
+  if (l.transfert !== null) {
+    lignes.push(l.transfert ? `Message transféré de ${l.transfert} :` : 'Message transféré (expéditeur inconnu) :')
+  }
+  lignes.push(TRACE_VOCAL)
+  lignes.push(transcription.trim())
+  if (l.legende) lignes.push(`Légende du vocal : ${l.legende}`)
+  return lignes.join('\n')
+}
+
+/**
+ * La ligne que le SERVEUR met en tete de la reponse a un vocal (jamais le
+ * modele) : ce qu'il a entendu, coupe au mot si c'est long. La personne voit
+ * ainsi tout de suite si la transcription a rate.
+ */
+export function ligneEntendu(transcription: string, transfert: string | null = null, max: number = MAX_LIGNE_ENTENDU): string {
+  const extrait = couperAuMot(transcription.replace(/\s+/g, ' '), max)
+  const qui = transfert === null ? '' : transfert ? ` (vocal transféré de ${transfert})` : ' (vocal transféré)'
+  return `J'ai entendu${qui} : « ${extrait} »`
+}
+
+// ---------------------------------------------------------------------------
 // L'historique pour le modele.
 //
 // Chaque tour ecrit SA question des son arrivee (avec un identifiant de
@@ -668,12 +863,15 @@ const ENTETE_TRANSFERT = /^Message transféré( de .*| \(expéditeur inconnu\)) 
  * Le texte du tour (texteDuTour) coupe en deux : les mots du titulaire, et le
  * contenu transmis. Un message transfere arrive seul (son commentaire vient
  * dans le message d'avant) : tout son texte est transmis. Les traces d'image
- * ne sont ni l'un ni l'autre.
+ * ne sont ni l'un ni l'autre. (31/10) La trace d'un vocal non plus : sa
+ * transcription compte comme les mots de celui qui a parle (le titulaire, ou
+ * le tiers d'un vocal transfere).
  */
 export function partsDuTour(texte: string): { titulaire: string; transmis: string } {
   const lignes = (texte ?? '').split('\n')
   const transfert = lignes.length > 0 && ENTETE_TRANSFERT.test(lignes[0].trim())
-  const corps = lignes.slice(transfert ? 1 : 0).filter(l => l.trim() !== TRACE_IMAGE && l.trim() !== TRACE_IMAGE_ALBUM).join('\n').trim()
+  const traces = new Set([TRACE_IMAGE, TRACE_IMAGE_ALBUM, TRACE_VOCAL])
+  const corps = lignes.slice(transfert ? 1 : 0).filter(l => !traces.has(l.trim())).join('\n').trim()
   return transfert ? { titulaire: '', transmis: corps } : { titulaire: corps, transmis: '' }
 }
 

@@ -86,6 +86,9 @@ export type PosteIA =
   // ligne = une lecture, comptée pour la limite de 5 par membre et par jour.
   | 'document'
   | 'liveclub_membre'
+  // (31/10) Les vocaux d'Agent AOK transcrits (Groq, src/lib/transcription.ts) : produit 'cockpit',
+  // aucun jeton, cout a la duree d'audio. Ligne ecrite directement par tracerTranscription.
+  | 'transcription'
   | 'tests_liveclub' | 'tests_support' | 'tests_juge'
   // Chaine clips (20/10/2026) : notation des passages d'un live par la grille, faite par le script
   // local automations/clips (cle du cockpit, tracee par conso_ia.py, echange = le replay).

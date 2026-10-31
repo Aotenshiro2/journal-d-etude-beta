@@ -6,11 +6,15 @@ import { boucleAgent, type ReponseAgent } from '@/lib/agent-cockpit'
 import { auteurDemande, libelleBoutonConfirmer } from '@/lib/agent-cockpit-pur'
 import { validerAction, executerAction, RefusAction, expurgerLiensInvitation, paramsPourLog } from '@/lib/stripe-actions'
 import {
-  DUREE_TOUR_DEFAUT_MS, GRACE_FILET_MS, MAX_OCTETS_IMAGE, TEXTE_IMAGE_REFUSEE, TEXTE_REPONSE_NON_PARTIE, TEXTE_TEMPS_DEPASSE,
-  decouperMessage, demandesEnSuspens, entreesQuestionEquipe, erreurDImage, historiquePourTour, marqueurRapportEquipe,
-  messagesAvecCarte, messagesPourModele, noteSuspens, partsDuTour, texteQuestionEquipe, texteRapportEquipe, typeImageDepuisOctets,
-  type DemandesEnSuspens, type ImageALire, type ImageDuTour, type QuestionEquipe,
+  DUREE_TOUR_DEFAUT_MS, GRACE_FILET_MS, MAX_OCTETS_IMAGE, MAX_OCTETS_VOCAL, MAX_TEXTE_TOUR_VOCAL, MAX_TRANSCRIPTION,
+  TEXTE_IMAGE_REFUSEE, TEXTE_REPONSE_NON_PARTIE, TEXTE_TEMPS_DEPASSE,
+  couperAuMot, decouperMessage, demandesEnSuspens, entreesQuestionEquipe, erreurDImage, historiquePourTour, ligneEntendu,
+  marqueurRapportEquipe, messagesAvecCarte, messagesPourModele, noteSuspens, partsDuTour, texteDuTourVocal, texteEchecVocal,
+  texteQuestionEquipe, texteRapportEquipe, typeImageDepuisOctets,
+  type DemandesEnSuspens, type ImageALire, type ImageDuTour, type LectureVocal, type QuestionEquipe,
 } from '@/lib/agent-cockpit-telegram-pur'
+import { FOURNISSEUR_TRANSCRIPTION, delaiTranscription, telechargerEtTranscrire } from '@/lib/transcription-pur'
+import { cleTranscriptionServeur, tracerTranscription } from '@/lib/transcription'
 import type { RelanceEquipe } from '@/lib/agent-equipe'
 import { analyserTexte, combinerAnalyses, rendreVisible } from '@/lib/securite/injection-pur'
 import { alerterBriceSecurite } from '@/lib/securite/alerte'
@@ -47,6 +51,12 @@ import { lireBoutonCorrection } from '@/lib/liveclub/relais-pur'
 // du bot QUI a recu le message (un file_id ne vaut que pour son bot), et part
 // au modele en bloc image dans le tour courant SEULEMENT. L'historique n'en
 // garde que la trace « [image envoyée] » et la legende, jamais le base64.
+//
+// VOCAUX (Brice, 31/10) : un message vocal ou un fichier audio est transcrit
+// (transcrireVocalTelegram, Groq) puis traite comme un message ECRIT de la
+// meme personne (memes verrous, meme analyse, memes cartes). L'historique
+// garde la transcription sous « [message vocal, transcrit ci-dessous] » ; la
+// reponse commence par la ligne « J'ai entendu », ajoutee par le serveur.
 
 const MAX_MESSAGES_CONSERVES = 20
 export const MAX_MESSAGE_LEN = 4000
@@ -80,6 +90,48 @@ export async function telechargerImageTelegram(bot: BotImage, image: ImageALire)
   const mediaType = typeImageDepuisOctets(issue.octets)
   if (!mediaType) return { ok: false, raison: 'pas_une_image' }
   return { ok: true, image: { base64: Buffer.from(issue.octets).toString('base64'), mediaType } }
+}
+
+/** (31/10) Un vocal transcrit : le texte du tour (trace + transcription), ou le message d'echec a envoyer tel quel. */
+export type IssueVocal =
+  | { ok: true; texte: string; transcription: string; transfert: string | null }
+  | { ok: false; texte: string }
+
+/**
+ * (31/10) Un message vocal (ou un fichier audio) recu par `bot` : refus dits
+ * en clair (duree, poids, format : lireVocalTelegram), puis telechargement
+ * chez Telegram avec le jeton du bot qui l'a recu (un file_id ne vaut que pour
+ * lui), transcription (transcription-pur.ts, delai borne par la limite du
+ * tour) et cout trace (AiUsage, poste « transcription »). Ne jette pas. Jamais
+ * la transcription, la cle ni l'URL du fichier dans un log : la raison et le
+ * statut seulement.
+ */
+export async function transcrireVocalTelegram(
+  bot: BotTelegram, lu: LectureVocal, o: { userId: string; limite: number; echange?: string | null },
+): Promise<IssueVocal> {
+  if (lu.genre === 'refus') return { ok: false, texte: lu.texte }
+  const { vocal } = lu
+  const cle = cleTranscriptionServeur()
+  if (!cle) console.warn(`[transcription] ${FOURNISSEUR_TRANSCRIPTION.variableCle} absente du projet journal : vocal non transcrit`)
+  const issue = await telechargerEtTranscrire(
+    { fileId: vocal.fileId, taille: vocal.taille, nomFichier: vocal.nomFichier, mime: vocal.mime },
+    {
+      cle,
+      maxOctets: MAX_OCTETS_VOCAL,
+      telecharger: (fileId, max, taille) => telechargerFichierTelegram(bot, fileId, max, taille),
+      fetch,
+      delaiMs: delaiTranscription(o.limite, Date.now()),
+      facturer: () => tracerTranscription({ userId: o.userId, dureeS: vocal.duree, echange: o.echange }),
+    },
+  )
+  if (!issue.ok) {
+    if (issue.raison !== 'sans_cle') {
+      console.warn(`[transcription] ${FOURNISSEUR_TRANSCRIPTION.nom} : vocal non transcrit (${issue.raison}${issue.statut ? `, HTTP ${issue.statut}` : ''})`)
+    }
+    return { ok: false, texte: texteEchecVocal(issue.raison, { source: vocal.source, taille: issue.taille ?? vocal.taille }) }
+  }
+  const transcription = couperAuMot(issue.texte, MAX_TRANSCRIPTION)
+  return { ok: true, texte: texteDuTourVocal(lu, transcription), transcription, transfert: lu.transfert }
 }
 
 /**
@@ -391,6 +443,13 @@ export type EntreeAgentTelegram = {
    * du fil, sur ses messages en suspens. Rien a reprendre = rien n'est fait.
    */
   reprise?: { par: string }
+  /**
+   * (31/10) Le tour vient d'un message vocal : sa transcription (le texte du
+   * tour la porte deja, sous TRACE_VOCAL) et l'origine d'un vocal transfere.
+   * La reponse commence par la ligne « J'ai entendu : « ... » », ajoutee par
+   * le serveur (ligneEntendu), jamais gardee en base.
+   */
+  vocal?: { transcription: string; transfert: string | null } | null
 }
 
 /**
@@ -484,7 +543,8 @@ async function tourAgent(e: EntreeAgentTelegram): Promise<IssueAgentTelegram> {
   const limite = e.limite ?? debut + DUREE_TOUR_DEFAUT_MS
   const image = e.image ?? null
   const piece = e.piece ?? null
-  const texte = e.texte.slice(0, MAX_MESSAGE_LEN).trim()
+  // (31/10) Un vocal de 5 minutes transcrit depasse les 4 000 caracteres d'un message ecrit.
+  const texte = e.texte.slice(0, e.vocal ? MAX_TEXTE_TOUR_VOCAL : MAX_MESSAGE_LEN).trim()
   if (!texte && !image) return 'traite'
 
   const conv = await chargerConversation(chatId)
@@ -540,6 +600,15 @@ async function tourAgent(e: EntreeAgentTelegram): Promise<IssueAgentTelegram> {
   )
   const texteGarde = analyse.suspect ? rendreVisible(texte) : texte
   const sourceAlerte = `Agent AOK, fil de ${compte.libelle?.trim() || `u${telegramId}`}${e.transmis ? ' (transmis par le bot Live Club)' : ''}`
+  // (31/10) LE VOCAL : la ligne « J'ai entendu : « ... » » en tete de ce qui
+  // conclut le tour (reponse, echec, temps depasse), ajoutee ici par le
+  // serveur, jamais par le modele ; rendue visible si le tour est suspect.
+  // Jamais gardee en base : le modele ne la voit pas dans ses reponses passees
+  // et ne la recopie donc pas (la transcription est deja dans la question).
+  const entendu = e.vocal
+    ? ligneEntendu(analyse.suspect ? rendreVisible(e.vocal.transcription) : e.vocal.transcription, e.vocal.transfert)
+    : null
+  const enTete = (t: string) => (entendu ? `${entendu}\n\n${t}` : t)
 
   // LA QUESTION EST ECRITE DES SON ARRIVEE (15/10), la reponse en fin de tour.
   // Avant, les deux partaient ensemble a la fin : un message transfere avec un
@@ -575,7 +644,7 @@ async function tourAgent(e: EntreeAgentTelegram): Promise<IssueAgentTelegram> {
   // s'est arrete juste au-dessus) : la citation et la source.
   if (analyse.suspect) {
     await alerterBriceSecurite({
-      source: `${sourceAlerte}, ${parts.transmis ? 'message transféré' : 'message'}`,
+      source: `${sourceAlerte}, ${e.vocal ? (parts.transmis ? 'vocal transféré, transcrit' : 'message vocal, transcrit') : parts.transmis ? 'message transféré' : 'message'}`,
       analyse, suite: "Aucune carte ni aucun geste dans ce tour ; l'agent dit à son interlocuteur ce qu'il a repéré.",
     })
   }
@@ -645,7 +714,7 @@ async function tourAgent(e: EntreeAgentTelegram): Promise<IssueAgentTelegram> {
     console.error('[cockpit/telegram]', err)
     // Une image refusee par l'API (poids, dimensions, format) : dit en clair.
     const texteErreur = image && erreurDImage(err) ? TEXTE_IMAGE_REFUSEE : TEXTE_ERREUR_AGENT
-    await tgCockpit('sendMessage', { chat_id: chatId, text: texteErreur })
+    await tgCockpit('sendMessage', { chat_id: chatId, text: enTete(texteErreur) })
     await ajouterReponseSeule(chatId, texteErreur, { echec: true })
     return 'traite'
   } finally {
@@ -656,7 +725,7 @@ async function tourAgent(e: EntreeAgentTelegram): Promise<IssueAgentTelegram> {
   if (reponse === 'delai') {
     controleur.abort()
     console.error(`[cockpit/telegram] filet : aucune reponse ${Math.round((Date.now() - debut) / 1000)} s apres le debut du tour, echec dit en clair`)
-    await tgCockpit('sendMessage', { chat_id: chatId, text: TEXTE_TEMPS_DEPASSE })
+    await tgCockpit('sendMessage', { chat_id: chatId, text: enTete(TEXTE_TEMPS_DEPASSE) })
     await ajouterReponseSeule(chatId, TEXTE_TEMPS_DEPASSE, { echec: true })
     return 'traite'
   }
@@ -664,11 +733,12 @@ async function tourAgent(e: EntreeAgentTelegram): Promise<IssueAgentTelegram> {
   // Une base qui ne repond plus au moment d'ecrire la reponse : la route
   // rendait une erreur, Telegram rejouait, et le rejeu s'arretait sur la
   // question deja ecrite (doublon) : le silence. Dit en clair a la place.
+  // (31/10) Un vocal : la reponse envoyee commence par « J'ai entendu », l'historique garde la reponse seule.
   try {
-    await livrerReponse({ chatId, telegramId, updateId, majUpdate, garde }, reponse)
+    await livrerReponse({ chatId, telegramId, updateId, majUpdate, garde }, entendu ? { ...reponse, reply: enTete(reponse.reply) } : reponse, reponse.reply)
   } catch (err) {
     console.error('[cockpit/telegram] reponse non enregistree', err instanceof Error ? err.message.split('\n')[0].slice(0, 160) : '?')
-    await tgCockpit('sendMessage', { chat_id: chatId, text: TEXTE_ERREUR_AGENT })
+    await tgCockpit('sendMessage', { chat_id: chatId, text: enTete(TEXTE_ERREUR_AGENT) })
     return 'traite'
   }
 
@@ -771,15 +841,17 @@ type ContexteLivraison = {
  * La reponse d'un tour : ecrite a l'historique (en ajout), puis envoyee,
  * coupee si elle est longue, la carte et ses boutons dans le dernier message.
  * Une reponse refusee par Telegram est dite en clair (signalerNonPartie).
+ * (31/10) `replyHistorique` : ce que l'historique garde, quand la reponse
+ * envoyee porte en plus la ligne « J'ai entendu » d'un vocal.
  */
-async function livrerReponse(c: ContexteLivraison, reponse: ReponseAgent): Promise<void> {
+async function livrerReponse(c: ContexteLivraison, reponse: ReponseAgent, replyHistorique: string = reponse.reply): Promise<void> {
   const { chatId, telegramId, updateId, majUpdate, garde } = c
   // La reponse de ce tour, seule (la question est deja en base). Un rejeu
   // Telegram du MEME update s'est arrete a l'ecriture de la question ; la
   // clause where de chaque upsert reste en ceinture. (29/10) Une reponse
   // partielle (temps) est marquee echec : la demande reste en suspens.
   const tour = JSON.stringify([
-    { role: 'assistant', content: reponse.reply, ...(reponse.inacheve ? { echec: true as const } : {}) },
+    { role: 'assistant', content: replyHistorique, ...(reponse.inacheve ? { echec: true as const } : {}) },
   ] satisfies MessageStocke[])
 
   if (reponse.action) {

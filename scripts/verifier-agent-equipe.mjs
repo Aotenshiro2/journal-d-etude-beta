@@ -61,7 +61,8 @@ bloc('le temps d un tour : limite avant la fin de la fonction, filet avant la pl
   const routeTg = lire('src/app/api/cockpit/agent/telegram/route.ts')
   assert.match(routeTg, /export const maxDuration = 300\b/)
   assert.match(routeTg, /const limite = limiteDuTour\(debut, maxDuration\)/)
-  assert.equal((routeTg.match(/, limite,?\s*\}\)/g) ?? []).length, 2, 'les deux appels de traiterTexteAgentTelegram portent la limite')
+  // (31/10) Trois appels : le vocal transcrit a le sien (verifier-vocaux.mjs).
+  assert.equal((routeTg.match(/, limite,?\s*\}\)/g) ?? []).length, 3, 'les trois appels de traiterTexteAgentTelegram portent la limite')
   const routeWeb = lire('src/app/api/cockpit/agent/route.ts')
   assert.match(routeWeb, /export const maxDuration = 300\b/)
   // (29/10) La route passe aussi la securite du tour (texteTitulaire, prudence...) : voir verifier-securite-bots.mjs.

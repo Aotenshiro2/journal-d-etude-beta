@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import {
-  compteCockpitTelegram, telechargerImageTelegram, traiterClicAgentTelegram, traiterTexteAgentTelegram, tgCockpit,
+  compteCockpitTelegram, telechargerImageTelegram, traiterClicAgentTelegram, traiterTexteAgentTelegram, transcrireVocalTelegram,
+  tgCockpit,
 } from '@/lib/agent-cockpit-telegram'
 import {
-  limiteDuTour, lireMessageTelegram, texteDuTour, texteEchecImage, texteImageTropGrosse, texteNonLu, type ImageDuTour,
+  limiteDuTour, lireMessageTelegram, lireVocalTelegram, texteDuTour, texteEchecImage, texteImageTropGrosse, texteNonLu,
+  type ImageDuTour,
 } from '@/lib/agent-cockpit-telegram-pur'
 import { MAX_FICHIER_AGENT, lireFichierSortant, lirePieceMessage, tracePieceAgent } from '@/lib/liveclub/support-pont-pur'
 
@@ -80,11 +82,34 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true })
   }
 
+  // (31/10, Brice) UN MESSAGE VOCAL, ou un fichier audio : transcrit, puis
+  // traite comme un message ECRIT de la meme personne (meme analyse que ses
+  // mots, memes cartes a un clic). Un vocal transfere garde son origine en
+  // tete : la voix d'un tiers, une donnee, jamais un ordre. Au-dela de 5
+  // minutes (duree donnee par Telegram), trop lourd, cle absente, echec ou
+  // silence : dit en clair, jamais le silence. Rien n'est telecharge avant le
+  // verrou 2. Le cout va a AiUsage (poste « transcription »).
+  const vocal = lireVocalTelegram(message)
+  if (vocal) {
+    // Quelques secondes de transcription avant l'accuse du tour : le signe de vie part tout de suite.
+    if (vocal.genre === 'vocal') await tgCockpit('sendChatAction', { chat_id: chatId, action: 'typing' })
+    const issue = await transcrireVocalTelegram('cockpit', vocal, { userId: compte.user_id, limite, echange: `vocal-u${updateId}` })
+    if (!issue.ok) {
+      await tgCockpit('sendMessage', { chat_id: chatId, text: issue.texte })
+      return NextResponse.json({ ok: true })
+    }
+    await traiterTexteAgentTelegram({
+      chatId, telegramId, texte: issue.texte, image: null, compte, updateId,
+      vocal: { transcription: issue.transcription, transfert: issue.transfert }, limite,
+    })
+    return NextResponse.json({ ok: true })
+  }
+
   // (16/10) La piece du message (photo ou document), par sa reference
   // Telegram : l'agent ne la lit pas forcement, mais peut l'ENVOYER a un
   // membre (proposer_reponse_membre). Un fichier qu'on sait envoyer (PDF,
   // Word, image lourde...) part donc a l'agent avec sa trace au lieu d'etre
-  // refuse ; les autres (vocal, video...) : comme avant.
+  // refuse ; les autres (video...) : comme avant. Le vocal est lu plus haut (31/10).
   const pieceLue = lirePieceMessage(message)
   const piece = pieceLue ? { ...pieceLue, bot: 'cockpit' as const } : null
   if ((lecture.genre === 'trop_gros' || lecture.genre === 'non_lu')

@@ -3,6 +3,48 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
+## Agent AOK comprend les messages vocaux (31/10/2026, LOCAL, non pousse ; aucune migration ; variable GROQ_API_KEY_COCKPIT A POSER)
+
+- Fait : un message vocal (voice) ou un fichier audio (audio) envoye a Agent AOK est telecharge chez Telegram (getFile,
+  jeton du bot qui l'a recu), transcrit par Groq (whisper-large-v3-turbo, langue fr, 30 s au plus, borne par
+  limiteDuTour), puis traite comme un message ECRIT de la meme personne. Route : `src/app/api/cockpit/agent/telegram/route.ts`
+  (apres le verrou 2, avant les pieces). Lecture pure : `lireVocalTelegram`, `texteDuTourVocal`, `ligneEntendu`,
+  `texteEchecVocal` (`src/lib/agent-cockpit-telegram-pur.ts`) ; `lireMessageTelegram` inchangee (le bot des membres garde
+  son parcours d'avant pour un vocal). Canal : `transcrireVocalTelegram` (`agent-cockpit-telegram.ts`).
+- Fournisseur : `src/lib/transcription-pur.ts` (aucun import ; FOURNISSEUR_TRANSCRIPTION = URL, modele, NOM de la variable
+  de la cle, prix, delai, poids max : tout service compatible OpenAI se branche la, rien d'autre a toucher) ;
+  `src/lib/transcription.ts` (cle lue dans l'environnement, cout trace).
+- Historique : « [message vocal, transcrit ci-dessous] » puis la transcription (6 000 caracteres au plus ; un tour vocal
+  garde 7 500 caracteres, un message ecrit 4 000). Reponse : la ligne « J'ai entendu : « ... » » (400 caracteres, coupee
+  au mot ; « (vocal transféré de X) » pour un transfert) ajoutee par le SERVEUR en tete de la reponse, de l'erreur et du
+  temps depasse, jamais gardee en base (le modele ne la recopie pas). Prompt : « LES MESSAGES VOCAUX SUR TELEGRAM (31/10) ».
+- Securite (grille de Brice) : partsDuTour ignore la trace du vocal ; le vocal du titulaire est analyse comme ses mots
+  (niveau 'cache', ordreQuestionExplicite compris), un vocal TRANSFERE est au niveau 'tiers' (une donnee, jamais un ordre).
+  Cartes toujours au clic. Alerte : source « message vocal, transcrit » ou « vocal transféré, transcrit ».
+- Limites et echecs, toujours dits en clair : plus de 5 min (duree Telegram : rien n'est telecharge), plus de 20 Mo,
+  format audio non lu (AAC...), cle absente (« Je ne sais pas encore écouter les vocaux ici (...) : écris-le-moi. »),
+  cle refusee (401/403), delai, echec du service, silence (texte vide, ou sous-titre fantome de Whisper).
+- Cout : AiUsage, product 'cockpit', poste 'transcription', modele whisper-large-v3-turbo, 0 jeton, costMicros =
+  max(10 s, duree Telegram) x 0,04 USD/h x 0,92 ; trace des que Groq rend un texte (silence compris), echange
+  vocal-u<update_id>. Aucune migration (AiUsage.usage est un texte libre). Ecran Depense IA : libelle ajoute dans
+  `apps/cockpit/src/lib/depense-ia.ts` (« Agent, vocaux transcrits (Groq) », famille Agent) ; sans deploiement du
+  cockpit, la ligne se lit « transcription, non détaillé ».
+- Verifs : `node scripts/verifier-vocaux.mjs` (9 blocs, hors ligne : faux fetch pour Telegram, avec le vrai
+  telechargerFichierTelegram, et pour Groq), verifier-securite-bots (17), verifier-agent-equipe (11 : la route a
+  maintenant trois appels de traiterTexteAgentTelegram), verifier-liveclub (63), tsc, eslint. Aucun appel reel a Groq
+  ni a Anthropic.
+- A FAIRE : (1) Brice cree la cle Groq (console Groq, une cle pour le cockpit) et la pose sur Vercel, projet du journal,
+  variable GROQ_API_KEY_COCKPIT ; (2) deployer le journal (sur GO) ; (3) UN essai reel : un vocal court a Agent AOK, puis
+  un vocal transfere ; verifier la ligne « J'ai entendu » et la ligne AiUsage (poste transcription) ; (4) deployer le
+  cockpit pour le libelle.
+- Reste : un vocal d'un compte de l'equipe envoye au bot des membres (transmettreSiEquipe) n'est pas transcrit ; un audio
+  envoye en FICHIER (document audio/...) non plus, ni une video ronde ; l'accuse reste « Je vérifie... » (la ligne
+  « J'ai entendu » arrive avec la reponse) ; un rejeu Telegram du meme update re-transcrit avant le dedoublonnage (cout
+  minime, aucun double message).
+- Pour plus tard (non fait) : le bot du Live Club pour les membres (meme module transcription-pur.ts ; un vocal de membre
+  analyse comme son ecrit, niveau 'injection') ; la bulle de support du site avec un bouton micro (reprendre si possible
+  la dictee locale du Carnet) ; une ligne dans la politique de confidentialite, puisque la voix partirait chez Groq.
+
 ## Academie : les QUESTIONS D'ENTREE (30/10/2026, LOCAL, non pousse ; migration 20261031170000 NON appliquee)
 
 - Ce que Skool demandait a l'arrivee, repose par l'academie : a la premiere entree d'un membre CONNECTE (pas un
