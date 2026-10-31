@@ -8,6 +8,7 @@
 // toujours annulee. N'importe que des types : Node l'importe tel quel.
 
 import type { DepotAbonnements, LigneConsentement } from './kit-abonnements-pur'
+import type { GardeMembres } from './kit-defauts-pur'
 
 type Db = {
   $queryRawUnsafe<T = unknown>(requete: string, ...valeurs: unknown[]): Promise<T>
@@ -18,6 +19,34 @@ type Db = {
 function doublon(err: unknown): boolean {
   const e = (err && typeof err === 'object' ? err : {}) as { code?: unknown; meta?: { code?: unknown } }
   return e.code === '23505' || e.meta?.code === '23505' || (e.code === 'P2010' && e.meta?.code === '23505')
+}
+
+/** Les tables de la migration ne sont pas encore la (aucun membre n'a donc regle ses choix). */
+function tableAbsente(err: unknown): boolean {
+  const e = (err && typeof err === 'object' ? err : {}) as { code?: unknown; meta?: { code?: unknown } }
+  return e.meta?.code === '42P01' || /42P01|relation .* does not exist/i.test(err instanceof Error ? err.message : String(err))
+}
+
+/**
+ * La garde des choix par defaut (kit-defauts-pur.ts) : un abonne Kit relie a
+ * un compte, ou dont un membre a regle les choix dans Mon espace, n'est
+ * jamais recoche d'office.
+ */
+export function gardePrisma(db: Db): GardeMembres {
+  return {
+    async ecarte(kitId) {
+      try {
+        const r = await db.$queryRawUnsafe<{ e: boolean }[]>(
+          `select exists (select 1 from public.profile_kit where kit_abonne_id = $1::bigint)
+               or exists (select 1 from public.profile_consentements
+                           where kit_abonne_id = $1::bigint and source = 'mon_espace') as e`, kitId)
+        return r[0]?.e === true
+      } catch (err) {
+        if (tableAbsente(err)) return false
+        throw err
+      }
+    },
+  }
 }
 
 export function depotPrisma(db: Db): DepotAbonnements {

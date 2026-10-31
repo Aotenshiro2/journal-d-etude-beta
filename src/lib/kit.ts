@@ -36,6 +36,8 @@ export type ClientKit = {
   poserTag(tag: number, id: number): Promise<void>
   retirerTag(tag: number, id: number): Promise<void>
   desinscrire(id: number): Promise<void>
+  /** Les abonnes ACTIFS crees a partir de `depuis` (filet des choix par defaut). */
+  abonnesActifsCreesDepuis(depuis: Date): Promise<{ id: number; creeLe: string }[]>
 }
 
 export function cleKit(): string | null {
@@ -126,6 +128,26 @@ export function clientKit(cle: string, f: typeof fetch = fetch): ClientKit {
     async desinscrire(id) {
       const r = await appel(`/subscribers/${id}/unsubscribe`, { method: 'POST', body: '{}' })
       if (!ok(r.statut)) throw new ErreurKit(r.statut, 'desinscription')
+    },
+    async abonnesActifsCreesDepuis(depuis) {
+      // created_after est au jour pres : on prend la veille, puis on filtre a la seconde.
+      const jour = new Date(depuis.getTime() - 86400000).toISOString().slice(0, 10)
+      const seuil = depuis.getTime()
+      const liste: { id: number; creeLe: string }[] = []
+      let apres: string | null = null
+      for (let page = 0; page < 20; page++) {
+        const q = new URLSearchParams({ status: 'active', created_after: jour, per_page: '1000', ...(apres ? { after: apres } : {}) })
+        const r = await appel(`/subscribers?${q}`)
+        if (!ok(r.statut)) throw new ErreurKit(r.statut, 'recents')
+        const j = r.json as { subscribers?: { id?: unknown; created_at?: unknown }[]; pagination?: { has_next_page?: boolean; end_cursor?: string } } | null
+        for (const s of j?.subscribers ?? []) {
+          if (typeof s.id !== 'number' || typeof s.created_at !== 'string') continue
+          if (Date.parse(s.created_at) >= seuil) liste.push({ id: s.id, creeLe: s.created_at })
+        }
+        if (!j?.pagination?.has_next_page || !j.pagination.end_cursor) break
+        apres = j.pagination.end_cursor
+      }
+      return liste
     },
   }
 }

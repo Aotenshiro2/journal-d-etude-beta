@@ -40,7 +40,8 @@ export async function middleware(request: NextRequest) {
   // /api/pilotage/achat (+ /confirmer, /webhook) : abonnements de Pilotage sans compte exige, session et abonnement relus chez Stripe (30/10/2026).
   // /api/liveclub/resend : webhook Resend du Live Club (emails refuses), signature Svix verifiee dans la route, 503 sans son secret (31/10/2026).
   // /api/newsletter/subscribe : inscription juste apres la creation d'un compte (journal, extension Carnet), sans session ; garde dans newsletter-inscription-pur.ts (31/10/2026).
-  const publicPaths = ['/auth', '/api/health', '/guide', '/api/membres/photo', '/api/academie/achat', '/api/academie/catalogue', '/api/tab/', '/api/liveclub/stripe', '/api/liveclub/resend', '/api/mcp/', '/api/club/paypal', '/api/pilotage/achat', '/api/newsletter/subscribe']
+  // /api/kit/webhook/ : webhooks Kit des inscriptions par formulaire, secret du chemin verifie dans la route (31/10/2026).
+  const publicPaths = ['/auth', '/api/health', '/guide', '/api/membres/photo', '/api/academie/achat', '/api/academie/catalogue', '/api/tab/', '/api/liveclub/stripe', '/api/liveclub/resend', '/api/mcp/', '/api/club/paypal', '/api/pilotage/achat', '/api/newsletter/subscribe', '/api/kit/webhook/']
   const isPublic = pathname === '/' || publicPaths.some(p => pathname.startsWith(p))
   if (isPublic) return supabaseResponse
 

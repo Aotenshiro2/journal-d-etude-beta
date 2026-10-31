@@ -19,7 +19,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { PrismaClient } from '@prisma/client'
-import { depotPrisma } from '../src/lib/kit-abonnements-depot.ts'
+import { depotPrisma, gardePrisma } from '../src/lib/kit-abonnements-depot.ts'
 
 const DOSSIER = '../../../sites/Aoknowledgecom/supabase/migrations/'
 const COMMUNICATIONS = new URL(DOSSIER + '20261031211000_profile_emails_communications.sql', import.meta.url)
@@ -76,7 +76,19 @@ async function refuseSousRole(tx, role, nom, sql) {
 
 const SQL_TABLES = `select count(to_regclass('public.profile_kit'))::int + count(to_regclass('public.profile_consentements'))::int as n`
 const avant = (await un(prisma, SQL_TABLES)).n
+// Les migrations peuvent deja etre en ligne : on compare a l'etat d'avant, pas a zero.
+const SQL_COLONNE = `select count(*)::int as n from information_schema.columns
+  where table_schema = 'public' and table_name = 'profile_emails' and column_name = 'communications'`
+const colonneAvant = (await un(prisma, SQL_COLONNE)).n
+const lignes = async () => avant === 2
+  ? un(prisma, `select (select count(*)::int from public.profile_kit) as liens, (select count(*)::int from public.profile_consentements) as accords`)
+  : null
+const lignesAvant = await lignes()
 console.log(`avant : ${avant} table(s) sur 2, ${ordres.length} ordres (+ ${ordresCommunications.length} de 20261031211000)`)
+if (avant === 0) {
+  assert.equal(await gardePrisma(prisma).ecarte(K1), false)
+  ok('garde des choix par defaut, tables absentes : personne n est ecarte, sans erreur')
+}
 
 try {
   await prisma.$transaction(async tx => {
@@ -108,10 +120,15 @@ try {
 
     // -- le vrai depot du journal, sur la transaction
     const depot = depotPrisma(tx)
+    // Deux comptes sans lien Kit ni accord (les tables peuvent deja servir en ligne), sans choix d'adresse coche.
+    const VIERGE = `pe.is_primary and pe.verified
+      and not exists (select 1 from public.profile_kit k where k.profile_id = pe.profile_id)
+      and not exists (select 1 from public.profile_consentements c where c.profile_id = pe.profile_id)
+      and not exists (select 1 from public.profile_emails x where x.profile_id = pe.profile_id and x.communications)`
     const p = (await un(tx, `select pe.profile_id::text as id from public.profile_emails pe
-      where pe.is_primary and pe.verified order by pe.created_at limit 1`)).id
+      where ${VIERGE} order by pe.created_at limit 1`)).id
     const q = (await un(tx, `select pe.profile_id::text as id from public.profile_emails pe
-      where pe.is_primary and pe.verified and pe.profile_id <> $1::uuid order by pe.created_at limit 1`, p)).id
+      where ${VIERGE} and pe.profile_id <> $1::uuid order by pe.created_at limit 1`, p)).id
     const principale = (await un(tx, `select email from public.profile_emails where profile_id = $1::uuid and is_primary`, p)).email
     assert.ok((await depot.adresse(p)) === principale, 'adresse des communications : la principale attendue')
     const prenom = await depot.prenom(p)
@@ -146,6 +163,12 @@ try {
     assert.equal(await depot.lien(p), null)
     ok('depot : delier')
 
+    const garde = gardePrisma(tx)
+    assert.equal(await garde.ecarte(K3), true)
+    assert.equal(await garde.ecarte(K2), true)
+    assert.equal(await garde.ecarte(K1), false)
+    ok('garde des choix par defaut : abonne relie ecarte, abonne avec un choix mon_espace ecarte, autre non')
+
     // -- contraintes
     await refuse(tx, 'id Kit nul ou negatif', `insert into public.profile_kit (profile_id, kit_abonne_id) values ($1::uuid, 0)`, p)
     await refuse(tx, 'meme abonne sur deux comptes', `insert into public.profile_kit (profile_id, kit_abonne_id) values ($1::uuid, $2)`, p, K3)
@@ -162,8 +185,8 @@ try {
 }
 
 assert.equal((await un(prisma, SQL_TABLES)).n, avant)
-assert.equal((await un(prisma, `select count(*)::int as n from information_schema.columns
-  where table_schema = 'public' and table_name = 'profile_emails' and column_name = 'communications'`)).n, 0)
-ok('transaction annulee : base inchangee (ni tables, ni colonne communications)')
+assert.equal((await un(prisma, SQL_COLONNE)).n, colonneAvant)
+assert.deepEqual(await lignes(), lignesAvant)
+ok(`transaction annulee : base inchangee (tables ${avant} sur 2, colonne communications ${colonneAvant}, lignes ${JSON.stringify(lignesAvant)})`)
 console.log(`\n${etapes} etapes ok`)
 await prisma.$disconnect()

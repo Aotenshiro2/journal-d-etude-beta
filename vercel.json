@@ -3,6 +3,7 @@
   "framework": "nextjs",
   "regions": ["fra1"],
   "crons": [
-    { "path": "/api/cron/liveclub", "schedule": "0 7 * * *" }
+    { "path": "/api/cron/liveclub", "schedule": "0 7 * * *" },
+    { "path": "/api/cron/kit-defauts", "schedule": "0 5 * * *" }
   ]
 }
