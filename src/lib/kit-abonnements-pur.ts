@@ -27,7 +27,8 @@ import type { ChoixKit } from './kit-choix'
 
 export type EtatKit = 'absent' | 'actif' | 'desinscrit' | 'inactif'
 export type Resynchro = 'non' | 'lie' | 'adresse' | 'fusion'
-export type SourceConsentement = 'mon_espace' | 'changement_adresse'
+/** Les sources admises par profile_consentements_source_ck (« bascule » : le rattrapage, qui n'ecrit pas ici). */
+export type SourceConsentement = 'mon_espace' | 'changement_adresse' | 'inscription'
 
 export type LigneConsentement = { type: string; tag: number; valeur: boolean; source: SourceConsentement; kitId: number }
 
