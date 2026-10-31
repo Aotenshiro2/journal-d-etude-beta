@@ -17,7 +17,7 @@
 export type Personne = { nom: string | null; email: string | null; pseudo: string | null; telegramId: number | null }
 
 export type RubriqueResume =
-  | 'nouveaux' | 'arrets' | 'pauses' | 'impayes' | 'sorties' | 'entrees' | 'acces' | 'adresses' | 'comptes' | 'humains'
+  | 'nouveaux' | 'arrets' | 'pauses' | 'impayes' | 'sorties' | 'entrees' | 'acces' | 'adresses' | 'rebonds' | 'comptes' | 'humains'
   | 'reprises' | 'demandes' | 'contacter' | 'suspens'
 
 /** Les rubriques, dans l'ordre du message. */
@@ -30,6 +30,8 @@ export const RUBRIQUES_RESUME: readonly { cle: RubriqueResume; titre: string }[]
   { cle: 'entrees', titre: 'Entrées dans le groupe' },
   { cle: 'acces', titre: 'Accès broker, exemptions et tarifs réservés' },
   { cle: 'adresses', titre: 'Adresses rattachées automatiquement' },
+  // (31/10) Webhook Resend (rebonds-pur.ts) : refusé par la boîte, marqué comme spam, bloqué par Resend.
+  { cle: 'rebonds', titre: 'Emails du Live Club qui ne sont pas arrivés' },
   { cle: 'comptes', titre: 'Comptes Telegram changés ou en conflit' },
   { cle: 'contacter', titre: 'À contacter' },
   { cle: 'humains', titre: "Demandes d'humain en attente" },
@@ -154,13 +156,20 @@ function date(d: Record<string, unknown>, champ: string): string | null {
  * calculee par l'appelant (elle demande l'adresse, que le journal ne garde
  * pas). `phraseCompte` (15/10) : celle d'un geste 'compte_telegram'
  * (phraseCompteResume, comptes-telegram-pur.ts : les comptes nommes).
+ * `phraseRebond` (31/10) : celle d'un geste 'adresse' du webhook Resend
+ * (regle email_*, phraseRebondResume de rebonds-pur.ts) ; seul un geste
+ * 'fait' compte (une ligne 'echec' = alerte pas partie, Resend rejoue).
  */
 export function evenementDeGeste(
   g: GesteResume,
-  o: { phraseAdresse?: string | null; phraseCompte?: string | null } = {},
+  o: { phraseAdresse?: string | null; phraseCompte?: string | null; phraseRebond?: string | null } = {},
 ): { rubrique: RubriqueResume; detail: string } | null {
   const d = g.details ?? {}
   const regle = g.regle ?? ''
+  if (g.geste === 'adresse' && /^email_/.test(regle)) {
+    if (g.resultat !== 'fait') return null
+    return { rubrique: 'rebonds', detail: o.phraseRebond || "email du Live Club qui n'est pas arrivé, voir le journal du bot" }
+  }
   if (g.geste === 'adresse') {
     if (!['fait', 'refuse', 'echec'].includes(g.resultat)) return null
     return { rubrique: 'adresses', detail: o.phraseAdresse || 'autre adresse traitée, voir le journal du bot' }

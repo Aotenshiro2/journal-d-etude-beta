@@ -3,6 +3,60 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
+## Emails du Live Club qui n'arrivent pas : webhook Resend (31/10/2026, LOCAL, non commite ; aucune migration ; webhook et variable A POSER)
+
+- Cas reel du 31/10 : l'invitation d'acces broker de Fabien (@libertysurf.fr) acceptee par Resend, puis « Bounced »
+  a la meme minute (Transient / ContentRejected, « 550 spam detected »), adresse mise dans les Suppressions de Resend.
+  Personne ne l'a su avant sa plainte.
+- Route `POST /api/liveclub/resend` (publique, middleware.ts) : signature Svix verifiee sans dependance (HMAC SHA-256,
+  « <svix-id>.<svix-timestamp>.<corps> », secret whsec_ decode du base64, 5 min de tolerance, plusieurs signatures
+  acceptees). Sans RESEND_WEBHOOK_SECRET_LIVECLUB : 503 ; signature fausse : 400, rien n'est traite. Evenements traites :
+  email.bounced, email.complained, email.suppressed (= un envoi vers une adresse deja bloquee, traite comme un rebond).
+  Ignores (200) : tous les autres, dont email.delivery_delayed (un retard finit en delivered ou en bounced : le rebond
+  previent), et les emails des autres produits du compte Resend (expediteur different de LIVECLUB_FROM_EMAIL ou de
+  « Live Club AOKnowledge <support@aoknowledge.com> »). LIVECLUB_REBONDS=0 coupe tout (200).
+- Regles et textes : `src/lib/liveclub/rebonds-pur.ts` (pur, traiterRebond avec ses outils en parametre) ; serveur :
+  `rebonds.ts`. Nature du refus lue dans bounce.type / subType : contenu (ContentRejected, spam : l'adresse vit),
+  definitif (Permanent), passager (MailboxFull...), bloque (Suppressions), plainte, indetermine.
+- Ce qui se passe : (a) la personne retrouvee par l'adresse (acces broker, rattachements par l'adresse, par la fiche du
+  cockpit, par un client Stripe) ; (b) une ligne au journal, geste 'adresse', regle email_rebond | email_plainte |
+  email_bloque (svix_id, empreinte sha256 de l'adresse, jour de Paris, nature, sujet, acces_id, client_stripe ; jamais
+  l'adresse), sous verrou pg_advisory_xact_lock de l'adresse : meme svix-id = traite une fois ; (c) invitation broker
+  (sujet « Votre accès au Live Club est ouvert », acces actif jamais ouvert) : invite_envoyee_le a null SEULEMENT pour
+  un refus definitif, si aucun jeton n'a servi et si elle n'a pas ete renvoyee depuis ; un refus de contenu ne remet
+  rien (le meme email serait refuse pareil) ; (d) message prive au membre si un compte Telegram est relie (une fois par
+  adresse, pas si l'equipe a la main dans son fil), sans parler de spam : l'email n'a pas pu arriver, donne une autre
+  adresse, l'equipe s'en occupe ; (e) alerte a Brice et Mel dans Agent AOK (une fois par adresse et par jour) : quel
+  email, a qui, pourquoi en clair avec type / sous-type et reponse SMTP, quoi faire (lien personnel a donner pour un
+  acces broker pas entre, ou une autre adresse), ce qui a ete fait pour le membre. Le lien personnel est dans l'alerte
+  Telegram, PAS dans l'historique de l'agent (« donné dans l'alerte Telegram, pas gardé ici »). Reponse du serveur =
+  texte de tiers : analysee (niveau 'tiers'), rendue visible si suspecte, Brice prevenu. Alerte pas partie : ligne
+  'echec', 500, Resend rejoue (rien d'autre n'est refait). (f) Fil Support (phraseGeste, pur.ts) et resume du matin
+  (rubrique « Emails du Live Club qui ne sont pas arrivés », resume-pur.ts / resume.ts).
+- Pas de boucle d'envois vers une adresse bloquee : aucun renvoi automatique d'invitation n'existe (le passage n'en
+  renvoie pas ; seul un nouveau collage de l'adresse dans Agent AOK renvoie, accorderUn a_relancer). Apres un refus
+  definitif, recoller la MEME adresse renverrait vers une adresse bloquee : refus suivant (email.suppressed), une alerte
+  par jour au plus, l'invitation deja a null n'est pas retouchee.
+- Consigne d'Agent AOK (agent-cockpit.ts) : les trois regles du geste 'adresse' et le sens de invite_envoyee_le a null.
+- Verifs : `node scripts/verifier-rebonds-email.mjs` (13 blocs, hors ligne : vecteur de test Svix, route, evenements
+  ignores, cas du 31/10, rejeu, invitation broker contenu / definitif, membre relie ou non, alerte une fois par jour,
+  textes, journal et resume, cablage) ; tsc ; eslint ; verifier-liveclub (63, filtre de la rubrique ajoute),
+  -securite-bots, -suivi-lots, -depot-perdu, -tips-accueil, -reouverture-impaye, -a-contacter, -accueil-groupe,
+  -agent-equipe, -repartition, -relais-accueil, -effacement, -alerte-equipe, -attente-equipe, -reponse-membre,
+  -pieces-support, -annulation-abonnement, -vocaux : ok. verifier-fiche-personne echoue comme avant
+  (src/lib/tab/lectures.ts). Aucun appel d'eval, aucune lecture ni ecriture de la base, aucun envoi.
+- A FAIRE (Brice) : (1) tableau de bord Resend, dans le compte ou il a vu le rebond : Webhooks > Add endpoint, URL
+  `https://journal.aoknowledge.com/api/liveclub/resend`, evenements email.bounced, email.complained et email.suppressed
+  (pas email.delivery_delayed) ; (2) copier le « Signing secret » (whsec_...) dans le coffre
+  `D:\6_Societe\Pilotage\Data-Performance\credentials.local\resend-webhook-liveclub.local.json`
+  (`{"signing_secret": "whsec_...", "url": "...", "evenements": [...], "cree_le": "...", "deploye_sur": "Vercel journal-d-etude-beta (RESEND_WEBHOOK_SECRET_LIVECLUB)"}`).
+  Puis (session principale) : variable RESEND_WEBHOOK_SECRET_LIVECLUB sur Vercel (journal-d-etude-beta), commit, push
+  du journal sur GO (= production). Un evenement de test envoye depuis Resend doit repondre 200 (ignore : ce n'est pas
+  un email du Live Club) ; une signature fausse, 400.
+- Pour Fabien (rebond d'avant le webhook) : rien n'est rattrape. Aucun outil ne donne a l'equipe le lien personnel
+  d'un acces (seule l'alerte le fera desormais) : a relire en base (jeton 'entree' de son acces) si besoin. Son
+  adresse reste dans les Suppressions de Resend tant que personne ne l'en retire.
+
 ## Depot perdu = acces ferme, Agent AOK sans noms d'outils, accueil etale en conseils, adresses multiples (31/10/2026, DEPLOYE le 31/10 a 17:00, commit 84a3839 ; aucune migration)
 
 - (1) Brice, 31/10 : « pas de commission pas d'acces ». Regle et textes : fin de `src/lib/liveclub/lots-pur.ts` ; lecture :

@@ -2407,8 +2407,9 @@ test('resume : composition (une ligne par personne, rubriques vides omises, rien
   assert.equal(lignes[0], TITRE_RESUME)
   assert.equal(TITRE_RESUME, 'Live Club, ce qui a bougé depuis hier')
   // Les rubriques dans l'ordre, toutes presentes ici (sauf « À contacter », 18/10 :
-  // scripts/verifier-a-contacter.mjs la verifie).
-  const titres = RUBRIQUES_RESUME.filter(r => r.cle !== 'contacter').map(r => r.titre)
+  // scripts/verifier-a-contacter.mjs la verifie ; et les emails qui ne sont pas
+  // arrives, 31/10 : scripts/verifier-rebonds-email.mjs).
+  const titres = RUBRIQUES_RESUME.filter(r => r.cle !== 'contacter' && r.cle !== 'rebonds').map(r => r.titre)
   const vus = lignes.filter(l => titres.includes(l))
   assert.deepEqual(vus, titres)
   // Les nouveaux abonnes dans l'ordre d'arrivee, nom, email et pseudo.

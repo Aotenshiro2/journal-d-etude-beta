@@ -38,7 +38,8 @@ export async function middleware(request: NextRequest) {
   // /api/mcp/ : le connecteur MCP de ChatGPT pour Belrive, secret du chemin verifie dans la route (23/10/2026).
   // /api/club/paypal (+ /commande, /capturer) : le 10% Club paye par PayPal sans compte, commande relue chez PayPal (29/10/2026).
   // /api/pilotage/achat (+ /confirmer, /webhook) : abonnements de Pilotage sans compte exige, session et abonnement relus chez Stripe (30/10/2026).
-  const publicPaths = ['/auth', '/api/health', '/guide', '/api/membres/photo', '/api/academie/achat', '/api/academie/catalogue', '/api/tab/', '/api/liveclub/stripe', '/api/mcp/', '/api/club/paypal', '/api/pilotage/achat']
+  // /api/liveclub/resend : webhook Resend du Live Club (emails refuses), signature Svix verifiee dans la route, 503 sans son secret (31/10/2026).
+  const publicPaths = ['/auth', '/api/health', '/guide', '/api/membres/photo', '/api/academie/achat', '/api/academie/catalogue', '/api/tab/', '/api/liveclub/stripe', '/api/liveclub/resend', '/api/mcp/', '/api/club/paypal', '/api/pilotage/achat']
   const isPublic = pathname === '/' || publicPaths.some(p => pathname.startsWith(p))
   if (isPublic) return supabaseResponse
 

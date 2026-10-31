@@ -57,6 +57,7 @@ import { formaterMontant, libelleTarifReserve, messageErreur, normaliserEmail, p
 import { jourParis } from './passage-regles'
 import { phraseAdresse } from './adresses-pur'
 import { idsDuDetail, libelleCourt, phraseCompteResume } from './comptes-telegram-pur'
+import { estRegleRebond, phraseRebondResume } from './rebonds-pur'
 
 /** Une liste d'identifiants (texte) d'un champ de details, ou rien. */
 function idsListe(v: unknown): string[] {
@@ -384,10 +385,32 @@ export async function resumeDuMatin(o: { maintenant?: Date; apercu?: boolean } =
     const compteParId = new Map(registreComptes.map(r => [Number(r.telegram_id), { telegramId: Number(r.telegram_id), pseudo: r.pseudo, nom: r.nom_affiche }]))
     const libelleCompte = (id: number) => libelleCourt(compteParId.get(id) ?? { telegramId: id, pseudo: null, nom: null })
 
+    // (31/10) Les emails du Live Club qui ne sont pas arrives (webhook Resend,
+    // rebonds-pur.ts) : le journal ne garde pas l'adresse. Elle se retrouve par
+    // l'acces broker (details.acces_id), sinon par le client Stripe.
+    const gestesRebonds = gestes.filter(g => g.geste === 'adresse' && estRegleRebond(g.regle))
+    const idsAccesRebonds = [...new Set(gestesRebonds.map(g => g.details?.acces_id).filter((x): x is string => typeof x === 'string' && /^[0-9a-f-]{36}$/i.test(x)))]
+    const accesRebonds = idsAccesRebonds.length === 0 ? [] : await facultatif('acces_rebonds', erreurs, () => prisma.$queryRaw<{ id: string; email: string }[]>`
+      select acces_id::text as id, lower(email) as email from public.cockpit_liveclub_acces where acces_id::text = any(${idsAccesRebonds}::text[])`)
+    const emailAccesRebond = new Map(accesRebonds.map(a => [a.id, a.email]))
+
     for (const g of gestes) {
       let phrase: string | null = null
       let phraseCompte: string | null = null
       let cle = cleGeste(g)
+      if (g.geste === 'adresse' && estRegleRebond(g.regle)) {
+        const d = g.details ?? {}
+        const parAcces = typeof d.acces_id === 'string' ? emailAccesRebond.get(d.acces_id) ?? null : null
+        const client = !parAcces && typeof d.client_stripe === 'string' ? await annuaire.client(d.client_stripe) : null
+        const email = normaliserEmail(parAcces ?? client?.email ?? null)
+        if (email) {
+          cle = `e${email}`
+          annuaire.completer(cle, { email, nom: client?.nom ?? null, telegramId: g.telegram_id })
+        }
+        const ev = evenementDeGeste(g, { phraseRebond: phraseRebondResume(d) })
+        if (ev) ajouter({ ...ev, qui: cle, quand: g.fait_le })
+        continue
+      }
       if (g.geste === 'compte_telegram') {
         // La personne : le payeur (son adresse, par le lien du nouveau compte
         // ou d'un ancien), sinon le compte qui a ecrit.

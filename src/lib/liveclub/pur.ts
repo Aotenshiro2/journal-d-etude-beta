@@ -1450,6 +1450,11 @@ export function phraseGeste(g: GesteLu): string | null {
     // Une adresse email rattachee sur preuve (15/10, adresses.ts). Le detail
     // (quelle adresse, quel compte) est dans le resume du matin, pas ici.
     case 'adresse':
+      // (31/10) Un email du Live Club qui n'arrive pas (webhook Resend, rebonds-pur.ts).
+      if (regle === 'email_plainte') return fait ? "Un email du Live Club a été rangé parmi les indésirables de sa boîte : l'équipe est prévenue." : null
+      if (regle === 'email_rebond' || regle === 'email_bloque') {
+        return fait ? "Un email du Live Club n'a pas pu lui arriver (refusé par sa boîte, ou bloqué) : l'équipe est prévenue." : null
+      }
       return fait
         ? `Une autre adresse email lui est rattachée (${regle === 'telegram' ? 'même compte Telegram vérifié' : 'tarif réservé payé avec elle'}).`
         : "Une autre adresse email n'a pas été rattachée automatiquement : à vérifier."
