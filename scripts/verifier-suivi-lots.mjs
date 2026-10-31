@@ -212,8 +212,12 @@ bloc('challenge Core content : une ligne dans le tour, la regle dans la consigne
   assert.match(p, /toutes les réponses aux quiz de ce sujet depuis le début, les anciens quiz compris/)
   assert.match(p, /le plus de bonnes réponses gagne ; en cas d'égalité, un tirage au sort départage/)
   assert.match(p, /Tu l'expliques s'il te le demande, sans en parler de toi-même/)
-  // Le lot n'est ni dans le code ni dans la base de connaissances : pas cite.
-  assert.ok(!/200 ?(EUR|€)|signaux gold/i.test(p))
+  // (31/10, Brice) Le bot connait le lot (200 EUR de depot broker) sans etre oblige de le citer ;
+  // pas un mot des signaux gold ; « ce n'est pas de la chance, il faut vraiment regarder les cours ».
+  assert.match(p, /Le gagnant reçoit 200 EUR de dépôt chez un broker partenaire : tu le sais, sans être obligé de le citer/)
+  assert.ok(!/signaux (gold|or)/i.test(p), 'aucun mot des signaux gold')
+  assert.match(p, /Ce n'est pas de la chance : les réponses sont dans les cours, il faut vraiment les regarder/)
+  assert.match(A.LIGNE_CHALLENGE_CORE_CONTENT, /Ce n'est pas de la chance : les réponses sont dans les cours\.$/)
 })
 
 bloc('droit en pause : un acces offert qui dit pourquoi, jamais la demande d email', () => {
