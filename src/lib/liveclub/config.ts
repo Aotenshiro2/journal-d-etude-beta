@@ -41,6 +41,11 @@ export const SUPPORT = 'support@aoknowledge.com'
  * connait) et les cours inclus dans le Live Club s'ouvrent seuls (droits de
  * l'academie, src/lib/academie/droits.ts). Pas d'annonce : le bot le dit a
  * qui le demande, il ne pousse pas l'info.
+ * (31/10, Brice : « que ces infos soient donnees avant d'entrer ») Une
+ * exception, une fois : le message prive de l'admission dans le groupe
+ * (texteAdmission, accueil-groupe.ts) donne l'adresse et la facon d'entrer a
+ * un nouveau membre, et la rappelle a qui revient apres 30 jours. L'agent du
+ * bot, lui, n'en parle toujours que si on le lui demande.
  *
  * Avant (15/10 au 18/10) : le Skool d'AOKnowledge, lien d'affiliation de
  * Melanie https://www.skool.com/ao-knowledge-trading-5563/about?ref=8d5bde6137124c10a3abe0535ca5f6ec

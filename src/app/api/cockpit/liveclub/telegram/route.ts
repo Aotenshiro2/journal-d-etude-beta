@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { traiterBouton, traiterDemandeAdhesion, traiterMessagePrive } from '@/lib/liveclub/bot-membre'
-import { accueilAPublier, nomPourAccueil, texteAccueil, type AvantEntree } from '@/lib/liveclub/accueil-groupe'
+import {
+  JOURS_ABSENCE_RETOUR, accueilAPublier, envoisAccueil, nomPourAccueil, type AvantEntree,
+} from '@/lib/liveclub/accueil-groupe'
 import { appelTelegram } from '@/lib/liveclub/telegram'
 import { noterNomTelegram } from '@/lib/liveclub/noms'
 import { chatDeLUpdate } from '@/lib/liveclub/mouvements-pur'
@@ -142,6 +144,8 @@ export async function POST(req: NextRequest) {
     avant = lignes[0] ? { present: lignes[0].present, sortiLe: lignes[0].sorti_le } : null
   } catch {
     avantLu = false
+    // (31/10) Jusqu'ici muet : une entree sans accueil ne laissait aucune trace.
+    console.warn('[liveclub/telegram] accueil non decide : presence avant l\'entree illisible')
   }
 
   await prisma.$executeRaw`
@@ -191,13 +195,27 @@ export async function POST(req: NextRequest) {
 
   // L'accueil dans le groupe, en best effort : un echec d'envoi ne fait pas
   // rejouer l'update (et un rejeu ne republie pas : la ligne dit « present »).
+  // (31/10) Deux envois, dans l'ordre (envoisAccueil, accueil-groupe.ts) :
+  // la ligne de bienvenue dans le sujet general « Accueil » (sans
+  // message_thread_id ; il est ferme, le bot y ecrit grace au droit « Gerer
+  // les sujets » donne par Brice le 31/10, sans lequel Telegram repondait
+  // TOPIC_CLOSED), puis, pour un nouveau seulement, le petit mot de Bla-bla.
+  // Independants : appelTelegram ne jette pas, l'echec de l'un n'empeche pas
+  // l'autre, et chaque echec est journalise ici, sans rejeu.
   const accueil = avantLu ? accueilAPublier(avant, cm.old_chat_member?.status, present, quand) : null
   if (accueil) {
-    const r = await appelTelegram('sendMessage', {
-      chat_id: cm.chat.id,
-      text: texteAccueil(accueil, nomPourAccueil(pseudo, u.first_name)),
-    })
-    if (!r.ok) console.warn(`[liveclub/telegram] accueil (${accueil}) non publie : ${r.erreur.slice(0, 160)}`)
+    for (const envoi of envoisAccueil(accueil, nomPourAccueil(pseudo, u.first_name))) {
+      const r = await appelTelegram('sendMessage', {
+        chat_id: cm.chat.id,
+        ...(envoi.sujet !== null ? { message_thread_id: envoi.sujet } : {}),
+        text: envoi.texte,
+      })
+      if (!r.ok) console.warn(`[liveclub/telegram] accueil (${accueil}) non publie dans ${envoi.ou} : ${r.erreur.slice(0, 160)}`)
+    }
+  } else if (avantLu && present && avant && avant.present !== true) {
+    // (31/10) Une entree d'un compte deja connu, sans accueil voulu : une
+    // ligne, sans identifiant, pour que les logs disent pourquoi.
+    console.log(`[liveclub/telegram] entree sans accueil : compte deja connu (${avant.sortiLe ? `sorti il y a moins de ${JOURS_ABSENCE_RETOUR} jours` : 'sans date de sortie'})`)
   }
 
   return NextResponse.json({ ok: true })

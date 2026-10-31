@@ -86,11 +86,24 @@
 //   le compte relais de l'episode, et n'entre ni au fil Support ni a
 //   l'historique de l'agent. Le texte libre d'un relais garde le parcours
 //   d'un membre.
+// - (31/10, Brice) le message prive de l'ADMISSION (demande acceptee, ou
+//   demande en attente reprise) devient le « tour du proprietaire » pour un
+//   nouveau membre : les sujets du groupe avec leur lien, ou poser ses
+//   questions, ou sont annonces les lives et les replays, la courte
+//   presentation dans Bla-bla (avec des idees), l'academie avec la facon d'y
+//   entrer (les consignes d'avant l'entree, plus Skool) et les liens utiles
+//   que l'agent sait donner. Un
+//   retour apres 30 jours : un rappel court de l'academie ; un retour rapide :
+//   l'acceptation seule. Toujours UN message, celui qui existait deja
+//   (texteAdmission, accueil-groupe.ts). Qui entre se lit dans
+//   cockpit_telegram_membres AVANT l'approbation (lireGenreEntree) : apres,
+//   la ligne peut deja dire « present ».
 
 import { journaliserGesteLiveClub } from '@/lib/stripe-actions'
 import { prisma } from '@/lib/db'
 import { TEXTE_PAUSE_AVANT_ARRET, chatId, texteAbonnement, texteRaisonSortie } from './config'
 import { droitLiveClub, type Droit } from './droits'
+import { genreEntree, texteAdmission, type GenreEntree } from './accueil-groupe'
 import { consommerJeton, ErreurTableLiveClub } from './jetons'
 import { rattacherTelegram, type Rattachement } from './rattacher'
 import {
@@ -450,8 +463,11 @@ export async function traiterDemandeAdhesion(demande: DemandeAdhesionTg, updateI
   }
 
   if (droit.statut === 'oui') {
-    await envoyer(ecrireA, `Bienvenue dans le Live Club ! Ta demande est acceptée, le groupe s'ouvre à l'instant.\n\n`
-      + `Je reste là pour ton abonnement : écris-moi ici quand tu veux (le voir, une pause, un arrêt).`)
+    // (31/10, Brice) Le message de l'admission : le tour du proprietaire pour
+    // un nouveau membre, un rappel court pour un retour (texteAdmission). Qui
+    // entre se lit AVANT l'approbation, comme l'ecriture au demandeur.
+    const entree = await lireGenreEntree(u.id)
+    await envoyer(ecrireA, texteAdmissionPour(entree, droit))
     const r = await approuverDemande(u.id)
     await journaliserGesteLiveClub(
       r.ok
@@ -501,8 +517,35 @@ async function demandeLaisseeEnAttente(telegramId: number): Promise<boolean> {
   }
 }
 
-const TEXTE_DEMANDE_ACCEPTEE = `C'est bon, ta demande pour rejoindre le Live Club est acceptée : le groupe s'ouvre à l'instant.\n\n`
-  + `Je reste là pour ton abonnement : écris-moi ici quand tu veux (le voir, une pause, un arrêt).`
+/**
+ * (31/10) Qui entre dans le groupe : la ligne de cockpit_telegram_membres
+ * AVANT l'entree, lue avant l'approbation (apres, l'evenement chat_member a
+ * pu la passer a « present »). Meme regle que l'accueil du groupe
+ * (genreEntree, accueil-groupe.ts). Lecture ratee = 'connu' : le message
+ * d'acceptation seul, plutot qu'un tour a quelqu'un qui connait deja le groupe.
+ */
+async function lireGenreEntree(telegramId: number): Promise<GenreEntree> {
+  try {
+    const lignes = await prisma.$queryRaw<{ present: boolean | null; sorti_le: Date | null }[]>`
+      select present, sorti_le from public.cockpit_telegram_membres where telegram_id = ${telegramId}`
+    return genreEntree(lignes[0] ? { present: lignes[0].present, sortiLe: lignes[0].sorti_le } : null, new Date())
+  } catch (err) {
+    console.warn(`[liveclub/bot] entree illisible (presence avant l'entree) : ${messageErreur(err)}`)
+    return 'connu'
+  }
+}
+
+/**
+ * (31/10) Le message prive de l'admission (accueil-groupe.ts) : liens des
+ * sujets tires du chat du groupe, email de l'academie selon le droit (un
+ * abonnement, ou un acces offert sans abonnement).
+ */
+function texteAdmissionPour(entree: GenreEntree, droit: Droit): string {
+  return texteAdmission(entree, { chat: chatId(), accesOffert: droit.raison !== 'abonnement' })
+}
+
+/** (31/10) Une demande en attente approuvee a la reprise : le droit lu, et qui entre (lu avant l'approbation). */
+type Reprise = { droit: Droit; entree: GenreEntree }
 
 /** (15/10) Un ban qui ne se leve pas : transmis a l'equipe, qui sait le lever (plus de renvoi vers support@). */
 const TEXTE_BAN_TRANSMIS = `Ton accès est bon, mais un ancien blocage t'empêche de revenir dans le groupe, et je n'arrive pas à le lever.\n\n`
@@ -518,22 +561,26 @@ const SINON_EQUIPE = `ou appuie sur « Contacter l'équipe » : elle te répond 
 /**
  * Approuve la demande laissee en attente si le droit est maintenant 'oui'.
  * L'approbation n'a pas de fenetre de temps (seule l'ecriture au demandeur
- * en a une). Renvoie true si le membre vient d'entrer. `updateId` n'est pose
- * que sur la ligne de succes : c'est alors le seul geste de l'update.
+ * en a une). Renvoie la reprise (droit, et qui entre) si le membre vient
+ * d'entrer, sinon null. `updateId` n'est pose que sur la ligne de succes :
+ * c'est alors le seul geste de l'update.
+ * (31/10) Qui entre est lu AVANT l'approbation : l'appelant envoie ensuite
+ * le message de l'admission (texteAdmissionPour).
  */
-async function reprendreDemandeEnAttente(u: Utilisateur, updateId: number, droitConnu?: Droit): Promise<boolean> {
-  if (!(await demandeLaisseeEnAttente(u.id))) return false
+async function reprendreDemandeEnAttente(u: Utilisateur, updateId: number, droitConnu?: Droit): Promise<Reprise | null> {
+  if (!(await demandeLaisseeEnAttente(u.id))) return null
   const droit = droitConnu ?? await droitLiveClub(u.id)
-  if (droit.statut !== 'oui') return false
+  if (droit.statut !== 'oui') return null
 
   const contexte = { telegramId: u.id, membreId: droit.membreId ?? null, acteur: ACTEUR_BOT_MEMBRE, abonnementId: droit.abonnementId ?? null }
+  const entree = await lireGenreEntree(u.id)
   const r = await approuverDemande(u.id)
   if (r.ok) {
     await journaliserGesteLiveClub(
       { geste: 'entree_acceptee', resultat: 'fait', regle: droit.raison, details: { reprise: true } },
       { ...contexte, updateId },
     )
-    return true
+    return { droit, entree }
   }
   // 400 = plus de demande en attente (retiree, ou traitee ailleurs) : on le
   // note pour ne plus reessayer. Autre erreur = on reessaiera au prochain /start.
@@ -543,7 +590,7 @@ async function reprendreDemandeEnAttente(u: Utilisateur, updateId: number, droit
       : { geste: 'entree_acceptee', resultat: 'echec', regle: 'telegram', details: { etape: 'approveChatJoinRequest', reprise: true, erreur: r.erreur } },
     { ...contexte, updateId: null },
   )
-  return false
+  return null
 }
 
 /**
@@ -659,8 +706,9 @@ async function proposerRetourAuGroupe(chat: number, u: Utilisateur, updateId: nu
 
   // Une demande a nous attend deja : on l'approuve, un nouveau lien ne
   // servirait a rien tant qu'elle n'est pas traitee.
-  if (o.reprendre && await reprendreDemandeEnAttente(u, updateId, droit)) {
-    await envoyer(chat, `${avant}${TEXTE_DEMANDE_ACCEPTEE}`, o.boutons)
+  const reprise = o.reprendre ? await reprendreDemandeEnAttente(u, updateId, droit) : null
+  if (reprise) {
+    await envoyer(chat, `${avant}${texteAdmissionPour(reprise.entree, reprise.droit)}`, o.boutons)
     return true
   }
 
@@ -895,8 +943,9 @@ async function traiterStartJeton(chat: number, u: Utilisateur, jeton: string, up
 
   // Une demande a nous attend deja (droit inconnu a l'epoque) : on l'approuve,
   // un nouveau lien ne servirait a rien tant qu'elle n'est pas traitee.
-  if (await reprendreDemandeEnAttente(u, updateId, droit)) {
-    await envoyer(chat, TEXTE_DEMANDE_ACCEPTEE, clavierMenu())
+  const reprise = await reprendreDemandeEnAttente(u, updateId, droit)
+  if (reprise) {
+    await envoyer(chat, texteAdmissionPour(reprise.entree, reprise.droit), clavierMenu())
     return
   }
 
@@ -1518,8 +1567,9 @@ export async function traiterMessagePrive(message: MessageTg, updateId: number):
     }
     // Une demande laissee en attente (droit inconnu a l'epoque) est reprise
     // ici : c'est ce que le message d'attente demande de faire.
-    if (await reprendreDemandeEnAttente(u, updateId)) {
-      await envoyer(chat, TEXTE_DEMANDE_ACCEPTEE, clavierMenu())
+    const reprise = await reprendreDemandeEnAttente(u, updateId)
+    if (reprise) {
+      await envoyer(chat, texteAdmissionPour(reprise.entree, reprise.droit), clavierMenu())
       return
     }
     const start = commande[1].toLowerCase() === 'start'
