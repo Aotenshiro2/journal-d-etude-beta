@@ -139,7 +139,7 @@ await bloc('une erreur Kit sur un abonne n arrete pas les suivants', async () =>
 
 await bloc('filet : abonnes actifs des 72 dernieres heures seulement, meme regle', async () => {
   const maintenant = new Date('2026-11-07T05:00:00Z')
-  assert.equal(FILET_HEURES, 72)
+  assert.equal(FILET_HEURES, 14 * 24)
   assert.equal(debutDuFilet(maintenant).toISOString(), '2026-11-04T05:00:00.000Z')
   const abonnes = new Map([
     [1, ab('active', [], '2026-11-06T22:00:00Z')],

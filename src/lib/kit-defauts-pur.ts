@@ -24,7 +24,7 @@ import type { ChoixKit } from './kit-choix'
 /** Au plus tant d'abonnes traites par livraison de webhook (le filet rattrape le reste). */
 export const WEBHOOK_MAX_ABONNES = 20
 /** La fenetre du filet quotidien. */
-export const FILET_HEURES = 72
+export const FILET_HEURES = 14 * 24
 
 const USAGE_CHEMIN = 'aok:kit-webhook:chemin:v1'
 
