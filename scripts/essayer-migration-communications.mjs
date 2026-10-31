@@ -1,5 +1,5 @@
 /**
- * ESSAI de la migration 20261031210000_profile_emails_communications.sql
+ * ESSAI de la migration 20261031211000_profile_emails_communications.sql
  * contre la vraie base, dans UNE transaction TOUJOURS ANNULEE (rien ne reste) :
  *   1. la migration, jouee deux fois (rejouable), structure et droits ;
  *   2. le choix par le membre (aok_choisir_email_communications, en se faisant
@@ -23,7 +23,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { PrismaClient } from '@prisma/client'
 
-const MIGRATION = new URL('../../../sites/Aoknowledgecom/supabase/migrations/20261031210000_profile_emails_communications.sql', import.meta.url)
+const MIGRATION = new URL('../../../sites/Aoknowledgecom/supabase/migrations/20261031211000_profile_emails_communications.sql', import.meta.url)
 const MIGRATION_VERIFIED = new URL('../../../sites/Aoknowledgecom/supabase/migrations/20261031200000_profile_emails_verified_a_la_confirmation.sql', import.meta.url)
 
 /** Decoupe sur les points-virgules, hors blocs $tag$ ... $tag$ (corps de fonctions). */
