@@ -3,6 +3,58 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
+## Adresse de CONTACT d'un acces broker, carte d'Agent AOK (31/10/2026, LOCAL, non commite ; migration 20261031210000 ECRITE, NON appliquee)
+
+- Cas reel du 31/10 : Fabien, entre par un depot RaiseFx (commission 587 EUR attendue, acces jusqu'au 30/04/2027) avec une
+  adresse @libertysurf.fr qui refuse nos emails (« 550 spam detected »). Brice, 31/10 : l'adresse de l'acces est celle de
+  l'ACTIVATION chez le broker (verifications de Mel, tracking de l'affiliation) : elle NE CHANGE PAS. Premier plan
+  (changer l'email de l'acces et des commissions) abandonne.
+- Ce qui est fait : une ADRESSE DE CONTACT en plus, qui sert seulement a lui ECRIRE. Table cockpit_liveclub_acces_contacts
+  (sites/Aoknowledgecom/supabase/migrations/20261031210000_cockpit_liveclub_acces_contacts.sql : une ligne par adresse
+  posee, en cours = retire_le null, une par acces, une adresse = un seul acces a la fois, RLS lecture equipe, cascade a
+  l'effacement d'un acces). Regles et textes : src/lib/liveclub/adresse-contact-pur.ts ; lectures : adresse-contact-lecture.ts ;
+  controle et execution : adresse-contact.ts.
+- Carte d'Agent AOK proposer_adresse_contact_acces (type 'adresse_contact', compte 'cockpit', bouton « Changer l'adresse
+  de contact ») : email_acces, adresse_contact ou retirer, raison. Carte longue (Brice) : l'adresse de contact, la phrase
+  « L'adresse du broker reste X : c'est elle qui compte pour la commission et les vérifications chez le broker. », l'acces
+  (dates, entre ou non), les depots et leur commission, ce qui part, ce qui ne bouge pas. Carte courte (Mel). Refus :
+  adresse illisible, deux adresses identiques, pas d'acces broker a cette adresse, acces retire ou termine, rien a
+  retirer, deja l'adresse de contact, adresse qui a son propre acces broker ou qui sert deja de contact a un autre acces,
+  table absente. Meme adresse mais invitation pas partie = la carte la renvoie.
+- Clic, EN UNE TRANSACTION : acces verrouille (for update), adresse verrouillee (pg_advisory_xact_lock), refus refaits,
+  acces et contact compares a la carte, ancienne ligne retiree, nouvelle posee, invite_envoyee_le a null si le lien n'a pas
+  servi (ni compte Telegram ni jeton utilise), ligne au journal (geste 'acces_broker', regle 'adresse_contact', details
+  quoi / contact_id / invitation, jamais l'adresse). Puis l'invitation part a l'adresse d'envoi (envoyerInvitation,
+  acces.ts : meme jeton, le jeton garde l'adresse de l'acces) et une ligne 'invitation' regle 'broker_contact'. Rien
+  n'ecrit l'email de l'acces, ses dates, cockpit_commissions, les jetons ni le rattachement Telegram.
+- ADRESSE D'ENVOI, une seule fonction (src/lib/liveclub/adresse-envoi.ts, adresseEnvoi ; regle pure choisirAdresseEnvoi) pour
+  TOUS les emails du Live Club a un membre : (1) l'adresse « communications » cochee dans Mon espace (aok_email_communications,
+  migration 20261031211000 de l'autre session, NON appliquee), pour le compte AOK UNIQUE qui porte l'adresse d'identite
+  verifiee (auth.users confirme ou profile_emails verified, comme trouver-cours ; zero ou deux comptes = etape sautee) ;
+  (2) l'adresse de contact de l'acces ; (3) l'adresse d'identite (acces ou abonnement). Fonction, colonne ou table absente :
+  etape suivante, un avertissement par instance. Branchee dans prevenir (passage.ts : pause, prelevement, sorties, impaye,
+  fin de fenetre, exemptions, fin d'acces, J-7, lots, depot perdu ; parametre accesId pour un acces broker),
+  emailReouverture et emailBienvenue du passage, la route /api/liveclub/bienvenue et envoyerInvitation. Exception voulue :
+  le code de verification d'une adresse part a cette adresse. La carte dit quand le choix du membre passe avant le contact.
+- Webhook Resend : rebonds.ts retrouve l'acces par son adresse de contact (en cours, sinon la plus recente), puis par les
+  autres adresses verifiees du compte AOK qui porte l'adresse refusee (son choix dans Mon espace : acces et rattachements de
+  ces adresses ; un seul compte). L'alerte dit « adresse de contact de l'accès broker de X » ou « adresse de son compte
+  AOK » et, pour tout acces broker, propose le geste (« écris-lui plutôt à »).
+- Prompt : regle « L'ADRESSE DE CONTACT D'UN ACCÈS BROKER », table au schema, dix-huit outils d'action ; sansNomsOutils
+  connait l'outil (verifie : tous les outils d'OUTILS ont leur description). verifier-annulation-abonnement mis a jour
+  (dix-huit au lieu de dix-sept).
+- Verifs : node scripts/verifier-adresse-contact.mjs (11 blocs, hors ligne), tsc, eslint ; -rebonds-email, -repartition,
+  -liveclub, -suivi-lots, -depot-perdu, -securite-bots, -agent-equipe, -annulation-abonnement, -tips-accueil,
+  -accueil-groupe, -effacement, -relais-accueil, -reouverture-impaye, -a-contacter, -alerte-equipe, -attente-equipe,
+  -reponse-membre, -pieces-support, -vocaux, -mcp-gpt : ok. verifier-fiche-personne echoue comme avant
+  (src/lib/tab/lectures.ts). Aucun appel d'eval, aucune lecture ni ecriture de la base, aucun envoi.
+- A FAIRE sur GO : appliquer la migration 20261031210000 (et 20261031211000 quand Brice la valide : le code tourne sans
+  elle), commit, push du journal (= prod). Pour Fabien : sa nouvelle adresse, puis la carte (« écris-lui plutôt à » et
+  l'adresse) ; son lien n'a pas servi, l'invitation repart a la nouvelle adresse.
+- Non couvert : fiche_personne et « Mon abonnement » ne montrent pas l'adresse de contact ; l'effacement de niveau 3 garde
+  l'adresse de contact d'un acces garde pour sa commission ; coller l'adresse de contact dans une carte d'acces broker
+  creerait un acces (seul le prompt l'interdit).
+
 ## Autres adresses email confirmees par code, Mon espace (31/10/2026, GO de Brice du 31/10 ; LOCAL, commite, NON pousse ; migration 20261031190000 A APPLIQUER)
 
 - Routes (Bearer obligatoire, CORS de l'academie) : POST /api/compte/emails/ajouter { email } (aussi « Renvoyer le code »)

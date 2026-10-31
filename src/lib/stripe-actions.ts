@@ -41,6 +41,7 @@ import {
 } from '@/lib/repartition/pur'
 import { lireParamsEffacement, NOMS_NIVEAUX } from '@/lib/effacement-pur'
 import { lireParamsReponseMembre } from '@/lib/reponse-membre-pur'
+import { lireParamsAdresseContact, paramsPourLogContact, resumeAdresseContact } from '@/lib/liveclub/adresse-contact-pur'
 import {
   lireParamsAnnulation, lireAbonnementStripe, produitsDeAbonnement, choisirAbonnement, refusAnnulation,
   avertissementAnnulation, paramsDepuisAbonnement, carteAnnulation, requeteAnnulation, phraseAnnulationFaite,
@@ -155,6 +156,10 @@ export type ActionAgent = {
     // annulation-abonnement-pur.ts. Compte aoknowledge ou melanie.
     | 'annulation_abonnement'
     | 'acces_broker' | 'exemption'
+    // (31/10) L'adresse de contact d'un acces broker : ou lui ecrire, sans
+    // toucher a l'adresse de l'acces (celle du broker). Compte 'cockpit'.
+    // liveclub/adresse-contact.ts et adresse-contact-pur.ts.
+    | 'adresse_contact'
     // Acces payant a un tarif particulier (13/10) : lien de paiement d'un
     // produit, et marquage d'un produit existant comme produit Live Club.
     | 'lien_paiement' | 'marquer_live_club'
@@ -188,6 +193,8 @@ export type ActionAgent = {
  */
 export function paramsPourLog(a: ActionAgent): Record<string, unknown> {
   if (a.type === 'acces_broker') return { emails: ((a.params.emails as string[]) ?? []).length }
+  // (31/10) Adresse de contact : ni l'adresse de l'acces ni la nouvelle.
+  if (a.type === 'adresse_contact') return paramsPourLogContact(a.params)
   if (a.type === 'exemption') {
     return { telegram_id: a.params.telegram_id, motif: a.params.motif, jusquau: a.params.jusquau ?? null }
   }
@@ -654,6 +661,16 @@ export function validerAction(brut: unknown): ActionAgent | string {
     return { type: 'reponse_membre', compte: 'cockpit', params: { ...lu } }
   }
 
+  // (31/10) L'adresse de contact d'un acces broker : l'adresse de l'acces, la
+  // nouvelle adresse ou le retrait, la raison. acces_id, contact_avant et
+  // invitation ne sont poses que par le controle avant la carte, qui les
+  // ecrase toujours ; ils sont exiges et relus en base au clic.
+  if (a.type === 'adresse_contact') {
+    const lu = lireParamsAdresseContact(p)
+    if (typeof lu === 'string') return lu
+    return { type: 'adresse_contact', compte: 'cockpit', params: { ...lu } }
+  }
+
   // Les actions du groupe Telegram n'ont pas de compte Stripe.
   if (a.type === 'retirer_telegram' || a.type === 'reintegrer_telegram') {
     const telegramId = lireTelegramId(p.telegram_id)
@@ -860,6 +877,8 @@ export function resumeAction(a: ActionAgent): string {
   if (a.type === 'reponse_membre') {
     return `Répondre à ${String(p.qui ?? p.fil ?? '?')} dans son fil Support.`
   }
+  // (31/10) Adresse de contact : la carte detaillee vient du controle (carteAdresseContact).
+  if (a.type === 'adresse_contact') return resumeAdresseContact(p)
   if (a.type === 'code_promo') {
     const reduc = p.pourcentage != null
       ? `${p.pourcentage} %`
@@ -1281,6 +1300,13 @@ export async function executerAction(a: ActionAgent, acteur = 'agent'): Promise<
   if (a.type === 'reponse_membre') {
     const { executerReponseMembre } = await import('@/lib/reponse-membre')
     return executerReponseMembre(a)
+  }
+
+  // ── Adresse de contact d'un acces broker (31/10) ──────────────────────────
+  // Import dynamique : adresse-contact.ts importe ce fichier (RefusAction).
+  if (a.type === 'adresse_contact') {
+    const { executerAdresseContact } = await import('@/lib/liveclub/adresse-contact')
+    return executerAdresseContact(a, acteur)
   }
 
   // ── Groupe Telegram ───────────────────────────────────────────────────────

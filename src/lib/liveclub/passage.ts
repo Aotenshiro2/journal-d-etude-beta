@@ -108,6 +108,9 @@ import {
 } from './stripe'
 import { droitLiveClub, type Droit } from './droits'
 import { annulerReservationEmail, creerJeton, jetonExistant } from './jetons'
+// (31/10) Ou part un email au membre : son choix dans Mon espace, sinon l'adresse de
+// contact de son acces broker, sinon son adresse d'identite (adresse-envoi.ts).
+import { adresseEnvoi } from './adresse-envoi'
 import { preparerBienvenue } from './bienvenue'
 import { rapprocherTarifsReserves } from './reserves'
 import { resumeDuMatin } from './resume'
@@ -632,6 +635,10 @@ async function cloreReservation(
  * Prevenir le membre : en prive d'abord (chaque compte Telegram donne, le
  * premier qui passe suffit ; 403 = il n'a jamais ecrit au bot), sinon par
  * email. null = rien n'est parti.
+ *
+ * (31/10) `email` est l'adresse d'IDENTITE (acces broker ou abonnement) ; le
+ * mail part a l'adresse d'envoi (adresseEnvoi : son choix dans Mon espace,
+ * sinon l'adresse de contact de l'acces `accesId`, sinon `email`).
  */
 async function prevenir(
   ctx: Contexte,
@@ -639,6 +646,7 @@ async function prevenir(
   email: string | null,
   m: ModeleMessage,
   parEmail: (email: string) => Promise<ResultatEmail>,
+  accesId: string | null = null,
 ): Promise<{ canal: 'prive' | 'email'; telegramId: number | null } | null> {
   const texte = m.paragraphes.join('\n\n')
   // (22/10) Le bouton a adresse, puis celui qui revient au bot (sortie pour
@@ -653,8 +661,9 @@ async function prevenir(
       return { canal: 'prive', telegramId: tid }
     }
   }
-  if (email) {
-    const r = await parEmail(email)
+  const adresse = email || accesId ? await adresseEnvoi({ emailIdentite: email, accesId }) : null
+  if (adresse) {
+    const r = await parEmail(adresse)
     if (r.ok) return { canal: 'email', telegramId: null }
   }
   ctx.s.messages_perdus++
@@ -1056,7 +1065,7 @@ async function tacheBroker(ctx: Contexte) {
       }
       if (reserve.length === 0) continue
       const envoi = await prevenir(ctx, tid ? [tid] : [], l.email, modeleRappelFinBroker(jusquau),
-        e => emailRappelFinBroker(e, jusquau))
+        e => emailRappelFinBroker(e, jusquau), l.acces_id)
       if (!envoi) {
         // Rien n'est parti : on rend la reservation, le prochain passage reessaie.
         await prisma.$executeRaw`
@@ -1122,7 +1131,7 @@ async function messageFinBroker(ctx: Contexte, accesId: string, telegramId: numb
     return false
   }
   if (reserve === null) return false
-  const envoi = await prevenir(ctx, [telegramId], email, modeleFinBroker(), e => emailFinBroker(e))
+  const envoi = await prevenir(ctx, [telegramId], email, modeleFinBroker(), e => emailFinBroker(e), accesId)
   await cloreReservation(ctx, reserve, envoi)
   return envoi !== null
 }
@@ -2099,7 +2108,8 @@ async function envoyerReouverture(
     try {
       const jeton = await jetonExistant({ abonnementId: a.id, usage: 'retour' })
         ?? await creerJeton({ usage: 'retour', clientStripe: a.clientStripe, abonnementId: a.id })
-      const r = await emailReouverture(email, lienBot(jeton))
+      // (31/10) A l'adresse d'envoi (son choix dans Mon espace, sinon celle de l'abonnement).
+      const r = await emailReouverture(await adresseEnvoi({ emailIdentite: email }) ?? email, lienBot(jeton))
       if (r.ok) return { canal: 'email', telegramId: null }
     } catch (err) {
       erreur(ctx, 'jetons_indisponibles', err)
@@ -2398,7 +2408,8 @@ async function tacheBienvenue(ctx: Contexte, abonnements: AbonnementResume[], pa
       continue
     }
     if (prep.issue !== 'lien' || !prep.jeton || !prep.envoyerEmail) { s.deja_envoyes++; continue }
-    const envoi = await emailBienvenue(email, lienBot(prep.jeton))
+    // (31/10) A l'adresse d'envoi (son choix dans Mon espace, sinon celle du paiement).
+    const envoi = await emailBienvenue(await adresseEnvoi({ emailIdentite: email }) ?? email, lienBot(prep.jeton))
     if (!envoi.ok) {
       try {
         await annulerReservationEmail(prep.jeton)
@@ -2831,7 +2842,7 @@ async function relancerLots(ctx: Contexte, l: LigneSuiviLots, tid: number, n: 1 
     return
   }
   if (reserve === null) { s.deja_faits++; return }
-  const envoi = await prevenir(ctx, [tid], l.email, modeleRelanceLots(n, limite), e => emailRelanceLots(e, n, limite))
+  const envoi = await prevenir(ctx, [tid], l.email, modeleRelanceLots(n, limite), e => emailRelanceLots(e, n, limite), l.accesId)
   await cloreReservation(ctx, reserve, envoi)
   if (!envoi) { s.echecs++; return }
   if (n === 1) s.relances_1++
@@ -2901,7 +2912,7 @@ async function messageSuspensionLots(ctx: Contexte, l: LigneSuiviLots, tid: numb
     return false
   }
   if (reserve === null) return false
-  const envoi = await prevenir(ctx, [tid], l.email, modeleSuspensionLots(), e => emailSuspensionLots(e))
+  const envoi = await prevenir(ctx, [tid], l.email, modeleSuspensionLots(), e => emailSuspensionLots(e), l.accesId)
   await cloreReservation(ctx, reserve, envoi)
   return envoi !== null
 }
@@ -3123,7 +3134,7 @@ async function messageFermetureDepot(ctx: Contexte, l: LigneDepotPerdu, tid: num
     return null
   }
   if (reserve === null) return 'deja'
-  const envoi = await prevenir(ctx, tid !== null ? [tid] : [], l.email, modeleFermetureDepot(), e => emailFermetureDepot(e))
+  const envoi = await prevenir(ctx, tid !== null ? [tid] : [], l.email, modeleFermetureDepot(), e => emailFermetureDepot(e), l.accesId)
   await cloreReservation(ctx, reserve, envoi)
   if (!envoi) ctx.s.depots_perdus.echecs++
   return envoi?.canal ?? null

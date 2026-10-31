@@ -23,6 +23,8 @@ import { analyserTexte, rendreVisible, resumeAnalyse } from '@/lib/securite/inje
 import { alerterBriceSecurite } from '@/lib/securite/alerte'
 import { cleStripeLecture, lienBot } from './config'
 import { jetonExistantDetail } from './jetons'
+import { accesParAdresseContact } from './adresse-contact-lecture'
+import { autresAdressesDuCompte } from './adresse-envoi'
 import { membreParEmail } from './rattacher'
 import { clientsStripeParEmail } from './stripe'
 import { envoyer } from './telegram'
@@ -74,6 +76,39 @@ async function retrouverPersonne(email: string): Promise<PersonneRebond> {
   } catch (err) {
     log('acces broker illisible', err)
   }
+  // (31/10) Sinon, l'acces dont c'est l'adresse de CONTACT (adresse-contact-lecture.ts ;
+  // table absente = comme avant, avertissement dans les logs).
+  if (!acces) {
+    const c = await accesParAdresseContact(email)
+    if (c) {
+      acces = { accesId: c.accesId, telegramId: c.telegramId, actif: c.actif, parContact: true, emailAcces: c.emailAcces }
+      ajouter(c.telegramId)
+    }
+  }
+  // (31/10) Sinon, une adresse de son compte AOK (celle qu'il a choisie dans Mon
+  // espace, adresse-envoi.ts) : l'acces et les rattachements de ses autres adresses
+  // verifiees. Un seul compte, sinon rien (pas de devinette).
+  const autres = acces ? [] : await autresAdressesDuCompte(email)
+  if (!acces && autres.length) {
+    try {
+      const l = await prisma.$queryRaw<{ acces_id: string; email_acces: string; telegram_id: bigint | null; actif: boolean }[]>`
+        select acces_id::text as acces_id, lower(email) as email_acces, telegram_id,
+          (retire_le is null and sorti_le is null and jusquau >= current_date) as actif
+        from public.cockpit_liveclub_acces
+        where lower(email) = any(${autres}::text[]) and motif = 'broker'
+        order by (retire_le is null and sorti_le is null and jusquau >= current_date) desc, pose_le desc
+        limit 1`
+      if (l[0]) {
+        acces = {
+          accesId: l[0].acces_id, telegramId: l[0].telegram_id === null ? null : Number(l[0].telegram_id),
+          actif: l[0].actif === true, parCompte: true, emailAcces: l[0].email_acces,
+        }
+        ajouter(l[0].telegram_id)
+      }
+    } catch (err) {
+      log('acces broker du compte illisible', err)
+    }
+  }
 
   // 2. La fiche du cockpit, puis les rattachements par l'adresse ou par la fiche.
   let membreId: string | null = null
@@ -86,7 +121,8 @@ async function retrouverPersonne(email: string): Promise<PersonneRebond> {
     const l = await prisma.$queryRaw<{ telegram_id: bigint }[]>`
       select telegram_id from public.cockpit_liveclub_rattachements
       where retire_le is null
-        and (lower(email) = ${email} or (${membreId}::uuid is not null and membre_id = ${membreId}::uuid))
+        and (lower(email) = ${email} or lower(email) = any(${autres}::text[])
+          or (${membreId}::uuid is not null and membre_id = ${membreId}::uuid))
       order by lie_le desc
       limit 5`
     for (const x of l) ajouter(x.telegram_id)

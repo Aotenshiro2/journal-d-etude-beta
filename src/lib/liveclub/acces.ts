@@ -15,6 +15,7 @@ import { cleStripeLecture, lienBot, MOIS_ACCES_BROKER } from './config'
 import { creerJeton, jetonExistant } from './jetons'
 import { emailAccesBroker } from './emails'
 import { abonnementsLiveClubParEmail } from './stripe'
+import { adresseEnvoi } from './adresse-envoi'
 import { abonnementOuvreLeGroupe, dateIso, joursEntre, messageErreur, normaliserEmail, relationAbsente } from './pur'
 
 export const MAX_EMAILS_PAR_LOT = 50
@@ -136,6 +137,8 @@ async function accorderUn(email: string, acteur: string, note: string | null, mo
     if (deja[0]) {
       const jusquau = dateIso(deja[0].jusquau)
       if (!deja[0].a_relancer) return { email, resultat: 'deja_accorde', jusquau }
+      // (31/10) Le renvoi part a l'adresse d'envoi (envoyerInvitation, adresse-envoi.ts) :
+      // l'adresse de l'acces reste celle du jeton.
       const envoi = await envoyerInvitation(deja[0].acces_id, email, jusquau)
       if (envoi.deja) return { email, resultat: 'deja_accorde', jusquau }
       await journaliserGesteLiveClub(
@@ -199,10 +202,16 @@ type LigneAccesExistant = { acces_id: string; jusquau: Date; a_relancer: boolean
  * email), et rendu vide si l'envoi echoue. deja = un autre appel a envoye,
  * ou l'acces n'est plus a relancer (utilise, retire, sorti). Le jeton,
  * valable jusqu'a la fin de l'acces, est reutilise s'il existe deja.
+ *
+ * (31/10) L'email part a l'adresse d'ENVOI (adresseEnvoi, adresse-envoi.ts :
+ * le choix du membre dans Mon espace, sinon l'adresse de contact de l'acces,
+ * sinon `email`), rendue dans `destination`. Le jeton garde l'adresse de
+ * l'ACCES (`email`), celle du broker : c'est elle que le bot relie au compte
+ * Telegram a l'entree.
  */
-async function envoyerInvitation(
+export async function envoyerInvitation(
   accesId: string, email: string, jusquau: string, mois?: number,
-): Promise<{ emailEnvoye: boolean; deja?: boolean; erreur?: string }> {
+): Promise<{ emailEnvoye: boolean; deja?: boolean; erreur?: string; destination?: string }> {
   let reserve: { acces_id: string }[]
   try {
     reserve = await prisma.$queryRaw<{ acces_id: string }[]>`
@@ -219,8 +228,9 @@ async function envoyerInvitation(
   try {
     const jeton = (await jetonExistant({ accesId, usage: 'entree' }))
       ?? await creerJeton({ usage: 'entree', accesId, email }, joursEntre(new Date(), jusquau) + 1)
-    const envoi = await emailAccesBroker(email, lienBot(jeton), jusquau, mois)
-    if (envoi.ok) return { emailEnvoye: true }
+    const destination = (await adresseEnvoi({ emailIdentite: email, accesId })) ?? email
+    const envoi = await emailAccesBroker(destination, lienBot(jeton), jusquau, mois)
+    if (envoi.ok) return { emailEnvoye: true, destination }
     erreur = `Acces accorde, email pas parti : ${envoi.erreur}`
   } catch (err) {
     erreur = `Acces accorde, invitation pas preparee : ${messageErreur(err)}`

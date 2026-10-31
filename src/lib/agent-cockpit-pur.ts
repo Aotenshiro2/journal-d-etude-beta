@@ -70,6 +70,8 @@ const LIBELLES_BOUTON: Record<string, string> = {
   // « Arrêter », pas « Annuler » : sur Telegram, il voisine avec le bouton Annuler de la carte.
   annulation_abonnement: "Arrêter l'abonnement",
   acces_broker: "Ouvrir l'accès broker",
+  // (31/10) Pose, change ou retire : le meme bouton (adresse-contact-pur.ts).
+  adresse_contact: "Changer l'adresse de contact",
   exemption: "Poser l'exemption",
   lien_paiement: 'Créer le lien de paiement',
   marquer_live_club: 'Marquer produit Live Club',
@@ -151,6 +153,7 @@ export const DESCRIPTIONS_OUTILS: Readonly<Record<string, string>> = {
   proposer_retirer_telegram: 'la carte de sortie du groupe',
   proposer_reintegrer_telegram: 'la carte de retour dans le groupe',
   proposer_acces_broker: "la carte d'accès broker",
+  proposer_adresse_contact_acces: "la carte d'adresse de contact",
   proposer_exemption: "la carte d'accès offert",
   proposer_depot_broker: 'la carte de dépôt broker',
   proposer_commission_affiliation: "la carte de commission d'affiliation",

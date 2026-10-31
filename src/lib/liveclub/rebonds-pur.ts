@@ -389,8 +389,21 @@ const PHRASE_MEMBRE: Readonly<Record<IssueMembre, string>> = {
 export const PREFIXE_LIEN = 'Son lien personnel : '
 export const LIEN_HORS_HISTORIQUE = "Son lien personnel : donné dans l'alerte Telegram, pas gardé ici."
 
-/** « À faire », selon le cas. */
+/**
+ * (31/10) Pour un acces broker, le geste quand il donne une autre adresse :
+ * l'adresse de contact (adresse-contact-pur.ts), jamais un nouvel acces.
+ * Aucun nom d'outil (regle de Brice du 31/10).
+ */
+export const SUITE_AUTRE_ADRESSE_ACCES = "S'il donne une autre adresse, dis-moi « écris-lui plutôt à » et cette adresse : "
+  + "elle devient son adresse de contact, l'accès et la commission restent sur l'adresse du broker."
+
+/** « À faire », selon le cas (et, pour un acces broker, le geste d'une autre adresse). */
 function aFaire(a: AlerteRebond): string {
+  const base = aFaireBase(a)
+  return a.accesBroker ? `${base} ${SUITE_AUTRE_ADRESSE_ACCES}` : base
+}
+
+function aFaireBase(a: AlerteRebond): string {
   const n = a.evenement.nature
   if (a.lien) return 'À faire : donne-lui toi-même son lien personnel (ci-dessous), il le fait entrer tout seul ; ou demande-lui une autre adresse.'
   if (n === 'plainte') return "À faire : s'il veut recevoir nos emails, demande-lui une autre adresse."
@@ -459,7 +472,17 @@ export function texteMembreRebond(email: string, sujet: string | null, genre: Ge
 }
 
 /** Ce qu'est l'adresse pour le Live Club, dans l'alerte. */
-export function quoiAdresse(p: { acces: { telegramId: number | null } | null; clientStripe: string | null; telegramIds: readonly number[] }): string | null {
+export function quoiAdresse(p: {
+  acces: { telegramId: number | null; parContact?: boolean; parCompte?: boolean; emailAcces?: string | null } | null
+  clientStripe: string | null
+  telegramIds: readonly number[]
+}): string | null {
+  const pasEntre = p.acces?.telegramId === null ? ', pas encore entré dans le groupe' : ''
+  const de = p.acces?.emailAcces ? ` de ${p.acces.emailAcces}` : ''
+  // (31/10) L'adresse de contact d'un acces broker (adresse-contact-pur.ts).
+  if (p.acces?.parContact) return `adresse de contact de l'accès broker${de}${pasEntre}`
+  // (31/10) Une adresse de son compte AOK (son choix dans Mon espace, adresse-envoi.ts).
+  if (p.acces?.parCompte) return `adresse de son compte AOK, accès broker${de}${pasEntre}`
   if (p.acces) return p.acces.telegramId === null ? 'accès broker, pas encore entré dans le groupe' : 'accès broker'
   if (p.clientStripe) return 'client Stripe du Live Club'
   if (p.telegramIds.length) return 'membre relié au bot'
@@ -493,8 +516,18 @@ export type PersonneRebond = {
   membreId: string | null
   /** Nom et @pseudo du premier compte, ou null. Choisi par la personne : rendu sur par l'appelant. */
   nom: string | null
-  /** L'acces broker de l'adresse (une ligne au plus par adresse). */
-  acces: { accesId: string; telegramId: number | null; actif: boolean } | null
+  /**
+   * L'acces broker de l'adresse (une ligne au plus par adresse). (31/10)
+   * parContact : l'adresse est (ou a ete) l'adresse de CONTACT de cet acces,
+   * emailAcces = l'adresse de l'acces, celle du broker.
+   */
+  acces: {
+    accesId: string; telegramId: number | null; actif: boolean
+    parContact?: boolean
+    /** (31/10) L'adresse est une autre adresse verifiee de son compte AOK (son choix dans Mon espace). */
+    parCompte?: boolean
+    emailAcces?: string | null
+  } | null
   /** Un client Stripe du Live Club qui porte l'adresse, ou null. */
   clientStripe: string | null
 }
@@ -569,6 +602,9 @@ export async function traiterRebond(ev: EvenementRebond, svixId: string, o: Outi
       svix_id: svixId, evenement: ev.genre, nature: ev.nature, type: ev.type, sous_type: ev.sousType, sujet: ev.sujet,
       email_id: ev.emailId, acces_id: acces?.accesId ?? null, client_stripe: p.clientStripe,
       connue: !!(acces || p.clientStripe || p.telegramIds.length || p.membreId),
+      // (31/10) Refus sur l'adresse de CONTACT de l'acces (adresse-contact-pur.ts).
+      ...(acces?.parContact ? { par_contact: true } : {}),
+      ...(acces?.parCompte ? { par_compte: true } : {}),
     },
   })
   if (!r) return { etat: 'deja' }

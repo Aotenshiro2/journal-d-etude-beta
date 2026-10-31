@@ -3,6 +3,7 @@ import { lienBot, nomBot } from '@/lib/liveclub/config'
 import { lireSessionCheckout } from '@/lib/liveclub/stripe'
 import { annulerReservationEmail } from '@/lib/liveclub/jetons'
 import { emailBienvenue } from '@/lib/liveclub/emails'
+import { adresseEnvoi } from '@/lib/liveclub/adresse-envoi'
 import { DUREE_JETON_JOURS, preparerBienvenue, type PreparationBienvenue } from '@/lib/liveclub/bienvenue'
 import { messageErreur, relationAbsente } from '@/lib/liveclub/pur'
 import { journaliserGesteLiveClub } from '@/lib/stripe-actions'
@@ -153,7 +154,8 @@ export async function POST(req: NextRequest) {
   //    pas la page : le lien est deja a l'ecran.
   let emailEnvoye = false
   if (prep.envoyerEmail && jeton && session.email) {
-    const envoi = await emailBienvenue(session.email, lien)
+    // (31/10) A l'adresse d'envoi : son choix dans Mon espace, sinon celle du paiement (adresse-envoi.ts).
+    const envoi = await emailBienvenue(await adresseEnvoi({ emailIdentite: session.email }) ?? session.email, lien)
     if (envoi.ok) {
       emailEnvoye = true
     } else {

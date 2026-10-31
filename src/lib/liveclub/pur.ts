@@ -1444,6 +1444,13 @@ export function phraseGeste(g: GesteLu): string | null {
       if (fait && regle === 'lots_confirmes') return "Premiers lots vus par l'équipe chez le broker : notés faits."
       if (fait && regle === 'lots_pas_vus') return "Premiers lots pas encore vus par l'équipe chez le broker : prévenu."
       if (fait && regle === 'depot_perdu_alerte') return "Commission perdue : accès broker fermé, l'équipe est prévenue."
+      // (31/10) L'adresse de contact de l'acces (adresse-contact-pur.ts) : sans adresse ici.
+      if (regle === 'adresse_contact') {
+        if (!fait) return null
+        return d.quoi === 'retrait'
+          ? "Adresse de contact de son accès broker retirée par l'équipe : les emails du Live Club repartent à l'adresse du broker."
+          : "Adresse de contact de son accès broker notée par l'équipe : les emails du Live Club lui partent là (l'adresse du broker ne change pas)."
+      }
       const jusqua = date('jusquau')
       return fait ? `Accès broker ouvert${jusqua ? ` jusqu'au ${jusqua}` : ''}.` : 'Accès broker non ouvert.'
     }

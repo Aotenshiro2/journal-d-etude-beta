@@ -27,6 +27,7 @@ import { controlerActionRepartition, repartitionPourAgent } from '@/lib/repartit
 import { fichePersonnePourAgent, resoudrePersonnePourEffacement, resoudrePersonnePourSupport } from '@/lib/fiche-personne'
 import { controlerActionEffacement } from '@/lib/effacement'
 import { controlerReponseMembre, rendreLaMainPourAgent } from '@/lib/reponse-membre'
+import { controlerAdresseContact } from '@/lib/liveclub/adresse-contact'
 import type { PieceAgent } from '@/lib/liveclub/support-pont-pur'
 import { OUTIL_GENERER_POST, genererPostPourAgent } from '@/lib/generation-agent'
 import { avecVuesServeur } from '@/lib/vues-serveur'
@@ -84,6 +85,7 @@ Les tables et vues du cockpit (schéma public, PostgreSQL) :
   - 'pause_debut', 'pause_j7', 'broker_j7' : les autres rappels. À chaque sortie réelle du groupe (pause_effective, broker_fin, desabonne quand les sorties seront actives), le membre reçoit un message : pourquoi, et comment revenir, en privé Telegram s'il a démarré le bot, sinon par email.
   - une pause posée par toi (carte confirmée) : geste 'pause', regle 'manuel', details paye_jusquau et reprise_le, sans telegram_id.
 - cockpit_liveclub_acces : acces_id, email (minuscules), motif (broker), source, debut (date), jusquau (date), pose_par, pose_le, invite_envoyee_le (null = l'email d'invitation n'est pas parti, ou est revenu refusé par une adresse morte), telegram_id (null = le lien du bot n'a pas encore été ouvert), rappel_envoye_le, sorti_le, retire_le, retire_par, note. Les ACCÈS BROKER : la durée demandée à la pose (6 mois par défaut, de 1 à 24 mois depuis le 29/10) à partir du jour de l'ajout, NON RENOUVELABLES (une adresse n'a qu'une seule ligne, pour toujours). source = le broker du dépôt ; les accès posés avant le 29/10 portent tous 'raisefx', valeur par défaut du code : ne t'en sers pas pour dire chez quel broker était le dépôt. Actif = retire_le is null and sorti_le is null and jusquau >= current_date. Un membre présent avec un accès broker actif n'est PAS un écart.
+- cockpit_liveclub_acces_contacts (31/10) : contact_id, acces_id, email, raison, pose_par, pose_le, retire_par, retire_le. L'ADRESSE DE CONTACT d'un accès broker : là où le Live Club lui écrit (invitation, relances des lots, fin d'accès, pause, fermeture), à la place de l'adresse de l'accès, qui reste celle du broker (commission, vérifications). En cours = retire_le is null, une par accès ; les anciennes restent. Posée, changée ou retirée par carte : geste 'acces_broker', regle 'adresse_contact' du journal (details->>'quoi' : pose, change, retrait). Table absente = migration pas encore appliquée : aucune adresse de contact, les emails partent à l'adresse de l'accès.
 - cockpit_liveclub_produits : produit_id, compte (melanie), nom, pose_par, pose_le, note, retire_le, role ('tarif_reserve' = le produit commun des tarifs réservés, « Live Club (tarif réservé) »). Les produits Stripe qui OUVRENT LE LIVE CLUB, les deux produits de base compris : un abonné à l'un d'eux entre par le bot, la page de bienvenue le reconnaît, le passage quotidien le compte et la collecte classe ses paiements en live-club. Actif = retire_le is null. Inscrits par proposer_produit (live_club vrai), proposer_marquer_live_club, ou par le serveur pour un tarif réservé.
 - cockpit_liveclub_tarifs_reserves : reserve_id, qui, email, telegram_id, produit_id, price_id, tarif_cree (vrai = tarif créé pour cette personne), montant (euros), devise, recurrence (month|year), lien_id, lien_url (son lien de paiement personnel, email prérempli), cree_par, cree_le, paye_le (null = en attente de paiement), abonnement_id, retire_le, retire_par, note. Les TARIFS RÉSERVÉS : un prix PERSONNEL ouvert à UNE personne, celle de cet email, et à personne d'autre. Active = retire_le is null. Une ligne ne dit RIEN du prix d'une autre personne, même si le nom du produit évoque un groupe (« Live Club ETM », « élève », « symbolique ») : sans réservation à son email, quelqu'un d'autre paie le prix public.
 - cockpit_demandes : demande_id, cree_le, auteur (libellé du compte Telegram de l'équipe, ou 'cockpit:<uuid>' depuis la fenêtre du cockpit), source (agent_cockpit|agent_telegram), texte (la demande reformulée), citation (telle qu'écrite), statut (nouvelle|au_picker|faite|refusee), traite_le, note. Les demandes de l'équipe que tu as notées faute d'outil (noter_demande). En attente = statut 'nouvelle'.
@@ -252,7 +254,7 @@ LES PERSONNES : LA FICHE ET LES PAROLES (15/10) :
 - Une personne qui demande l'effacement de ses messages ou de ses données : voir « L'EFFACEMENT DES DONNÉES D'UNE PERSONNE » plus bas.
 
 LES ACTIONS STRIPE (03/09) :
-Tu disposes de dix-sept outils d'action : proposer_code_promo, proposer_revoquer_code, proposer_remboursement, proposer_produit, proposer_lien_paiement, proposer_marquer_live_club, proposer_abonnement_reserve, proposer_retirer_tarif_reserve, proposer_pause_abonnement, proposer_reprise_abonnement, proposer_annulation_abonnement, proposer_retirer_telegram, proposer_reintegrer_telegram, proposer_acces_broker, proposer_exemption, proposer_effacement et proposer_reponse_membre (décrits plus bas) (et huit pour la répartition, décrits plus bas : proposer_depot_broker, proposer_commission_affiliation, proposer_marquer_commission, proposer_taux_partenaire, proposer_intervenant, proposer_lives_du_mois, proposer_depense, proposer_reglement). Un appel N'EXÉCUTE RIEN : il affiche une carte de confirmation que Brice ou Mélanie doit cliquer : dis-le dans ta réponse. Après la confirmation, le résultat leur arrive directement et finit par l'étape humaine suivante (rien à faire, quoi dire à la personne, ou le lien à transmettre). Règles strictes :
+Tu disposes de dix-huit outils d'action : proposer_code_promo, proposer_revoquer_code, proposer_remboursement, proposer_produit, proposer_lien_paiement, proposer_marquer_live_club, proposer_abonnement_reserve, proposer_retirer_tarif_reserve, proposer_pause_abonnement, proposer_reprise_abonnement, proposer_annulation_abonnement, proposer_retirer_telegram, proposer_reintegrer_telegram, proposer_acces_broker, proposer_adresse_contact_acces, proposer_exemption, proposer_effacement et proposer_reponse_membre (décrits plus bas) (et huit pour la répartition, décrits plus bas : proposer_depot_broker, proposer_commission_affiliation, proposer_marquer_commission, proposer_taux_partenaire, proposer_intervenant, proposer_lives_du_mois, proposer_depense, proposer_reglement). Un appel N'EXÉCUTE RIEN : il affiche une carte de confirmation que Brice ou Mélanie doit cliquer : dis-le dans ta réponse. Après la confirmation, le résultat leur arrive directement et finit par l'étape humaine suivante (rien à faire, quoi dire à la personne, ou le lien à transmettre). Règles strictes :
 - AJOUTER, REMETTRE OU FAIRE REVENIR QUELQU'UN DANS LE GROUPE (règle de Brice, 08/10) : le groupe ne s'ouvre qu'à quelqu'un qui a un DROIT, parce que c'est le droit qui compte sa durée et qui le fait sortir à la fin. Un lien brut donné à quelqu'un sans droit l'ouvre pour toujours, sans que rien ne le compte ni ne le sorte. AVANT toute proposition, vérifie son droit par requêtes : exemption active (cockpit_liveclub_exemptions), accès broker actif (cockpit_liveclub_acces, par email ou telegram_id), abonnement Live Club vivant (cockpit_membre_emails ou cockpit_liveclub_rattachements, puis cockpit_abonnements), accès manuel (cockpit_acces_manuel). Le serveur revérifie de toute façon.
   - SANS droit : pose d'abord le droit, jamais une réintégration. Un dépôt chez un broker partenaire (« il a fait un dépôt », « il a accès pour 4 mois ») : voir « UNE DEMANDE D'ACCÈS BROKER » plus bas (proposer_depot_broker, ou proposer_acces_broker sans dépôt, avec la durée demandée ; l'email part avec son lien personnel vers le bot, qui le fait entrer tout seul). Jamais une exemption pour un dépôt broker. Un geste de l'équipe (fondateur, admin, équipe, favorisé, cadeau) = proposer_exemption, qui demande son compte Telegram : cherche le telegram_id (cockpit_telegram_membres, cockpit_liveclub_rattachements, cockpit_membre_telegram, archive) et, s'il reste inconnu, demande-le au lieu d'en deviner un. Une durée dite (« pour 3 mois ») devient la date de fin incluse ; sans durée, demande si l'exemption est permanente.
   - AVEC un droit mais hors du groupe : rien à poser. Le bot des membres lui donne tout seul son lien de retour dès qu'il lui écrit (Démarrer, /menu, un bouton ou n'importe quel message). proposer_reintegrer_telegram ne sert que si la personne reste bloquée malgré son droit (ancien ban, bot jamais ouvert) : le serveur la refuse si le droit n'est pas ouvert, et dit quel droit poser.
@@ -289,6 +291,7 @@ Tu disposes de dix-sept outils d'action : proposer_code_promo, proposer_revoquer
   - L'enregistrer : un accord simple (un montant fixe par dépôt ou un pourcentage, le même pour tout dépôt au-dessus du minimum) = proposer_taux_partenaire avec montant_fixe ou taux_pct, a_partir_du (depuis quand) et accord (le texte : le minimum, les conditions). Un accord à PALIERS (la commission change avec le montant du dépôt) = proposer_taux_partenaire SANS taux, avec accord (tous les paliers, le minimum, depuis quand) : il est noté sur le broker, et chaque dépôt porte sa commission (commission de proposer_depot_broker), que tu calcules d'après l'accord et que la carte montre. Le modèle de la base n'a qu'un taux à la fois : ne pose jamais un taux pour un accord à paliers.
   - UN ACCORD QUI CHANGE (« l'accord avec RaiseFx évolue, on passe à 800 EUR de commission ») : le broker est déjà en base, ne redemande pas sa nature. Demande en UNE question ce qui manque : la date d'effet, et si le changement touche aussi des dépôts déjà inscrits (par défaut non : ils gardent leur commission). Puis proposer_taux_partenaire : le nouveau montant_fixe ou taux_pct, ou le nouvel accord (paliers, minimum), a_partir_du = la date d'effet, et retroactif vrai SEULEMENT si ton interlocuteur a dit explicitement que les dépôts déjà inscrits changent aussi. La carte dit l'ancien accord, le nouveau, la date d'effet, et en rétroactif la liste des dépôts touchés (les commissions déjà reçues ou perdues ne bougent jamais). Le montant fixe, le pourcentage, les paliers et le dépôt minimum changent tous par cette même carte.
 - ACCÈS BROKER SANS DÉPÔT À INSCRIRE : quand on te colle des emails de clients d'un broker partenaire pour leur ouvrir le Live Club, sans montant, propose proposer_acces_broker avec TOUTES les adresses collées, sans en retirer ni en inventer (50 au plus par carte), et la durée demandée (mois, 6 par défaut). Chacune reçoit son accès à partir d'aujourd'hui et un email de support@ avec son lien personnel vers le bot, qui fait entrer la personne tout seul : personne n'a rien à faire à la main sur Telegram. NON RENOUVELABLE : une adresse qui a déjà eu un accès broker est refusée par le serveur, même si l'accès est terminé ; ne promets jamais un second accès. Une adresse déjà abonnée au Live Club est signalée sans rien accorder. Après la confirmation, rends le résultat adresse par adresse tel que le serveur le donne.
+- L'ADRESSE DE CONTACT D'UN ACCÈS BROKER (règle de Brice, 31/10) : l'adresse d'un accès broker est celle de l'ACTIVATION chez le broker. Mélanie s'en sert pour vérifier les dépôts et les lots, et le tracking de l'affiliation en dépend : elle ne change JAMAIS. Quand une personne qui a DÉJÀ un accès broker a une autre adresse (« son autre adresse est Y », « écris-lui plutôt à Y », « change l'adresse de l'accès de X en Y », ou ses emails reviennent refusés) = proposer_adresse_contact_acces, avec email_acces = l'adresse de l'accès et adresse_contact = Y. Y devient l'adresse où le Live Club lui écrit (invitation, relances des lots, fin d'accès, pause, fermeture) ; l'accès, ses dates, la commission, les lots, son lien personnel et son compte Telegram ne bougent pas, et si son lien n'a pas encore servi, l'invitation repart à Y. JAMAIS un nouvel accès (proposer_acces_broker, proposer_depot_broker) ni un nouvel email collé pour quelqu'un qui a déjà un accès : un nouvel accès ne sert qu'à une NOUVELLE personne. « Retire son adresse de contact », « écris-lui de nouveau à X » = la même carte, retirer vrai. Retrouve d'abord l'accès par requête (cockpit_liveclub_acces par l'email, ou par son compte Telegram ; cockpit_liveclub_acces_contacts pour son adresse de contact) ; si tu ne sais pas de quel accès il s'agit, demande l'adresse de l'accès, celle du broker. Quand tout est là, la carte tout de suite, en une phrase. Un refus du serveur (pas d'accès à cette adresse, adresse qui a son propre accès ou qui sert déjà à un autre accès, migration pas appliquée) : dis-le tel quel. L'adresse que le membre a choisie lui-même dans Mon espace (son compte AOK) passe avant l'adresse de contact : la carte le dit, n'en débats pas.
 - N'appelle un outil d'action QUE si on te le demande explicitement. Jamais de ta propre initiative, jamais « pendant que j'y suis ».
 - Une seule action proposée à la fois.
 - Le compte doit être certain : melanie = le Live Club (tout son récurrent), aoknowledge = le comptant et les abonnements des apps (Carnet Premium, Pilotage Premium, Premium Duo). En cas de doute, demande.
@@ -580,7 +583,7 @@ const OUTILS: Anthropic.Tool[] = [
   {
     name: 'proposer_acces_broker',
     description:
-      "Propose d'ouvrir le Live Club à des clients d'un broker partenaire, SANS inscrire de dépôt (l'équipe colle leurs emails). Un dépôt connu (montant) passe par proposer_depot_broker, qui pose aussi l'accès. N'exécute rien : carte de confirmation. Chaque adresse reçoit `mois` mois d'accès (6 par défaut, toute durée de 1 à 24 mois) à partir d'aujourd'hui et un email de support@ avec son lien personnel vers le bot. NON RENOUVELABLE : une adresse qui a déjà eu un accès broker est refusée par le serveur ; une adresse déjà abonnée est signalée sans rien accorder. 1 à 50 adresses par carte.",
+      "Propose d'ouvrir le Live Club à des clients d'un broker partenaire, SANS inscrire de dépôt (l'équipe colle leurs emails). Un dépôt connu (montant) passe par proposer_depot_broker, qui pose aussi l'accès. N'exécute rien : carte de confirmation. Chaque adresse reçoit `mois` mois d'accès (6 par défaut, toute durée de 1 à 24 mois) à partir d'aujourd'hui et un email de support@ avec son lien personnel vers le bot. NON RENOUVELABLE : une adresse qui a déjà eu un accès broker est refusée par le serveur ; une adresse déjà abonnée est signalée sans rien accorder. 1 à 50 adresses par carte. Jamais pour une personne qui a déjà un accès et donne une autre adresse : c'est son adresse de contact (proposer_adresse_contact_acces).",
     input_schema: {
       type: 'object',
       properties: {
@@ -593,6 +596,23 @@ const OUTILS: Anthropic.Tool[] = [
         note: { type: 'string', description: 'Facultatif : contexte court (ex. lot RaiseFx de septembre).' },
       },
       required: ['emails'],
+    },
+  },
+  // (31/10) L'adresse de contact d'un acces broker : controle avant la carte et
+  // execution dans liveclub/adresse-contact.ts, regles et textes dans adresse-contact-pur.ts.
+  {
+    name: 'proposer_adresse_contact_acces',
+    description:
+      "Propose de poser, changer ou retirer l'ADRESSE DE CONTACT d'un accès broker existant : l'adresse où le Live Club écrit à ce membre (invitation, relances des lots, fin d'accès, pause, fermeture), quand il en donne une autre (« son autre adresse est Y », « écris-lui plutôt à Y », « change l'adresse de l'accès de X en Y »). L'adresse de l'accès, celle du broker (de l'activation), ne change jamais : elle compte pour la commission et les vérifications chez le broker. L'accès, ses dates, la commission, les lots, le lien personnel et le compte Telegram ne bougent pas ; si son lien n'a pas encore servi, l'invitation repart à l'adresse de contact. N'exécute rien : carte de confirmation. Jamais un nouvel accès pour une personne qui en a déjà un. Refusé par le serveur : aucun accès broker à email_acces, adresse illisible, deux adresses identiques, adresse qui a son propre accès broker ou qui sert déjà de contact à un autre accès.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        email_acces: { type: 'string', description: "L'adresse de l'accès broker, celle du broker (de l'activation), telle qu'en base." },
+        adresse_contact: { type: 'string', description: 'La nouvelle adresse où lui écrire. Vide pour un retrait.' },
+        retirer: { type: 'boolean', description: "Vrai pour retirer l'adresse de contact : les emails repartent à l'adresse de l'accès." },
+        raison: { type: 'string', description: 'Facultatif : pourquoi, court (ex. sa boîte refuse nos emails).' },
+      },
+      required: ['email_acces'],
     },
   },
   {
@@ -1006,6 +1026,7 @@ const TYPE_PAR_OUTIL: Record<string, ActionAgent['type']> = {
   proposer_reprise_abonnement: 'reprise_abonnement',
   proposer_annulation_abonnement: 'annulation_abonnement',
   proposer_acces_broker: 'acces_broker',
+  proposer_adresse_contact_acces: 'adresse_contact',
   proposer_exemption: 'exemption',
   proposer_depot_broker: 'depot_broker',
   proposer_commission_affiliation: 'commission_affiliation',
@@ -1364,6 +1385,8 @@ export async function boucleAgent(
           // personne part AVANT elle, dans la reponse (jamais reecrit par le modele).
           let carte: string | null = null
           let avant: string | null = null
+          // (31/10) La version courte d'une carte composee par le serveur (adresse de contact), pour Melanie.
+          let carteCourte: string | null = null
           if (action.type === 'effacement') {
             let controle: Awaited<ReturnType<typeof controlerActionEffacement>>
             try {
@@ -1398,6 +1421,25 @@ export async function boucleAgent(
             }
             action = controle.action
             carte = controle.carte
+            manqueControle = controle.manque
+          } else if (action.type === 'adresse_contact') {
+            // (31/10) L'adresse de contact d'un acces broker : l'acces, son
+            // depot et sa commission lus en base, la carte composee par le
+            // serveur (longue pour Brice, courte pour Melanie).
+            let controle: Awaited<ReturnType<typeof controlerAdresseContact>>
+            try {
+              controle = await controlerAdresseContact(action)
+            } catch (err) {
+              const raison = err instanceof Error ? err.message.split('\n').filter(Boolean).pop() ?? '' : String(err)
+              controle = { erreur: `Lecture impossible avant la carte (${raison.slice(0, 200)}) : réessaie dans un instant.` }
+            }
+            if ('erreur' in controle) {
+              resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify({ erreur: controle.erreur }), is_error: true })
+              continue
+            }
+            action = controle.action
+            carte = controle.carte
+            carteCourte = controle.court
             manqueControle = controle.manque
           } else if (action.compte === 'cockpit') {
             let controle: Awaited<ReturnType<typeof controlerActionRepartition>>
@@ -1446,6 +1488,7 @@ export async function boucleAgent(
               ...action,
               resume: carte ?? (resumeAction(action) + (complement ? ` ${sansNomsOutils(complement)}` : '')),
               ...(court ? { resume: alerte ? `${court} ${alerte}` : court } : {}),
+              ...(carteCourte && estMelanie(qui) ? { resume: carteCourte } : {}),
               // Acces broker : il faut Resend et la lecture Stripe, pas le
               // bot (l'email porte le lien du bot, rien n'est fait sur le groupe).
               ...(manque ? { cle_presente: false, cle_manquante: manque } : { cle_presente: true }),
