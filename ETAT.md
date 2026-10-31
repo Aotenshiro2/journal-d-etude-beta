@@ -3,7 +3,7 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
-## Accueil du Live Club : ligne d'Accueil, mot dans Bla-bla, tour du proprietaire en prive (31/10/2026, LOCAL, NON commite, non pousse ; aucune migration)
+## Accueil du Live Club : ligne d'Accueil, mot dans Bla-bla, tour du proprietaire en prive (31/10/2026, DEPLOYE le 31/10 a 14:38, commit e3952eb ; aucune migration)
 
 - Bug (logs Vercel du 31/10, « TOPIC_CLOSED ») : l'accueil partait sans message_thread_id dans le sujet general « Accueil », ferme, et le bot n'avait pas le droit « Gerer les sujets » (manage_topics=False, Metricgram l'avait). Brice l'a donne le 31/10 (manage_topics=True, verifie).
 - Repartition decidee par Brice le 31/10 :
@@ -15,7 +15,7 @@ reste dans TODO.md.
 - A faire : commit, puis push du journal sur GO de Brice (= production). Un sujet cree, renomme ou ferme dans le groupe : a reporter dans SUJETS_LIVECLUB.
 - A confirmer par Brice : les lives sont annonces dans Annonce ; les questions de trading vont dans Trading chat ; le contenu de l'offre Live Club de l'academie (fiche du 18/10).
 
-## Agent AOK comprend les messages vocaux (31/10/2026, LOCAL, non pousse ; aucune migration ; variable GROQ_API_KEY_COCKPIT A POSER)
+## Agent AOK comprend les messages vocaux (31/10/2026, DEPLOYE le 31/10 a 14:38, commit 47cf17b, en sommeil sans cle ; aucune migration ; variable GROQ_API_KEY_COCKPIT A POSER)
 
 - Fait : un message vocal (voice) ou un fichier audio (audio) envoye a Agent AOK est telecharge chez Telegram (getFile,
   jeton du bot qui l'a recu), transcrit par Groq (whisper-large-v3-turbo, langue fr, 30 s au plus, borne par
