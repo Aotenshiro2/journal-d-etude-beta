@@ -43,6 +43,7 @@ import {
 } from './pur'
 import type { ActionMembre } from './conversations'
 import type { Bouton } from './telegram'
+import { BOUTON_LOTS, TEXTES_LOTS_SITUATION } from './lots-pur'
 
 /** Signature des gestes faits par un membre depuis le bot. */
 export const ACTEUR_BOT_MEMBRE = 'bot:membre'
@@ -100,7 +101,7 @@ export type ProfilSansRattachement =
 export async function profilSansRattachement(telegramId: number, r: null | 'illisible'): Promise<ProfilSansRattachement> {
   const droit = await droitLiveClub(telegramId)
   const parcours = parcoursSansRattachement(r === null ? 'aucun' : 'illisible', droit)
-  const acces = accesSansAbonnement(droit, { texteAbonnement: texteAbonnement() })
+  const acces = accesSansAbonnement(droit, { texteAbonnement: texteAbonnement(), lots: TEXTES_LOTS_SITUATION })
   if (parcours === 'acces_offert' && acces) return { parcours, droit, acces }
   if (parcours === 'non_rattache') return { parcours, droit }
   return { parcours: 'panne', droit }
@@ -222,7 +223,7 @@ export async function situationDuMembre(telegramId: number): Promise<Situation> 
   // manuel) peut ouvrir le groupe. Memes textes que pour un compte non
   // rattache (accesSansAbonnement, pur.ts).
   const droit = await droitLiveClub(telegramId)
-  const acces = accesSansAbonnement(droit, { texteAbonnement: texteAbonnement() })
+  const acces = accesSansAbonnement(droit, { texteAbonnement: texteAbonnement(), lots: TEXTES_LOTS_SITUATION })
   if (acces) return { etat: 'ok', texte: acces.texte, faits: acces.faits, accesOffert: true }
   const fin = droit.fin ? formaterDateFr(droit.fin) : null
   // Un 'oui' par abonnement sans abonnement vivant lu ici (lectures Stripe
@@ -589,8 +590,10 @@ export function clavierSansRattachement(): Bouton[][] {
  * mettre en pause ni a arreter, donc sa situation et l'equipe. Jamais « J'ai
  * paye : verifier mon email ».
  */
-export function clavierAccesOffert(): Bouton[][] {
+export function clavierAccesOffert(o: { lotsEnPause?: boolean } = {}): Bouton[][] {
   return [
+    // (31/10) Acces broker en pause pour ses lots : « J'ai tradé mes lots » d'abord.
+    ...(o.lotsEnPause ? [[{ texte: BOUTON_LOTS.texte, data: BOUTON_LOTS.data }]] : []),
     [{ texte: 'Mon abonnement', data: 'm:abo' }],
     [{ texte: "Contacter l'équipe", data: 'm:equipe' }],
   ]

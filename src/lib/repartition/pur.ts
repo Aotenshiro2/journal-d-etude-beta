@@ -1616,6 +1616,54 @@ export function resumeRepartition(type: TypeRepartition, p: Record<string, unkno
   }
 }
 
+/**
+ * (31/10, Brice : Melanie « n'a pas la patience des messages detailles ») La
+ * carte en COURT, pour Melanie : l'action exacte du bouton, les montants et
+ * la date, sans les regles. null = pas de version courte simple (un accord
+ * retroactif garde la carte longue, sa liste compte). Le complement chiffre
+ * du serveur (parts, mois prevu) n'est pas ajoute ; seule une alerte l'est
+ * (acces deja eu), par l'appelant.
+ */
+export function resumeCourtRepartition(type: TypeRepartition, p: Record<string, unknown>): string | null {
+  const jour = (v: unknown) => jourCourt(String(v))
+  switch (type) {
+    case 'depot_broker':
+      return `Dépôt ${p.partenaire_nom} de ${eur(p.montant)} le ${jour(p.le)} pour ${p.email}`
+        + `${p.commission !== null && p.commission !== undefined ? `, commission ${eur(p.commission)}` : ''}. `
+        + `Accès Live Club ${libelleMoisAcces(p.mois)} et email d'invitation, si l'adresse n'a jamais eu d'accès broker.`
+    case 'commission_affiliation':
+      return `Affiliation ${p.partenaire_nom} : ${p.client}, le ${jour(p.le)}${p.montant !== null && p.montant !== undefined ? `, vente de ${eur(p.montant)}` : ''}.`
+    case 'marquer_commission':
+      if (p.etat === 'lots_faits') return `Lots faits le ${jour(p.le)} : ${p.qui ?? 'le client'}.`
+      if (p.etat === 'recue') return `Commission reçue : ${eur(p.montant)} le ${jour(p.le)}${p.qui ? ` (${p.qui})` : ''}, encaissée par ${NOM_COTE[p.encaisse_par as Cote]}.`
+      return `Commission perdue${p.qui ? ` : ${p.qui}` : ''}.`
+    case 'taux_partenaire': {
+      if (p.retroactif === true) return null
+      const depuis = jour(p.a_partir_du)
+      if (p.sans_taux === true) {
+        return p.accord
+          ? `Accord ${p.partenaire_nom} à partir du ${depuis} : ${p.accord}.`
+          : `Nouveau partenaire ${p.partenaire_nom} (${p.nature}), sans taux pour l'instant.`
+      }
+      const t = { tauxPct: (p.taux_pct as number | null) ?? null, montantFixe: p.montant_fixe === null || p.montant_fixe === undefined ? null : centimes(p.montant_fixe) }
+      return `${p.partenaire_nom}${p.nature ? ` (${p.nature})` : ''} : ${libelleTaux(t)} à partir du ${depuis}. Les dépôts déjà inscrits ne changent pas.`
+    }
+    case 'intervenant':
+      return `Tarif de ${p.intervenant} : ${libelleTarif({ montantParUnite: centimes(p.montant_par_live) ?? 0, unite: (p.unite as UniteIntervenant | undefined) ?? 'live' })} à partir du ${jour(p.a_partir_du)}.`
+    case 'lives_du_mois':
+      return `${p.intervenant} : ${Number(p.nombre)} ${nomUnite('live', Number(p.nombre))} en ${libelleMois(String(p.mois))}${p.prix_unitaire !== null && p.prix_unitaire !== undefined ? `, ${euros(Number(p.nombre) * (centimes(p.prix_unitaire) ?? 0))}` : ''}.`
+    case 'depense':
+      return `Dépense ${libelleMois(String(p.mois))} : ${p.libelle}, ${eur(p.montant)}, payée par ${NOM_COTE[p.payee_par as Cote]}.`
+    case 'reglement': {
+      const de = NOM_COTE[p.de as Cote]
+      const a = NOM_COTE[p.a as Cote]
+      if (p.nature === 'dette') return `Dette ${deMois(String(p.mois))} : ${de} doit ${eur(p.montant)} à ${a}.`
+      if (p.nature === 'avance') return `Avance : ${de} a avancé ${eur(p.montant)} à ${a} le ${jour(p.le)}.`
+      return `${libelleMoisMaj(String(p.mois))} réglé : ${de} a payé ${eur(p.montant)} à ${a}.`
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // L'etape humaine suivante, en une ligne, a la fin de chaque resultat (comme
 // les gestes d'acces du 08/10).

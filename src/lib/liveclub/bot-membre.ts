@@ -98,12 +98,20 @@
 //   (texteAdmission, accueil-groupe.ts). Qui entre se lit dans
 //   cockpit_telegram_membres AVANT l'approbation (lireGenreEntree) : apres,
 //   la ligne peut deja dire « present ».
+// - (31/10, Brice et Mel) le SUIVI DES LOTS d'un acces broker (lots-pur.ts,
+//   lots.ts) : le message de l'admission dit le delai des premiers lots ; un
+//   acces EN PAUSE (lots pas trades a la fin du delai : droit 'non' qui porte
+//   `lots`) recoit sa situation et le bouton « J'ai tradé mes lots » partout
+//   ou un impaye recoit sa facture (demande d'adhesion, /start, /menu, lien) ;
+//   le bouton (m:lots) transmet la declaration a l'equipe, une seule fois.
 
 import { journaliserGesteLiveClub } from '@/lib/stripe-actions'
 import { prisma } from '@/lib/db'
 import { TEXTE_PAUSE_AVANT_ARRET, chatId, texteAbonnement, texteRaisonSortie } from './config'
 import { droitLiveClub, type Droit } from './droits'
 import { genreEntree, texteAdmission, type GenreEntree } from './accueil-groupe'
+import { BOUTON_LOTS, texteAccesEnPauseLots } from './lots-pur'
+import { declarerLots } from './lots'
 import { consommerJeton, ErreurTableLiveClub } from './jetons'
 import { rattacherTelegram, type Rattachement } from './rattacher'
 import {
@@ -404,7 +412,7 @@ async function envoyerMenu(
   const p = profilLu ?? await profilSansRattachement(telegramId, r)
   const avecEntete = (texte: string) => (entete ? `${entete}\n\n${texte}` : texte)
   if (p.parcours === 'acces_offert') {
-    await envoyer(chat, avecEntete(p.acces.texte), clavierAccesOffert())
+    await envoyer(chat, avecEntete(p.acces.texte), clavierAccesOffert({ lotsEnPause: p.droit.lots?.etat === 'en_retard' }))
     return
   }
   if (p.parcours === 'panne') {
@@ -481,11 +489,14 @@ export async function traiterDemandeAdhesion(demande: DemandeAdhesionTg, updateI
   // La dette d'abord (Brice, 30/09) : un payeur rattache dont l'acces est
   // suspendu pour un impaye encore dans la fenetre de 30 jours recoit le
   // montant et le lien de sa facture, pas les liens d'un nouvel abonnement.
-  await envoyer(ecrireA, droit.dette ? texteDette(droit.dette) : messageRefus())
+  // (31/10) Un acces broker en pause pour ses lots : pourquoi, et le bouton.
+  const enPauseLots = !droit.dette && droit.lots?.etat === 'en_retard'
+  if (enPauseLots) await envoyer(ecrireA, texteAccesEnPauseLots(), [[{ texte: BOUTON_LOTS.texte, data: BOUTON_LOTS.data }]])
+  else await envoyer(ecrireA, droit.dette ? texteDette(droit.dette) : messageRefus())
   const r = await refuserDemande(u.id)
   await journaliserGesteLiveClub(
     r.ok
-      ? { geste: 'entree_refusee', resultat: 'fait', regle: droit.dette ? 'impaye_ouvert' : 'sans_droit', details: {} }
+      ? { geste: 'entree_refusee', resultat: 'fait', regle: droit.dette ? 'impaye_ouvert' : enPauseLots ? 'lots_non_faits' : 'sans_droit', details: {} }
       : { geste: 'entree_refusee', resultat: 'echec', regle: 'telegram', details: { etape: 'declineChatJoinRequest', erreur: r.erreur } },
     contexte,
   )
@@ -541,7 +552,11 @@ async function lireGenreEntree(telegramId: number): Promise<GenreEntree> {
  * abonnement, ou un acces offert sans abonnement).
  */
 function texteAdmissionPour(entree: GenreEntree, droit: Droit): string {
-  return texteAdmission(entree, { chat: chatId(), accesOffert: droit.raison !== 'abonnement' })
+  // (31/10) Un acces broker dont les premiers lots sont attendus (et pas deja
+  // declares faits) : le paragraphe des lots, avec le delai.
+  const lots = droit.raison === 'acces_broker' && droit.lots?.etat === 'a_faire' && !droit.lots.declare
+    ? { limite: droit.lots.limite } : null
+  return texteAdmission(entree, { chat: chatId(), accesOffert: droit.raison !== 'abonnement', lots })
 }
 
 /** (31/10) Une demande en attente approuvee a la reprise : le droit lu, et qui entre (lu avant l'approbation). */
@@ -682,6 +697,17 @@ async function proposerRetourAuGroupe(chat: number, u: Utilisateur, updateId: nu
   const details = { declencheur: o.declencheur }
 
   if (droit.statut === 'non') {
+    // (31/10) Un acces broker en pause pour ses lots : pourquoi, comment
+    // revenir, et le bouton « J'ai tradé mes lots ». Pas sur un clic de
+    // bouton : « Mon abonnement » le dit deja.
+    if (!droit.dette && droit.lots?.etat === 'en_retard' && o.declencheur !== 'bouton') {
+      await envoyer(chat, `${avant}${texteAccesEnPauseLots()}`, [[{ texte: BOUTON_LOTS.texte, data: BOUTON_LOTS.data }], ...(o.boutons ?? [])])
+      await journaliserGesteLiveClub(
+        { geste: 'invitation', resultat: 'refuse', regle: 'lots_non_faits', details },
+        { ...contexte, updateId: null },
+      )
+      return true
+    }
     // La dette d'abord (Brice, 30/09) : hors du groupe a cause d'un impaye
     // encore dans la fenetre de 30 jours, le montant et le lien de la
     // facture. Pas sur un clic de bouton : « Mon abonnement » le dit deja.
@@ -933,6 +959,12 @@ async function traiterStartJeton(chat: number, u: Utilisateur, jeton: string, up
     if (droit.dette) {
       await envoyer(chat, texteDette(droit.dette), clavierMenu())
       await journal({ geste: 'invitation', resultat: 'refuse', regle: 'impaye_ouvert', details: { usage: ligne.usage } }, extra)
+      return
+    }
+    // (31/10) Un acces broker en pause pour ses lots : pourquoi, et le bouton.
+    if (droit.lots?.etat === 'en_retard') {
+      await envoyer(chat, texteAccesEnPauseLots(), clavierAccesOffert({ lotsEnPause: true }))
+      await journal({ geste: 'invitation', resultat: 'refuse', regle: 'lots_non_faits', details: { usage: ligne.usage } }, extra)
       return
     }
     await envoyer(chat, `Ton lien est bon, mais je ne vois pas d'abonnement actif en ce moment, donc je ne peux pas t'ouvrir le groupe.\n\n`
@@ -1735,12 +1767,13 @@ async function proposer(chat: number, telegramId: number, prep: Awaited<ReturnTy
  * Jamais la demande d'email ni la raison d'une sortie.
  */
 async function boutonAccesOffert(chat: number, u: Utilisateur, updateId: number, data: string, p: ProfilAccesOffert): Promise<void> {
+  const clavier = clavierAccesOffert({ lotsEnPause: p.droit.lots?.etat === 'en_retard' })
   if (/^(?:m:pause|m:arret|m:arret_ok|m:annuler|p:[1-6])$/.test(data)) {
-    await envoyer(chat, p.acces.rienAGerer, clavierAccesOffert())
+    await envoyer(chat, p.acces.rienAGerer, clavier)
     return
   }
   await proposerRetourAuGroupe(chat, u, updateId, { declencheur: 'bouton', reprendre: true, droit: p.droit })
-  await envoyer(chat, p.acces.texte, clavierAccesOffert())
+  await envoyer(chat, p.acces.texte, clavier)
 }
 
 /**
@@ -1834,6 +1867,16 @@ export async function traiterBouton(bouton: BoutonTg, updateId: number): Promise
     return
   }
 
+  // (31/10) « J'ai tradé mes lots » : la declaration, relue et transmise a
+  // l'equipe une seule fois (lots.ts). Rattache ou non : l'identite est ce
+  // compte Telegram, et la reponse est une ligne.
+  if (data === BOUTON_LOTS.data) {
+    await repondreBouton(bouton.id)
+    const d = await declarerLots(u.id, { origine: 'bouton' })
+    await envoyer(chat, d.texte, d.issue === 'panne' ? clavierEquipe() : undefined, identite)
+    return
+  }
+
   // « J'ai paye : verifier mon email » (decision 4).
   if (data === 'v:email') {
     await repondreBouton(bouton.id)
@@ -1844,7 +1887,7 @@ export async function traiterBouton(bouton: BoutonTg, updateId: number): Promise
     const p = await profil()
     // (06/10) Acces offert : rien a verifier, sa situation (vieux bouton).
     if (p.parcours === 'acces_offert') {
-      await envoyer(chat, p.acces.texte, clavierAccesOffert())
+      await envoyer(chat, p.acces.texte, clavierAccesOffert({ lotsEnPause: p.droit.lots?.etat === 'en_retard' }))
       return
     }
     // Sorti du groupe il y a peu (06/10) : la raison, qui demande deja l'email.

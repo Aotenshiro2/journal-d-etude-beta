@@ -22,6 +22,7 @@ import { telechargerFichierTelegram, type BotTelegram } from '@/lib/liveclub/tel
 import { dernierePieceHistorique, phraseMainRendue, type PieceAgent } from '@/lib/liveclub/support-pont-pur'
 import { lireDonneeRendreLaMain, referenceFil } from '@/lib/alerte-equipe-telegram-pur'
 import { lireBoutonCorrection } from '@/lib/liveclub/relais-pur'
+import { lireBoutonLots } from '@/lib/liveclub/lots-pur'
 
 // Le TRAITEMENT du canal Telegram de l'agent cockpit (« Agent AOK »), sorti de
 // la route /api/cockpit/agent/telegram le 08/10 pour servir a deux portes :
@@ -311,6 +312,16 @@ export async function traiterClicAgentTelegram(cq: ClicAgentTelegram): Promise<v
   if (correction) {
     const { traiterBoutonCorrection } = await import('@/lib/liveclub/corrections-pseudo')
     await traiterBoutonCorrection(cq, chatId, telegramId, compte, correction)
+    return
+  }
+
+  // (31/10) « Oui, lots tradés » / « Non, pas encore » sous une carte du
+  // suivi des lots (liveclub/lots.ts). Apres le verrou 2, import a la
+  // demande comme les corrections (lots.ts importe ce module).
+  const lots = lireBoutonLots(donnee)
+  if (lots) {
+    const { traiterBoutonLots } = await import('@/lib/liveclub/lots')
+    await traiterBoutonLots(cq, chatId, telegramId, compte, lots)
     return
   }
 

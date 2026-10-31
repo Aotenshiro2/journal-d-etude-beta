@@ -34,6 +34,16 @@ export function lireDemande(brut: unknown): DemandeLue | string {
 }
 
 /**
+ * (31/10, Brice) Melanie « n'a pas la patience des messages detailles » : ses
+ * cartes partent en version courte (resumeCourtRepartition). Le libelle de
+ * cockpit_allowlist ('Mélanie'), accents et casse ignores.
+ */
+export function estMelanie(qui: string | null | undefined): boolean {
+  const s = String(qui ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase()
+  return s === 'melanie' || s === 'mel'
+}
+
+/**
  * L'auteur d'une demande : le libelle du compte Telegram de l'equipe
  * (cockpit_telegram_comptes) quand il est connu, sinon 'cockpit:<uuid>'.
  */

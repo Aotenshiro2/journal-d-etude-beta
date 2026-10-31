@@ -177,6 +177,8 @@ export function evenementDeGeste(
       if (regle === 'desabonne') return { rubrique: 'sorties', detail: 'sorti du groupe : abonnement terminé, fin de la période payée' }
       if (regle === 'impaye_5j') return { rubrique: 'impayes', detail: 'sorti du groupe : paiement en retard depuis plus de 5 jours' }
       if (regle === 'changement_compte') return { rubrique: 'sorties', detail: 'sorti du groupe : son abonnement est passé sur un autre compte Telegram' }
+      // (31/10) Suivi des lots (lots-pur.ts) : pause, pas un bannissement.
+      if (regle === 'lots_non_faits') return { rubrique: 'sorties', detail: 'accès broker en pause : premiers lots pas tradés dans le délai, sorti du groupe sans blocage' }
       return { rubrique: 'sorties', detail: "sorti du groupe par l'équipe" }
     case 'fin_acces':
       return regle === 'fin_exemption' || d.motif === 'fin_exemption'
@@ -205,6 +207,7 @@ export function evenementDeGeste(
       if (regle === 'reouverture_impaye') {
         return { rubrique: 'impayes', detail: `paiement passé : accès rouvert, lien envoyé${d.canal === 'email' ? ' par email' : ''}` }
       }
+      if (regle === 'retour_lots') return { rubrique: 'sorties', detail: 'premiers lots vus chez le broker : accès rouvert, lien envoyé' }
       return null
     default:
       return null

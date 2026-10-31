@@ -40,10 +40,19 @@
 // webhook) : l'echec de l'un n'empeche pas l'autre, chacun est journalise.
 // Un rejeu de l'update ne republie rien : la ligne dit deja « present ».
 //
-// Module pur, teste par scripts/verifier-accueil-groupe.mjs. Seul import :
-// config.ts (pur lui aussi), pour l'adresse de l'academie.
+// Module pur, teste par scripts/verifier-accueil-groupe.mjs. Imports :
+// config.ts (pur lui aussi), pour l'adresse de l'academie ; lots-pur.ts (pur,
+// 31/10), pour le paragraphe des premiers lots d'un acces broker.
+//
+// (31/10, Brice) Deux ajouts au message prive de l'admission :
+// - un acces broker dont les premiers lots sont attendus : un paragraphe
+//   simple et rassurant, sans forcer (paragrapheLotsAdmission), avec le delai ;
+// - le challenge du sujet « Core content by MELMOM » compte toutes les
+//   reponses aux quiz depuis le debut : une ligne courte pour un nouveau
+//   (LIGNE_CHALLENGE_CORE_CONTENT), il peut y repondre au fil de sa progression.
 
 import { URL_FORMATION_LIVECLUB } from './config'
+import { paragrapheLotsAdmission } from './lots-pur'
 
 export const JOURS_ABSENCE_RETOUR = 30
 
@@ -165,6 +174,18 @@ const TOUR_AUTRES: readonly SujetDuTour[] = [
 /** Les sujets du tour, dans l'ordre du message (verifier-accueil-groupe.mjs). */
 export const SUJETS_DU_TOUR: readonly number[] = [...TOUR_ESSENTIEL, ...TOUR_AUTRES].map(s => s.sujet)
 
+/**
+ * (31/10, Brice) Le challenge du sujet Core content by MELMOM compte TOUTES
+ * les reponses aux quiz du sujet depuis le debut : un nouveau peut repondre
+ * aux anciens au fil de sa progression. Une ligne, sous la liste des sujets.
+ * Le reste (qui gagne, egalite) : l'agent du bot l'explique si on le lui
+ * demande (prompt-membre.ts). Le lot n'est ecrit nulle part dans le code ni
+ * dans la base de connaissances : il n'est pas cite.
+ */
+export const LIGNE_CHALLENGE_CORE_CONTENT = `Dans Core content by MELMOM, le challenge compte toutes les réponses aux quiz, les anciens aussi : tu peux y répondre au fil de ta progression. `
+  // (31/10, Brice) « dire que ce n'est pas de la chance, il faut vraiment regarder les cours ».
+  + `Ce n'est pas de la chance : les réponses sont dans les cours.`
+
 /** « - Nom, ce que c'est : lien ». L'adresse finit la ligne : une ponctuation collee entrerait dans le lien. */
 function ligneSujet(s: SujetDuTour, chat: number | null): string {
   const lien = lienSujet(chat, s.sujet)
@@ -245,6 +266,12 @@ export type OptionsAdmission = {
    * d'abonnement a gerer.
    */
   accesOffert: boolean
+  /**
+   * (31/10) Un acces broker dont les premiers lots sont attendus (et pas
+   * encore declares faits) : la fin du delai ('YYYY-MM-DD'). Absent ou null :
+   * pas de paragraphe des lots.
+   */
+  lots?: { limite: string } | null
 }
 
 /**
@@ -272,22 +299,28 @@ export function texteAdmission(genre: GenreEntree, o: OptionsAdmission): string 
   const fin = o.accesOffert
     ? `Je reste là pour la moindre question : écris-moi ici quand tu veux.`
     : `Je reste là pour ton abonnement : écris-moi ici quand tu veux (le voir, une pause, un arrêt).`
+  // (31/10) Les premiers lots d'un acces broker : un paragraphe, juste apres
+  // l'acceptation (nouveau) ou avant la derniere ligne (retour, connu).
+  const lots = o.lots?.limite ? paragrapheLotsAdmission(o.lots.limite) : null
   if (genre === 'connu') {
-    return `C'est bon, ta demande pour rejoindre le Live Club est acceptée : le groupe s'ouvre à l'instant.\n\n${fin}`
+    return `C'est bon, ta demande pour rejoindre le Live Club est acceptée : le groupe s'ouvre à l'instant.\n\n${lots ? `${lots}\n\n` : ''}${fin}`
   }
   if (genre === 'retour') {
     return `Bon retour dans le Live Club ! Ta demande est acceptée, le groupe s'ouvre à l'instant.\n\n`
       + `Petit rappel : les cours de formation inclus dans le Live Club sont sur l'académie du site. `
       + `Connecte-toi avec ${email}, et ils s'ouvrent tout seuls : ${URL_FORMATION_LIVECLUB}\n\n`
+      + (lots ? `${lots}\n\n` : '')
       + fin
   }
   const questions = o.accesOffert
     ? `Et si tu as la moindre question, sur l'académie ou sur ton accès, écris-moi ici.`
     : `Et si tu as la moindre question, sur l'académie ou sur ton abonnement (le voir, une pause, un arrêt), écris-moi ici.`
-  return `Bienvenue dans le Live Club ! Ta demande est acceptée, le groupe s'ouvre à l'instant. `
+  return `Bienvenue dans le Live Club ! Ta demande est acceptée, le groupe s'ouvre à l'instant.`
+    + (lots ? `\n\n${lots}\n\n` : ' ')
     + `Voici le tour du propriétaire, pour t'y retrouver.\n\n`
     + `L'essentiel :\n${TOUR_ESSENTIEL.map(s => ligneSujet(s, o.chat)).join('\n')}\n\n`
     + `Les autres sujets :\n${TOUR_AUTRES.map(s => ligneSujet(s, o.chat)).join('\n')}\n\n`
+    + `${LIGNE_CHALLENGE_CORE_CONTENT}\n\n`
     + `Pour briser la glace, présente-toi en deux mots dans Bla-bla, pas besoin d'en faire un roman. `
     + `Si tu ne sais pas quoi dire, quelques idées :\n${IDEES_PRESENTATION.map(i => `- ${i}`).join(' ;\n')}.\n\n`
     // (31/10) Sans la liste des cours : elle change avec l'offre (module

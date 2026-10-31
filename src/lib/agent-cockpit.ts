@@ -10,8 +10,10 @@ import { prerequisAccesBroker } from '@/lib/liveclub/acces'
 import { cleStripeLecture } from '@/lib/liveclub/config'
 import {
   DUREE_GENERATION_MS, MARGE_APPEL_MODELE_MS, MAX_GENERATIONS_PAR_TOUR, TEXTE_PLUS_LE_TEMPS_BROUILLON, TEXTE_TROP_DE_BROUILLONS,
-  lireDemande, reponsePartielle, type SourceDemande,
+  estMelanie, lireDemande, reponsePartielle, type SourceDemande,
 } from '@/lib/agent-cockpit-pur'
+import { estTypeRepartition, resumeCourtRepartition } from '@/lib/repartition/pur'
+import { DELAI_LOTS_JOURS, EXEMPLE_LOTS, RELANCE_LOTS_1_JOURS, TENUE_LOTS } from '@/lib/liveclub/lots-pur'
 import {
   citationQuestion, demandesEnSuspensPourAgent, preparerQuestionPourAgent, preparerRapportPourAgent, preparerRelancePourAgent,
   type RelanceEquipe,
@@ -272,12 +274,16 @@ Tu disposes de dix-sept outils d'action : proposer_code_promo, proposer_revoquer
   2. Le lien. Après la confirmation du produit (ou s'il existait déjà), proposer_lien_paiement avec le produit_id, qui (le prénom de la personne) et son email s'il est connu (prérempli sur la page de paiement). Le lien est PERSONNEL : un seul paiement possible. Pour un produit Live Club, la personne arrive après le paiement sur la page de bienvenue, qui la guide vers le bot, qui la fait entrer tout seul : aucun droit à poser à la main, aucune réintégration.
   Le produit_id d'un produit existant : cockpit_catalogue (produit_id, tarifs avec price_id ; s'il a plusieurs tarifs actifs, demande lequel et passe price_id). Un produit créé aujourd'hui n'y apparaît qu'après la prochaine collecte : prends alors le produit_id donné plus haut dans la conversation par le résultat de proposer_produit, sinon demande-le. Ne dis jamais que tu ne sais pas faire un lien de paiement ou un tarif réservé, et ne le note jamais en demande.
 - UNE DEMANDE D'ACCÈS BROKER (règles de Brice, 29/10 ; elles valent pour Brice comme pour Mélanie). « Tu peux ajouter x@y.com au Live Club pour 4 mois, il a déposé 400 EUR sur RaiseFx, on prend 400 EUR de commission » :
-  1. Ce qu'il te faut : le broker et son ACCORD (voir « LES ACCORDS DES BROKERS » juste après : la règle de commission, le dépôt minimum et les paliers, depuis quand) ; l'email du client ; le montant du dépôt et sa date ; la durée de l'accès (6 mois par défaut, toute durée de 1 à 24 mois : elle est LIBRE, ne dis jamais qu'elle est fixe ou non modulable).
+  1. Ce qu'il te faut : le broker et son ACCORD (voir « LES ACCORDS DES BROKERS » juste après : la règle de commission, le dépôt minimum et les paliers, depuis quand), OU la commission de CE dépôt, qui suffit ; l'email du client ; le montant du dépôt en euros et sa date ; la durée de l'accès (6 mois par défaut, toute durée de 1 à 24 mois : elle est LIBRE, ne dis jamais qu'elle est fixe ou non modulable).
   2. Vérifie d'abord par requêtes : cockpit_partenaires (le broker et son accord noté, colonne note) et cockpit_partenaire_taux (son taux en vigueur à la date du dépôt), cockpit_liveclub_acces (un accès déjà eu par cet email : non renouvelable), cockpit_commissions (un dépôt DÉJÀ INSCRIT pour cet email, joint à cockpit_liveclub_acces par acces_id, ou par email : même broker, même jour, même montant), un abonnement en cours. Si l'accès ET le dépôt existent déjà, dis-le (ce qui est inscrit, la date, la commission) au lieu de proposer une carte : rien n'est à refaire. Le serveur refuse de toute façon un dépôt déjà inscrit.
-  3. Ce qui manque, demande-le TOUT DE SUITE, en une seule question, à ton interlocuteur, dans son fil : jamais « demande à Brice », jamais « demande à Mélanie ». Un broker dont l'accord n'est pas connu : son accord (règle de commission, dépôt minimum et paliers, depuis quand), dans la même question que le reste. Une commission donnée pour ce dépôt (« on prend 400 EUR ») sans règle générale : demande si c'est la règle de ce broker pour tous ses clients ou seulement pour ce dépôt. Une date de dépôt non dite : demande-la (« aujourd'hui ? »). N'invente jamais un taux ni un accord.
-  4. Puis les cartes, UNE à la fois, dans l'ordre : (a) broker absent de la base = proposer_taux_partenaire, nature broker, avec son taux et son accord, ou SANS taux (avec l'accord s'il a des paliers, sinon la note « taux général à demander au prochain client ») ; broker en base dont l'accord vient d'être donné = la même carte, sans nature ; (b) puis proposer_depot_broker : montant, le (date du dépôt), mois (la durée demandée), commission si elle est propre à ce dépôt ou si l'accord a des paliers ; il pose AUSSI l'accès de cette durée, avec l'email d'invitation. Jamais proposer_acces_broker en plus pour la même personne, jamais une exemption. Après la carte (a), dis que la suivante vient dès que la première est confirmée (« réponds « suite » »).
+  3. Ce qui manque, demande-le TOUT DE SUITE, en une seule question, à ton interlocuteur, dans son fil : jamais « demande à Brice », jamais « demande à Mélanie ». Un broker dont l'accord n'est pas connu, SANS commission donnée pour ce dépôt : son accord (règle de commission, dépôt minimum et paliers, depuis quand), dans la même question que le reste. Une commission donnée pour CE dépôt (« commission 587 », « on prend 400 EUR ») : passe-la telle quelle (commission de proposer_depot_broker) et c'est tout, sans AUCUNE question ni remarque sur une règle générale du broker, même si son accord n'est pas connu (règle de Brice, 31/10). Une date de dépôt non dite : demande-la (« aujourd'hui ? »). N'invente jamais un taux ni un accord.
+  LES MONTANTS SONT EN EUROS (31/10) : « 650 EUR (655 USD) », « 650 € (655 $) » : prends les euros (650) sans question. Un montant en dollars SEULEMENT : une question courte, « Combien en euros ? ». Jamais de conversion faite par toi.
+  QUAND TOUT EST LÀ (31/10) : propose la carte TOUT DE SUITE, avec une phrase, sans rappeler les règles, les étapes ni l'accord du broker. Exemple, Mélanie : « Dépôt RaiseFx 650 EUR (655 USD) pour x@y.com aujourd'hui, commission 587, 6 mois » = directement proposer_depot_broker (montant 650, commission 587, le = aujourd'hui, mois 6).
+  4. Puis les cartes, UNE à la fois, dans l'ordre : (a) broker absent de la base = proposer_taux_partenaire, nature broker, avec son taux et son accord, ou SANS taux (avec l'accord s'il a des paliers, sinon la note « taux général à demander au prochain client ») ; broker en base dont l'accord vient d'être donné = la même carte, sans nature ; broker en base et commission de ce dépôt donnée : pas de (a), directement (b) ; (b) puis proposer_depot_broker : montant, le (date du dépôt), mois (la durée demandée), commission si elle est propre à ce dépôt ou si l'accord a des paliers ; il pose AUSSI l'accès de cette durée, avec l'email d'invitation. Jamais proposer_acces_broker en plus pour la même personne, jamais une exemption. Après la carte (a), dis que la suivante vient dès que la première est confirmée (« réponds « suite » »).
 - LES ACCORDS DES BROKERS (règles de Brice, 29/10 ; RaiseFx, Pulse et tout futur broker). L'accord d'un broker, c'est : la règle de commission (un montant fixe par dépôt, ou un pourcentage du dépôt), le dépôt minimum et les paliers s'il y en a, et depuis quand. Il se lit dans cockpit_partenaires (note : l'accord noté, qui commence par « Accord à partir du » ; une autre note est une remarque, pas un accord) et cockpit_partenaire_taux (les taux datés). Tu ne parles que de l'accord du broker dont il est question, jamais de toi-même de celui d'un autre broker.
-  - Tu ne le demandes JAMAIS de toi-même, ni à Brice ni à Mélanie : seulement quand l'un d'eux met sur la table un dépôt ou un accès broker pour un broker dont l'accord n'est pas connu (absent de la base, ou en base sans taux en vigueur à la date du dépôt ni accord noté). Alors tu le demandes dans le même échange, avec ce qui manque au dépôt. Aucune question sur les accès broker posés avant le 29/10.
+  - Tu ne le demandes JAMAIS de toi-même, ni à Brice ni à Mélanie : seulement quand l'un d'eux met sur la table un dépôt ou un accès broker pour un broker dont l'accord n'est pas connu (absent de la base, ou en base sans taux en vigueur à la date du dépôt ni accord noté) ET sans commission donnée pour ce dépôt. Alors tu le demandes dans le même échange, avec ce qui manque au dépôt. Aucune question sur les accès broker posés avant le 29/10.
+  - Une note du partenaire qui ne commence pas par « Accord à partir du » (une remarque, une hypothèse, « ... à confirmer par Mel ») n'est PAS un accord (règle du 29/10, redite par Brice le 31/10) : ne la cite pas, n'en débats pas, ne pose aucune question à son sujet ; elle ne bloque rien et ne change aucune commission.
+  - LES RÈGLES DÉFINITIVES PAR BROKER (31/10) : c'est Mélanie qui les donne, quand elle veut ; tu ne les inventes pas et tu ne les réclames pas. Quand elle (ou Brice) dit la règle d'un broker pour tous ses dépôts (« pour RaiseFx, c'est toujours ... »), c'est la carte proposer_taux_partenaire (accord simple, ou accord à paliers) ; ensuite tu l'appliques sans plus rien demander. Tu ne questionnes que pour un broker nouveau ou sans accord noté, et seulement sans commission donnée.
   - Accord connu (un taux en vigueur à la date, ou un accord noté) : tu ne le redemandes pas. Tu l'appliques, tu montres la commission qu'il donne, et tu ne demandes que ce qui manque (la date du dépôt, par exemple).
   - L'enregistrer : un accord simple (un montant fixe par dépôt ou un pourcentage, le même pour tout dépôt au-dessus du minimum) = proposer_taux_partenaire avec montant_fixe ou taux_pct, a_partir_du (depuis quand) et accord (le texte : le minimum, les conditions). Un accord à PALIERS (la commission change avec le montant du dépôt) = proposer_taux_partenaire SANS taux, avec accord (tous les paliers, le minimum, depuis quand) : il est noté sur le broker, et chaque dépôt porte sa commission (commission de proposer_depot_broker), que tu calcules d'après l'accord et que la carte montre. Le modèle de la base n'a qu'un taux à la fois : ne pose jamais un taux pour un accord à paliers.
   - UN ACCORD QUI CHANGE (« l'accord avec RaiseFx évolue, on passe à 800 EUR de commission ») : le broker est déjà en base, ne redemande pas sa nature. Demande en UNE question ce qui manque : la date d'effet, et si le changement touche aussi des dépôts déjà inscrits (par défaut non : ils gardent leur commission). Puis proposer_taux_partenaire : le nouveau montant_fixe ou taux_pct, ou le nouvel accord (paliers, minimum), a_partir_du = la date d'effet, et retroactif vrai SEULEMENT si ton interlocuteur a dit explicitement que les dépôts déjà inscrits changent aussi. La carte dit l'ancien accord, le nouveau, la date d'effet, et en rétroactif la liste des dépôts touchés (les commissions déjà reçues ou perdues ne bougent jamais). Le montant fixe, le pourcentage, les paliers et le dépôt minimum changent tous par cette même carte.
@@ -300,6 +306,7 @@ LA RÉPARTITION BRICE / MÉLANIE (règles de Brice, 08/10) :
   - Broker ou taux inconnu (l'outil te le dit) : demande à ton interlocuteur, dans ce fil, le taux du broker (en % du dépôt, par exemple 50 ou 100, ou un montant fixe par client) et depuis quand, ou la commission de ce seul dépôt ; propose proposer_taux_partenaire, puis seulement le dépôt. N'invente jamais un taux. Un nouveau partenaire demande sa nature (broker ou affiliation), un partenaire déjà en base jamais. Un taux ou un accord change par proposer_taux_partenaire (voir « UN ACCORD QUI CHANGE ») : une nouvelle ligne datée, les dépôts déjà inscrits gardent le leur sauf rétroactivité dite explicitement.
   - Une commission broker est du côté de Mel, donc partagée 70 % Mel, 30 % Brice (règle de l'apporteur), jamais 50/50 par défaut : repartition_du_mois fait le calcul.
   - « X a fait ses lots » = proposer_marquer_commission, etat lots_faits. « RaiseFx a payé 240 pour X » = etat recue, avec le montant réellement reçu et sa date (encaissée par Mel sauf indication). « C'est perdu » = perdue. Retrouve commission_id par requête (cockpit_commissions joint à cockpit_liveclub_acces pour l'email).
+  - LES LOTS DES MEMBRES ENTRÉS PAR UN ACCÈS BROKER (Brice et Mel, 31/10) : le bot des membres suit leurs premiers lots, pour un accès avec un dépôt inscrit. Il leur dit, sans forcer, que l'affiliation ne nous paie qu'une fois les premiers lots tradés (exemple donné : ${EXEMPLE_LOTS}, position tenue ${TENUE_LOTS}). Délai : ${DELAI_LOTS_JOURS} jours après son entrée (au plus tôt depuis le déploiement, pour ceux déjà entrés), une relance en privé à J+${RELANCE_LOTS_1_JOURS}, une autre quelques jours avant la fin. Lots pas faits à la fin du délai : son accès au groupe est EN PAUSE (sortie sans ban, message clair), et il revient dès que ses lots sont notés faits. Quand un membre dit au bot qu'il a tradé ses lots, une carte « Lots à vérifier » arrive ici avec deux boutons, « Oui, lots tradés » et « Non, pas encore » : le clic fait tout (lots notés comme proposer_marquer_commission, membre prévenu, lien de retour s'il était en pause). Ne propose pas de carte en plus pour cette déclaration. La commission est prévue à la fin du mois des lots, et elle compte dans la répartition le mois où elle est reçue.
   - Une commission d'affiliation d'un autre partenaire = proposer_commission_affiliation.
   - « Adrien prend 50 EUR par live sur le Live Club à partir d'octobre » = proposer_intervenant (offre_id lu dans cockpit_offres, montant_par_live, « à partir d'octobre » = le 1er du mois). Un nouveau tarif = une nouvelle ligne datée : les mois déjà déclarés gardent le leur. N'invente jamais un tarif.
   - « Adrien a fait 6 lives en octobre » = proposer_lives_du_mois (intervenant, mois, nombre). Payée par le côté du produit par défaut (Mel pour le Live Club) : dis-le dans ta réponse, et passe payee_par si on te dit qui le paie. Si l'outil répond qu'aucun tarif n'est connu pour ce mois, demande combien il touche par live et depuis quand, propose d'abord proposer_intervenant, puis les lives. Déjà déclarés ce mois-là : l'outil le dit, la correction se fait dans le cockpit (retirer la dépense, puis redéclarer).
@@ -614,10 +621,10 @@ const OUTILS: Anthropic.Tool[] = [
         partenaire: { type: 'string', description: 'Le broker, tel que dit (ex. RaiseFx).' },
         email: { type: 'string', description: "L'email du client (son accès Live Club en dépend)." },
         client: { type: 'string', description: 'Facultatif : son nom ou prénom, pour que la ligne soit lisible.' },
-        montant: { type: 'number', description: 'Le dépôt, en euros.' },
+        montant: { type: 'number', description: "Le dépôt, en euros : « 650 EUR (655 USD) » = 650. Un montant en dollars seulement : demande d'abord combien en euros." },
         le: { type: 'string', description: "Jour du dépôt AAAA-MM-JJ, aujourd'hui ou avant (demande-le s'il n'est pas dit). Vide = aujourd'hui." },
         mois: { type: 'integer', description: "Durée de l'accès Live Club en mois, de 1 à 24, telle que demandée (« pour 4 mois » = 4). Vide = 6." },
-        commission: { type: 'number', description: "Facultatif : la commission en euros prise sur CE dépôt quand on te la donne (« on prend 400 EUR de commission »). Elle prime sur le taux du broker pour ce dépôt seulement." },
+        commission: { type: 'number', description: "Facultatif : la commission en euros prise sur CE dépôt quand on te la donne (« commission 587 », « on prend 400 EUR de commission »). Elle prime sur le taux du broker pour ce dépôt seulement : passe-la sans question sur une règle générale du broker." },
         note: { type: 'string', description: 'Facultatif : contexte court.' },
       },
       required: ['partenaire', 'email', 'montant'],
@@ -1173,13 +1180,20 @@ export async function boucleAgent(
   // ce vers quoi on va en cas d'ambiguite), JAMAIS les droits : les trois sont
   // administrateurs des memes donnees, archive comprise (arbitrage de Brice du
   // 04/09). Ne pas relire ce bloc comme un cloisonnement.
+  // (31/10, Brice) Le TON selon l'interlocuteur : Melanie « n'a pas la
+  // patience des messages detailles », Brice, si. Ses cartes partent aussi en
+  // version courte (resumeCourtRepartition, plus bas).
   const ROLES: Record<string, string> = {
-    Brice: `le fondateur. Il voit tout et arbitre. En cas d'ambiguite sur le compte Stripe, demande.`,
+    Brice: `le fondateur. Il voit tout et arbitre. En cas d'ambiguite sur le compte Stripe, demande.`
+      + ` Le detail ne le gene pas, mais une demande complete appelle la carte tout de suite, sans rappeler les regles.`,
     Mélanie: `associee sur le Stripe du RECURRENT (Live Club) : c'est son perimetre quotidien, donc`
       + ` une question de paiement ou d'abonnement sans compte precise porte le plus souvent sur celui-la.`
       + ` Elle apparait aussi comme CLIENTE dans les donnees (fiches, paiements, archive) : quand tu`
       + ` tombes sur une fiche a son nom, dis-lui que c'est peut-etre la sienne au lieu d'en parler`
-      + ` comme d'une inconnue, et mefie-toi des homonymes.`,
+      + ` comme d'une inconnue, et mefie-toi des homonymes.`
+      + ` AVEC ELLE, DES MESSAGES COURTS, en francais simple : elle n'a pas la patience des messages detailles.`
+      + ` Deux ou trois lignes, l'essentiel d'abord, sans rappeler les regles, les etapes ni ce que le serveur calcule (parts, mois prevu).`
+      + ` Sa demande est complete : propose la carte tout de suite, avec une phrase. Il manque quelque chose : UNE question courte.`,
     Adil: `la compta, du cote de Melanie et de ses acces Stripe. Il vient surtout pour des rapprochements,`
       + ` des montants et des periodes : sois precis sur les dates, les frais et le net, et rappelle qu'un`
       + ` remboursement est un paiement negatif. Il n'est pas sur le bot Telegram, seulement sur la fenetre du cockpit.`,
@@ -1338,6 +1352,8 @@ export async function boucleAgent(
           // avec un complement chiffre (commission attendue, parts, solde).
           let complement: string | null = null
           let manqueControle: string | null = null
+          // (31/10) Ce que la carte courte de Melanie garde du complement.
+          let alerte: string | null = null
           // L'effacement (15/10) : la personne resolue comme fiche_personne,
           // l'apercu compte ce que le niveau effacerait (lecture seule). La
           // carte est composee par le serveur, et le texte a dire a la
@@ -1394,6 +1410,7 @@ export async function boucleAgent(
             action = controle.action
             complement = controle.complement
             manqueControle = controle.manque
+            alerte = controle.alerte ?? null
           } else if (aControleStripe(action.type)) {
             // Lien de paiement, produit Live Club (13/10) : produit et tarif
             // lus chez Stripe avant la carte. Un refus retourne au modele.
@@ -1407,14 +1424,21 @@ export async function boucleAgent(
             manqueControle = controle.manque
           }
           const manque = manqueControle ?? ceQuiManque(action)
+          // (31/10, Brice) Pour Melanie, la carte COURTE quand elle existe :
+          // l'action exacte du bouton et ses chiffres, sans les regles ; seule
+          // une alerte du controle reste. Le bouton et l'execution ne changent pas.
+          const court = !carte && estMelanie(qui) && estTypeRepartition(action.type)
+            ? resumeCourtRepartition(action.type, action.params) : null
           return avecRelances({
             reply: (textOf(response)
-              || 'Voilà ce que je te propose — à toi de confirmer :')
+              // (31/10) Sans tiret long (regle de Brice), court.
+              || 'À toi de confirmer :')
               + (avant ? `\n\n${avant}` : ''),
             etapes,
             action: {
               ...action,
               resume: carte ?? (resumeAction(action) + (complement ? ` ${complement}` : '')),
+              ...(court ? { resume: alerte ? `${court} ${alerte}` : court } : {}),
               // Acces broker : il faut Resend et la lecture Stripe, pas le
               // bot (l'email porte le lien du bot, rien n'est fait sur le groupe).
               ...(manque ? { cle_presente: false, cle_manquante: manque } : { cle_presente: true }),

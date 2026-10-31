@@ -23,6 +23,7 @@ import {
   BOUTON_REGLE, echapperHtml, formaterDateFr, formaterMontant, messageErreur, normaliserEmail, phraseARegler, phraseQuestion,
   phraseRetourApresReglement, type FactureARegler,
 } from './pur'
+import { BOUTON_LOTS, EXEMPLE_LOTS, TENUE_LOTS, texteRelanceLots1, texteRelanceLots2, texteSuspensionLots } from './lots-pur'
 
 export type ResultatEmail = { ok: true; id: string | null } | { ok: false; erreur: string }
 
@@ -98,6 +99,9 @@ export function modeleAccesBroker(lienBot: string, jusquau: string, mois?: numbe
       'Bonjour,',
       `Grâce à votre compte chez notre broker partenaire, vous avez accès au Live Club ${duree}.`,
       "Pour entrer dans le groupe Telegram, ouvrez notre bot avec le bouton ci-dessous et appuyez sur Démarrer. Il vous donne le lien du groupe : vous demandez à rejoindre, et c'est accepté tout seul.",
+      // (31/10, Brice) L'email parle aussi des premiers lots ; le bot donne la date limite a l'entree.
+      `Un point important : tant que vos premiers lots ne sont pas tradés chez le broker, l'affiliation ne nous rémunère pas. `
+        + `Pas besoin de risquer votre compte : ${EXEMPLE_LOTS}, avec une position tenue ${TENUE_LOTS}, suffisent. Ensuite, vous prenez tout votre temps.`,
       "Cet accès n'est pas renouvelable. Une semaine avant la fin, on vous prévient, et si vous voulez rester, il suffira de vous abonner.",
       `Une question ? Répondez à cet email ou écrivez à ${SUPPORT}.`,
     ],
@@ -410,6 +414,75 @@ export function modeleFinFenetre(factureAnnulee: boolean, canal: Canal = 'telegr
       phraseQuestion(canal),
     ],
   }
+}
+
+// ---------------------------------------------------------------------------
+// (31/10) Le suivi des lots d'un acces broker (lots-pur.ts) : les deux
+// relances et le message de la pause. En prive, les textes de lots-pur.ts et
+// le bouton BOUTON_LOTS ; par email (bot bloque), le vouvoiement et le lien du
+// bot (le membre y dit que c'est fait). Jamais de ban, rien de definitif.
+// ---------------------------------------------------------------------------
+
+const EXEMPLE_LOTS_PHRASE = `${EXEMPLE_LOTS}, avec une position tenue ${TENUE_LOTS}`
+
+/** Relance 1 (pas-a-pas) ou 2 (quelques jours avant la fin du delai). limite = 'YYYY-MM-DD'. */
+export function modeleRelanceLots(n: 1 | 2, limite: string, canal: Canal = 'telegram'): ModeleMessage {
+  if (canal === 'telegram') {
+    return {
+      sujet: n === 1 ? 'Tes premiers lots chez le broker' : 'Quelques jours pour tes premiers lots',
+      paragraphes: (n === 1 ? texteRelanceLots1(limite) : texteRelanceLots2(limite)).split('\n\n'),
+      boutonBot: { texte: BOUTON_LOTS.texte, data: BOUTON_LOTS.data },
+    }
+  }
+  const auBot = `dites-le au bot du Live Club (${lienBotAccueil()}) ou répondez à cet email : l'équipe vérifie chez le broker.`
+  const dire = `Quand c'est fait, ${auBot}`
+  return n === 1
+    ? {
+      sujet: 'Vos premiers lots chez le broker',
+      paragraphes: [
+        'Bonjour,',
+        "Petit rappel pour votre accès au Live Club par le broker : vos premiers lots ne sont pas encore tradés chez lui, et tant qu'ils ne le sont pas, l'affiliation ne nous paie pas.",
+        `Le plus simple : ouvrez votre plateforme chez le broker, prenez une position de ${EXEMPLE_LOTS}, gardez-la ${TENUE_LOTS}, puis fermez-la.`,
+        `C'est tout, et vous avez jusqu'au ${formaterDateFr(limite)}. ${dire}`,
+      ],
+    }
+    : {
+      sujet: 'Quelques jours pour vos premiers lots',
+      paragraphes: [
+        'Bonjour,',
+        `Il vous reste quelques jours pour trader vos premiers lots chez le broker : jusqu'au ${formaterDateFr(limite)}. Pour rappel, ${EXEMPLE_LOTS_PHRASE} suffisent.`,
+        "Passé cette date, votre accès au groupe se met en pause tant que les lots ne sont pas faits. Rien de définitif : vous revenez dès que l'équipe les voit chez le broker.",
+        `Déjà fait ? ${auBot.charAt(0).toUpperCase()}${auBot.slice(1)}`,
+      ],
+    }
+}
+
+/** Le message de la pause de l'acces (le passage vient de le sortir du groupe, sans ban). */
+export function modeleSuspensionLots(canal: Canal = 'telegram'): ModeleMessage {
+  if (canal === 'telegram') {
+    return {
+      sujet: 'Ton accès au Live Club est en pause',
+      paragraphes: texteSuspensionLots().split('\n\n'),
+      boutonBot: { texte: BOUTON_LOTS.texte, data: BOUTON_LOTS.data },
+    }
+  }
+  return {
+    sujet: 'Votre accès au Live Club est en pause',
+    paragraphes: [
+      'Bonjour,',
+      'Vos premiers lots ne sont pas encore tradés chez le broker, et le délai est passé : votre accès au groupe Telegram est donc en pause pour le moment.',
+      `Rien de définitif : dès que vos lots sont faits (${EXEMPLE_LOTS_PHRASE}, par exemple), dites-le au bot du Live Club (${lienBotAccueil()}) ou répondez à cet email. L'équipe vérifie chez le broker, et le bot vous redonne votre lien vers le groupe.`,
+      phraseQuestion('email'),
+    ],
+  }
+}
+
+export function emailRelanceLots(email: string, n: 1 | 2, limite: string): Promise<ResultatEmail> {
+  return envoyerModele(email, modeleRelanceLots(n, limite, 'email'))
+}
+
+export function emailSuspensionLots(email: string): Promise<ResultatEmail> {
+  return envoyerModele(email, modeleSuspensionLots('email'))
 }
 
 // ---------------------------------------------------------------------------

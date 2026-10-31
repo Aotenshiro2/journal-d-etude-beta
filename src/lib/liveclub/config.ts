@@ -181,6 +181,17 @@ export function sortiesImpayesActives(): boolean {
 }
 
 /**
+ * (31/10) Le SUIVI DES LOTS d'un acces broker (lots-pur.ts) : paragraphe de
+ * l'admission, relances, pause de l'acces a la fin du delai, carte « lots
+ * tradés » de l'equipe. Actif par defaut ; LIVECLUB_SUIVI_LOTS=0 le coupe
+ * tout entier (le droit ignore alors les lots, rien ne part). La sortie du
+ * groupe, elle, suit aussi sortiesActives() comme les autres sorties.
+ */
+export function suiviLotsActif(): boolean {
+  return process.env.LIVECLUB_SUIVI_LOTS?.trim() !== '0'
+}
+
+/**
  * Plafond de resiliations REELLES par passage (fenetre de 30 jours) : un
  * garde-fou si une lecture fausse faisait croire a une serie d'impayes.
  */

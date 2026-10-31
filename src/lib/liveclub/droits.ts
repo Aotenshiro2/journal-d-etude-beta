@@ -6,12 +6,16 @@
 // seule source illisible (Stripe en panne, table pas encore migree) et
 // aucun 'oui' ailleurs = 'inconnu', et 'inconnu' ne fait jamais sortir ni
 // refuser personne. droitLiveClub ne jette jamais.
+// (31/10) Un acces broker dont les premiers lots ne sont pas trades a la fin
+// du delai est en pause (suivi des lots, lots-pur.ts) : le droit porte `lots`.
 
 import { prisma } from '@/lib/db'
 import { exemptionActive } from '@/lib/stripe-actions'
 import { rattachementActif, membreParEmail } from './rattacher'
 import { abonnementsLiveClubDuClient, abonnementsLiveClubParEmail, type AbonnementResume } from './stripe'
 import { lireProduitsLiveClub } from './produits'
+import { lotsDesAcces } from './lots-lecture'
+import type { EtatLots } from './lots-pur'
 import { dateIso, detteOuverte, finDuDroit, meilleurAbonnement, messageErreur, relationAbsente, type Dette } from './pur'
 
 export { meilleurAbonnement }
@@ -32,6 +36,14 @@ export type Droit = {
    * d'abonnement (detteOuverte, pur.ts).
    */
   dette?: Dette
+  /**
+   * (31/10, suivi des lots, lots-pur.ts) Un acces broker dont les premiers
+   * lots sont attendus : 'a_faire' sur un 'oui' (raison acces_broker), dans
+   * le delai ; 'en_retard' sur un 'non' : l'acces est EN PAUSE (le seul acces
+   * broker du compte, delai passe, aucun autre droit), comme la dette d'un
+   * impaye. Absent : pas de suivi (pas de depot inscrit, lots faits, suivi coupe).
+   */
+  lots?: EtatLots & { commissionId: string }
   /** Sources illisibles (codes courts, sans donnee personnelle), pour les logs. */
   erreurs?: string[]
 }
@@ -114,6 +126,12 @@ export async function droitLiveClub(telegramId: number, opts: { exemptionIgnoree
   }
 
   // 3. Acces broker actif : lie a ce compte Telegram, ou a l'email rattache.
+  // (31/10) Un acces dont les premiers lots ne sont pas trades a la fin du
+  // delai est EN PAUSE (lots-pur.ts) : il n'ouvre plus le groupe, comme un
+  // abonnement impaye depuis plus de 5 jours. On regarde les autres sources
+  // (acces manuel), puis le 'non' porte `lots` (le bot dit pourquoi). Le
+  // suivi illisible ne met personne en pause (lotsDesAcces ne jette pas).
+  let lotsEnPause: Droit['lots'] | undefined
   try {
     const email = rattachement?.email ?? null
     const lignes = await prisma.$queryRaw<LigneAcces[]>`
@@ -122,9 +140,18 @@ export async function droitLiveClub(telegramId: number, opts: { exemptionIgnoree
         and (telegram_id = ${telegramId}
           or (${email}::text is not null and lower(email) = lower(${email})))
       order by jusquau desc
-      limit 1`
-    if (lignes[0]) {
-      return { statut: 'oui', raison: 'acces_broker', ...base, accesId: lignes[0].acces_id, fin: dateIso(lignes[0].jusquau) }
+      limit 3`
+    const lots = lignes.length ? await lotsDesAcces(lignes.map(l => l.acces_id)) : new Map()
+    for (const l of lignes) {
+      const etat = lots.get(l.acces_id)
+      if (etat?.etat === 'en_retard') {
+        lotsEnPause ??= etat
+        continue
+      }
+      return {
+        statut: 'oui', raison: 'acces_broker', ...base, accesId: l.acces_id, fin: dateIso(l.jusquau),
+        ...(etat ? { lots: etat } : {}),
+      }
     }
   } catch (err) {
     erreurs.push(relationAbsente(err)
@@ -169,5 +196,5 @@ export async function droitLiveClub(telegramId: number, opts: { exemptionIgnoree
     return { statut: 'inconnu', raison: null, ...base, erreurs }
   }
   const dette = detteOuverte(lus)
-  return { statut: 'non', raison: null, ...base, ...(dette ? { dette } : {}) }
+  return { statut: 'non', raison: null, ...base, ...(dette ? { dette } : {}), ...(lotsEnPause ? { lots: lotsEnPause } : {}) }
 }

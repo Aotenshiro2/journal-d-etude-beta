@@ -3,6 +3,49 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
+## Suivi des LOTS d'un acces broker, ton d'Agent AOK, challenge Core content (31/10/2026, LOCAL, non commite ; aucune migration)
+
+- Echanges de Brice et Mel du 31/10. Regles et textes : `src/lib/liveclub/lots-pur.ts` (aucun import) ; lectures :
+  `lots-lecture.ts` ; serveur : `lots.ts`. Suivi = acces broker actif (motif 'broker') avec un depot inscrit
+  (cockpit_commissions, nature depot, attendue, lots_faits_le vide) et aucun depot aux lots faits ou recu.
+- CONSTANTES (lots-pur.ts), DECIDEES par Brice le 31/10 : DELAI_LOTS_JOURS = 21 (3 semaines) ; RELANCE_LOTS_1_JOURS = 14 ;
+  RELANCE_LOTS_2_AVANT_FIN_JOURS = 3 (J+18) ; SUIVI_LOTS_DEPUIS = '2026-10-31' (jour du deploiement).
+  Exemple donne au membre : « 2 lots sur le NAS », position tenue « 30 secondes » (EXEMPLE_LOTS, TENUE_LOTS).
+- Depart du delai = entree (jeton personnel utilise), sinon debut de l'acces, jamais avant SUIVI_LOTS_DEPUIS : les membres
+  entres AVANT le deploiement ont 21 jours a partir de lui (aucune pause retroactive). Lu en base le 31/10 (lecture seule) :
+  8 acces broker, 6 sans depot (jamais suivis), 2 avec depot (29/10, 31/10), aucun entre dans le groupe ; relance 1 le
+  14/11 au plus tot, fin du delai le 21/11 (deploye le 31/10).
+- Parcours : (1) admission : paragraphe des lots + delai (texteAdmission, option lots) ; (2) passage quotidien, tache (o)
+  tacheLots : relance 1 (pas-a-pas) puis relance 2, en prive sinon email, une fois chacune (reservation, regles
+  lots_relance_1/2), etat relu juste avant, membre present seulement ; (3) « J'ai tradé mes lots » (bouton m:lots, ou outil
+  lots_trades de l'agent des membres, propose a ce membre seulement) : declaration ('acces_broker' lots_declares, une
+  ouverte par depot, verrou), carte a Brice et Mel dans Agent AOK « Oui, lots tradés » / « Non, pas encore » (lt:o|n:<id>),
+  au membre une ligne « l'équipe vérifie chez le broker » ; (4) Oui = validerAction + executerActionRepartition
+  marquer_commission lots_faits (la meme ecriture que proposer_marquer_commission ; jour = celui de la declaration), membre
+  prevenu, lien de retour tout de suite s'il est hors du groupe (retourApresLots, unban only_if_banned) ; Non = membre
+  prevenu ; (5) fin du delai : droitLiveClub rend 'non' avec `lots` (comme la dette d'un impaye), le passage sort SANS ban
+  (sortir, regle lots_non_faits, SIMULE sans sortiesActives()), message prive sinon email ; filet du retour au passage.
+- Garde-fous : une declaration en cours arrete relances et pause ; pas de pause tant que la relance 2 n'est pas partie, et
+  jamais moins de 3 jours apres elle (limiteEffectiveLots) ; suivi illisible = droit garde ; LIVECLUB_SUIVI_LOTS=0 coupe tout.
+- Commission : moisPrevuCommission prevoit deja la fin du mois des LOTS (verifie) ; elle compte dans la repartition le mois
+  ou elle est RECUE (regle du 08/10, inchangee).
+- Agent AOK (agent-cockpit.ts) : Mel = messages courts (ROLES), carte courte pour elle (resumeCourtRepartition, l'alerte du
+  controle gardee) ; carte tout de suite quand tout est la ; montants en euros (« 650 EUR (655 USD) » = 650, dollars seuls =
+  une question) ; commission de CE depot passee sans question sur une regle generale ; note de partenaire sans « Accord a
+  partir du » = remarque, jamais citee ni debattue ; regles definitives par broker = celles de Mel, par la carte d'accord.
+  Texte par defaut d'une carte sans tiret long.
+- Challenge Core content : une ligne dans le tour du proprietaire (LIGNE_CHALLENGE_CORE_CONTENT) ; regle dans le prompt du bot
+  des membres (toutes les reponses aux quiz depuis le debut, le plus de bonnes reponses gagne, tirage au sort a egalite). Le
+  lot n'est ecrit ni dans le code ni dans la base de connaissances : pas cite. Le calcul du tirage n'est pas fait ici.
+- Verifs : `node scripts/verifier-suivi-lots.mjs` (18 blocs), tsc, eslint ; verifier-accueil-groupe (12), -liveclub (63),
+  -repartition (22), -agent-equipe (11), -securite-bots (17), -relais-accueil (13), -effacement (21), -reouverture-impaye,
+  -attente-equipe, -reponse-membre, -vocaux, -pieces-support, -annulation-abonnement : ok. verifier-fiche-personne echoue
+  comme avant (src/lib/tab/lectures.ts). SQL relu contre la base en LECTURE SEULE (ecritures en EXPLAIN). Evals :
+  `node --env-file=.env.local scripts/eval-suivi-lots.mjs L1|L2` (un cas par lancement, essai) : L1 ok (carte directe et
+  courte), L2 : outil appele, controle de casse corrige ensuite (voir le rapport du 31/10).
+- A FAIRE : poser SUIVI_LOTS_DEPUIS au jour du deploiement ; confirmer les delais avec Brice ; commit puis push du journal sur
+  GO (= production) ; deployer le cockpit n'est pas necessaire.
+
 ## Accueil du Live Club : ligne d'Accueil, mot dans Bla-bla, tour du proprietaire en prive (31/10/2026, DEPLOYE le 31/10 a 14:38, commit e3952eb ; aucune migration)
 
 - Bug (logs Vercel du 31/10, « TOPIC_CLOSED ») : l'accueil partait sans message_thread_id dans le sujet general « Accueil », ferme, et le bot n'avait pas le droit « Gerer les sujets » (manage_topics=False, Metricgram l'avait). Brice l'a donne le 31/10 (manage_topics=True, verifie).

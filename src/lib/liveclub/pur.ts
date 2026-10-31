@@ -1300,6 +1300,7 @@ export function phraseGeste(g: GesteLu): string | null {
       return `Entrée dans le groupe acceptée${raison ? ` (${raison})` : ''}${d.reprise ? ', demande en attente reprise' : ''}.`
     case 'entree_refusee':
       if (fait && regle === 'impaye_ouvert') return 'Entrée dans le groupe refusée (paiement en retard, facture à régler).'
+      if (fait && regle === 'lots_non_faits') return 'Entrée dans le groupe refusée (accès broker en pause : premiers lots pas tradés).'
       return fait ? "Entrée dans le groupe refusée (pas de droit ouvert)." : "Refus d'entrée non appliqué."
     case 'invitation': {
       const canal = d.canal === 'email' ? ' par email' : ''
@@ -1308,10 +1309,13 @@ export function phraseGeste(g: GesteLu): string | null {
         if (regle === 'deja_dans_le_groupe') return 'Lien personnel ouvert : déjà dans le groupe.'
         if (regle === 'sans_droit') return "Lien personnel ouvert : pas d'abonnement actif."
         if (regle === 'impaye_ouvert') return 'Lien vers le groupe non envoyé : paiement en retard, facture à régler.'
+        if (regle === 'lots_non_faits') return 'Lien vers le groupe non envoyé : accès broker en pause (premiers lots pas tradés).'
+        if (regle === 'retour_lots') return 'Lots faits : déjà revenu dans le groupe.'
         if (regle === 'reouverture_impaye') return 'Paiement passé : déjà revenu dans le groupe.'
         return 'Lien vers le groupe non envoyé.'
       }
       if (regle === 'retour_groupe') return 'Lien de retour vers le groupe envoyé.'
+      if (regle === 'retour_lots') return `Lots faits : accès rouvert, lien de retour envoyé${canal}.`
       if (regle === 'sortie_abusive_metricgram') return 'Bannissement levé, lien de retour envoyé.'
       if (regle === 'broker_renvoi') return "Lien d'accès broker renvoyé par email."
       if (regle === 'reouverture_impaye') return `Paiement passé : accès réouvert, lien de retour envoyé${canal}.`
@@ -1325,6 +1329,7 @@ export function phraseGeste(g: GesteLu): string | null {
       if (!fait) return `Sortie du groupe non faite${motif ? ` (${motif})` : ''}.`
       if (regle === 'desabonne') return 'Sortie du groupe (abonnement terminé).'
       if (regle === 'impaye_5j') return 'Sortie du groupe (paiement en retard depuis plus de 5 jours).'
+      if (regle === 'lots_non_faits') return 'Sortie du groupe, sans blocage : accès broker en pause, premiers lots pas tradés dans le délai.'
       if (regle === 'changement_compte') return "Sortie du groupe, sans blocage : l'abonnement est passé sur un autre compte Telegram de son titulaire."
       return "Sorti du groupe par l'équipe."
     case 'fin_acces':
@@ -1383,12 +1388,20 @@ export function phraseGeste(g: GesteLu): string | null {
       if (regle === 'fin_exemption_j7') return `Rappel de fin d'accès offert envoyé${canal} (J-7).`
       if (regle === 'fin_exemption_message') return `Message de fin d'accès offert envoyé${canal}.`
       if (regle === REGLE_RAISON_SORTIE) return 'Raison de la sortie du groupe donnée (compte non relié à un abonnement actif).'
+      // (31/10) Le suivi des lots d'un acces broker (lots-pur.ts).
+      if (regle === 'lots_relance_1') return `Première relance des lots chez le broker envoyée${canal}.`
+      if (regle === 'lots_relance_2') return `Seconde relance des lots chez le broker envoyée${canal} (quelques jours avant la fin du délai).`
+      if (regle === 'lots_suspension_message') return `Message de pause de l'accès broker (premiers lots pas tradés) envoyé${canal}.`
       return `Rappel envoyé${canal}.`
     }
     case 'refus':
       if (regle === 'sortie_abusive_metricgram') return 'Sortie par Metricgram repérée (droit ouvert).'
       return 'Refus noté par le bot.'
     case 'acces_broker': {
+      // (31/10) Les lots : la declaration du membre, puis la decision de l'equipe.
+      if (fait && regle === 'lots_declares') return "A dit avoir tradé ses premiers lots : l'équipe vérifie chez le broker."
+      if (fait && regle === 'lots_confirmes') return "Premiers lots vus par l'équipe chez le broker : notés faits."
+      if (fait && regle === 'lots_pas_vus') return "Premiers lots pas encore vus par l'équipe chez le broker : prévenu."
       const jusqua = date('jusquau')
       return fait ? `Accès broker ouvert${jusqua ? ` jusqu'au ${jusqua}` : ''}.` : 'Accès broker non ouvert.'
     }
@@ -1477,6 +1490,16 @@ export type DroitLu = {
   raison: 'exemption' | 'abonnement' | 'acces_broker' | 'acces_manuel' | null
   /** Fin du droit ('YYYY-MM-DD' ou ISO), incluse ; absente = sans date. */
   fin?: string
+  /**
+   * (31/10) Les premiers lots d'un acces broker (lots-pur.ts) : a faire d'ici
+   * `limite` (droit 'oui'), ou en retard, acces en pause (droit 'non').
+   */
+  lots?: { etat: 'a_faire' | 'en_retard'; limite: string; declare: boolean }
+}
+
+/** (31/10) Un acces broker en pause pour ses lots (droit 'non') : sa situation se dit comme un acces offert. */
+export function accesEnPauseLots(droit: DroitLu): boolean {
+  return droit.statut === 'non' && droit.lots?.etat === 'en_retard'
 }
 
 export type AccesSansAbonnement = {
@@ -1502,7 +1525,29 @@ const TEXTE_RIEN_A_GERER = "Il n'y a rien à mettre en pause ni à arrêter : tu
  * passee en parametre parce que ce module n'importe rien. La date de fin est
  * incluse (« jusqu'au 1er janvier 2027 » = encore dans le groupe ce jour-la).
  */
-export function accesSansAbonnement(droit: DroitLu, o: { texteAbonnement: string }): AccesSansAbonnement | null {
+/**
+ * (31/10) Les textes du suivi des lots (lots-pur.ts, passes par l'appelant :
+ * ce module n'importe rien). Absents (tests anciens), la ligne des lots a
+ * faire est omise et la pause garde une phrase neutre.
+ */
+export type TextesLotsSituation = {
+  enPause: () => string
+  aFaire: (limite: string, declare: boolean) => string
+}
+
+export function accesSansAbonnement(droit: DroitLu, o: { texteAbonnement: string; lots?: TextesLotsSituation }): AccesSansAbonnement | null {
+  // (31/10) Acces broker en pause pour ses lots : sa situation, partout
+  // (/start, /menu, « Mon abonnement », l'agent), jamais l'email du paiement.
+  if (accesEnPauseLots(droit)) {
+    return {
+      texte: o.lots?.enPause() ?? "Ton accès offert au Live Club est en pause pour le moment. Écris-moi ici pour savoir comment revenir.",
+      faits: {
+        acces: 'offert_broker_en_pause', raison_de_la_pause: 'premiers lots pas encore tradés chez le broker, délai passé',
+        retour: "dès que l'équipe voit ses lots chez le broker", rien_a_payer: true,
+      },
+      rienAGerer: TEXTE_RIEN_A_GERER,
+    }
+  }
   if (droit.statut !== 'oui' || !RAISONS_SANS_ABONNEMENT.has(droit.raison)) return null
   const fin = droit.fin ? formaterDateFr(droit.fin) : null
   const jusquau = fin ? ` jusqu'au ${fin}` : ''
@@ -1514,10 +1559,17 @@ export function accesSansAbonnement(droit: DroitLu, o: { texteAbonnement: string
     }
   }
   if (droit.raison === 'acces_broker') {
+    // (31/10) Ses premiers lots, s'ils sont attendus : la date, ou « l'equipe verifie ».
+    const lots = droit.lots?.etat === 'a_faire' ? droit.lots : null
+    const ligneLots = lots && o.lots ? `\n\n${o.lots.aFaire(lots.limite, lots.declare)}` : ''
     return {
       texte: `Tu as un accès offert au Live Club${jusquau}, grâce à ton compte chez notre broker partenaire. `
-        + `Il n'est pas renouvelable : pour rester après, il suffira de t'abonner.\n\n${o.texteAbonnement}`,
-      faits: { acces: 'offert_broker', jusquau: fin, renouvelable: false, rien_a_payer: true },
+        + `Il n'est pas renouvelable : pour rester après, il suffira de t'abonner.`
+        + `${ligneLots}\n\n${o.texteAbonnement}`,
+      faits: {
+        acces: 'offert_broker', jusquau: fin, renouvelable: false, rien_a_payer: true,
+        ...(lots ? { premiers_lots_chez_le_broker: lots.declare ? 'déclarés faits, l\'équipe vérifie' : `à faire d'ici le ${formaterDateFr(lots.limite)}` } : {}),
+      },
       rienAGerer: TEXTE_RIEN_A_GERER,
     }
   }
@@ -1547,6 +1599,9 @@ export type ParcoursSansRattachement = 'acces_offert' | 'non_rattache' | 'panne'
  */
 export function parcoursSansRattachement(rattachement: 'aucun' | 'illisible', droit: DroitLu): ParcoursSansRattachement {
   if (droit.statut === 'oui' && RAISONS_SANS_ABONNEMENT.has(droit.raison)) return 'acces_offert'
+  // (31/10) Un acces broker en pause pour ses lots reste un acces offert : sa
+  // situation dit pourquoi et comment revenir, jamais « envoie ton email ».
+  if (accesEnPauseLots(droit)) return 'acces_offert'
   if (rattachement === 'illisible' || droit.statut === 'inconnu') return 'panne'
   return 'non_rattache'
 }
@@ -1565,6 +1620,8 @@ const LIBELLES_BOUTONS: Record<string, string> = {
   'm:annuler': 'Annuler un arrêt prévu',
   'm:equipe': "Contacter l'équipe",
   'v:email': "J'ai payé : vérifier mon email",
+  // (31/10) = BOUTON_LOTS (lots-pur.ts ; ce module n'importe rien, verifier-suivi-lots.mjs).
+  'm:lots': "J'ai tradé mes lots",
   [BOUTON_REGLE.data]: BOUTON_REGLE.texte,
 }
 

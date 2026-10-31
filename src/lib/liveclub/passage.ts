@@ -36,6 +36,11 @@
 //       Absent du groupe, ou autre droit : on clot simplement. Une fois par
 //       exemption. SIMULEE sans la bascule. Une exemption permanente (sans
 //       date) n'est jamais concernee ;
+//   (o) SUIVI DES LOTS d'un acces broker (Brice et Mel, 31/10, lots-pur.ts) :
+//       deux relances en prive, une fois chacune, puis a la fin du delai la
+//       PAUSE de l'acces (sortie SANS ban, message), le filet du retour des
+//       que les lots sont notes faits. Une declaration en cours arrete tout.
+//       Pause SIMULEE sans la bascule ; LIVECLUB_SUIVI_LOTS=0 coupe la tache ;
 //   (d) purge des conversations privees de plus de 7 jours ;
 //   (m) RESUME DU MATIN (Brice, 15/10, resume.ts) : en dernier, Agent AOK
 //       envoie en prive a l'equipe (cockpit_telegram_comptes) ce qui a bouge
@@ -79,8 +84,11 @@ import {
 } from '@/lib/stripe-actions'
 import {
   GRACE_JOURS, PLAFOND_RESILIATIONS_PASSAGE, PLAFOND_SORTIES_PASSAGE, chatId, cleStripeLecture, lienBot,
-  sortiesActives, sortiesImpayesActives,
+  sortiesActives, sortiesImpayesActives, suiviLotsActif,
 } from './config'
+import { suiviLotsDeCommission, suivisLotsATraiter, type LigneSuiviLots } from './lots-lecture'
+import { limiteAnnonceeRelance2, limiteEffectiveLots, limiteLots, phaseLots } from './lots-pur'
+import { fermerRetourLots, retourApresLots } from './lots'
 import {
   listerAbonnementsLiveClub, clientsStripeParEmail, abonnementsLiveClubParEmail, abonnementsLiveClubDuClient, adopterPause,
   effacerMetadonneesPause,
@@ -99,7 +107,7 @@ import { tracerGeste, tracerMessageBot } from './support-pont'
 import {
   emailRappelPause, emailDebutPauseSansReprise, emailRetour, emailRappelFinBroker, emailFinBroker,
   emailSortieDesabonne, emailRappelPrelevement, emailSortieImpaye, emailReouverture, emailFinFenetre, emailBienvenue,
-  emailRappelFinExemption, emailFinExemption,
+  emailRappelFinExemption, emailFinExemption, emailRelanceLots, emailSuspensionLots, modeleRelanceLots, modeleSuspensionLots,
   modeleRappelPause, modeleDebutPauseSansReprise, modeleRetour, modeleRappelFinBroker, modeleFinBroker,
   modeleSortieDesabonne, modeleRappelPrelevement, modeleRetourSortieAbusive, modeleSortieImpaye, modeleReouverture,
   modeleFinFenetre, modeleRappelFinExemption, modeleFinExemption, boutonsTelegram,
@@ -187,6 +195,18 @@ export type SynthesePassage = {
    * rappel ou message impossible (bot jamais demarre, aucun email connu).
    */
   exemptions: { rappels_j7: number; sorties: number; simulees: number; messages_fin: number; closes_absent: number; gardees_autre_droit: number; sans_moyen: number; inconnus: number; echecs: number }
+  /**
+   * (o) Suivi des lots d'un acces broker (31/10). pauses : sorties reelles
+   * (acces en pause, sans ban) ; simulees : sans sortiesActives() ; declares :
+   * une declaration attend l'equipe (rien n'est fait) ; sans_compte : jamais
+   * entre (lien personnel pas ouvert) ; gardes : admin, ou autre droit ;
+   * retours : liens de retour du filet ; coupe : LIVECLUB_SUIVI_LOTS=0.
+   */
+  lots: {
+    relances_1: number; relances_2: number; pauses: number; simulees: number; messages: number; retours: number
+    deja_revenus: number; deja_faits: number; declares: number; absents: number; gardes: number; sans_compte: number
+    inconnus: number; echecs: number; coupe: boolean
+  }
   purge: { conversations: number }
   /**
    * (l) Tarifs reserves (13/10) : reservations ouvertes rapprochees des
@@ -2688,6 +2708,232 @@ async function rattraperMessagesFinExemption(ctx: Contexte, rattaches: Rattache[
 }
 
 // ---------------------------------------------------------------------------
+// (o) Suivi des lots d'un acces broker (Brice et Mel, 31/10, lots-pur.ts)
+// ---------------------------------------------------------------------------
+
+/**
+ * Pour chaque acces broker actif dont un depot attend ses premiers lots :
+ * - relance 1 (pas-a-pas) puis relance 2 (la date, et la pause qui suit), en
+ *   prive sinon par email, chacune UNE fois par depot (reservation), l'etat
+ *   relu juste avant (lots faits, declaration en cours, relance partie), et
+ *   seulement a un membre present dans le groupe ;
+ * - a la fin du delai (limite effective : jamais avant RELANCE_LOTS_2_AVANT_FIN
+ *   jours apres la relance 2), la PAUSE de l'acces : sortie SANS ban par
+ *   sortir() (plafond du passage), si le compte est present, ni admin ni
+ *   createur, et sans autre droit (droit relu en direct) ; puis le message de
+ *   la pause, une fois par depot. SIMULEE sans sortiesActives() (une ligne
+ *   'simule' par depot, a relire dans le Journal du bot) ;
+ * - le filet du retour (retoursApresLots) : lots notes faits apres une pause,
+ *   membre absent et droit 'oui' : le lien de retour, une fois par depot.
+ * Une declaration en cours (l'equipe verifie) arrete tout. LIVECLUB_SUIVI_LOTS=0 coupe la tache.
+ */
+async function tacheLots(ctx: Contexte) {
+  const s = ctx.s.lots
+  if (!suiviLotsActif()) {
+    s.coupe = true
+    return
+  }
+  await retoursApresLots(ctx)
+  let suivis: LigneSuiviLots[]
+  try {
+    suivis = await suivisLotsATraiter()
+  } catch (err) {
+    erreur(ctx, relationAbsente(err) ? 'lots_table_absente' : 'lots_illisibles', err)
+    return
+  }
+  const aujourdhui = jourParis(ctx.maintenant.toISOString())
+  for (const l of suivis) {
+    if (tempsEcoule(ctx)) return
+    const phase = phaseLots(l.suivi, aujourdhui)
+    if (phase === 'attente') continue
+    if (phase === 'declares') { s.declares++; continue }
+    // Jamais entre (lien personnel jamais ouvert) : rien a relancer ni a mettre en pause.
+    if (l.telegramId === null || !Number.isSafeInteger(l.telegramId)) { s.sans_compte++; continue }
+    if (ctx.sortis.has(l.telegramId)) continue
+    if (phase === 'pause') await mettreEnPauseLots(ctx, l, l.telegramId, aujourdhui)
+    else await relancerLots(ctx, l, l.telegramId, phase === 'relance_1' ? 1 : 2, aujourdhui)
+  }
+}
+
+/** Le suivi de CE depot relu juste avant d'agir (grille de Brice : l'etat, pas une sequence). null = plus rien a faire. */
+async function reluLots(ctx: Contexte, l: LigneSuiviLots): Promise<LigneSuiviLots | null | 'panne'> {
+  try {
+    return await suiviLotsDeCommission(l.commissionId)
+  } catch (err) {
+    erreur(ctx, 'lots_illisibles', err)
+    return 'panne'
+  }
+}
+
+async function relancerLots(ctx: Contexte, l: LigneSuiviLots, tid: number, n: 1 | 2, aujourdhui: string) {
+  const s = ctx.s.lots
+  const relu = await reluLots(ctx, l)
+  if (relu === 'panne') { s.inconnus++; return }
+  if (!relu || phaseLots(relu.suivi, aujourdhui) !== (n === 1 ? 'relance_1' : 'relance_2')) return
+  const p = await presence(tid)
+  if (p.etat === 'inconnu') { s.inconnus++; return }
+  if (p.etat === 'non') { s.absents++; return }
+  const limite = n === 1 ? limiteLots(relu.suivi) : limiteAnnonceeRelance2(relu.suivi, aujourdhui)
+  const regle = `lots_relance_${n}`
+  let reserve: bigint | null
+  try {
+    reserve = await reserverGeste({
+      cle: `liveclub:${regle}:${l.commissionId}`,
+      deja: Prisma.sql`
+        select 1 from public.cockpit_liveclub_gestes d
+        where d.geste = 'rappel' and d.regle = ${regle} and d.resultat = 'fait'
+          and d.details->>'commission_id' = ${l.commissionId}`,
+      geste: 'rappel', regle, telegramId: tid, abonnementId: null,
+      details: { acces_id: l.accesId, commission_id: l.commissionId, limite },
+    })
+  } catch (err) {
+    erreur(ctx, 'journal_reservation', err)
+    s.inconnus++
+    return
+  }
+  if (reserve === null) { s.deja_faits++; return }
+  const envoi = await prevenir(ctx, [tid], l.email, modeleRelanceLots(n, limite), e => emailRelanceLots(e, n, limite))
+  await cloreReservation(ctx, reserve, envoi)
+  if (!envoi) { s.echecs++; return }
+  if (n === 1) s.relances_1++
+  else s.relances_2++
+}
+
+async function mettreEnPauseLots(ctx: Contexte, l: LigneSuiviLots, tid: number, aujourdhui: string) {
+  const s = ctx.s.lots
+  const relu = await reluLots(ctx, l)
+  if (relu === 'panne') { s.inconnus++; return }
+  if (!relu || phaseLots(relu.suivi, aujourdhui) !== 'pause') return
+  const p = await presence(tid)
+  if (p.etat === 'inconnu') { s.inconnus++; return }
+  if (p.etat === 'non') {
+    // Deja hors du groupe : le droit refuse son entree et dit pourquoi. Un
+    // message de pause rate apres une sortie se retente ici.
+    s.absents++
+    await rattraperMessageSuspensionLots(ctx, l, tid)
+    return
+  }
+  if (estIntouchable(p)) { s.gardes++; return }
+  // Abonnement, exemption, acces manuel (meme par un autre email) : on garde.
+  const droit = await droitAvantSortie(tid, [l.email])
+  if (droit === 'inconnu') { s.inconnus++; return }
+  if (droit === 'oui') { s.gardes++; return }
+  const details = { acces_id: l.accesId, commission_id: l.commissionId, limite: limiteEffectiveLots(relu.suivi), statut_tg: p.statut }
+  if (!sortiesActives()) {
+    let deja: boolean
+    try {
+      deja = await gesteExiste({
+        geste: 'retrait', regle: 'lots_non_faits', resultats: ['simule'], telegramId: tid,
+        detail: { cle: 'commission_id', valeur: l.commissionId },
+      })
+    } catch (err) {
+      erreur(ctx, 'journal_illisible', err)
+      s.inconnus++
+      return
+    }
+    if (!deja) {
+      await tracer(ctx, { geste: 'retrait', resultat: 'simule', regle: 'lots_non_faits', details }, { telegramId: tid })
+      s.simulees++
+    }
+    return
+  }
+  const issue = await sortir(ctx, tid, { geste: 'retrait', regle: 'lots_non_faits', details })
+  if (issue === 'plafond') return
+  if (issue !== 'fait') { s.echecs++; return }
+  s.pauses++
+  if (await messageSuspensionLots(ctx, l, tid)) s.messages++
+}
+
+/** Le message de la pause, une fois par depot, reserve avant l'envoi. true = parti. */
+async function messageSuspensionLots(ctx: Contexte, l: LigneSuiviLots, tid: number): Promise<boolean> {
+  let reserve: bigint | null
+  try {
+    reserve = await reserverGeste({
+      cle: `liveclub:lots_suspension_message:${l.commissionId}`,
+      deja: Prisma.sql`
+        select 1 from public.cockpit_liveclub_gestes d
+        where d.geste = 'rappel' and d.regle = 'lots_suspension_message' and d.resultat = 'fait'
+          and d.details->>'commission_id' = ${l.commissionId}`,
+      geste: 'rappel', regle: 'lots_suspension_message', telegramId: tid, abonnementId: null,
+      details: { acces_id: l.accesId, commission_id: l.commissionId },
+    })
+  } catch (err) {
+    erreur(ctx, 'journal_reservation', err)
+    return false
+  }
+  if (reserve === null) return false
+  const envoi = await prevenir(ctx, [tid], l.email, modeleSuspensionLots(), e => emailSuspensionLots(e))
+  await cloreReservation(ctx, reserve, envoi)
+  return envoi !== null
+}
+
+/** Sorti pour ses lots, message jamais parti : on le retente (la reservation garde l'unicite). */
+async function rattraperMessageSuspensionLots(ctx: Contexte, l: LigneSuiviLots, tid: number) {
+  let sorti: boolean
+  let envoye: boolean
+  try {
+    const detail = { cle: 'commission_id', valeur: l.commissionId }
+    sorti = await gesteExiste({ geste: 'retrait', regle: 'lots_non_faits', resultats: ['fait'], telegramId: tid, detail })
+    envoye = sorti && await gesteExiste({ geste: 'rappel', regle: 'lots_suspension_message', resultats: ['fait'], detail })
+  } catch (err) {
+    erreur(ctx, 'journal_illisible', err)
+    return
+  }
+  if (!sorti || envoye) return
+  if (await messageSuspensionLots(ctx, l, tid)) ctx.s.lots.messages++
+  else ctx.s.lots.echecs++
+}
+
+/**
+ * Le filet du retour : un membre mis en pause pour ses lots (sortie
+ * 'lots_non_faits' de moins de 120 jours) dont les lots sont notes faits (ou
+ * la commission recue) depuis, sans lien de retour encore parti. Absent et
+ * droit 'oui' : le lien (retourApresLots, le meme que le clic de l'equipe,
+ * une fois par depot). Deja dans le groupe : la boucle se ferme.
+ */
+async function retoursApresLots(ctx: Contexte) {
+  const s = ctx.s.lots
+  let lignes: { telegram_id: bigint; commission_id: string }[]
+  try {
+    lignes = await prisma.$queryRaw`
+      select distinct on (g.details->>'commission_id') g.telegram_id, g.details->>'commission_id' as commission_id
+      from public.cockpit_liveclub_gestes g
+      join public.cockpit_commissions c on c.commission_id::text = g.details->>'commission_id'
+      where g.geste = 'retrait' and g.regle = 'lots_non_faits' and g.resultat = 'fait' and g.telegram_id is not null
+        and g.fait_le > now() - interval '120 days'
+        and (c.lots_faits_le is not null or c.statut = 'recue')
+        and not exists (
+          select 1 from public.cockpit_liveclub_gestes r
+          where r.geste = 'invitation' and r.regle = 'retour_lots' and r.resultat in ('fait', 'refuse')
+            and r.details->>'commission_id' = g.details->>'commission_id')
+      order by g.details->>'commission_id', g.fait_le desc
+      limit 100`
+  } catch (err) {
+    erreur(ctx, relationAbsente(err) ? 'lots_table_absente' : 'lots_illisibles', err)
+    return
+  }
+  for (const l of lignes) {
+    if (tempsEcoule(ctx)) return
+    const tid = Number(l.telegram_id)
+    if (!Number.isSafeInteger(tid)) continue
+    const p = await presence(tid)
+    if (p.etat === 'inconnu') { s.inconnus++; continue }
+    if (p.etat === 'oui') {
+      await fermerRetourLots(tid, l.commission_id, ACTEUR)
+      s.deja_revenus++
+      continue
+    }
+    const droit = await droitLiveClub(tid)
+    if (droit.statut === 'inconnu') { s.inconnus++; continue }
+    if (droit.statut === 'non') continue
+    const r = await retourApresLots(tid, { commissionId: l.commission_id, acteur: ACTEUR })
+    if (r === 'envoye') s.retours++
+    else if (r === 'deja') s.deja_faits++
+    else s.echecs++
+  }
+}
+
+// ---------------------------------------------------------------------------
 // (d) Purge des conversations privees
 // ---------------------------------------------------------------------------
 
@@ -2739,6 +2985,10 @@ function nouveauContexte(maintenant: Date): Contexte {
       fenetre_30j: { simulees: 0, resiliations: 0, factures_annulees: 0, factures_en_echec: 0, messages: 0, plus_a_resilier: 0, reportees: 0, deja_faits: 0, inconnus: 0, echecs: 0 },
       bienvenue: { simules: 0, envoyes: 0, deja_envoyes: 0, deja_traites: 0, rattaches: 0, sans_email: 0, inconnus: 0, echecs: 0 },
       exemptions: { rappels_j7: 0, sorties: 0, simulees: 0, messages_fin: 0, closes_absent: 0, gardees_autre_droit: 0, sans_moyen: 0, inconnus: 0, echecs: 0 },
+      lots: {
+        relances_1: 0, relances_2: 0, pauses: 0, simulees: 0, messages: 0, retours: 0, deja_revenus: 0, deja_faits: 0,
+        declares: 0, absents: 0, gardes: 0, sans_compte: 0, inconnus: 0, echecs: 0, coupe: false,
+      },
       purge: { conversations: 0 },
       tarifs_reserves: { payees: 0, en_attente: 0, illisibles: 0 },
       resume: { etat: 'pas_lance', lignes: 0, livres: 0 },
@@ -2874,6 +3124,10 @@ export async function passageQuotidien(maintenant: Date = new Date()): Promise<S
     // compte sans aucun lien ne depend pas de Stripe : meme decision qu'avant.
     await etape('exemptions', () => tacheExemptions(ctx, rattaches))
   }
+  // (o) Suivi des lots d'un acces broker (31/10), APRES les autres sorties
+  // (une seule sortie par compte, le message le plus precis d'abord). Le droit
+  // s'y relit en direct : une panne Stripe donne 'inconnu', rien ne part.
+  await etape('lots', () => tacheLots(ctx))
   // Le droit s'y relit en direct (droitLiveClub) : la liste Stripe du passage
   // n'est pas necessaire, une panne Stripe donne 'inconnu' et rien ne part.
   await etape('metricgram', () => tacheSortiesMetricgram(ctx, rattaches, abonnements))

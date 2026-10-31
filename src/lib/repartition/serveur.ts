@@ -825,7 +825,14 @@ async function phraseSoldeDuMois(mois: string): Promise<string | null> {
 
 export type ControleCarte =
   | { erreur: string }
-  | { action: ActionAgent; complement: string | null; manque: string | null }
+  | {
+    action: ActionAgent; complement: string | null; manque: string | null
+    /**
+     * (31/10) Ce que la carte COURTE (Melanie) doit garder du complement : un
+     * avertissement qui change ce que fait le clic (acces broker deja eu).
+     */
+    alerte?: string | null
+  }
 
 /**
  * Controle une action de repartition DEJA validee (validerAction), avant de
@@ -893,15 +900,17 @@ export async function controlerActionRepartition(a: ActionAgent): Promise<Contro
       const accordConnu = accordNote(partenaire.note)
       if (accordConnu) complement += ` Accord de ${partenaire.nom} : ${accordConnu}.`
       let manque: string | null = null
+      let alerte: string | null = null
       if (type === 'depot_broker') {
         const acces = await accesParEmail(String(p.email))
         if (acces) {
-          complement += ` Cette adresse a déjà eu un accès broker (jusqu'au ${libelleJour(acces.jusquau)}) : il ne sera pas refait, le dépôt y sera relié.`
+          alerte = `Cette adresse a déjà eu un accès broker (jusqu'au ${libelleJour(acces.jusquau)}) : il ne sera pas refait, le dépôt y sera relié.`
+          complement += ` ${alerte}`
         } else {
           manque = prerequisAccesBroker()
         }
       }
-      return { action: a, complement, manque }
+      return { action: a, complement, manque, alerte }
     }
 
     if (type === 'marquer_commission') {

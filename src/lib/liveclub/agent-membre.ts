@@ -21,6 +21,10 @@
 // decision 5) ne touche a rien : il leve le drapeau veutHumain, et c'est le
 // bot qui fait passer le fil en « veut un humain » dans l'ecran Support.
 //
+// (31/10) lots_trades (membre dont les premiers lots chez le broker sont
+// attendus seulement) : ni identifiant ni parametre ; le serveur relit l'etat,
+// transmet a l'equipe une seule fois et ecrit la ligne au membre (lots.ts).
+//
 // Le coeur du bot (entrees, sorties, execution) ne depend jamais d'ici : si
 // l'IA echoue ou si le plafond du jour est atteint, la route bascule sur le
 // menu a boutons.
@@ -48,10 +52,11 @@ import { REFUS_PRUDENCE_MEMBRE, analyserTexte, contextePrudenceMembre, rendreVis
 import { alerterBriceSecurite } from '@/lib/securite/alerte'
 import { nomTelegram } from '@/lib/alerte-equipe-telegram'
 import {
-  CONSIGNE_ACCES_OFFERT, CONSIGNE_EQUIPE_TRANSMISE, CONSIGNE_MONTANTS, MODELE_LIVECLUB, NOM_OUTIL_MEMBRE_A_CONTACTER,
+  CONSIGNE_ACCES_OFFERT, CONSIGNE_EQUIPE_TRANSMISE, CONSIGNE_MONTANTS, MODELE_LIVECLUB, NOM_OUTIL_LOTS, NOM_OUTIL_MEMBRE_A_CONTACTER,
   NOM_OUTIL_PROPOSER_CORRECTION_PSEUDO, RESULTAT_DEMANDER_UN_HUMAIN, requeteAgentMembre,
   resultatConnaissances,
 } from './prompt-membre'
+import { declarerLots, etatLotsDuMembre } from './lots'
 
 export { MODELE_LIVECLUB }
 
@@ -205,8 +210,11 @@ export async function repondreAuMembre(
   const echange = randomUUID()
   // Relais d'accueil (24/10) : l'outil membre_a_contacter et sa consigne, pour un relais actif seulement.
   const relais = await estRelaisActif(telegramId)
+  // (31/10) Suivi des lots : l'outil lots_trades et sa consigne, pour un
+  // membre dont les premiers lots chez le broker sont attendus seulement.
+  const lots = await etatLotsDuMembre(telegramId)
   for (let tour = 0; tour < MAX_TOURS; tour++) {
-    const response = await client.messages.create(requeteAgentMembre(messages, contexte, { relais }))
+    const response = await client.messages.create(requeteAgentMembre(messages, contexte, { relais, lots }))
     await tracerUsage(telegramId, response.usage, echange)
 
     if (response.stop_reason !== 'tool_use') {
@@ -222,9 +230,25 @@ export async function repondreAuMembre(
       if (bloc.type !== 'tool_use') continue
 
       // (29/10) Message suspect : ni proposition, ni outil du relais.
-      if (prudence && (TYPE_PAR_OUTIL[bloc.name] || bloc.name === NOM_OUTIL_MEMBRE_A_CONTACTER || bloc.name === NOM_OUTIL_PROPOSER_CORRECTION_PSEUDO)) {
+      // (31/10) Ni declaration de lots.
+      if (prudence && (TYPE_PAR_OUTIL[bloc.name] || bloc.name === NOM_OUTIL_MEMBRE_A_CONTACTER
+        || bloc.name === NOM_OUTIL_PROPOSER_CORRECTION_PSEUDO || bloc.name === NOM_OUTIL_LOTS)) {
         resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify(REFUS_PRUDENCE_MEMBRE) })
         continue
+      }
+
+      // (31/10) « C'est bon, j'ai trade mes lots » : le serveur relit l'etat,
+      // transmet a l'equipe une seule fois (carte Oui / Non dans Agent AOK) et
+      // ecrit lui-meme la ligne au membre ; la boucle s'arrete la. Sans suivi
+      // en cours, l'outil n'est pas propose : un appel quand meme = inconnu.
+      if (bloc.name === NOM_OUTIL_LOTS) {
+        if (!lots) {
+          resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify({ erreur: 'Outil inconnu.' }), is_error: true })
+          continue
+        }
+        const d = await declarerLots(telegramId, { origine: 'agent' })
+        // Panne : le texte parle du bouton « Contacter l'equipe », le menu le porte (repli).
+        return d.issue === 'panne' ? { texte: d.texte, repli: true, ...drapeau() } : { texte: d.texte, ...drapeau() }
       }
 
       if (bloc.name === 'demander_un_humain') {
