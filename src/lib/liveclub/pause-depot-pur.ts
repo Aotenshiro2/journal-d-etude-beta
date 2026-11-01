@@ -210,6 +210,25 @@ const ton = (canal: Canal, tu: string, vous: string) => (canal === 'email' ? vou
 const EXEMPLE_LOTS_PHRASE = `${EXEMPLE_LOTS}, avec une position tenue ${TENUE_LOTS}`
 
 /**
+ * (01/11) Les lots de CE parcours : la condition de Mel (OFFRE_PAUSE_DEPOT.lots,
+ * « 10 lots sur le Nasdaq a 10 $ du point, en une ou plusieurs positions »), et
+ * pas l'exemple general des acces broker (« 2 lots sur le NAS, 30 secondes ») :
+ * le membre lit le meme chiffre dans les conditions, le message du clic et les
+ * relances. Condition vide : l'exemple general, comme avant.
+ */
+export function lotsPauseDepot(o: OffrePauseDepot = OFFRE_PAUSE_DEPOT): string {
+  return o.lots.trim() || EXEMPLE_LOTS_PHRASE
+}
+
+/** (01/11) Le paragraphe des lots du message du clic, avec les lots de ce parcours. */
+export function paragrapheLotsPauseDepot(limite: string, o: OffrePauseDepot = OFFRE_PAUSE_DEPOT): string {
+  if (!o.lots.trim()) return paragrapheLotsAdmission(limite)
+  return `Un mot sur ton accès par le broker : tant que tes premiers lots ne sont pas tradés chez lui, l'affiliation ne nous paie pas. `
+    + `Ce qu'il faut : ${o.lots.trim()}. Tu as jusqu'au ${formaterDateFr(limite)} pour les faire. `
+    + `Quand c'est fait, dis-le-moi ici : l'équipe vérifie chez le broker.`
+}
+
+/**
  * Le message au membre apres le clic de l'equipe : le depot note, la pause et
  * ses dates, le groupe garde, la reprise ou l'arret, ses lots. lienBot : le
  * lien du bot (lienBotAccueil, config.ts), pour l'email seulement.
@@ -228,7 +247,7 @@ export function modeleConfirmationPauseDepot(
         `Ton abonnement passe en pause : ta période payée va jusqu'au ${paye}, puis rien n'est prélevé jusqu'au ${reprise}. `
           + `Et tu gardes le groupe tout du long, grâce à ton accès par le broker : aucune coupure.`,
         `Le ${reprise}, ton abonnement reprend tout seul. Une semaine avant, je te fais signe, et si tu préfères arrêter là, il suffira de me le dire.`,
-        ...(o.limiteLots ? [paragrapheLotsAdmission(o.limiteLots)] : []),
+        ...(o.limiteLots ? [paragrapheLotsPauseDepot(o.limiteLots)] : []),
         phraseQuestion('telegram'),
       ],
       ...(o.limiteLots ? { boutonBot: { texte: BOUTON_LOTS.texte, data: BOUTON_LOTS.data } } : {}),
@@ -244,7 +263,7 @@ export function modeleConfirmationPauseDepot(
       `Le ${reprise}, votre abonnement reprend tout seul. Une semaine avant, on vous prévient, et si vous préférez arrêter là, il suffira de nous le dire.`,
       ...(o.limiteLots
         ? [`Un point important : tant que vos premiers lots ne sont pas tradés chez le broker, l'affiliation ne nous rémunère pas. `
-          + `Pas besoin de risquer votre compte : ${EXEMPLE_LOTS_PHRASE}, suffisent. Vous avez jusqu'au ${formaterDateFr(o.limiteLots)}. `
+          + `Ce qu'il faut : ${lotsPauseDepot()}. Vous avez jusqu'au ${formaterDateFr(o.limiteLots)}. `
           + `Quand c'est fait, dites-le au bot du Live Club (${lienBot}) ou répondez à cet email : l'équipe vérifie chez le broker.`]
         : []),
       phraseQuestion('email'),
@@ -290,12 +309,14 @@ export function modeleRelanceLotsPauseDepot(n: 1 | 2, limite: string, canal: Can
       paragraphes: n === 1
         ? [
           `Salut ! Petit rappel pour ta pause d'abonnement par le dépôt chez le broker : tes premiers lots ne sont pas encore tradés chez lui, et tant qu'ils ne le sont pas, l'affiliation ne nous paie pas.`,
-          `Le plus simple, en trois étapes :\n${ETAPES_LOTS.map((e, i) => `${i + 1}. ${e}`).join('\n')}`,
-          `C'est tout, et tu as jusqu'au ${date}. ${quand}`,
+          OFFRE_PAUSE_DEPOT.lots.trim()
+            ? `Ce qu'il faut : ${lotsPauseDepot()}.`
+            : `Le plus simple, en trois étapes :\n${ETAPES_LOTS.map((e, i) => `${i + 1}. ${e}`).join('\n')}`,
+          `Tu as jusqu'au ${date}. ${quand}`,
         ]
         : [
           `Salut ! Il te reste quelques jours pour trader tes premiers lots chez le broker : jusqu'au ${date}.`,
-          `Pour rappel, ${EXEMPLE_LOTS_PHRASE}, suffisent.`,
+          `Pour rappel : ${lotsPauseDepot()}.`,
           "Ta pause d'abonnement repose sur ce dépôt : si les lots ne sont pas faits à cette date, l'équipe revient vers toi pour voir la suite ensemble.",
           `Déjà fait ? Appuie sur « ${BOUTON_LOTS.texte} » ou écris-le-moi ici : l'équipe vérifie chez le broker.`,
         ],
@@ -309,7 +330,9 @@ export function modeleRelanceLotsPauseDepot(n: 1 | 2, limite: string, canal: Can
       paragraphes: [
         'Bonjour,',
         "Petit rappel pour votre pause d'abonnement par le dépôt chez le broker : vos premiers lots ne sont pas encore tradés chez lui, et tant qu'ils ne le sont pas, l'affiliation ne nous paie pas.",
-        `Le plus simple : ouvrez votre plateforme chez le broker, prenez une position de ${EXEMPLE_LOTS}, gardez-la ${TENUE_LOTS}, puis fermez-la.`,
+        OFFRE_PAUSE_DEPOT.lots.trim()
+          ? `Ce qu'il faut : ${lotsPauseDepot()}.`
+          : `Le plus simple : ouvrez votre plateforme chez le broker, prenez une position de ${EXEMPLE_LOTS}, gardez-la ${TENUE_LOTS}, puis fermez-la.`,
         `C'est tout, et vous avez jusqu'au ${date}. Quand c'est fait, ${auBot}`,
       ],
     }
@@ -317,7 +340,7 @@ export function modeleRelanceLotsPauseDepot(n: 1 | 2, limite: string, canal: Can
       sujet: 'Quelques jours pour vos premiers lots',
       paragraphes: [
         'Bonjour,',
-        `Il vous reste quelques jours pour trader vos premiers lots chez le broker : jusqu'au ${date}. Pour rappel, ${EXEMPLE_LOTS_PHRASE}, suffisent.`,
+        `Il vous reste quelques jours pour trader vos premiers lots chez le broker : jusqu'au ${date}. Pour rappel : ${lotsPauseDepot()}.`,
         "Votre pause d'abonnement repose sur ce dépôt : si les lots ne sont pas faits à cette date, l'équipe revient vers vous pour voir la suite ensemble.",
         `Déjà fait ? ${auBot.charAt(0).toUpperCase()}${auBot.slice(1)}`,
       ],
