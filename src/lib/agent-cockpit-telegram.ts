@@ -23,6 +23,7 @@ import { dernierePieceHistorique, phraseMainRendue, type PieceAgent } from '@/li
 import { lireDonneeRendreLaMain, referenceFil } from '@/lib/alerte-equipe-telegram-pur'
 import { lireBoutonCorrection } from '@/lib/liveclub/relais-pur'
 import { lireBoutonLots } from '@/lib/liveclub/lots-pur'
+import { lireBoutonProposition } from '@/lib/tab/repondre-pur'
 
 // Le TRAITEMENT du canal Telegram de l'agent cockpit (« Agent AOK »), sorti de
 // la route /api/cockpit/agent/telegram le 08/10 pour servir a deux portes :
@@ -322,6 +323,18 @@ export async function traiterClicAgentTelegram(cq: ClicAgentTelegram): Promise<v
   if (lots) {
     const { traiterBoutonLots } = await import('@/lib/liveclub/lots')
     await traiterBoutonLots(cq, chatId, telegramId, compte, lots)
+    return
+  }
+
+  // (01/11) « Envoyer » / « Annuler » sous une reponse a un membre PREPAREE
+  // par Tab ou Tache (API de Tab, POST /support/<fil>/repondre ;
+  // tab/repondre.ts). Apres le verrou 2 : seuls les comptes de l'equipe
+  // envoient. Le premier clic l'emporte. Import a la demande, comme les
+  // corrections.
+  const propositionTab = lireBoutonProposition(donnee)
+  if (propositionTab) {
+    const { traiterBoutonPropositionTab } = await import('@/lib/tab/repondre')
+    await traiterBoutonPropositionTab(cq, chatId, telegramId, compte, propositionTab)
     return
   }
 

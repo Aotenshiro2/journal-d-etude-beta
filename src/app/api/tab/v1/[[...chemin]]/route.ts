@@ -16,6 +16,7 @@ import { marquerNote } from '@/lib/securite/injection-pur'
 import { alerterBriceSecurite } from '@/lib/securite/alerte'
 import { lireImage as lireImageBelrive, listerImages as listerImagesBelrive, type Executeur } from '@/lib/mcp-gpt/requetes'
 import { urlSigneeImage } from '@/lib/mcp-gpt/stockage-images'
+import { listerPropositions, proposerReponseTab } from '@/lib/tab/repondre'
 
 /**
  * L'API DE TAB (20/10/2026) : /api/tab/v1/... , JSON, LECTURE SEULE.
@@ -39,6 +40,15 @@ import { urlSigneeImage } from '@/lib/mcp-gpt/stockage-images'
  * differences : l'aide (aide('tache')), les notes (sa propre lecture,
  * listerNotesTache et marquerLueParTache ; ses notes pour Claude ont l'auteur
  * tache) et l'origine des brouillons de /generer-post ('tache').
+ *
+ * REPONDRE A UN MEMBRE (01/11/2026, Brice : « ok pour la B ») : POST
+ * /support/<fil_id>/repondre { texte } PREPARE une reponse dans un fil du bot
+ * du Live Club. Rien ne part au membre : une carte « Envoyer / Annuler » va a
+ * Brice et a Melanie dans Agent AOK, et c'est leur clic qui envoie, par le
+ * chemin de l'onglet Support. GET /support/propositions[/<id>] dit ou en est
+ * chacune. Regles et controles : src/lib/tab/repondre-pur.ts ; serveur :
+ * src/lib/tab/repondre.ts. Ouvert aux cles 'tab' et 'tache' (les seules que
+ * verifierCle laisse passer).
  */
 
 export const maxDuration = 300
@@ -189,6 +199,20 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ chemin?: st
       return fin({ ok: false, ...enTete, erreur: 'Lecture des images impossible pour l\'instant.' }, 502, null, raison.slice(0, 300))
     }
   }
+  // (01/11) Les reponses preparees pour les membres (POST /support/<fil_id>/repondre) : ou en est chacune.
+  if (nom === 'support' && chemin.length > 1) {
+    if (chemin.length === 3 && chemin[2] === 'repondre') {
+      return fin({ ok: false, ...enTete, erreur: 'Préparer une réponse se demande en POST /support/<fil_id>/repondre { texte }.' }, 405, null)
+    }
+    if (chemin[1] !== 'propositions' || chemin.length > 3) {
+      return fin({ ok: false, ...enTete, erreur: `Route inconnue : ${route}. Les réponses préparées : /support/propositions ou /support/propositions/<id>.` }, 404, null, 'route inconnue')
+    }
+    const s = await listerPropositions({
+      cleId: verdict.cleId, id: chemin[2] ?? null, fil: url.searchParams.get('fil'), statut: url.searchParams.get('statut'),
+      limite: Number(url.searchParams.get('limite')) || 50,
+    })
+    return fin({ ok: s.corps.ok, ...enTete, ...s.corps }, s.status, s.lignes, s.erreur)
+  }
   if (nom === 'generer-post') {
     return fin({ ok: false, ...enTete, erreur: 'generer-post se demande en POST.' }, 405, null)
   }
@@ -299,7 +323,14 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ chemin?: s
       return fin({ ok: false, erreur: 'Écriture impossible pour l\'instant.' }, 502, null, raison)
     }
   }
-  if (route !== '/generer-post') return fin({ ok: false, erreur: `${route} : seules /generer-post, /notes et /notes/<id>/lu acceptent POST. Les lectures sont en GET.` }, 405, null)
+  // (01/11, Brice : « ok pour la B ») Preparer une reponse a un membre : RIEN ne part. Une carte
+  // « Envoyer / Annuler » va a Brice et a Melanie dans Agent AOK ; leur clic envoie (src/lib/tab/repondre.ts).
+  // Le journal garde la requete (cle, fil, texte coupe a 500 caracteres) comme toute ecriture de l'API.
+  if (chemin.length === 3 && chemin[0] === 'support' && chemin[2] === 'repondre') {
+    const s = await proposerReponseTab({ portee: verdict.portee, cleId: verdict.cleId, fil: chemin[1], corps })
+    return fin({ ...s.corps, ...(s.status >= 400 ? { aide: `${url.origin}/api/tab/v1/aide` } : {}) }, s.status, s.lignes, s.erreur)
+  }
+  if (route !== '/generer-post') return fin({ ok: false, erreur: `${route} : seules /generer-post, /notes, /notes/<id>/lu et /support/<fil_id>/repondre acceptent POST. Les lectures sont en GET.` }, 405, null)
 
   const demande = lireDemandeGeneration(corps)
   if (typeof demande === 'string') return fin({ ok: false, erreur: demande, aide: `${url.origin}/api/tab/v1/aide` }, 400, null, demande)

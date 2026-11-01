@@ -20,6 +20,9 @@
 
 import type { Prisma } from '@prisma/client'
 import { ficheEtIdsPourTab } from '@/lib/fiche-personne'
+import { referenceFil } from '@/lib/alerte-equipe-telegram-pur'
+import { STATUTS_FIL_EN_CLAIR, statutFil } from '@/lib/tab/repondre-pur'
+import { dernieresPropositions } from '@/lib/tab/repondre'
 import {
   centimes, couper, decalerJour, eurosExact, eurosTuile, joursDuMois, jourLisible, moisLisible, moisPrecedent,
   paginer, pourcentage, unMoisAvant, type Pagination, type Periode,
@@ -364,9 +367,15 @@ function lireFil(f: LigneFil, maintenant: number) {
   const attendHumain = tEscalade !== null && !(tHumain !== null && tHumain >= tEscalade)
   const dernier = msgs[msgs.length - 1]
   const role = (r: string) => (r === 'user' ? 'le membre' : r === 'human' ? 'l\'équipe' : r === 'assistant' ? 'l\'IA ou le bot' : 'le système')
+  // (01/11) Le statut du fil, pour retrouver le bon depuis une alerte et suivre une reponse preparee.
+  const statut = statutFil({ attendHumain, nonOuverte, tMembre, tHumain })
   return {
     fil: f.id.slice(0, 8),
+    // L'identifiant que prend POST /support/<fil_id>/repondre (01/11).
     fil_id: f.id,
+    reference: referenceFil(f.id) ?? `fil ${f.id.slice(0, 8)}`,
+    statut,
+    statut_en_clair: STATUTS_FIL_EN_CLAIR[statut],
     qui: f.email ?? f.nom_telegram ?? (f.pseudo ? `@${f.pseudo}` : f.telegram_id ? `Telegram ${f.telegram_id}` : 'compte inconnu'),
     email: f.email,
     telegram: f.pseudo ? `@${f.pseudo}` : null,
@@ -406,6 +415,10 @@ export async function support(c: Ctx): Promise<Sortie> {
   const nonOuvertes = tous.filter((f) => f.non_ouverte && !f.demande_un_humain)
   const periode = tous.filter((f) => f.mis_a_jour_le.slice(0, 10) >= p.du && f.mis_a_jour_le.slice(0, 10) <= p.au)
   const { page, pagination } = paginer(periode.slice(c.pag.decalage, c.pag.decalage + c.pag.limite + 1), c.pag, periode.length)
+  // (01/11) La derniere reponse preparee par Tab ou Tache pour chaque fil montre (aucune si la table manque).
+  const propositions = await dernieresPropositions(tx, [...new Set([...attente, ...nonOuvertes, ...page].map((f) => f.fil_id))])
+  const avecProposition = <T extends { fil_id: string }>(l: T[]) =>
+    l.map((f) => (propositions.has(f.fil_id) ? { ...f, derniere_reponse_preparee: propositions.get(f.fil_id) } : f))
   const demandes = await facultatif(notes, 'cockpit_demandes', () => q(tx, `
     select demande_id::text, ${H('cree_le')} as cree_le, auteur, texte, statut from public.cockpit_demandes
     where statut = 'nouvelle' order by cree_le desc limit 50`))
@@ -416,12 +429,15 @@ export async function support(c: Ctx): Promise<Sortie> {
     libelle: `Support ${p.libelle}`,
     sources: ['cockpit_support_threads (support IA du site et bot Live Club)', 'cockpit_support_ouvertures', 'cockpit_demandes', 'aok_support_demandes (page Mon espace > Support)'],
     donnees: {
-      en_attente_d_un_humain: { nombre: attente.length, regle: 'Le membre a demandé un humain et personne de l\'équipe n\'a répondu depuis.', fils: attente },
-      non_ouvertes: { nombre: nonOuvertes.length, regle: `Un message du membre de moins de ${FENETRE_NON_OUVERTES_JOURS} jours que personne de l'équipe n'a ouvert ni répondu depuis (même règle que la pastille de l'onglet Support).`, fils: nonOuvertes },
+      en_attente_d_un_humain: { nombre: attente.length, regle: 'Le membre a demandé un humain et personne de l\'équipe n\'a répondu depuis.', fils: avecProposition(attente) },
+      non_ouvertes: { nombre: nonOuvertes.length, regle: `Un message du membre de moins de ${FENETRE_NON_OUVERTES_JOURS} jours que personne de l'équipe n'a ouvert ni répondu depuis (même règle que la pastille de l'onglet Support).`, fils: avecProposition(nonOuvertes) },
       demandes_de_l_equipe_a_traiter: demandes,
       demandes_du_site_dans_la_periode: site,
-      conversations_actives_dans_la_periode: page,
-      ou_repondre: 'Dans le cockpit, onglet Support (cockpit.aoknowledge.com), ou à l\'Agent AOK sur Telegram (« réponds à X : ... »). Cette API ne répond pas aux membres.',
+      conversations_actives_dans_la_periode: avecProposition(page),
+      statuts_des_fils: STATUTS_FIL_EN_CLAIR,
+      ou_repondre: 'Brice et Mélanie répondent dans le cockpit (onglet Support) ou par Agent AOK (« réponds à X : ... »). '
+        + 'Toi, tu peux seulement PRÉPARER une réponse dans un fil du bot Live Club, sur leur demande explicite : POST /support/<fil_id>/repondre { texte }. '
+        + 'Rien ne part sans leur clic dans Agent AOK (voir repondre_a_un_membre dans /aide).',
     },
     lignes: attente.length + nonOuvertes.length + page.length,
     pagination,
