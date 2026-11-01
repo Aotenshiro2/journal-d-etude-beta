@@ -14,6 +14,7 @@
 // verdict rend la portee, la route s'en sert pour l'aide, les notes et
 // l'origine des brouillons.
 
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { prisma } from '@/lib/db'
 import { DEBIT_PAR_MINUTE, porteeApi, type PorteeApi } from '@/lib/tab/pur'
@@ -22,12 +23,39 @@ export type VerdictCle =
   | { ok: true; cleId: string; portee: PorteeApi; appelsMinute: number }
   | { ok: false; status: 401 | 429 | 503; erreur: string; cleId: string | null }
 
+/** Une ligne du journal d'acces, telle que la route l'ecrit (sans la date, posee par la base). */
+export type LigneJournal = {
+  cleId: string | null; route: string; parametres: Record<string, unknown>; statut: number
+  dureeMs: number; lignes: number | null; ip: string | null; erreur?: string | null
+}
+
+// LE CONNECTEUR MCP DE TACHE (01/11/2026, src/lib/mcp-tache/) : ses outils
+// appellent les handlers de CETTE API, dans le meme processus, pour que les
+// regles soient exactement celles de la cle de Tache. Le connecteur a deja
+// verifie SA cle (secret du chemin ou Bearer de Tache) et SA cadence ; il
+// ouvre ce contexte avec le verdict de portee 'tache' (jamais 'tab') :
+// verifierCle le rend tel quel, et journaliser garde la ligne au lieu de
+// l'ecrire (le connecteur ecrit la derniere, celle de la route, en mcp-cockpit/...
+// sous sa cle, et les autres telles quelles, apres). Le contexte ne vient
+// jamais d'une requete : seul le code serveur l'ouvre.
+type AppelMcpTache = { verdict: { ok: true; cleId: string; portee: 'tache'; appelsMinute: number }; journaux: LigneJournal[] }
+const appelMcpTache = new AsyncLocalStorage<AppelMcpTache>()
+
+/** Fait tourner f comme un appel de l'API avec la cle de Tache (verdict deja rendu), et rend les lignes de journal gardees, dans l'ordre. */
+export async function sousCleDeTache<T>(cleId: string, appelsMinute: number, f: () => Promise<T>): Promise<{ valeur: T; journaux: LigneJournal[] }> {
+  const etat: AppelMcpTache = { verdict: { ok: true, cleId, portee: 'tache', appelsMinute }, journaux: [] }
+  const valeur = await appelMcpTache.run(etat, f)
+  return { valeur, journaux: etat.journaux }
+}
+
 export function empreinteCle(cle: string): string {
   return createHash('sha256').update(cle, 'utf8').digest('hex')
 }
 
 export async function verifierCle(entete: string | null): Promise<VerdictCle> {
-  const m = /^Bearer\s+(\S{20,200})\s*$/i.exec(entete ?? '')
+  const mcp = appelMcpTache.getStore()
+  if (mcp) return mcp.verdict
+  const m =/^Bearer\s+(\S{20,200})\s*$/i.exec(entete ?? '')
   if (!m) return { ok: false, status: 401, erreur: 'Clé absente : en-tête Authorization: Bearer <clé>.', cleId: null }
   const recue = Buffer.from(empreinteCle(m[1]), 'hex')
   let cles: { cle_id: string; empreinte: string; portee: string; appels: number }[]
@@ -72,10 +100,9 @@ export function parametresJournal(url: URL, corps?: Record<string, unknown> | nu
 }
 
 /** Ecrit une ligne du journal d'acces. Ne jette jamais : un journal en panne ne casse pas la reponse. */
-export async function journaliser(l: {
-  cleId: string | null; route: string; parametres: Record<string, unknown>; statut: number
-  dureeMs: number; lignes: number | null; ip: string | null; erreur?: string | null
-}): Promise<void> {
+export async function journaliser(l: LigneJournal): Promise<void> {
+  const mcp = appelMcpTache.getStore()
+  if (mcp) { mcp.journaux.push(l); return }
   try {
     await prisma.$executeRaw`
       insert into public.cockpit_tab_acces (cle_id, route, parametres, statut, duree_ms, lignes, ip, erreur)

@@ -3,6 +3,33 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
+## CONNECTEUR MCP DU COCKPIT POUR TACHE (01/11/2026, commite NON pousse ; migration 20261101200000 ECRITE, NON appliquee)
+
+- Besoin (Brice, 01/11) : le concepteur de Tache ajoute un « connecteur MCP personnalise » ; il doit avoir EXACTEMENT les
+  droits de la cle API de Tache (portee tache = celle de Tab), pas un de plus.
+- Route `POST /api/mcp-cockpit/<secret>` (MCP HTTP sans etat, JSON, comme /api/mcp ; GET et DELETE : 405). Code :
+  `src/lib/mcp-tache/pur.ts` (protocole, 26 outils = une route de aide('tache').routes chacun, schemas fermes),
+  `serveur.ts` (cle, appel des handlers), route `src/app/api/mcp-cockpit/[secret]/route.ts`. Middleware : public.
+- Droits : chaque outil appelle le handler GET/POST de `src/app/api/tab/v1/[[...chemin]]/route.ts` dans le meme
+  processus, sous `sousCleDeTache` (src/lib/tab/acces.ts, AsyncLocalStorage) : verifierCle rend un verdict de portee
+  'tache' (jamais 'tab') sans requete, journaliser garde la ligne. Memes regles, controles anti-injection et limites
+  que l'API, aucune regle recopiee. La requete interne ne porte ni cle ni secret.
+- Cle : ligne DEDIEE de cockpit_tab_cles, portee tache_mcp, empreinte sha256 prefixee `mcp-cockpit-tache:` (ne passe
+  ni l'API ni ChatGPT), secret `tmcp_` + 43 car. Option : `Authorization: Bearer <cle API de Tache>` (portee tache
+  seulement, cle de Tab refusee), n'importe quel dernier segment. Cle coupee, absente, inconnue : 404 neutre.
+  Migration pas passee (contrainte de portee lue par pg_get_constraintdef) : 503.
+- Cadence : 60 appels d'outil par minute et par cle (lots compris), comptes dans cockpit_tab_acces. Journal : une
+  ligne par appel d'outil, route `mcp-cockpit/<outil>`, parametres de la route (parametresJournal) ; une ligne par
+  requete sans outil. Jamais le secret (masquerSecrets sur les erreurs ; Sentry masque /api/mcp-cockpit/<secret>).
+  En mode Bearer, les lignes vont a la cle API de Tache (meme compteur que l'API).
+- Cle a creer : `node scripts/creer-cle-tache-mcp.mjs [--essai]` (URL complete dans
+  credentials.local/tache-mcp.local.json, jamais affichee). Essai du 01/11 : migration pas passee, 0 cle.
+- Cockpit : bloc « Accès de Tache », sous-partie « Connecteur MCP » (etat, nombre d'appels, dernier appel, « Couper
+  la clé ») ; le bloc de ChatGPT ecarte la route mcp-cockpit.
+- Verifs : `node scripts/verifier-mcp-tache.mjs` (13 blocs, dont les VRAIS handlers de l'API sans base : aide de
+  Tache, refus pour = tache), -tab-repondre, -notes-tache, -mcp-gpt, -securite-bots, -images-belrive : ok ; tsc ok.
+- A FAIRE sur GO : migration 20261101200000, push du journal, deploiement du cockpit, puis la cle (script).
+
 ## PAUSE DE L'ABONNEMENT + ACCES PAR DEPOT BROKER, pour un abonne (01/11/2026, LOCAL, non commite ; AUCUNE migration)
 
 - Besoin de Brice et Mel (01/11) : un abonne fait un depot chez un broker partenaire = 6 mois de Live Club ; son
