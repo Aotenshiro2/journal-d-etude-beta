@@ -22,7 +22,8 @@ import {
 } from '@/lib/generation-pur'
 import { garderCapture, lireCapture } from '@/lib/generation-capture'
 
-export type OrigineGeneration = 'cockpit' | 'agent_telegram' | 'agent_cockpit' | 'tab'
+// tache (01/11/2026, migration 20261101030000) : POST /generer-post avec la cle de Tache, poste generation_tache.
+export type OrigineGeneration = 'cockpit' | 'agent_telegram' | 'agent_cockpit' | 'tab' | 'tache'
 
 export type ResultatGeneration =
   | {

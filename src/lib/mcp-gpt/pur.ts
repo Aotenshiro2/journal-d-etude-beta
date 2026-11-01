@@ -245,10 +245,11 @@ export function lireDestinataire(v: unknown): Destinataire | null {
   return null
 }
 
+// tache (01/11/2026) : Tache, l'autre assistant de Brice (auteur d'une note, ou destinataire d'une note de Tab).
 const NOM_INSTANCE: Record<string, string> = {
-  sora: 'Sora', umi: 'Yume', sekai: 'Sekai', toutes: 'Sora, Yume et Sekai', les_deux: 'Sora et Yume',
+  sora: 'Sora', umi: 'Yume', sekai: 'Sekai', toutes: 'Sora, Yume et Sekai', les_deux: 'Sora et Yume', tache: 'Tache',
 }
-const NOM_AUTEUR: Record<string, string> = { tab: 'Tab', claude: 'Claude', brice: 'Brice', gpt: 'ChatGPT' }
+const NOM_AUTEUR: Record<string, string> = { tab: 'Tab', claude: 'Claude', brice: 'Brice', gpt: 'ChatGPT', tache: 'Tache' }
 
 /** Qui ecrit a qui, en clair, pour ChatGPT. */
 export function deEtPour(n: Pick<NoteBelrive, 'sens' | 'auteur' | 'instance'>): { de: string; pour: string } {

@@ -9,6 +9,21 @@ export const LIMITE_DEFAUT = 50
 export const LIMITE_MAX = 500
 export const DEBIT_PAR_MINUTE = 60
 
+/**
+ * Les portees de cle qui ouvrent cette API (cockpit_tab_cles.portee). tache (01/11/2026,
+ * migration 20261101030000) : la cle a part de Tache, autre assistant de Brice, avec EXACTEMENT
+ * les memes routes que Tab (Brice : « tache doit avoir la meme portee que tab »). Ce qui change
+ * avec elle : l'aide, la lecture des notes (sa propre lecture, lue_par 'tache') et l'origine des
+ * brouillons du generateur ('tache'). gpt_belrive (le connecteur de ChatGPT) n'en fait pas partie.
+ */
+export const PORTEES_API = ['tab', 'tache'] as const
+export type PorteeApi = (typeof PORTEES_API)[number]
+
+/** La portee d'une cle si elle ouvre cette API, sinon null. */
+export function porteeApi(p: unknown): PorteeApi | null {
+  return typeof p === 'string' && (PORTEES_API as readonly string[]).includes(p) ? (p as PorteeApi) : null
+}
+
 const JOUR = /^\d{4}-\d{2}-\d{2}$/
 
 /** Le jour de Paris d'un instant, AAAA-MM-JJ. */

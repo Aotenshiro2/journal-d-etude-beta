@@ -75,7 +75,7 @@ export const AI_MODEL: Record<AiProduct, string> = {
  */
 export type PosteIA =
   | 'agent_cockpit' | 'agent_telegram'
-  | 'generation_ecran' | 'generation_agent_cockpit' | 'generation_agent_telegram' | 'generation_tab'
+  | 'generation_ecran' | 'generation_agent_cockpit' | 'generation_agent_telegram' | 'generation_tab' | 'generation_tache'
   | 'creation_assiste' | 'creation_genere' | 'creation_titre' | 'creation_phrase' | 'creation_idee' | 'creation_idees'
   | 'enquete'
   | 'mentorat_chat' | 'mentorat_plan'

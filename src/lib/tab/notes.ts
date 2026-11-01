@@ -14,12 +14,19 @@
 //   sa session par le script local notes_tab.py --nouvelles.
 // Un ping rate ne fait jamais echouer l'ecriture de la note : il est consigne
 // (ping_envoye_le, ping_erreur).
+// Tache (01/11/2026), l'autre assistant de Brice, n'a pas de ping : il lit ses
+// notes par GET /notes de sa cle (listerNotesTache) et les marque lues pour
+// lui seul (marquerLueParTache). Ses notes pour Claude previennent Brice comme
+// celles de Tab (prevenirBrice, auteur tache).
 
 import { Resend } from 'resend'
 import { prisma } from '@/lib/db'
 import { tgCockpit } from '@/lib/agent-cockpit-telegram'
 import { BASE } from '@/lib/tab/aide'
-import { emailPing, messageBrice, type Auteur, type NoteEntrante, type NotePerso, type Instance, type Sens, type StatutNote } from '@/lib/tab/notes-pur'
+import {
+  emailPing, lueParTache, messageBrice, notePourTache,
+  type Auteur, type FiltreNotes, type NoteEntrante, type NotePerso, type Instance, type Sens, type StatutNote,
+} from '@/lib/tab/notes-pur'
 
 export const BRICE_USER_ID = '0636a40b-13a4-4fe8-af11-d060e2810767'
 
@@ -73,6 +80,50 @@ export async function marquerLueParTab(noteId: string): Promise<NotePerso | null
   const deja = await prisma.$queryRawUnsafe<Ligne[]>(
     `select ${COLONNES} from public.cockpit_perso_notes where note_id = $1::uuid and sens = 'vers_tab'`, noteId)
   return deja[0] ? versNote(deja[0]) : null
+}
+
+// --- Tache (01/11/2026, migration 20261101030000_cockpit_notes_tache.sql) ---------
+
+export type NoteTache = NotePerso & { lue_par_toi: boolean }
+
+/** La note vue par Tache : lue_par_toi = Tache l'a marquee lue. */
+function pourTache(n: NotePerso): NoteTache {
+  return { ...n, lue_par_toi: lueParTache(n) }
+}
+
+/**
+ * Les notes de Tache : les notes vers_tab (Claude ou Brice ecrit aux assistants) et celles de Tab
+ * pour tache ou pour toutes. Le filtre suit SA lecture (filtreTache de notes-pur.ts) : nouvelle =
+ * pas encore lue par Tache, lue = lue par Tache, traitee = statut traitee.
+ */
+export async function listerNotesTache(filtre: FiltreNotes, limite: number): Promise<NoteTache[]> {
+  const lignes = await prisma.$queryRawUnsafe<Ligne[]>(
+    `select ${COLONNES} from public.cockpit_perso_notes
+      where (sens = 'vers_tab' or (sens = 'vers_claude' and auteur = 'tab' and instance in ('tache', 'toutes')))
+        and ($1 = 'toutes'
+             or ($1 = 'nouvelle' and not ('tache' = any(lue_par)))
+             or ($1 = 'lue' and 'tache' = any(lue_par))
+             or ($1 = 'traitee' and statut = 'traitee'))
+      order by cree_le desc limit $2`,
+    filtre, limite,
+  )
+  // Seconde garde : la meme regle en TypeScript (notePourTache).
+  return lignes.map(versNote).filter(notePourTache).map(pourTache)
+}
+
+/**
+ * Tache marque lue une note : 'tache' entre dans lue_par par cockpit_perso_note_lue, qui decide
+ * aussi du statut (une note vers_tab garde le statut de Tab). Rend la note, ou null si elle
+ * n'existe pas ou n'est pas pour Tache.
+ */
+export async function marquerLueParTache(noteId: string): Promise<NoteTache | null> {
+  const r = await prisma.$queryRawUnsafe<{ statut: string | null }[]>(
+    `select public.cockpit_perso_note_lue($1::uuid, 'tache') as statut`, noteId)
+  if (!r[0]?.statut) return null
+  const lignes = await prisma.$queryRawUnsafe<Ligne[]>(
+    `select ${COLONNES} from public.cockpit_perso_notes where note_id = $1::uuid`, noteId)
+  const n = lignes[0] ? versNote(lignes[0]) : null
+  return n && notePourTache(n) ? pourTache(n) : null
 }
 
 export function pingActif(): boolean {

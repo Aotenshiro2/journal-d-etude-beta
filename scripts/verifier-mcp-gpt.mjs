@@ -468,7 +468,8 @@ await cas('perimetre du code : aucun SQL hors requetes.ts, route publique, filtr
   assert.match(route, /export async function DELETE\(\)/)
   assert.match(route, /Allow: 'POST'/)
   assert.match(lire('../middleware.ts'), /'\/api\/mcp\/'/)
-  assert.match(lire('../src/lib/tab/acces.ts'), /c\.coupee_le is null and c\.portee = 'tab'/)
+  // (01/11/2026) La cle de Tache (portee tache) ouvre aussi l'API de Tab ; gpt_belrive jamais.
+  assert.match(lire('../src/lib/tab/acces.ts'), /c\.coupee_le is null and c\.portee in \('tab', 'tache'\)/)
   const agent = lire('../src/lib/agent-cockpit.ts')
   assert.match(agent, /TABLES_PERSO = \/\\bcockpit_perso_\\w\*\/i/, 'l Agent AOK doit refuser cockpit_perso_*, dont les documents')
 })

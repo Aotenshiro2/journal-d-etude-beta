@@ -9,13 +9,17 @@
 // Seules les cles de portee 'tab' ouvrent cette API (23/10/2026) : les cles
 // 'gpt_belrive' sont celles du connecteur MCP de ChatGPT (src/lib/mcp-gpt/),
 // avec une empreinte a part (empreinteCleGpt) qui ne passerait pas ici non plus.
+// Depuis le 01/11/2026, aussi les cles 'tache' (Tache, autre assistant de
+// Brice), avec les memes routes (PORTEES_API de src/lib/tab/pur.ts) : le
+// verdict rend la portee, la route s'en sert pour l'aide, les notes et
+// l'origine des brouillons.
 
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { prisma } from '@/lib/db'
-import { DEBIT_PAR_MINUTE } from '@/lib/tab/pur'
+import { DEBIT_PAR_MINUTE, porteeApi, type PorteeApi } from '@/lib/tab/pur'
 
 export type VerdictCle =
-  | { ok: true; cleId: string; appelsMinute: number }
+  | { ok: true; cleId: string; portee: PorteeApi; appelsMinute: number }
   | { ok: false; status: 401 | 429 | 503; erreur: string; cleId: string | null }
 
 export function empreinteCle(cle: string): string {
@@ -26,29 +30,31 @@ export async function verifierCle(entete: string | null): Promise<VerdictCle> {
   const m = /^Bearer\s+(\S{20,200})\s*$/i.exec(entete ?? '')
   if (!m) return { ok: false, status: 401, erreur: 'Clé absente : en-tête Authorization: Bearer <clé>.', cleId: null }
   const recue = Buffer.from(empreinteCle(m[1]), 'hex')
-  let cles: { cle_id: string; empreinte: string; appels: number }[]
+  let cles: { cle_id: string; empreinte: string; portee: string; appels: number }[]
   try {
-    cles = await prisma.$queryRaw<{ cle_id: string; empreinte: string; appels: number }[]>`
-      select c.cle_id::text as cle_id, c.empreinte,
+    cles = await prisma.$queryRaw<{ cle_id: string; empreinte: string; portee: string; appels: number }[]>`
+      select c.cle_id::text as cle_id, c.empreinte, c.portee,
         (select count(*)::int from public.cockpit_tab_acces a
           where a.cle_id = c.cle_id and a.appele_le > now() - interval '1 minute') as appels
       from public.cockpit_tab_cles c
-      where c.coupee_le is null and c.portee = 'tab'`
+      where c.coupee_le is null and c.portee in ('tab', 'tache')`
   } catch (err) {
     console.error('[tab] cles illisibles', err instanceof Error ? err.message.split('\n').pop() : err)
     return { ok: false, status: 503, erreur: 'Base indisponible, réessaie dans un instant.', cleId: null }
   }
   // Temps constant : chaque cle active est comparee, sans sortie anticipee.
-  let trouvee: { cle_id: string; appels: number } | null = null
+  let trouvee: { cle_id: string; portee: string; appels: number } | null = null
   for (const c of cles) {
     const attendue = Buffer.from(c.empreinte, 'hex')
     if (attendue.length === recue.length && timingSafeEqual(attendue, recue) && !trouvee) trouvee = c
   }
-  if (!trouvee) return { ok: false, status: 401, erreur: 'Clé inconnue ou coupée.', cleId: null }
+  // Seconde garde : la portee relue cote serveur (jamais gpt_belrive, meme si le filtre SQL changeait).
+  const portee = trouvee ? porteeApi(trouvee.portee) : null
+  if (!trouvee || !portee) return { ok: false, status: 401, erreur: 'Clé inconnue ou coupée.', cleId: null }
   if (trouvee.appels >= DEBIT_PAR_MINUTE) {
     return { ok: false, status: 429, erreur: `Trop d'appels : ${DEBIT_PAR_MINUTE} par minute au plus. Réessaie dans une minute.`, cleId: trouvee.cle_id }
   }
-  return { ok: true, cleId: trouvee.cle_id, appelsMinute: trouvee.appels }
+  return { ok: true, cleId: trouvee.cle_id, portee, appelsMinute: trouvee.appels }
 }
 
 /** Les parametres a journaliser : la requete, sans rien de secret (aucune cle n'y passe jamais). */
