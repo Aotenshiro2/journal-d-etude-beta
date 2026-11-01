@@ -125,10 +125,14 @@ function monde(o = {}) {
 // ---------------------------------------------------------------------------
 
 await bloc("conditions vides : l'offre en attente de Mel, rien d'invente, l'equipe prevenue", () => {
-  // La configuration nommee, vide tant que Mel n'a pas donne les conditions.
-  assert.deepEqual({ ...CFG.OFFRE_PAUSE_DEPOT }, { partenaire: '', lien: '', depotMinimum: '', lots: '' })
-  assert.equal(PD.conditionsCompletes(), false)
-  const { texte, equipe } = PD.texteOffrePauseDepot()
+  // La configuration nommee, remplie le 01/11 (RaiseFx) : le bot donne les conditions.
+  assert.equal(PD.conditionsCompletes(), true)
+  assert.equal(PD.texteOffrePauseDepot().equipe, false)
+  texteMembre(PD.texteOffrePauseDepot().texte, 'offre de la configuration')
+  // Conditions vides : rien d'invente, l'equipe prevenue.
+  const vide = { partenaire: '', lien: '', depotMinimum: '', lots: '' }
+  assert.equal(PD.conditionsCompletes(vide), false)
+  const { texte, equipe } = PD.texteOffrePauseDepot(vide)
   assert.equal(equipe, true)
   assert.match(texte, /^Oui, c'est possible ! En faisant un dépôt chez notre broker partenaire, tu as 6 mois de Live Club offerts\./)
   assert.match(texte, /ton abonnement est en pause : rien n'est prélevé, et tu restes dans le groupe, sans coupure/)
@@ -150,7 +154,7 @@ await bloc("conditions vides : l'offre en attente de Mel, rien d'invente, l'equi
   texteMembre(ok.texte, 'offre avec conditions')
   // La reponse du serveur au membre, selon son etat relu.
   const r = (etat, etape) => PD.reponseMembrePauseDepot(etat, etape)
-  assert.deepEqual(r({ genre: 'abonne' }, 'renseignement'), { texte, equipe: true, regle: 'pause_depot_demande' })
+  assert.deepEqual(r({ genre: 'abonne' }, 'renseignement'), { ...PD.texteOffrePauseDepot(), regle: 'pause_depot_demande' })
   assert.deepEqual(r({ genre: 'abonne' }, 'depot_fait'), { texte: PD.TEXTE_DEPOT_DECLARE_PAUSE, equipe: true, regle: 'pause_depot_declare' })
   assert.equal(r({ genre: 'pas_abonne' }, 'renseignement').equipe, true)
   assert.deepEqual(r({ genre: 'panne' }, 'depot_fait'), { texte: PD.TEXTE_PANNE_PAUSE_DEPOT, equipe: false, regle: null })
