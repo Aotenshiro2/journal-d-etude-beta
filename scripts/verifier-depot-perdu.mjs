@@ -59,7 +59,8 @@ bloc('le droit : un acces ferme n ouvre plus le groupe, le non porte depotPerdu'
   const droits = lire('src/lib/liveclub/droits.ts')
   assert.match(droits, /const fermes = lignes\.length \? await depotsPerdusDesAcces\(lignes\.map\(l => l\.acces_id\)\)/)
   assert.match(droits, /if \(ferme\) \{\n\s+depotPerdu \?\?= ferme\n\s+continue\n\s+\}/)
-  assert.ok(droits.indexOf('if (ferme) {') < droits.indexOf("if (etat?.etat === 'en_retard')"), 'le depot perdu est lu avant les lots')
+  // (01/11) La condition des lots porte aussi la pause par depot broker (scripts/verifier-pause-depot.mjs).
+  assert.ok(droits.indexOf('if (ferme) {') < droits.indexOf("if (etat?.etat === 'en_retard' && !etat.pauseDepot)"), 'le depot perdu est lu avant les lots')
   assert.match(droits, /\.\.\.\(depotPerdu \? \{ depotPerdu \} : \{\}\)/)
 })
 

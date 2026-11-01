@@ -177,7 +177,15 @@ export function lotsEnRetard(s: SuiviLots, aujourdhui: string): boolean {
  * le delai) ou 'en_retard' (en pause), la date a dire, et si une declaration
  * attend l'equipe.
  */
-export type EtatLots = { etat: 'a_faire' | 'en_retard'; limite: string; declare: boolean }
+export type EtatLots = {
+  etat: 'a_faire' | 'en_retard'; limite: string; declare: boolean
+  /**
+   * (01/11) L'acces vient de la « pause de l'abonnement + acces par depot
+   * broker » (pause-depot-pur.ts) : son abonnement est en pause, et des lots
+   * en retard ne coupent PAS son acces (droits.ts) ; l'equipe est prevenue.
+   */
+  pauseDepot?: boolean
+}
 
 export function etatLots(s: SuiviLots, aujourdhui: string): EtatLots {
   return {

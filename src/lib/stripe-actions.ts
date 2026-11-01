@@ -42,6 +42,7 @@ import {
 import { lireParamsEffacement, NOMS_NIVEAUX } from '@/lib/effacement-pur'
 import { lireParamsReponseMembre } from '@/lib/reponse-membre-pur'
 import { lireParamsAdresseContact, paramsPourLogContact, resumeAdresseContact } from '@/lib/liveclub/adresse-contact-pur'
+import { lireParamsPauseDepot, paramsPourLogPauseDepot, resumePauseDepot } from '@/lib/liveclub/pause-depot-pur'
 import {
   lireParamsAnnulation, lireAbonnementStripe, produitsDeAbonnement, choisirAbonnement, refusAnnulation,
   avertissementAnnulation, paramsDepuisAbonnement, carteAnnulation, requeteAnnulation, phraseAnnulationFaite,
@@ -160,6 +161,10 @@ export type ActionAgent = {
     // toucher a l'adresse de l'acces (celle du broker). Compte 'cockpit'.
     // liveclub/adresse-contact.ts et adresse-contact-pur.ts.
     | 'adresse_contact'
+    // (01/11) Le depot broker d'un ABONNE : pause de son abonnement et acces
+    // broker en une fois. Compte 'cockpit' (la base, plus la pause chez Stripe
+    // par pauser, stripe.ts). liveclub/pause-depot.ts et pause-depot-pur.ts.
+    | 'pause_depot'
     // Acces payant a un tarif particulier (13/10) : lien de paiement d'un
     // produit, et marquage d'un produit existant comme produit Live Club.
     | 'lien_paiement' | 'marquer_live_club'
@@ -195,6 +200,8 @@ export function paramsPourLog(a: ActionAgent): Record<string, unknown> {
   if (a.type === 'acces_broker') return { emails: ((a.params.emails as string[]) ?? []).length }
   // (31/10) Adresse de contact : ni l'adresse de l'acces ni la nouvelle.
   if (a.type === 'adresse_contact') return paramsPourLogContact(a.params)
+  // (01/11) Pause par depot broker : ni email, ni nom, ni note.
+  if (a.type === 'pause_depot') return paramsPourLogPauseDepot(a.params)
   if (a.type === 'exemption') {
     return { telegram_id: a.params.telegram_id, motif: a.params.motif, jusquau: a.params.jusquau ?? null }
   }
@@ -671,6 +678,16 @@ export function validerAction(brut: unknown): ActionAgent | string {
     return { type: 'adresse_contact', compte: 'cockpit', params: { ...lu } }
   }
 
+  // (01/11) Le depot broker d'un abonne : pause de son abonnement + acces
+  // broker. abonnement_id, les dates et telegram_id ne sont poses que par le
+  // controle avant la carte, qui les ecrase toujours ; ils sont exiges et
+  // relus (Stripe, base) au clic.
+  if (a.type === 'pause_depot') {
+    const lu = lireParamsPauseDepot(p, { aujourdhui: jourParis(new Date()) })
+    if (typeof lu === 'string') return lu
+    return { type: 'pause_depot', compte: 'cockpit', params: { ...lu } }
+  }
+
   // Les actions du groupe Telegram n'ont pas de compte Stripe.
   if (a.type === 'retirer_telegram' || a.type === 'reintegrer_telegram') {
     const telegramId = lireTelegramId(p.telegram_id)
@@ -879,6 +896,8 @@ export function resumeAction(a: ActionAgent): string {
   }
   // (31/10) Adresse de contact : la carte detaillee vient du controle (carteAdresseContact).
   if (a.type === 'adresse_contact') return resumeAdresseContact(p)
+  // (01/11) Pause par depot broker : la carte detaillee vient du controle (carteLonguePauseDepot).
+  if (a.type === 'pause_depot') return resumePauseDepot(p)
   if (a.type === 'code_promo') {
     const reduc = p.pourcentage != null
       ? `${p.pourcentage} %`
@@ -1307,6 +1326,13 @@ export async function executerAction(a: ActionAgent, acteur = 'agent'): Promise<
   if (a.type === 'adresse_contact') {
     const { executerAdresseContact } = await import('@/lib/liveclub/adresse-contact')
     return executerAdresseContact(a, acteur)
+  }
+
+  // ── Depot broker d'un abonne : pause + acces (01/11) ──────────────────────
+  // Import dynamique : pause-depot.ts importe ce fichier (RefusAction).
+  if (a.type === 'pause_depot') {
+    const { executerPauseDepot } = await import('@/lib/liveclub/pause-depot')
+    return executerPauseDepot(a, acteur)
   }
 
   // ── Groupe Telegram ───────────────────────────────────────────────────────

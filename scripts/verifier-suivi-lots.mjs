@@ -354,7 +354,8 @@ bloc('Agent AOK : ton de Mel, euros, commission de CE depot, note « a confirmer
 bloc('cablage : droit, bot, passage, clic de l equipe, prudence (lecture des sources)', () => {
   const droits = lire('src/lib/liveclub/droits.ts')
   assert.match(droits, /const lots = lignes\.length \? await lotsDesAcces\(/)
-  assert.match(droits, /if \(etat\?\.etat === 'en_retard'\) \{\n\s+lotsEnPause \?\?= etat\n\s+continue/)
+  // (01/11) Sauf l'acces d'une pause par depot broker (scripts/verifier-pause-depot.mjs).
+  assert.match(droits, /if \(etat\?\.etat === 'en_retard' && !etat\.pauseDepot\) \{\n\s+lotsEnPause \?\?= etat\n\s+continue/)
   assert.match(droits, /\.\.\.\(lotsEnPause \? \{ lots: lotsEnPause \} : \{\}\)/)
   const lecture = lire('src/lib/liveclub/lots-lecture.ts')
   assert.match(lecture, /NE JETTE JAMAIS/)
@@ -383,7 +384,8 @@ bloc('cablage : droit, bot, passage, clic de l equipe, prudence (lecture des sou
   assert.match(lots, /type: 'marquer_commission', compte: 'cockpit',\n\s+params: \{ commission_id: d\.commissionId, etat: 'lots_faits', le: d\.lotsLe \}/)
   assert.match(lots, /executerActionRepartition\(action, `agent:\$\{compte\.user_id\}`\)/)
   const agent = lire('src/lib/liveclub/agent-membre.ts')
-  assert.match(agent, /bloc\.name === NOM_OUTIL_PROPOSER_CORRECTION_PSEUDO \|\| bloc\.name === NOM_OUTIL_LOTS\)\) \{/)
+  // (01/11) La pause par depot broker est refusee de meme sous prudence (scripts/verifier-pause-depot.mjs).
+  assert.match(agent, /bloc\.name === NOM_OUTIL_PROPOSER_CORRECTION_PSEUDO \|\| bloc\.name === NOM_OUTIL_LOTS\n\s+\|\| bloc\.name === NOM_OUTIL_MEMBRE_PAUSE_DEPOT\)\) \{/)
   assert.match(agent, /if \(!lots\) \{\n\s+resultats\.push\(\{ type: 'tool_result', tool_use_id: bloc\.id, content: JSON\.stringify\(\{ erreur: 'Outil inconnu\.' \}\), is_error: true \}\)/)
   const config = lire('src/lib/liveclub/config.ts')
   assert.match(config, /return process\.env\.LIVECLUB_SUIVI_LOTS\?\.trim\(\) !== '0'/)

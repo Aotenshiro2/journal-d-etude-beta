@@ -30,6 +30,12 @@ export type LigneSuiviLots = {
   suivi: SuiviLots
   /** La declaration en cours (geste_id), ou null. */
   declarationId: number | null
+  /**
+   * (01/11) L'acces vient de la « pause de l'abonnement + acces par depot
+   * broker » (marqueur du journal, pause-depot-pur.ts) : relances au texte de
+   * ce parcours, et des lots en retard ne le sortent pas du groupe.
+   */
+  pauseDepot: boolean
 }
 
 type LigneSql = {
@@ -37,6 +43,7 @@ type LigneSql = {
   commission_id: string; depot_le: string; montant_base: number | null; commission_attendue: number
   client: string | null; partenaire: string
   entree_le: Date | null; relance2_le: Date | null; declaration_id: bigint | null
+  pause_depot: boolean | null
 }
 
 /**
@@ -61,7 +68,10 @@ async function lire(filtre: Prisma.Sql): Promise<LigneSuiviLots[]> {
                and not exists (
                  select 1 from public.cockpit_liveclub_gestes e
                  where e.geste = 'acces_broker' and e.regle in ('lots_confirmes', 'lots_pas_vus') and e.resultat = 'fait'
-                   and e.details->>'declaration' = d.geste_id::text)) as declaration_id
+                   and e.details->>'declaration' = d.geste_id::text)) as declaration_id,
+           exists (select 1 from public.cockpit_liveclub_gestes pd
+             where pd.geste = 'acces_broker' and pd.regle = 'pause_depot' and pd.resultat = 'fait'
+               and pd.details->>'acces_id' = a.acces_id::text) as pause_depot
     from public.cockpit_liveclub_acces a
     join lateral (
       select c1.commission_id, c1.partenaire_id, c1.le, c1.montant_base, c1.commission_attendue, c1.client
@@ -97,6 +107,7 @@ async function lire(filtre: Prisma.Sql): Promise<LigneSuiviLots[]> {
       declarationEnCours: l.declaration_id !== null,
     },
     declarationId: l.declaration_id === null ? null : Number(l.declaration_id),
+    pauseDepot: l.pause_depot === true,
   }))
 }
 
@@ -131,7 +142,9 @@ export async function lotsDesAcces(accesIds: readonly string[], maintenant: Date
     const lignes = await lire(Prisma.sql`a.acces_id::text = any(${[...accesIds]}::text[])`)
     const aujourdhui = jourParis(maintenant.toISOString())
     for (const l of lignes) {
-      if (!etats.has(l.accesId)) etats.set(l.accesId, { ...etatLots(l.suivi, aujourdhui), commissionId: l.commissionId })
+      if (!etats.has(l.accesId)) {
+        etats.set(l.accesId, { ...etatLots(l.suivi, aujourdhui), commissionId: l.commissionId, ...(l.pauseDepot ? { pauseDepot: true } : {}) })
+      }
     }
   } catch (err) {
     console.warn(`[liveclub/lots] suivi des lots illisible (droit garde) : ${relationAbsente(err) ? 'table absente' : messageErreur(err)}`)

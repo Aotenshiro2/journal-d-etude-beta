@@ -460,10 +460,15 @@ export async function resumeDuMatin(o: { maintenant?: Date; apercu?: boolean } =
       }
     }
 
-    // Acces broker, exemptions, tarifs reserves.
+    // Acces broker, exemptions, tarifs reserves. (01/11) Sans l'acces d'une
+    // pause par depot broker : sa ligne est dans « Pauses et reprises ».
     const acces = await facultatif('acces', erreurs, () => prisma.$queryRaw<{ email: string; jusquau: Date; telegram_id: bigint | null; pose_le: Date }[]>`
-      select lower(email) as email, jusquau, telegram_id, pose_le from public.cockpit_liveclub_acces
-      where pose_le > ${depuis} and pose_le <= ${jusqua} and retire_le is null`)
+      select lower(a.email) as email, a.jusquau, a.telegram_id, a.pose_le from public.cockpit_liveclub_acces a
+      where a.pose_le > ${depuis} and a.pose_le <= ${jusqua} and a.retire_le is null
+        and not exists (
+          select 1 from public.cockpit_liveclub_gestes g
+          where g.geste = 'acces_broker' and g.regle = 'pause_depot' and g.resultat = 'fait'
+            and g.details->>'acces_id' = a.acces_id::text)`)
     for (const a of acces) {
       ajouter({ rubrique: 'acces', qui: `e${a.email}`, quand: a.pose_le.toISOString(), detail: detailAccesBroker(a.jusquau.toISOString().slice(0, 10)) },
         { email: a.email, telegramId: a.telegram_id === null ? null : Number(a.telegram_id) })

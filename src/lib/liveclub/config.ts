@@ -126,6 +126,25 @@ export const PLAFOND_MESSAGES_IA_JOUR = 30
 export const MOIS_ACCES_BROKER = 6
 
 /**
+ * (01/11) LES CONDITIONS DE L'OFFRE « pause de l'abonnement + acces par depot
+ * broker » (pause-depot-pur.ts), telles que le bot les donne a un abonne qui
+ * la demande. EN ATTENTE DE MEL : vides tant qu'elle ne les a pas donnees, et
+ * tant qu'une seule manque, le bot ne donne AUCUNE condition (rien d'invente) :
+ * il dit que l'equipe les lui envoie, et l'equipe est prevenue (alerte « un
+ * membre demande un humain »). A remplir telles qu'elles doivent etre dites :
+ * - partenaire : le nom du broker (ex. « RaiseFx ») ;
+ * - lien : le lien d'affiliation, en entier (https://...) ;
+ * - depotMinimum : le depot minimum, en clair (ex. « 500 EUR ») ;
+ * - lots : les lots a trader, en clair (ex. « 2 lots sur le NAS »).
+ */
+export const OFFRE_PAUSE_DEPOT: Readonly<{ partenaire: string; lien: string; depotMinimum: string; lots: string }> = {
+  partenaire: '',
+  lien: '',
+  depotMinimum: '',
+  lots: '',
+}
+
+/**
  * `produits` : la liste lue (lireProduitsLiveClub, produits.ts). Sans elle,
  * seuls les deux produits de base sont reconnus.
  */

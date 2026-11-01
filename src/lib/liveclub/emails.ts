@@ -26,6 +26,7 @@ import {
 import {
   BOUTON_EQUIPE_DEPOT, BOUTON_LOTS, EXEMPLE_LOTS, TENUE_LOTS, texteFermetureDepot, texteRelanceLots1, texteRelanceLots2, texteSuspensionLots,
 } from './lots-pur'
+import { modeleConfirmationPauseDepot, modeleRappelPauseDepot, modeleRelanceLotsPauseDepot } from './pause-depot-pur'
 
 export type ResultatEmail = { ok: true; id: string | null } | { ok: false; erreur: string }
 
@@ -427,8 +428,13 @@ export function modeleFinFenetre(factureAnnulee: boolean, canal: Canal = 'telegr
 
 const EXEMPLE_LOTS_PHRASE = `${EXEMPLE_LOTS}, avec une position tenue ${TENUE_LOTS}`
 
-/** Relance 1 (pas-a-pas) ou 2 (quelques jours avant la fin du delai). limite = 'YYYY-MM-DD'. */
-export function modeleRelanceLots(n: 1 | 2, limite: string, canal: Canal = 'telegram'): ModeleMessage {
+/**
+ * Relance 1 (pas-a-pas) ou 2 (quelques jours avant la fin du delai). limite = 'YYYY-MM-DD'.
+ * (01/11) pauseDepot : l'acces d'une « pause de l'abonnement + acces par depot
+ * broker » (pause-depot-pur.ts) : la suite n'est pas une sortie du groupe.
+ */
+export function modeleRelanceLots(n: 1 | 2, limite: string, canal: Canal = 'telegram', pauseDepot = false): ModeleMessage {
+  if (pauseDepot) return modeleRelanceLotsPauseDepot(n, limite, canal, lienBotAccueil())
   if (canal === 'telegram') {
     return {
       sujet: n === 1 ? 'Tes premiers lots chez le broker' : 'Quelques jours pour tes premiers lots',
@@ -479,8 +485,34 @@ export function modeleSuspensionLots(canal: Canal = 'telegram'): ModeleMessage {
   }
 }
 
-export function emailRelanceLots(email: string, n: 1 | 2, limite: string): Promise<ResultatEmail> {
-  return envoyerModele(email, modeleRelanceLots(n, limite, 'email'))
+export function emailRelanceLots(email: string, n: 1 | 2, limite: string, pauseDepot = false): Promise<ResultatEmail> {
+  return envoyerModele(email, modeleRelanceLots(n, limite, 'email', pauseDepot))
+}
+
+// ---------------------------------------------------------------------------
+// (01/11) La « pause de l'abonnement + acces par depot broker »
+// (pause-depot-pur.ts) : le message apres le clic de l'equipe, et le rappel
+// J-7 de la reprise (il reste dans le groupe, arreter c'est le dire).
+// ---------------------------------------------------------------------------
+
+export function modeleMessagePauseDepot(
+  o: { partenaire: string; payeJusquau: string; repriseLe: string; limiteLots: string | null }, canal: Canal = 'telegram',
+): ModeleMessage {
+  return modeleConfirmationPauseDepot(o, canal, lienBotAccueil())
+}
+
+export function emailMessagePauseDepot(
+  email: string, o: { partenaire: string; payeJusquau: string; repriseLe: string; limiteLots: string | null },
+): Promise<ResultatEmail> {
+  return envoyerModele(email, modeleMessagePauseDepot(o, 'email'))
+}
+
+export function modeleRappelRepriseDepot(repriseLe: string, canal: Canal = 'telegram'): ModeleMessage {
+  return modeleRappelPauseDepot(repriseLe, canal)
+}
+
+export function emailRappelRepriseDepot(email: string, repriseLe: string): Promise<ResultatEmail> {
+  return envoyerModele(email, modeleRappelPauseDepot(repriseLe, 'email'))
 }
 
 export function emailSuspensionLots(email: string): Promise<ResultatEmail> {

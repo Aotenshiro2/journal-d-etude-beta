@@ -53,9 +53,18 @@
 //   bonnes reponses gagne, tirage au sort en cas d'egalite). Le lot n'est
 //   ecrit nulle part (code, base de connaissances) : il n'est pas cite.
 
+//
+// Brice et Mel, 01/11 : la PAUSE DE L'ABONNEMENT + ACCES PAR DEPOT BROKER
+// (pause-depot-pur.ts). Un abonne qui la demande, ou qui dit que son depot est
+// fait : l'outil pause_par_depot, sans texte du modele (le serveur repond,
+// avec les conditions d'OFFRE_PAUSE_DEPOT quand elles sont connues, et
+// previent l'equipe quand il le faut). Une pause de ce parcours en cours :
+// consignePauseDepotMembre, en dernier bloc system (il GARDE le groupe).
+
 import type Anthropic from '@anthropic-ai/sdk'
 import { ARGUMENT_TARIF_PAUSE, SUPPORT, URL_FORMATION_LIVECLUB, URL_PORTAIL_CARTE, texteAbonnement } from './config'
 import { EXEMPLE_LOTS, TENUE_LOTS, dateLots, type EtatLots } from './lots-pur'
+import { NOM_OUTIL_MEMBRE_PAUSE_DEPOT, consignePauseDepotMembre } from './pause-depot-pur'
 import { TEXTE_PROMOS, consignesPolitique } from '../politique-information'
 import { OUTIL_CONNAISSANCES, resultatConnaissances as resultatCommun } from '../connaissances-outil'
 import { OUTIL_TROUVER_COURS } from '../trouver-cours-pur'
@@ -83,6 +92,7 @@ Ce que tu sais faire, avec tes outils :
 - proposer_pause : proposer une pause de 1 à 6 mois. La pause démarre toujours à la fin de la période déjà payée, jamais avant, et l'abonnement reprend tout seul ensuite. Pendant la pause, le membre sort du groupe, et il y revient dès que le paiement repart. S'il ne dit pas combien de mois, demande-lui.
 - proposer_arret : proposer d'arrêter l'abonnement. Il garde le groupe jusqu'à la fin de la période payée, puis plus rien n'est prélevé. Voir « Pause ou arrêt » plus bas.
 - proposer_annuler_arret : proposer d'annuler un arrêt déjà programmé, tant que la période court.
+- pause_par_depot : un abonné qui veut passer par un dépôt chez notre broker partenaire pour avoir des mois de Live Club offerts, son abonnement en pause pendant ce temps et le groupe gardé (« je veux passer par le dépôt broker », « mettre en pause et garder l'accès », « le dépôt chez le broker, ça marche comment ? ») : etape renseignement. Il te dit que son dépôt est fait : etape depot_fait. Appelle-le sans écrire de texte : c'est le serveur qui lui répond, avec les conditions quand elles sont connues, et qui prévient l'équipe quand il le faut. Tu ne donnes jamais toi-même de broker, de lien, de dépôt minimum ni de lots pour cette offre, et ce n'est pas proposer_pause.
 - connaissances_produits : lire les fiches des produits et services AOKnowledge, écrites et vérifiées par l'équipe : le Carnet du Trader, le Journal d'Études, Pilotage, les masterclass, l'académie, le 10% Club, Mon espace, la connexion au compte, les ressources gratuites. Une question sur un produit (ce que c'est, pour qui, le prix, ce qui est inclus pour lui, comment y aller, un souci d'utilisation) : appelle-le avant de répondre, puis réponds depuis ses fiches, en deux à quatre phrases, avec les adresses recopiées en entier. Si la réponse n'est pas dans les fiches, dis simplement que tu n'as pas l'info et propose de prévenir l'équipe (demander_un_humain). Pas besoin de lui pour son abonnement, ses montants, la formation incluse, les liens utiles ou les promos : tu as déjà tout ça. Pour un cours sur une notion, c'est trouver_cours.
 - trouver_cours : chercher, dans les leçons de l'académie et dans les masterclass, celles qui traitent une notion (par exemple les FVG, le journal de trading, la psychologie, la gestion du risque). Quand il veut apprendre une notion, ou te demande s'il y a un cours, une vidéo ou une masterclass sur un sujet : appelle-le, puis donne-lui le ou les deux ou trois liens les plus utiles, adresses recopiées en entier, avec leur accès tel que l'outil l'écrit (gratuit, inclus dans son Live Club, ou formation complète du 10% Club). Tu n'expliques pas la notion toi-même. Si rien ne sort, dis-le simplement, sans inventer de cours.
 - demander_un_humain : transmettre à l'équipe, qui lira la conversation et répondra au membre ici même, dans Telegram. Appelle-le quand un humain est nécessaire : il demande à parler à quelqu'un, il demande un remboursement, une remise pour lui ou une remise qu'on lui aurait promise, il fait une réclamation, c'est un cas particulier que tes outils ne règlent pas, ou sa question porte sur son compte, le Live Club ou un produit et tu ne sais pas y répondre. Jamais pour ce que tu peux répondre toi-même : un lien utile, un prix, une info publique, une fiche produit, son abonnement ou ses montants. Pas pour une confidence, une humeur, un merci ou une simple discussion : là, tu réponds toi-même avec chaleur, et tu peux lui dire que l'équipe peut lui répondre ici s'il le souhaite. Ensuite, dis-lui en une phrase que l'équipe est prévenue et lui répondra ici, dans cette conversation, sans promettre de délai.
@@ -148,6 +158,22 @@ export const OUTILS_MEMBRE: Anthropic.Tool[] = [
     name: 'proposer_annuler_arret',
     description: "Propose au membre qui écrit d'annuler l'arrêt déjà programmé de son abonnement. N'exécute rien : bouton de confirmation.",
     input_schema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  // (01/11) La pause de l'abonnement + acces par depot broker (pause-depot-pur.ts).
+  {
+    name: NOM_OUTIL_MEMBRE_PAUSE_DEPOT,
+    description: "Un abonné qui veut passer par un dépôt chez notre broker partenaire (des mois de Live Club offerts, son abonnement en pause pendant ce temps, le groupe gardé), ou qui dit que son dépôt est fait. N'exécute rien sur son abonnement : le serveur lui répond (l'offre, les conditions quand elles sont connues) et prévient l'équipe quand il le faut. Appelle-le sans écrire de texte.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        etape: {
+          type: 'string', enum: ['renseignement', 'depot_fait'],
+          description: "renseignement : il demande l'offre ou comment ça marche. depot_fait : il dit que son dépôt chez le broker est fait.",
+        },
+      },
+      required: ['etape'],
+      additionalProperties: false,
+    },
   },
   OUTIL_CONNAISSANCES,
   OUTIL_TROUVER_COURS,
@@ -258,6 +284,20 @@ export const OUTIL_LOTS: Anthropic.Tool = {
 /** La consigne du suivi des lots, d'apres l'etat lu par le serveur (etatLotsDuMembre, lots.ts). */
 export function consigneLots(e: EtatLots): string {
   const exemple = `${EXEMPLE_LOTS}, avec une position tenue ${TENUE_LOTS}`
+  // (01/11) La pause de l'abonnement + acces par depot broker : il garde le
+  // groupe, et des lots pas faits a la fin du delai ne le sortent pas.
+  if (e.pauseDepot) {
+    const etat = e.declare
+      ? "Il a déjà dit les avoir faits : l'équipe vérifie chez le broker, il n'a rien à refaire."
+      : e.etat === 'en_retard'
+        ? "Le délai est passé : l'équipe revient vers lui pour la suite de sa pause ; il garde le groupe en attendant."
+        : `Il a jusqu'au ${dateLots(e.limite)} pour les faire ; après, l'équipe revient vers lui pour la suite de sa pause.`
+    return `Information du serveur sur le membre qui t'écrit (ce n'est pas un message du membre) : son abonnement est en pause grâce à son dépôt chez notre broker partenaire, et ses premiers lots ne sont pas encore notés comme tradés chez ce broker. `
+      + `Tant qu'ils ne le sont pas, l'affiliation ne nous paie pas. Pas besoin de cramer son compte : ${exemple}, par exemple, suffisent ; ensuite, il prend tout son temps. ${etat}\n`
+      + `Quand il te dit qu'il a tradé ses lots, appelle ${NOM_OUTIL_LOTS} sans écrire de texte : le serveur lui répond. `
+      + "S'il te pose une question sur ses lots, réponds avec ces informations, simplement et sans insister ; tu n'en parles pas s'il ne t'en parle pas. "
+      + "Tu ne vois pas son compte chez le broker : ne dis pas que ses lots sont faits ou vus, c'est l'équipe qui vérifie."
+  }
   const etat = e.declare
     ? "Il a déjà dit les avoir faits : l'équipe vérifie chez le broker, il n'a rien à refaire."
     : e.etat === 'en_retard'
@@ -279,9 +319,12 @@ export function consigneLots(e: EtatLots): string {
  * compte relais actif seulement.
  * lots (31/10) : l'outil lots_trades et consigneLots, pour un membre dont les
  * premiers lots chez le broker sont attendus seulement.
+ * pauseDepot (01/11) : consignePauseDepotMembre, pour un membre dont la pause
+ * par depot broker court (il garde le groupe).
  */
 export function requeteAgentMembre(
-  messages: Anthropic.MessageParam[], contexte?: string, o: { relais?: boolean; lots?: EtatLots | null } = {},
+  messages: Anthropic.MessageParam[], contexte?: string,
+  o: { relais?: boolean; lots?: EtatLots | null; pauseDepot?: { partenaire: string | null; repriseLe: string } | null } = {},
 ): Anthropic.MessageCreateParamsNonStreaming {
   const requete: Anthropic.MessageCreateParamsNonStreaming = {
     model: MODELE_LIVECLUB,
@@ -291,6 +334,7 @@ export function requeteAgentMembre(
       ...(contexte ? [{ type: 'text' as const, text: contexte }] : []),
       ...(o.relais ? [{ type: 'text' as const, text: CONSIGNE_RELAIS }] : []),
       ...(o.lots ? [{ type: 'text' as const, text: consigneLots(o.lots) }] : []),
+      ...(o.pauseDepot ? [{ type: 'text' as const, text: consignePauseDepotMembre(o.pauseDepot) }] : []),
     ],
     tools: o.relais ? [...OUTILS_MEMBRE, OUTIL_MEMBRE_A_CONTACTER, OUTIL_PROPOSER_CORRECTION_PSEUDO] : OUTILS_MEMBRE,
     messages,

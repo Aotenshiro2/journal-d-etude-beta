@@ -99,6 +99,9 @@ import {
 } from './lots-lecture'
 import { limiteAnnonceeRelance2, limiteEffectiveLots, limiteLots, phaseLots, type IssueFermetureDepot } from './lots-pur'
 import { alerterEquipeDepotPerdu, fermerRetourLots, retourApresLots, retourApresRegularisation, texteAlerteDepot } from './lots'
+// (01/11) La pause de l'abonnement + acces par depot broker (pause-depot-pur.ts).
+import { accesDePauseQuiReprend, alerterEquipePauseDepot, pauseDepotDeAbonnement, texteAlerteLots } from './pause-depot'
+import { REGLE_LOTS_PAUSE_DEPOT } from './pause-depot-pur'
 import {
   listerAbonnementsLiveClub, clientsStripeParEmail, abonnementsLiveClubParEmail, abonnementsLiveClubDuClient, adopterPause,
   effacerMetadonneesPause,
@@ -126,7 +129,7 @@ import {
   emailRappelPause, emailDebutPauseSansReprise, emailRetour, emailRappelFinBroker, emailFinBroker,
   emailSortieDesabonne, emailRappelPrelevement, emailSortieImpaye, emailReouverture, emailFinFenetre, emailBienvenue,
   emailRappelFinExemption, emailFinExemption, emailRelanceLots, emailSuspensionLots, modeleRelanceLots, modeleSuspensionLots,
-  emailFermetureDepot, modeleFermetureDepot,
+  emailFermetureDepot, modeleFermetureDepot, emailRappelRepriseDepot, modeleRappelRepriseDepot,
   modeleRappelPause, modeleDebutPauseSansReprise, modeleRetour, modeleRappelFinBroker, modeleFinBroker,
   modeleSortieDesabonne, modeleRappelPrelevement, modeleRetourSortieAbusive, modeleSortieImpaye, modeleReouverture,
   modeleFinFenetre, modeleRappelFinExemption, modeleFinExemption, boutonsTelegram,
@@ -225,6 +228,8 @@ export type SynthesePassage = {
     relances_1: number; relances_2: number; pauses: number; simulees: number; messages: number; retours: number
     deja_revenus: number; deja_faits: number; declares: number; absents: number; gardes: number; sans_compte: number
     inconnus: number; echecs: number; coupe: boolean
+    /** (01/11) Pause par depot broker, lots pas faits a la fin du delai : alertes parties a l'equipe (pas de sortie). */
+    pause_depot_alertes: number
   }
   /**
    * (p) Depot perdu (31/10, « pas de commission, pas d'acces ») : sorties
@@ -887,8 +892,15 @@ async function tachePauses(ctx: Contexte, abonnements: AbonnementResume[], parCl
       }
       if (reserve === null) { s.deja_faits++; continue }
       const email = rattaches.find(r => r.email)?.email ?? await emailClient(ctx, a.clientStripe)
-      const envoi = await prevenir(ctx, rattaches.map(r => r.telegramId), email,
-        modeleRappelPause(date, 'j7'), e => emailRappelPause(e, date, 'j7'))
+      // (01/11) Une pause par depot broker (pause-depot-pur.ts) : il reste dans
+      // le groupe, le texte le dit (pas de « on t'envoie de quoi revenir »).
+      // Lecture ratee : le texte d'une pause classique, comme avant.
+      const parDepot = await pauseDepotDeAbonnement(a.id).catch(() => null)
+      const envoi = parDepot
+        ? await prevenir(ctx, rattaches.map(r => r.telegramId), email,
+          modeleRappelRepriseDepot(date), e => emailRappelRepriseDepot(e, date), parDepot.accesId)
+        : await prevenir(ctx, rattaches.map(r => r.telegramId), email,
+          modeleRappelPause(date, 'j7'), e => emailRappelPause(e, date, 'j7'))
       await cloreReservation(ctx, reserve, envoi)
       if (envoi) s.rappels_j7++
       else s.echecs++
@@ -1038,6 +1050,12 @@ async function tacheBroker(ctx: Contexte) {
       // (31/10) Acces deja ferme pour un depot perdu (tache p) : il a eu son
       // message, pas de « ton acces se termine bientot » en plus.
       if ((await depotsPerdusDesAcces([l.acces_id])).has(l.acces_id)) { s.ignores++; continue }
+      // (01/11) L'acces d'une pause par depot broker dont l'abonnement reprend
+      // ce jour-la : le rappel J-7 de la pause (tache a) s'en charge, pas de
+      // « ton acces se termine, abonne-toi ». Lecture ratee : rien n'est envoye.
+      const reprend = await accesDePauseQuiReprend(l.acces_id)
+      if (reprend === 'inconnu') { s.inconnus++; continue }
+      if (reprend) { s.ignores++; continue }
       // Deja abonne (ou autre droit) : pas de rappel « abonne-toi ».
       try {
         const abonnements = await abonnementsLiveClubParEmail(l.email)
@@ -2800,9 +2818,47 @@ async function tacheLots(ctx: Contexte) {
     // Jamais entre (lien personnel jamais ouvert) : rien a relancer ni a mettre en pause.
     if (l.telegramId === null || !Number.isSafeInteger(l.telegramId)) { s.sans_compte++; continue }
     if (ctx.sortis.has(l.telegramId)) continue
-    if (phase === 'pause') await mettreEnPauseLots(ctx, l, l.telegramId, aujourdhui)
+    // (01/11) Une pause par depot broker (pause-depot-pur.ts) : pas de sortie
+    // du groupe pour des lots en retard (son abonnement est en pause) ;
+    // l'equipe est prevenue une fois et decide (SUITE_LOTS_PAUSE_DEPOT).
+    if (phase === 'pause' && l.pauseDepot) await alerterLotsPauseDepot(ctx, l, aujourdhui)
+    else if (phase === 'pause') await mettreEnPauseLots(ctx, l, l.telegramId, aujourdhui)
     else await relancerLots(ctx, l, l.telegramId, phase === 'relance_1' ? 1 : 2, aujourdhui)
   }
+}
+
+/**
+ * (01/11) Lots pas faits a la fin du delai, pour une pause par depot broker :
+ * il garde le groupe (droits.ts), et Brice et Melanie recoivent UNE alerte
+ * par depot dans Agent AOK (reservee avant l'envoi ; ratee = 'echec',
+ * retentee au passage suivant). Rien n'est ecrit sur l'acces ni sur Stripe.
+ */
+async function alerterLotsPauseDepot(ctx: Contexte, l: LigneSuiviLots, aujourdhui: string) {
+  const s = ctx.s.lots
+  const relu = await reluLots(ctx, l)
+  if (relu === 'panne') { s.inconnus++; return }
+  if (!relu || phaseLots(relu.suivi, aujourdhui) !== 'pause') return
+  let reserve: bigint | null
+  try {
+    reserve = await reserverGeste({
+      cle: `liveclub:${REGLE_LOTS_PAUSE_DEPOT}:${l.commissionId}`,
+      deja: Prisma.sql`
+        select 1 from public.cockpit_liveclub_gestes d
+        where d.geste = 'acces_broker' and d.regle = ${REGLE_LOTS_PAUSE_DEPOT} and d.resultat = 'fait'
+          and d.details->>'commission_id' = ${l.commissionId}`,
+      geste: 'acces_broker', regle: REGLE_LOTS_PAUSE_DEPOT, telegramId: l.telegramId, abonnementId: null,
+      details: { acces_id: l.accesId, commission_id: l.commissionId, limite: limiteEffectiveLots(relu.suivi) },
+    })
+  } catch (err) {
+    erreur(ctx, 'journal_reservation', err)
+    s.inconnus++
+    return
+  }
+  if (reserve === null) { s.deja_faits++; return }
+  const livres = await alerterEquipePauseDepot(await texteAlerteLots(l), `pause-depot-lots-${l.commissionId}`)
+  await cloreReservation(ctx, reserve, livres > 0 ? { canal: 'prive', telegramId: null } : null)
+  if (livres > 0) s.pause_depot_alertes++
+  else s.echecs++
 }
 
 /** Le suivi de CE depot relu juste avant d'agir (grille de Brice : l'etat, pas une sequence). null = plus rien a faire. */
@@ -2842,7 +2898,9 @@ async function relancerLots(ctx: Contexte, l: LigneSuiviLots, tid: number, n: 1 
     return
   }
   if (reserve === null) { s.deja_faits++; return }
-  const envoi = await prevenir(ctx, [tid], l.email, modeleRelanceLots(n, limite), e => emailRelanceLots(e, n, limite), l.accesId)
+  // (01/11) Pause par depot broker : le texte de ce parcours (la suite n'est pas une sortie du groupe).
+  const envoi = await prevenir(ctx, [tid], l.email, modeleRelanceLots(n, limite, 'telegram', l.pauseDepot),
+    e => emailRelanceLots(e, n, limite, l.pauseDepot), l.accesId)
   await cloreReservation(ctx, reserve, envoi)
   if (!envoi) { s.echecs++; return }
   if (n === 1) s.relances_1++
@@ -3409,7 +3467,7 @@ function nouveauContexte(maintenant: Date): Contexte {
       exemptions: { rappels_j7: 0, sorties: 0, simulees: 0, messages_fin: 0, closes_absent: 0, gardees_autre_droit: 0, sans_moyen: 0, inconnus: 0, echecs: 0 },
       lots: {
         relances_1: 0, relances_2: 0, pauses: 0, simulees: 0, messages: 0, retours: 0, deja_revenus: 0, deja_faits: 0,
-        declares: 0, absents: 0, gardes: 0, sans_compte: 0, inconnus: 0, echecs: 0, coupe: false,
+        declares: 0, absents: 0, gardes: 0, sans_compte: 0, inconnus: 0, echecs: 0, coupe: false, pause_depot_alertes: 0,
       },
       depots_perdus: {
         sorties: 0, simulees: 0, messages: 0, alertes: 0, retours: 0, deja_revenus: 0,

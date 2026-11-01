@@ -195,8 +195,23 @@ export function evenementDeGeste(
       return regle === 'fin_exemption' || d.motif === 'fin_exemption'
         ? { rubrique: 'sorties', detail: "sorti du groupe : fin de l'accès offert" }
         : { rubrique: 'sorties', detail: "sorti du groupe : fin de l'accès broker" }
+    // (01/11) La pause de l'abonnement + acces par depot broker (pause-depot-pur.ts).
+    case 'acces_broker': {
+      if (regle === 'pause_depot') {
+        const fin = date(d, 'jusquau')
+        return { rubrique: 'pauses', detail: `accès broker posé par un dépôt (pause de son abonnement)${fin ? ` jusqu'au ${fin}` : ''}, groupe gardé` }
+      }
+      if (regle === 'pause_depot_demande') return { rubrique: 'pauses', detail: 'demande la pause de son abonnement par un dépôt broker' }
+      if (regle === 'pause_depot_declare') return { rubrique: 'pauses', detail: 'dit que son dépôt chez le broker est fait (pause par dépôt) : à vérifier, puis la carte' }
+      if (regle === 'pause_depot_lots') return { rubrique: 'pauses', detail: 'premiers lots pas tradés à la fin du délai (pause par dépôt) : à décider, il garde le groupe' }
+      return null
+    }
     case 'pause': {
       if (regle === 'pause_effective') return { rubrique: 'pauses', detail: 'début de la pause : sorti du groupe' }
+      if (regle === 'pause_depot') {
+        const reprise = date(d, 'reprise_le')
+        return { rubrique: 'pauses', detail: `pause par dépôt broker posée par l'équipe${reprise ? `, reprise le ${reprise}` : ''}` }
+      }
       if (regle === 'pause_resortie') return { rubrique: 'pauses', detail: 'en pause mais revenu dans le groupe : ressorti' }
       if (regle === 'pause_adoptee') return { rubrique: 'pauses', detail: 'pause posée hors du bot (Stripe), prise en compte' }
       const reprise = date(d, 'reprise_le')

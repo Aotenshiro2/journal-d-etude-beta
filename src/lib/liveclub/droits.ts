@@ -8,6 +8,9 @@
 // refuser personne. droitLiveClub ne jette jamais.
 // (31/10) Un acces broker dont les premiers lots ne sont pas trades a la fin
 // du delai est en pause (suivi des lots, lots-pur.ts) : le droit porte `lots`.
+// (01/11) Pas l'acces d'une « pause de l'abonnement + acces par depot broker »
+// (pause-depot-pur.ts) : pendant la pause de son abonnement, c'est cet acces
+// qui lui garde le groupe, lots en retard ou non.
 
 import { prisma } from '@/lib/db'
 import { exemptionActive } from '@/lib/stripe-actions'
@@ -160,7 +163,11 @@ export async function droitLiveClub(telegramId: number, opts: { exemptionIgnoree
         continue
       }
       const etat = lots.get(l.acces_id)
-      if (etat?.etat === 'en_retard') {
+      // (01/11) Sauf l'acces d'une « pause de l'abonnement + acces par depot
+      // broker » (pause-depot-pur.ts) : son abonnement est en pause, et des
+      // lots en retard ne lui coupent pas le groupe sans que l'abonnement
+      // reprenne. Il garde son droit ; l'equipe est prevenue (passage, tache o).
+      if (etat?.etat === 'en_retard' && !etat.pauseDepot) {
         lotsEnPause ??= etat
         continue
       }

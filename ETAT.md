@@ -3,6 +3,56 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
+## PAUSE DE L'ABONNEMENT + ACCES PAR DEPOT BROKER, pour un abonne (01/11/2026, LOCAL, non commite ; AUCUNE migration)
+
+- Besoin de Brice et Mel (01/11) : un abonne fait un depot chez un broker partenaire = 6 mois de Live Club ; son
+  abonnement est en PAUSE (aucun prelevement) et il GARDE le groupe, sans trou ; a la fin, reprise automatique ou arret.
+  Premier cas : Arthur (u5026707870), renouvellement le 07/11/2026 : la carte doit etre cliquee AVANT le 07/11.
+- Regles, textes et enchainement du clic (outils en parametre) : src/lib/liveclub/pause-depot-pur.ts ; serveur :
+  pause-depot.ts. Conditions de l'offre : OFFRE_PAUSE_DEPOT (config.ts : partenaire, lien, depotMinimum, lots), VIDES,
+  EN ATTENTE DE MEL : tant qu'une manque, le bot n'en donne aucune et l'equipe est prevenue.
+- Membre (bot des membres) : outil pause_par_depot (etape renseignement | depot_fait), reponse ECRITE PAR LE SERVEUR
+  (reponseMembrePauseDepot), veutHumain = l'alerte existante « un membre demande un humain » (conditions a envoyer,
+  depot a verifier) ; une ligne au journal par 24 h (regles pause_depot_demande / pause_depot_declare) ; refuse sous
+  prudence. Une pause du parcours en cours : consigne « il GARDE le groupe » (consignePauseDepotMembre), ligne dans
+  « Mon abonnement » (ligneSituationPauseDepot), consigne des lots adaptee (consigneLots, pauseDepot).
+- Equipe (Agent AOK) : carte proposer_pause_depot (type 'pause_depot', compte 'cockpit', bouton « Pause + accès
+  broker »), carte longue (Brice) / courte (Mel) composees par controlerPauseDepot (lecture seule : commission par
+  depotPourPauseDepot, repartition/serveur.ts, comme la carte de depot broker ; abonnement chez Stripe, UN seul en
+  cours ; acces, depot deja inscrit, pause du parcours en base ; compte Telegram du rattachement ; dates).
+  Au clic (executerPauseDepotAvec) : tout relu ; dates de la carte encore justes sinon refus ; puis UNE transaction
+  (verrous par abonnement et par adresse) : acces broker pose MALGRE l'abonnement (insert direct : accorderAccesBroker
+  et son refus 'deja_abonne' ne sont pas touches, ils valent partout ailleurs), relie au compte Telegram, jusquau =
+  jour de la reprise ; depot inscrit (ou relie s'il etait inscrit sans acces) ; marqueur au journal (geste
+  'acces_broker', regle 'pause_depot', details acces_id / abonnement_id / commission_id / reprise_le) ; PUIS la pause
+  par pauser() (stripe.ts, STRIPE_AGENT_KEY_MELANIE, metadonnees comprises) + ligne 'pause' regle 'pause_depot' ; PUIS
+  le message au membre (une fois par acces, regle 'pause_depot_message', prive sinon email a l'adresse d'envoi).
+  Pause refusee par Stripe : acces et depot restent, l'erreur le dit, la MEME carte redemandee ne fait que la pause.
+  Reponse de Stripe perdue (pause posee quand meme) : la carte redemandee reconnait SA pause (reprise = fin de l'acces
+  du parcours), note la ligne 'pause' et previent le membre.
+- Dates : reprise = fin de la periode payee + N mois (calculerReprisePause, la regle de toute pause) = dernier jour de
+  l'acces (inclus). Arthur : paye jusqu'au 07/11/2026, reprise et fin d'acces le 07/05/2027. Verifie jour par jour
+  (resumerAbonnement reel) : aucun jour sans droit.
+- Groupe : pendant la pause, droitLiveClub trouve l'acces broker (telegram_id) : 'oui', ni la pause ni le passage ne
+  le sortent (droit relu avant toute sortie). Lots en retard : droits.ts garde le 'oui' pour un acces du parcours
+  (EtatLots.pauseDepot, lu dans la requete du suivi, lots-lecture.ts). Relances J+14/J+18 au texte du parcours
+  (modeleRelanceLots(..., pauseDepot)). Fin du delai : PAS de sortie, alerte UNE fois a Brice et Mel dans Agent AOK
+  (regle 'pause_depot_lots', reservee). PROPOSITION A FAIRE VALIDER (SUITE_LOTS_PAUSE_DEPOT = 'equipe' en service) :
+  lots pas faits a la fin du delai = la pause s'arrete et l'abonnement reprend.
+- Fin : rappel J-7 de la pause au texte du parcours (il reste dans le groupe ; arreter = le dire au bot) ; rappel J-7
+  « fin d'acces broker, abonne-toi » saute tant que l'abonnement reprend (accesDePauseQuiReprend) ; reprise = Stripe.
+- Visibilite : vue CALCULEE cockpit_liveclub_pauses_depot (vues-serveur.ts, SQL_PAUSES_DEPOT, WITH injecte dans
+  requete_sql, aucune migration) ; API de Tab GET /membres (pauses_par_depot_broker) ; resume du matin (rubrique
+  « Pauses et reprises », l'acces du parcours retire de « Accès broker ») ; fil Support (phraseGeste).
+- Verifs : node scripts/verifier-pause-depot.mjs (18 blocs, faux Stripe et fausse base), tsc --noEmit (complet), eslint
+  des fichiers touches ; -suivi-lots, -depot-perdu, -adresse-contact, -annulation-abonnement (regex et compte d'outils
+  19 mis a jour), -repartition, -liveclub, -securite-bots, -tab-repondre, -agent-equipe, -relais-accueil,
+  -rebonds-email, -a-contacter, -alerte-equipe, -attente-equipe, -reponse-membre, -pieces-support, -tips-accueil,
+  -accueil-groupe, -effacement, -reouverture-impaye, -vocaux, -mcp-gpt, -notes-tache, -vues-serveur --sans-base : ok.
+  verifier-fiche-personne echoue comme avant (src/lib/tab/lectures.ts). Aucune eval, aucune base, aucun envoi.
+- A FAIRE : Mel donne les conditions (OFFRE_PAUSE_DEPOT) ; Brice tranche la regle des lots ; commit + push du journal sur
+  GO (= prod) AVANT le 07/11 pour Arthur. Ecran du cockpit (apps/cockpit) : propose, pas code.
+
 ## Reponse a un membre PREPAREE par Tab ou Tache, envoyee d'un clic dans Agent AOK (01/11/2026, LOCAL, non commite ; migration 20261101120000 ECRITE, NON appliquee)
 
 - Cas reel du 01/11 : Arthur a clique « Contacter l'équipe » dans le bot ; l'API n'avait que GET /support, Tab a du lui

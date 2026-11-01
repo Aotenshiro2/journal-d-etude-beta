@@ -45,6 +45,9 @@ import {
 import type { ActionMembre } from './conversations'
 import type { Bouton } from './telegram'
 import { BOUTON_LOTS, TEXTES_LOTS_SITUATION } from './lots-pur'
+// (01/11) La pause de l'abonnement + acces par depot broker.
+import { pauseDepotPourAgentMembre } from './pause-depot'
+import { ligneSituationPauseDepot } from './pause-depot-pur'
 
 /** Signature des gestes faits par un membre depuis le bot. */
 export const ACTEUR_BOT_MEMBRE = 'bot:membre'
@@ -206,11 +209,15 @@ export async function situationDuMembre(telegramId: number): Promise<Situation> 
   const ligne = ligneAdresses(adresses)
   const vivants = abonnements.filter(abonnementEnCours)
   if (vivants.length) {
+    // (01/11) Une pause par depot broker (pause-depot-pur.ts) : il garde le
+    // groupe, la phrase le dit. Lecture ratee : la phrase d'une pause, seule.
+    const parDepot = vivants.some(a => a.pauseActive) ? await pauseDepotPourAgentMembre(telegramId) : null
     return {
       etat: 'ok',
-      texte: `${vivants.map(phraseAbonnement).join('\n\n')}${ligne ? `\n\n${ligne}` : ''}`,
+      texte: `${vivants.map(phraseAbonnement).join('\n\n')}${parDepot ? `\n${ligneSituationPauseDepot(parDepot)}` : ''}${ligne ? `\n\n${ligne}` : ''}`,
       faits: {
         ...(adresses.length ? { adresses_email_reliees: adresses } : {}),
+        ...(parDepot ? { pause_par_depot_broker: { garde_le_groupe: true, reprise_le: formaterDateFr(parDepot.repriseLe), broker: parDepot.partenaire } } : {}),
         abonnements: vivants.map(a => ({
           statut: statutDesFaits(a),
           fin_periode: a.finPeriode ? formaterDateFr(a.finPeriode) : null,

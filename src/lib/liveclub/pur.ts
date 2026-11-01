@@ -1385,6 +1385,8 @@ export function phraseGeste(g: GesteLu): string | null {
       const reprise = date('reprise_le')
       const jusqua = date('paye_jusquau')
       if (regle === 'manuel') return `Pause programmée par l'équipe${reprise ? `, reprise le ${reprise}` : ''}.`
+      // (01/11) La pause d'un depot broker (pause-depot-pur.ts) : il garde le groupe tout du long.
+      if (regle === 'pause_depot') return `Pause de l'abonnement par un dépôt broker${jusqua ? `, période payée jusqu'au ${jusqua}` : ''}${reprise ? `, reprise le ${reprise}` : ''} : groupe gardé tout du long.`
       return `Pause programmée${jusqua ? `, groupe gardé jusqu'au ${jusqua}` : ''}${reprise ? `, reprise le ${reprise}` : ''}.`
     }
     case 'arret': {
@@ -1433,6 +1435,8 @@ export function phraseGeste(g: GesteLu): string | null {
       if (regle === 'lots_suspension_message') return `Message de pause de l'accès broker (premiers lots pas tradés) envoyé${canal}.`
       // (31/10) L'acces ferme pour un depot perdu (lots-pur.ts).
       if (regle === 'depot_perdu_message') return `Message de fermeture de l'accès broker (dépôt pas activé, comment régulariser) envoyé${canal}.`
+      // (01/11) La pause par depot broker (pause-depot-pur.ts).
+      if (regle === 'pause_depot_message') return `Message de la pause par dépôt broker envoyé${canal} (dates, groupe gardé, lots).`
       return `Rappel envoyé${canal}.`
     }
     case 'refus':
@@ -1444,6 +1448,14 @@ export function phraseGeste(g: GesteLu): string | null {
       if (fait && regle === 'lots_confirmes') return "Premiers lots vus par l'équipe chez le broker : notés faits."
       if (fait && regle === 'lots_pas_vus') return "Premiers lots pas encore vus par l'équipe chez le broker : prévenu."
       if (fait && regle === 'depot_perdu_alerte') return "Commission perdue : accès broker fermé, l'équipe est prévenue."
+      // (01/11) La pause de l'abonnement + acces par depot broker (pause-depot-pur.ts).
+      if (fait && regle === 'pause_depot') {
+        const jusqua = date('jusquau')
+        return `Pause de l'abonnement par un dépôt broker posée par l'équipe : accès broker${jusqua ? ` jusqu'au ${jusqua}` : ''}, groupe gardé tout du long.`
+      }
+      if (fait && regle === 'pause_depot_demande') return "A demandé la pause de son abonnement par un dépôt broker."
+      if (fait && regle === 'pause_depot_declare') return "Dit que son dépôt chez le broker est fait (pause par dépôt) : l'équipe vérifie."
+      if (fait && regle === 'pause_depot_lots') return "Premiers lots pas tradés à la fin du délai (pause par dépôt) : l'équipe est prévenue, rien n'est coupé."
       // (31/10) L'adresse de contact de l'acces (adresse-contact-pur.ts) : sans adresse ici.
       if (regle === 'adresse_contact') {
         if (!fait) return null

@@ -23,6 +23,7 @@ import { ficheEtIdsPourTab } from '@/lib/fiche-personne'
 import { referenceFil } from '@/lib/alerte-equipe-telegram-pur'
 import { STATUTS_FIL_EN_CLAIR, statutFil } from '@/lib/tab/repondre-pur'
 import { dernieresPropositions } from '@/lib/tab/repondre'
+import { SQL_PAUSES_DEPOT } from '@/lib/vues-serveur'
 import {
   centimes, couper, decalerJour, eurosExact, eurosTuile, joursDuMois, jourLisible, moisLisible, moisPrecedent,
   paginer, pourcentage, unMoisAvant, type Pagination, type Periode,
@@ -241,6 +242,12 @@ export async function membres(c: Ctx): Promise<Sortie> {
     where a.statut in ('active', 'trialing') and a.pause_jusquau >= $1::date order by a.pause_jusquau limit $2`, c.aujourdhui, lim)
   const arretsProgrammes = await q(tx, `select ${ABO_COLONNES} from ${ABO_FROM}
     where a.statut in ('active', 'trialing') and a.annule_a_la_fin order by a.fin_periode limit $1`, lim)
+  // (01/11) Les abonnes en « pause + acces par depot broker » (liveclub/pause-depot-pur.ts) :
+  // la vue calculee du serveur (vues-serveur.ts), en cours, les reprises les plus proches d'abord.
+  const pausesDepot = await facultatif(notes, 'pauses par dépôt broker (cockpit_liveclub_gestes, cockpit_liveclub_acces)', () => q(tx, `
+    select coalesce(v.nom, v.email) as nom, v.pseudo, v.email, v.broker, v.debut, v.paye_jusquau, v.reprise_le,
+      v.acces_jusquau, v.commission_statut, v.lots_faits_le
+    from (${SQL_PAUSES_DEPOT}) v where v.en_cours order by v.acces_jusquau limit $1`, lim))
   const arrivees = await q(tx, `
     select tm.pseudo, tm.nom_affiche, ${H('tm.entre_le')} as entre_le, tm.source, tm.par_qui
     from public.cockpit_telegram_membres tm where ${JP('tm.entre_le')} between $1::date and $2::date
@@ -277,6 +284,10 @@ export async function membres(c: Ctx): Promise<Sortie> {
       },
       en_pause_aujourdhui: enPause,
       arrets_programmes: arretsProgrammes,
+      pauses_par_depot_broker: {
+        regle: "Abonnés dont l'abonnement est en pause grâce à un dépôt chez un broker partenaire : ils GARDENT le groupe par un accès broker qui court jusqu'à la reprise (acces_jusquau = reprise_le). Reprise automatique ce jour-là.",
+        membres: pausesDepot,
+      },
     },
     lignes: entrees.length + resiliations.length + gestes.length + arrivees.length + departs.length,
     notes: [

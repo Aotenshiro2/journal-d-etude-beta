@@ -820,6 +820,67 @@ async function phraseSoldeDuMois(mois: string): Promise<string | null> {
 }
 
 // ---------------------------------------------------------------------------
+// (01/11) Le DEPOT d'un abonne qui passe par la « pause + acces par depot
+// broker » (liveclub/pause-depot.ts) : la MEME commission que la carte de
+// depot broker (taux du broker en vigueur a la date, ou commission propre a
+// CE depot, figee ; mois des lots et 70/30 inchanges), sans l'acces ni
+// l'ecriture, que ce parcours fait lui-meme dans sa transaction.
+// ---------------------------------------------------------------------------
+
+export type DepotPourPause = {
+  partenaireId: string
+  partenaireNom: string
+  /** Centimes. */
+  base: number
+  /** Centimes. */
+  attendue: number
+  taux: TauxPartenaire
+  /** « commission propre à ce dépôt » quand elle est donnee avec lui, sinon null. */
+  libelle: string | null
+  /** Commission attendue, mois prevu et parts, en une phrase (carte et resultat). */
+  phrase: string
+}
+
+/** La commission d'un depot pour ce parcours, ou ce qui manque (rendu au modele, comme la carte de depot broker). */
+export async function depotPourPauseDepot(p: {
+  partenaire: string; partenaire_nom: string; le: string; montant: number; commission: number | null; client: string | null; email: string
+}): Promise<DepotPourPause | { erreur: string }> {
+  const { moisCourant } = contexteParis()
+  const partenaire = await partenaireParId(p.partenaire)
+  if (!partenaire) {
+    return {
+      erreur: `Broker « ${p.partenaire_nom} » absent de la base (cockpit_partenaires) : rien n'est proposé. Demande à ton interlocuteur, `
+        + `dans ce fil et en une question, sa commission (un taux général ou un montant fixe par client, et depuis quand ; ou seulement la commission de ce dépôt). `
+        + `Puis propose d'abord proposer_taux_partenaire (nature broker), et ce geste ensuite.`,
+    }
+  }
+  if (partenaire.nature !== 'broker') return { erreur: `${partenaire.nom} est une affiliation, pas un broker : ce parcours ne vaut que pour un dépôt chez un broker.` }
+  const choix = await tauxPourDepot('depot_broker', { commission: p.commission }, partenaire.partenaire_id, p.le)
+  if (!choix) {
+    const accord = accordNote(partenaire.note)
+    return {
+      erreur: accord
+        ? `Pas de taux général pour ${partenaire.nom} au ${libelleJour(p.le)}, mais son accord est noté : « ${accord} ». Ne le redemande pas : calcule la commission de ce dépôt d'après lui, passe-la (commission) et repropose.`
+        : `Aucun accord connu pour ${partenaire.nom} au ${libelleJour(p.le)}, ni commission donnée pour ce dépôt. Demande à ton interlocuteur, en une question, la commission de ce dépôt (ou l'accord du broker), puis repropose.`,
+    }
+  }
+  const base = centimes(p.montant) ?? 0
+  const attendue = commissionDuTaux(choix.taux, base)
+  if (attendue === null) return { erreur: `Le taux de ${partenaire.nom} est en % : il faut le montant du dépôt. Demande-le.` }
+  const client = p.client ?? p.email
+  return {
+    partenaireId: partenaire.partenaire_id, partenaireNom: partenaire.nom, base, attendue, taux: choix.taux,
+    libelle: choix.libelle ?? null,
+    phrase: phraseCommission({ attendue, taux: choix.taux, nature: 'depot', le: p.le, client, moisCourant, libelle: choix.libelle }),
+  }
+}
+
+/** La note d'une commission de depot, comme la carte de depot broker (« [commission propre à ce dépôt] ... »). */
+export function noteDepotPourPause(libelle: string | null, note: string | null): string | null {
+  return libelle ? [`[${libelle}]`, note].filter(Boolean).join(' ') : note
+}
+
+// ---------------------------------------------------------------------------
 // Avant la carte : ce que le modele doit savoir (taux inconnu, offre
 // inconnue...), et le complement chiffre qui rend la carte lisible.
 // ---------------------------------------------------------------------------

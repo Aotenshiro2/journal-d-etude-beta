@@ -281,10 +281,10 @@ await bloc('Agent AOK : outil, consigne, bouton, controle, carte courte, filet s
   }
   assert.equal(AP.sansNomsOutils('Je te propose proposer_adresse_contact_acces pour Fabien.'), "Je te propose la carte d'adresse de contact pour Fabien.")
   assert.equal(AP.sansNomsOutils('Voici la carte `proposer_adresse_contact_acces`.'), "Voici la carte d'adresse de contact.")
-  // Le prompt compte ses outils d'action.
-  const phrase = /Tu disposes de dix-huit outils d'action : ([^(]+) \(décrits plus bas\)/.exec(src)
+  // Le prompt compte ses outils d'action (dix-neuf depuis la pause par depot broker, 01/11).
+  const phrase = /Tu disposes de dix-neuf outils d'action : ([^(]+) \(décrits plus bas\)/.exec(src)
   assert.ok(phrase)
-  assert.equal(phrase[1].split(/, | et /).length, 18)
+  assert.equal(phrase[1].split(/, | et /).length, 19)
   assert.ok(phrase[1].includes('proposer_adresse_contact_acces'))
 
   // Validation, resume, execution, log.
@@ -368,7 +368,8 @@ await bloc('cablage : envois du passage, invitation, transaction, lectures sans 
   const envois = [
     /prevenir\(ctx, tid \? \[tid\] : \[\], l\.email, modeleRappelFinBroker\(jusquau\),\n\s+e => emailRappelFinBroker\(e, jusquau\), l\.acces_id\)/,
     /prevenir\(ctx, \[telegramId\], email, modeleFinBroker\(\), e => emailFinBroker\(e\), accesId\)/,
-    /prevenir\(ctx, \[tid\], l\.email, modeleRelanceLots\(n, limite\), e => emailRelanceLots\(e, n, limite\), l\.accesId\)/,
+    // (01/11) Les relances portent le texte de la pause par depot broker quand il le faut.
+    /prevenir\(ctx, \[tid\], l\.email, modeleRelanceLots\(n, limite, 'telegram', l\.pauseDepot\),\n\s+e => emailRelanceLots\(e, n, limite, l\.pauseDepot\), l\.accesId\)/,
     /prevenir\(ctx, \[tid\], l\.email, modeleSuspensionLots\(\), e => emailSuspensionLots\(e\), l\.accesId\)/,
     /prevenir\(ctx, tid !== null \? \[tid\] : \[\], l\.email, modeleFermetureDepot\(\), e => emailFermetureDepot\(e\), l\.accesId\)/,
   ]
@@ -390,7 +391,9 @@ await bloc('cablage : envois du passage, invitation, transaction, lectures sans 
   }
   parcourir('src')
   const expediteurs = fichiers.filter(f => /import \{[^}]*\bemail[A-Z]\w*[^}]*\} from '(\.\/emails|@\/lib\/liveclub\/emails)'/.test(lire(f)))
-  assert.deepEqual(expediteurs.sort(), ['src/app/api/liveclub/bienvenue/route.ts', 'src/lib/liveclub/acces.ts', 'src/lib/liveclub/passage.ts'])
+  // (01/11) pause-depot.ts : le message de la pause par depot broker, a l'adresse d'envoi aussi.
+  assert.deepEqual(expediteurs.sort(), ['src/app/api/liveclub/bienvenue/route.ts', 'src/lib/liveclub/acces.ts', 'src/lib/liveclub/passage.ts', 'src/lib/liveclub/pause-depot.ts'])
+  assert.match(lire('src/lib/liveclub/pause-depot.ts'), /const adresse = await adresseEnvoi\(\{ emailIdentite: o\.email, accesId: o\.accesId \}\)\n\s+if \(adresse && \(await emailMessagePauseDepot\(adresse, contenu\)\)\.ok\) canal = 'email'/)
   // L'identite reste l'adresse de l'acces (droit, abonnements).
   assert.match(pa, /abonnementsLiveClubParEmail\(l\.email\)/)
 

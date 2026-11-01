@@ -81,7 +81,9 @@ export async function etatLotsDuMembre(telegramId: number, maintenant: Date = ne
   if (!suiviLotsActif()) return null
   try {
     const { ligne } = await suiviDuMembre(telegramId)
-    return ligne ? etatLots(ligne.suivi, jourParis(maintenant.toISOString())) : null
+    if (!ligne) return null
+    // (01/11) L'acces d'une pause par depot broker : la consigne de ce parcours (prompt-membre.ts).
+    return { ...etatLots(ligne.suivi, jourParis(maintenant.toISOString())), ...(ligne.pauseDepot ? { pauseDepot: true } : {}) }
   } catch (err) {
     console.warn(`[liveclub/lots] etat des lots illisible : ${relationAbsente(err) ? 'table absente' : messageErreur(err).slice(0, 160)}`)
     return null
@@ -115,7 +117,8 @@ export async function declarerLots(telegramId: number, o: { origine: 'agent' | '
     console.warn(`[liveclub/lots] declaration illisible : ${messageErreur(err).slice(0, 160)}`)
     return rendre('panne')
   }
-  const enPause = lotsEnRetard(ligne.suivi, aujourdhui)
+  // (01/11) Une pause par depot broker garde le groupe : jamais « en pause » pour ses lots.
+  const enPause = lotsEnRetard(ligne.suivi, aujourdhui) && !ligne.pauseDepot
   if (ligne.declarationId !== null) return rendre('deja_declare', enPause)
 
   let id: number | null

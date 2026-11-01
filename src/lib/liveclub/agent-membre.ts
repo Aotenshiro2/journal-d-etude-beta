@@ -57,6 +57,9 @@ import {
   resultatConnaissances,
 } from './prompt-membre'
 import { declarerLots, etatLotsDuMembre } from './lots'
+// (01/11) La pause de l'abonnement + acces par depot broker (pause-depot.ts).
+import { parcoursPauseDepotMembre, pauseDepotPourAgentMembre } from './pause-depot'
+import { NOM_OUTIL_MEMBRE_PAUSE_DEPOT } from './pause-depot-pur'
 
 export { MODELE_LIVECLUB }
 
@@ -213,8 +216,10 @@ export async function repondreAuMembre(
   // (31/10) Suivi des lots : l'outil lots_trades et sa consigne, pour un
   // membre dont les premiers lots chez le broker sont attendus seulement.
   const lots = await etatLotsDuMembre(telegramId)
+  // (01/11) Une pause par depot broker en cours : il garde le groupe (sa consigne).
+  const pauseDepot = await pauseDepotPourAgentMembre(telegramId)
   for (let tour = 0; tour < MAX_TOURS; tour++) {
-    const response = await client.messages.create(requeteAgentMembre(messages, contexte, { relais, lots }))
+    const response = await client.messages.create(requeteAgentMembre(messages, contexte, { relais, lots, pauseDepot }))
     await tracerUsage(telegramId, response.usage, echange)
 
     if (response.stop_reason !== 'tool_use') {
@@ -230,11 +235,24 @@ export async function repondreAuMembre(
       if (bloc.type !== 'tool_use') continue
 
       // (29/10) Message suspect : ni proposition, ni outil du relais.
-      // (31/10) Ni declaration de lots.
+      // (31/10) Ni declaration de lots. (01/11) Ni pause par depot broker.
       if (prudence && (TYPE_PAR_OUTIL[bloc.name] || bloc.name === NOM_OUTIL_MEMBRE_A_CONTACTER
-        || bloc.name === NOM_OUTIL_PROPOSER_CORRECTION_PSEUDO || bloc.name === NOM_OUTIL_LOTS)) {
+        || bloc.name === NOM_OUTIL_PROPOSER_CORRECTION_PSEUDO || bloc.name === NOM_OUTIL_LOTS
+        || bloc.name === NOM_OUTIL_MEMBRE_PAUSE_DEPOT)) {
         resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify(REFUS_PRUDENCE_MEMBRE) })
         continue
+      }
+
+      // (01/11) La pause de l'abonnement + acces par depot broker : le serveur
+      // relit son etat (pause deja en place, abonne ou non), lui repond
+      // (l'offre ; les conditions seulement quand elles sont toutes connues,
+      // rien d'invente) et note la demande ; veutHumain = l'equipe doit agir
+      // (conditions a lui envoyer, depot a verifier) : l'alerte existante part.
+      // La boucle s'arrete la, sans texte du modele.
+      if (bloc.name === NOM_OUTIL_MEMBRE_PAUSE_DEPOT) {
+        const r = await parcoursPauseDepotMembre(telegramId, bloc.input)
+        if (r.veutHumain) humain = true
+        return r.panne ? { texte: r.texte, repli: true, ...drapeau() } : { texte: r.texte, ...drapeau() }
       }
 
       // (31/10) « C'est bon, j'ai trade mes lots » : le serveur relit l'etat,
