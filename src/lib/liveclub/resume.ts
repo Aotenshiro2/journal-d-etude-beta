@@ -47,7 +47,9 @@
 // rapporte. Jamais de nom, d'email ni de texte de message dans un log : des
 // comptes seulement.
 
+import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db'
+import { sourcesAContacter } from './contact-instantane'
 import { stripeGet } from '@/lib/stripe-actions'
 import { ajouterAHistoriqueAgent, tgCockpit } from '@/lib/agent-cockpit-telegram'
 import { lireSuspensEquipe, nomEquipe } from '@/lib/agent-equipe'
@@ -558,6 +560,9 @@ export async function resumeDuMatin(o: { maintenant?: Date; apercu?: boolean } =
     // (18/10) Les membres a contacter : une fenetre ouverte depuis le dernier
     // resume, ni deja annoncee ni marquee « fait » au cockpit. Vue illisible :
     // rien d'annonce, et la memoire du repere est gardee telle quelle.
+    // (02/11) Lues dans l'instantane du matin (contact-instantane.ts), que le
+    // passage vient de refaire ; absent ou perime : la vue en direct.
+    const source = await sourcesAContacter(prisma)
     const risque = await facultatif('membres_risque', erreurs, () => prisma.$queryRaw<{
       membre_id: string; cle_episode: string; motif: string; nom: string | null; email: string | null; telegram: string | null
       prochain_prelevement: string | null; prochaine_tentative: string | null; jours_silence: number | null
@@ -566,7 +571,7 @@ export async function resumeDuMatin(o: { maintenant?: Date; apercu?: boolean } =
       select membre_id::text as membre_id, cle_episode, motif, nom, email_principal as email, telegram,
         prochain_prelevement::text as prochain_prelevement, prochaine_tentative::text as prochaine_tentative,
         jours_silence, jours_anciennete, entree::text as entree
-      from public.cockpit_membres_risque`)
+      from public.cockpit_membres_risque${Prisma.raw(source.risque)}`)
     const risqueLu = !erreurs.includes('membres_risque')
     const traitees = await facultatif('risque_traitees', erreurs, () => prisma.$queryRaw<{ membre_id: string; motif: string }[]>`
       select membre_id::text as membre_id, motif from public.cockpit_actions_traitees where motif like 'a_risque:%'`)
@@ -616,7 +621,7 @@ export async function resumeDuMatin(o: { maintenant?: Date; apercu?: boolean } =
       : repere?.annonces ?? null
     // Le pied « Bientot » : un nombre, jamais une raison d'envoyer.
     const aVenir = await facultatif('membres_a_venir', erreurs, () => prisma.$queryRaw<{ n: number }[]>`
-      select count(*)::int as n from public.cockpit_membres_a_venir where entree <= current_date + 7`)
+      select count(*)::int as n from public.cockpit_membres_a_venir${Prisma.raw(source.aVenir)} where entree <= current_date + 7`)
     const bientot = Number(aVenir[0]?.n ?? 0)
 
     // 4. Les noms, emails et pseudos.

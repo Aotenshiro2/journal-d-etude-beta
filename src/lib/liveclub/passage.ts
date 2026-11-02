@@ -118,6 +118,7 @@ import { preparerBienvenue } from './bienvenue'
 import { rapprocherTarifsReserves } from './reserves'
 import { resumeDuMatin } from './resume'
 import { relaisDuMatin } from './relais'
+import { recalculerAContacter } from './contact-instantane'
 import { appelTelegram, envoyer, lienDemandeAdhesion } from './telegram'
 import { lireEtatFil, tracerGeste, tracerMessageBot } from './support-pont'
 import { quiRepond } from './support-pont-pur'
@@ -160,6 +161,8 @@ const MAX_RESOLUTIONS_EMAIL = 300
 const BUDGET_RESUME_MS = 265_000
 /** Le relais d'accueil (24/10) passe avant le resume : il lui laisse au moins 10 s. */
 const BUDGET_RELAIS_MS = 255_000
+/** L'instantane des membres a contacter (02/11) : quelques secondes, il passe jusqu'a 4 min 40. */
+const BUDGET_INSTANTANE_MS = 280_000
 
 export type SynthesePassage = {
   ok: boolean
@@ -270,6 +273,11 @@ export type SynthesePassage = {
    * et les relais qui ont tout recu. Jamais un nom.
    */
   relais: { etat: string; lignes: number; livres: number }
+  /**
+   * (r) Instantane des membres a contacter (02/11, contact-instantane.ts) :
+   * fait, recent, en_cours, fonction_absente, reporte. Des comptes seulement.
+   */
+  a_contacter: { etat: string; risque: number; a_venir: number }
   /** Lignes de journal perdues (table ou contrainte pas encore migree). */
   journal_echecs: number
   /** Messages qui n'ont pu partir ni en prive ni par email. */
@@ -3478,6 +3486,7 @@ function nouveauContexte(maintenant: Date): Contexte {
       tarifs_reserves: { payees: 0, en_attente: 0, illisibles: 0 },
       resume: { etat: 'pas_lance', lignes: 0, livres: 0 },
       relais: { etat: 'pas_lance', lignes: 0, livres: 0 },
+      a_contacter: { etat: 'pas_lance', risque: 0, a_venir: 0 },
       journal_echecs: 0,
       messages_perdus: 0,
       erreurs: [],
@@ -3630,6 +3639,24 @@ export async function passageQuotidien(maintenant: Date = new Date()): Promise<S
     if (ctx.s.tarifs_reserves.illisibles > 0) erreur(ctx, 'tarifs_reserves_illisibles')
   })
   await etape('purge', () => tachePurge(ctx))
+
+  // (r) Les membres a contacter, calcules une fois par jour (02/11,
+  // contact-instantane.ts) : la base Nano est tombee le 02/11, les vues
+  // cockpit_membres_risque et cockpit_membres_a_venir coutent 1,1 s par
+  // lecture. APRES les taches du passage (sorties, exemptions closes), JUSTE
+  // AVANT le relais et le resume, qui lisent donc l'instantane frais. Fonction
+  // absente (migration 20261102150000 pas passee) : rien, sans erreur, les
+  // lecteurs restent sur les vues. Il passe meme apres le budget du relais :
+  // le cockpit en depend toute la journee (quelques secondes, route a 300 s).
+  await etape('a_contacter', async () => {
+    if (Date.now() - ctx.debut > BUDGET_INSTANTANE_MS) {
+      ctx.s.a_contacter.etat = 'reporte'
+      erreur(ctx, 'a_contacter_reporte')
+      return
+    }
+    const b = await recalculerAContacter(prisma, ACTEUR)
+    ctx.s.a_contacter = { etat: b.etat, risque: b.risque, a_venir: b.a_venir }
+  })
 
   // (n) Le relais d'accueil (24/10, relais.ts) : apres les taches du passage,
   // JUSTE AVANT le resume. Pourquoi ici : (1) il ne depend pas du resume, qui

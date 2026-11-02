@@ -24,6 +24,7 @@ import { referenceFil } from '@/lib/alerte-equipe-telegram-pur'
 import { STATUTS_FIL_EN_CLAIR, statutFil } from '@/lib/tab/repondre-pur'
 import { dernieresPropositions } from '@/lib/tab/repondre'
 import { SQL_PAUSES_DEPOT } from '@/lib/vues-serveur'
+import { sourcesAContacter } from '@/lib/liveclub/contact-instantane'
 import {
   centimes, couper, decalerJour, eurosExact, eurosTuile, joursDuMois, jourLisible, moisLisible, moisPrecedent,
   paginer, pourcentage, unMoisAvant, type Pagination, type Periode,
@@ -739,15 +740,18 @@ export async function aFaire(c: Ctx): Promise<Sortie> {
     where a.motif is not null
       and not exists (select 1 from public.cockpit_actions_traitees t where t.membre_id = a.membre_id and t.motif = a.motif)
     order by a.urgence nulls last limit 100`)
+  // (02/11) Les membres a contacter : l'instantane du matin (contact-instantane.ts),
+  // la vue en direct s'il manque ou date de plus de 30 h. Le suffixe ne vaut que '' ou '_instantane'.
+  const source = await sourcesAContacter(tx)
   const aContacter = await facultatif(notes, 'cockpit_membres_risque', () => q(tx, `
     select r.motif, r.nom, r.telegram, r.email_principal as email, r.produits, ${D('r.prochain_prelevement')} as prochain_prelevement,
       ${D('r.prochaine_tentative')} as prochaine_tentative, r.jours_silence, r.jours_anciennete, r.cle_episode
-    from public.cockpit_membres_risque r
+    from public.cockpit_membres_risque${source.risque} r
     where not exists (select 1 from public.cockpit_actions_traitees t where t.membre_id = r.membre_id and t.motif = r.cle_episode)
     order by array_position(array['echec', 'prelevement', 'silence', 'accueil'], r.motif), r.nom limit 100`))
   const aVenir = await facultatif(notes, 'cockpit_membres_a_venir', () => q(tx, `
     select motif, nom, telegram, ${D('entree')} as entre_dans_la_fenetre_le, dans_jours, ${D('prochain_prelevement')} as prochain_prelevement
-    from public.cockpit_membres_a_venir order by entree limit 50`))
+    from public.cockpit_membres_a_venir${source.aVenir} order by entree limit 50`))
   const fils = await lireFilsSupport(tx, decalerJour(auj, -29), auj)
   const demandes = await facultatif(notes, 'cockpit_demandes', () => q(tx, `
     select ${H('cree_le')} as cree_le, auteur, texte from public.cockpit_demandes where statut = 'nouvelle' order by cree_le desc limit 30`))

@@ -53,6 +53,7 @@ import { prisma } from '@/lib/db'
 import { appelTelegram, envoyer, repondreBouton, statutDansLeGroupe } from './telegram'
 import { jourParis } from './passage-regles'
 import { messageErreur, relationAbsente } from './pur'
+import { sourcesAContacter } from './contact-instantane'
 import {
   cleEcartRelais, cleEpisodeRelais, clavierApresFait, decisionBoutonRelais, ecartsPourRelais, lignesPourRelais, lireBoutonRelais,
   messagesEcarts, messagesRelais, motifsDuRelais, noteMarqueRelais, textePresentation,
@@ -166,12 +167,15 @@ async function lireDonnees(db: Client, o: { avecReserves: boolean }): Promise<Do
   }
 
   // Les deux fenetres du relais, et elles seules : echec et prelevement ne sont jamais lus ici.
+  // (02/11) Dans l'instantane du matin (contact-instantane.ts), refait par le
+  // passage juste avant le relais ; absent ou perime : la vue en direct.
+  const source = await sourcesAContacter(db)
   const risque = await db.$queryRaw<{
     membre_id: string; cle_episode: string; motif: string; nom: string | null; telegram: string | null
     jours_silence: number | null; jours_anciennete: number | null; entree: string | null
   }[]>`
     select membre_id::text as membre_id, cle_episode, motif, nom, telegram, jours_silence, jours_anciennete, entree::text as entree
-    from public.cockpit_membres_risque
+    from public.cockpit_membres_risque${Prisma.raw(source.risque)}
     where motif in ('accueil', 'silence')`
   const ids = [...new Set(risque.map(r => r.membre_id))]
   const comptes = ids.length === 0 ? [] : await db.$queryRaw<{

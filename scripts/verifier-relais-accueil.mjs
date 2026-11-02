@@ -49,9 +49,9 @@ bloc('motifs : accueil et silence seulement, jamais echec ni prelevement', () =>
   assert.deepEqual(ids(lignesPourRelais(tous, { ...alex, motifs: ['silence'] }, vide, sans)), ['m3'])
   // Une cle qui ne dit pas la meme fenetre que le motif est ecartee.
   assert.deepEqual(lignesPourRelais([{ ...candidat(5, 'silence'), cleEpisode: 'a_risque:echec:2026-10' }], alex, vide, sans), [])
-  // Le source ne lit que ces deux fenetres dans la vue.
+  // Le source ne lit que ces deux fenetres dans la vue (ou son instantane du matin, 02/11).
   const source = readFileSync(new URL('../src/lib/liveclub/relais.ts', import.meta.url), 'utf8')
-  assert.match(source, /from public\.cockpit_membres_risque\s+where motif in \('accueil', 'silence'\)/)
+  assert.match(source, /from public\.cockpit_membres_risque\$\{Prisma\.raw\(source\.risque\)\}\s+where motif in \('accueil', 'silence'\)/)
   const migration = readFileSync(new URL('../../../sites/Aoknowledgecom/supabase/migrations/20261024120000_cockpit_liveclub_relais.sql', import.meta.url), 'utf8')
   assert.match(migration, /motifs <@ array\['accueil', 'silence'\]::text\[\]/)
   assert.match(migration, /check \(motif in \('accueil', 'silence'\)\)/)
