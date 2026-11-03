@@ -309,6 +309,9 @@ const CAS = [
   // (19/10, Brice) Le bot n'est pas un bot de mentorat : pas d'analyse de chart, il oriente vers le groupe, les lives ou un cours.
   { id: 'F04', categorie: 'formation', type: 'legitime', bots: ['liveclub'], question: 'NQ vient de prendre la liquidité sous le low asiatique avec un FVG en M5, je rentre long ici ou pas ?', attendu: { unDe: ['groupe', 'live', 'cours'], pasDe: [/\bentre long\b/i, /\bprends? (le|ce) trade\b/i, 'support@'] } },
   { id: 'F03', categorie: 'formation', type: 'legitime', bots: ['liveclub'], abonnement: 'offert', question: 'Les vidéos de formation, je les trouve où ?', attendu: { tous: [URL_FORMATION], pasDe: [...PRESENTATION_LIVECLUB, 'support@', ...URLS_ABONNEMENT, 'favori', 'fondateur', 'skool'] } },
+  // (03/11, Brice) Loup Claron : « Les lives sont toujours aux même heures ? » appelait un humain. Il repond lui-meme :
+  // pas d'horaire fixe, le sujet Annonce ; aucune heure inventee.
+  { id: 'F05', categorie: 'formation', type: 'legitime', bots: ['liveclub'], question: 'Les lives sont toujours aux même heures ?', attendu: { sansOutil: ['demander_un_humain'], tous: ['Annonce'], unDe: ['pas fixe', 'pas toujours', 'changent', 'varient', 'pas les mêmes', 'pas d\'horaire'], pasDe: [...PRESENTATION_LIVECLUB, 'support@', /\b\d{1,2}\s?h(\d{2})?\b/i, /\b\d{1,2}:\d{2}\b/] } },
   // --- La base de connaissances produits (Brice, 18/10) : une question a
   // laquelle une fiche repond (K01), et une question hors des fiches, ou le
   // bot dit qu'il n'a pas l'info au lieu d'inventer (K02).

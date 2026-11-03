@@ -3,6 +3,30 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
+## ACCUEIL APRES UN RETRAIT, HORAIRES DES LIVES, REPONSES PARTAGEES DANS L'EQUIPE (03/11/2026 soir, commite NON pousse ; aucune migration)
+
+- Bienvenue manquee d'EarvinSaintus (887971980, acces broker, 03/11 16:15) : PAS dc5e25d ni le sujet ferme (bot admin,
+  can_manage_topics = oui, lu par getChatMember le 03/11). Sa ligne disait sorti le 06/10 12:06 (retrait manuel de Melanie,
+  « sans abonnement relie »), 28 jours < 30 = 'connu' (retour rapide) : ni accueil, ni tour en prive (geste 426 genre
+  'connu'). Correction : lireAvantEntree (liveclub/avant-entree.ts) lit aussi la regle du geste « retrait » de cette sortie
+  (a 1 h pres) ; genreEntree : un retrait autre que impaye_5j (RETRAITS_SANS_RETOUR) suivi d'une entree = 'retour' ; impaye
+  regularise vite = 'connu' comme le 13/10. Route du webhook et bot-membre lisent la meme chose.
+- Accueil refuse par Telegram : alerte a l'equipe par Agent AOK (texteAlerteAccueilNonPublie, geste « Gerer les sujets »
+  pour TOPIC_CLOSED), via alerterEquipeTexte (alerte-equipe-telegram.ts, generique, `sauf` = compte qui a agi).
+- scripts/renvoyer-accueil.mjs <telegram_id> [--genre] [--oui] : a blanc par defaut (etat du membre et droits du bot lus).
+  Earvin : accueilli a la main par Alex, ne pas relancer.
+- Bot des membres : les horaires des lives ne sont pas fixes, annonces dans Annonce (prompt-membre.ts + FAQ de
+  docs/connaissances/live-club.md ; connaissances.generated.ts patche a la main : generer-connaissances.mjs echoue deja
+  sur masterclass.md, 14 masterclasses du site Masterclass non citees). Eval F05 (une passe) : reponse_correcte.
+  Copie du site (sites/Aoknowledgecom/v3/src/data/connaissances.generated.ts) pas regeneree.
+- Reponse d'un compte de l'equipe a un fil Support (onglet Support, Agent AOK, cartes de Tab) : repondreAuFil prend
+  l'auteur et previent les AUTRES comptes d'Agent AOK (« X a pris la discussion avec Y », citation de 200 car., fil),
+  ajoute a leur historique. Adil n'a pas de compte Agent AOK : il ne recoit rien, mais ses reponses sont annoncees.
+  Une reponse ecrite depuis un compte Telegram personnel reste invisible.
+- Verifs : tsc, eslint ; verifier-accueil-groupe (15), -reconnaissance, -liveclub, -agent-equipe, -reponse-partagee (3,
+  nouveau), -alerte-equipe, -reponse-membre, -tab-repondre, -pieces-support, -attente-equipe et voisins : ok.
+  verifier-pont-support pas lance (ecrit en transaction annulee sur la base de prod).
+
 ## REVENANTS RECONNUS PAR L'ONTOLOGIE, RESUME DU MATIN SANS DOUBLON (03/11/2026, commite NON pousse ; migration 20261103090000 ECRITE, NON appliquee)
 
 - Cas du 03/11 : Benoit Richard (fiche f6a1feb5, Skool 16/09/2025, abonnement 99 EUR annule le 16/08) revient par un

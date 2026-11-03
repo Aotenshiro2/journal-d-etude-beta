@@ -31,6 +31,8 @@ import { ajouterReponseEquipe, telegramDuFil, texteReponseEquipe } from '@/lib/l
 import {
   legendeFichier, pieceDuResultat, refusLegende, texteFilEnvoi, type FichierLu, type PieceSupport,
 } from '@/lib/liveclub/support-pont-pur'
+import { alerterEquipeTexte, nomTelegram } from '@/lib/alerte-equipe-telegram'
+import { texteReponsePartagee, userIdActeur } from '@/lib/alerte-equipe-telegram-pur'
 
 /** Meme plafond que /api/support/chat et le pont. */
 export const MAX_REPONSE_FIL = 4000
@@ -59,6 +61,58 @@ export async function repondreAuFil(
   message: string,
   journal = '[support/reply]',
   fichier: FichierReponse | null = null,
+  auteur: string | null = null,
+): Promise<IssueReponseFil> {
+  const issue = await repondreAuFilSansPartage(threadId, message, journal, fichier)
+  // (03/11, Brice) La reponse est partie : les AUTRES comptes de l'equipe le
+  // savent (Agent AOK), avec la reponse en citation courte. Celui qui a
+  // repondu ne recoit rien (auteur = son user_id, ou « agent:<user_id> »).
+  // Ne jette jamais : l'envoi au membre est fait.
+  if (issue.ok || issue.raison === 'livre_non_enregistre') {
+    await partagerReponseAvecLEquipe({
+      auteur, filId: threadId, texte: message, piece: Boolean(fichier),
+      canal: issue.ok ? issue.canal : 'telegram', journal,
+    })
+  }
+  return issue
+}
+
+/** Le nom de l'acteur du cockpit (cockpit_allowlist.label), ou null. */
+async function nomDuCompte(userId: string): Promise<string | null> {
+  try {
+    const l = await prisma.$queryRaw<{ label: string | null }[]>`
+      select label from public.cockpit_allowlist where user_id = ${userId}::uuid`
+    return l[0]?.label?.trim() || null
+  } catch {
+    return null
+  }
+}
+
+async function partagerReponseAvecLEquipe(p: {
+  auteur: string | null; filId: string; texte: string; piece: boolean; canal: 'telegram' | 'site'; journal: string
+}): Promise<void> {
+  try {
+    const userId = userIdActeur(p.auteur)
+    const nom = userId ? await nomDuCompte(userId) : null
+    let qui: string | null = null
+    if (p.canal === 'telegram') {
+      const telegramId = await telegramDuFil(p.filId).catch(() => null)
+      qui = telegramId ? await nomTelegram(telegramId) : null
+    }
+    await alerterEquipeTexte(
+      texteReponsePartagee({ auteur: nom, qui, fil: p.filId, texte: p.texte, piece: p.piece, canal: p.canal }),
+      { sauf: userId, journal: `${p.journal} reponse partagee avec l'equipe` },
+    )
+  } catch (err) {
+    console.warn(`${p.journal} reponse non partagee avec l'equipe : ${premiereLigne(err)}`)
+  }
+}
+
+async function repondreAuFilSansPartage(
+  threadId: string,
+  message: string,
+  journal: string,
+  fichier: FichierReponse | null,
 ): Promise<IssueReponseFil> {
   if (typeof message !== 'string' || (!message.trim() && !fichier) || message.length > MAX_REPONSE_FIL) {
     return { ok: false, raison: 'texte_invalide' }

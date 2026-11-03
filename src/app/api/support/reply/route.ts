@@ -87,7 +87,7 @@ export async function POST(req: NextRequest) {
     piece = { lu, octets: new Uint8Array(await fichier.arrayBuffer()) }
   }
 
-  const issue = await repondreAuFil(threadId, message, '[support/reply]', piece)
+  const issue = await repondreAuFil(threadId, message, '[support/reply]', piece, userId)
   if (issue.ok) {
     return issue.canal === 'telegram'
       ? NextResponse.json({

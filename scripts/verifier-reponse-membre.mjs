@@ -323,7 +323,7 @@ test('un seul envoi : la route de l\'onglet Support et l\'agent passent par repo
   assert.match(envoi, /role: 'human'/)
   assert.match(envoi, /escalatedAt: null/)
   const route = lire('src/app/api/support/reply/route.ts')
-  assert.match(route, /await repondreAuFil\(threadId, message, '\[support\/reply\]', piece\)/)
+  assert.match(route, /await repondreAuFil\(threadId, message, '\[support\/reply\]', piece, userId\)/)
   // (16/10) Le JSON d'avant reste lu tel quel ; le multipart n'est qu'une autre porte.
   assert.match(route, /const body = await req\.json\(\)\.catch\(\(\) => \(\{\}\)\)/)
   assert.match(route, /lireFichierSortant\(\{ type: 'document', mime: fichier\.type, nom: fichier\.name, taille: fichier\.size \}, MAX_FICHIER_COCKPIT\)/)

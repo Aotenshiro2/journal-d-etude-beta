@@ -303,7 +303,7 @@ await cas('premier clic : seule une proposition en attente et pas expiree se dec
 await cas('cablage : Envoyer passe par repondreAuFil, la fonction de l onglet Support ; la proposition n envoie rien', () => {
   // L'onglet Support du cockpit (POST /api/support/reply) et ce clic : la meme fonction.
   assert.match(REPLY, /import \{ repondreAuFil, type FichierReponse \} from '@\/lib\/support-reponse'/)
-  assert.match(REPLY, /await repondreAuFil\(threadId, message, '\[support\/reply\]', piece\)/)
+  assert.match(REPLY, /await repondreAuFil\(threadId, message, '\[support\/reply\]', piece, userId\)/)
   const envoi = corpsDe(SERVEUR, 'envoyerProposition')
   assert.match(envoi, /const \{ repondreAuFil \} = await import\('@\/lib\/support-reponse'\)/)
   assert.match(envoi, /issue = await repondreAuFil\(fil\.id, c\.texte, '\[tab\/repondre\]'\)/)

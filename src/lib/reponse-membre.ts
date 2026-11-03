@@ -319,7 +319,7 @@ export async function rendreLaMainPourAgent(entree: unknown, resoudre: Resolveur
  * ou un refus de Telegram. Livre mais pas enregistre : une phrase (pas une
  * erreur), pour que personne ne la renvoie.
  */
-export async function executerReponseMembre(a: ActionAgent): Promise<string> {
+export async function executerReponseMembre(a: ActionAgent, acteur: string | null = null): Promise<string> {
   const p = lireParamsReponseMembre(a.params)
   if (typeof p === 'string') throw new RefusAction(`${p} Rien n'a été envoyé.`)
   if (!p.fil_id) throw new RefusAction("Carte incomplète (fil non résolu) : rien n'a été envoyé, redemande la réponse.")
@@ -347,7 +347,7 @@ export async function executerReponseMembre(a: ActionAgent): Promise<string> {
 
   let issue: Awaited<ReturnType<typeof repondreAuFil>>
   try {
-    issue = await repondreAuFil(p.fil_id, p.texte, '[cockpit/reponse-membre]', fichier)
+    issue = await repondreAuFil(p.fil_id, p.texte, '[cockpit/reponse-membre]', fichier, acteur)
   } catch (err) {
     // repondreAuFil ne jette qu'avant tout envoi (fil illisible) ou sur
     // l'ecriture d'un fil du site : rien n'est parti.

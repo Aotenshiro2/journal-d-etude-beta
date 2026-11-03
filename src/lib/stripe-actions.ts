@@ -1318,7 +1318,7 @@ export async function executerAction(a: ActionAgent, acteur = 'agent'): Promise<
   // dynamique : reponse-membre.ts importe ce fichier (RefusAction).
   if (a.type === 'reponse_membre') {
     const { executerReponseMembre } = await import('@/lib/reponse-membre')
-    return executerReponseMembre(a)
+    return executerReponseMembre(a, acteur)
   }
 
   // ── Adresse de contact d'un acces broker (31/10) ──────────────────────────
