@@ -110,6 +110,7 @@ import { prisma } from '@/lib/db'
 import { TEXTE_PAUSE_AVANT_ARRET, chatId, texteAbonnement, texteRaisonSortie, tipsAccueilActifs } from './config'
 import { droitLiveClub, type Droit } from './droits'
 import { genreEntree, texteAdmission, type GenreEntree } from './accueil-groupe'
+import { reconnaitrePersonne } from './reconnaissance'
 import { BOUTON_LOTS, texteAccesEnPauseLots, texteAccesFermeDepot } from './lots-pur'
 import { declarerLots } from './lots'
 import { consommerJeton, ErreurTableLiveClub } from './jetons'
@@ -475,7 +476,7 @@ export async function traiterDemandeAdhesion(demande: DemandeAdhesionTg, updateI
     // (31/10, Brice) Le message de l'admission : le tour du proprietaire pour
     // un nouveau membre, un rappel court pour un retour (texteAdmission). Qui
     // entre se lit AVANT l'approbation, comme l'ecriture au demandeur.
-    const entree = await lireGenreEntree(u.id)
+    const entree = await lireGenreEntree(u.id, droit)
     await envoyer(ecrireA, texteAdmissionPour(entree, droit))
     const r = await approuverDemande(u.id)
     await journaliserGesteLiveClub(
@@ -540,14 +541,31 @@ async function demandeLaisseeEnAttente(telegramId: number): Promise<boolean> {
  * (genreEntree, accueil-groupe.ts). Lecture ratee = 'connu' : le message
  * d'acceptation seul, plutot qu'un tour a quelqu'un qui connait deja le groupe.
  */
-async function lireGenreEntree(telegramId: number): Promise<GenreEntree> {
+async function lireGenreEntree(telegramId: number, droit?: Droit): Promise<GenreEntree> {
+  let genre: GenreEntree
   try {
     const lignes = await prisma.$queryRaw<{ present: boolean | null; sorti_le: Date | null }[]>`
       select present, sorti_le from public.cockpit_telegram_membres where telegram_id = ${telegramId}`
-    return genreEntree(lignes[0] ? { present: lignes[0].present, sortiLe: lignes[0].sorti_le } : null, new Date())
+    genre = genreEntree(lignes[0] ? { present: lignes[0].present, sortiLe: lignes[0].sorti_le } : null, new Date())
   } catch (err) {
     console.warn(`[liveclub/bot] entree illisible (presence avant l'entree) : ${messageErreur(err)}`)
     return 'connu'
+  }
+  if (genre !== 'nouveau') return genre
+  // (03/11, Brice) Un compte jamais vu : l'ontologie des membres dit s'il
+  // revient (autre compte Telegram, autre adresse, ancien abonnement : Benoit
+  // Richard, 03/11). Le droit donne la fiche et l'abonnement qui le fait
+  // entrer. 'incertain' (nom ambigu) ou lecture ratee : le tour du nouveau,
+  // qui ne dit rien de faux en prive.
+  try {
+    const r = await reconnaitrePersonne({
+      telegramId, membreId: droit?.membreId ?? null, abonnementId: droit?.abonnementId ?? null,
+      clientStripe: droit?.clientStripe ?? null, quand: new Date(),
+    })
+    return r.verdict === 'retour' ? 'retour' : 'nouveau'
+  } catch (err) {
+    console.warn(`[liveclub/bot] ontologie illisible a l'entree, message du nouveau : ${messageErreur(err)}`)
+    return 'nouveau'
   }
 }
 
@@ -603,7 +621,7 @@ async function reprendreDemandeEnAttente(u: Utilisateur, updateId: number, droit
   if (droit.statut !== 'oui') return null
 
   const contexte = { telegramId: u.id, membreId: droit.membreId ?? null, acteur: ACTEUR_BOT_MEMBRE, abonnementId: droit.abonnementId ?? null }
-  const entree = await lireGenreEntree(u.id)
+  const entree = await lireGenreEntree(u.id, droit)
   const r = await approuverDemande(u.id)
   if (r.ok) {
     await journaliserGesteLiveClub(

@@ -3,6 +3,38 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
+## REVENANTS RECONNUS PAR L'ONTOLOGIE, RESUME DU MATIN SANS DOUBLON (03/11/2026, commite NON pousse ; migration 20261103090000 ECRITE, NON appliquee)
+
+- Cas du 03/11 : Benoit Richard (fiche f6a1feb5, Skool 16/09/2025, abonnement 99 EUR annule le 16/08) revient par un
+  NOUVEAU compte Telegram (9028774793, jamais vu) et un nouveau client Stripe : le bot a poste « vient d'arriver ».
+  Cause : genreEntree ne lisait que la ligne du compte dans cockpit_telegram_membres. Correction : un compte jamais vu
+  passe par reconnaitrePersonne (src/lib/liveclub/reconnaissance.ts, regles dans reconnaissance-pur.ts) : identifiants
+  (rattachements meme retires, exemptions, acces broker du compte, fiche et abonnement du droit, adresses, client
+  Stripe) -> fiches -> traces anciennes (abonnement autre que celui qui le fait entrer, paiement, fiche entree 30 j
+  avant, autre compte Telegram de la fiche deja vu, acces ou exemption) = 'retour'. Rien par identifiant : le nom
+  complet (cleNom, mots tries sans accents), une seule fiche = retour ; plusieurs = 'incertain' -> accueil 'neutre'
+  (ligne d'Accueil seule, sans mot de Bla-bla). Route du webhook : lecture ratee = neutre. Message prive (bot-membre,
+  lireGenreEntree(u.id, droit)) : retour -> rappel court, sinon tour du nouveau. Essai lecture seule sur la base le
+  03/11 : Benoit = retour (abonnement), Loup Claron = nouveau (fiche recente).
+- Resume du matin : une rubrique « Arrivées (nouveaux et retours) » remplace « Nouveaux abonnés » + « Entrées dans le
+  groupe » (rubrique 'entrees' supprimee) : une ligne par personne (abonnement et entree rejoints par le compte entre
+  avec l'abonnement, sinon le compte rattache au client Stripe), nouveau/retour (genre de l'entree puis ontologie),
+  montant REELLEMENT paye (lireAbonnementPourMontant, stripe.ts : sub + latest_invoice + discounts depliees, coupons
+  lus a part ; detailMontantArrivee), « pas encore entré dans le groupe » si besoin. Lecture Stripe ratee : ancien
+  libelle « 139 € par mois, avec remise ».
+- Equipe jamais dans « À contacter » ni dans les impayes : lireEquipe (exemptions fondateur/admin/equipe, comptes
+  d'Agent AOK, leurs fiches par fiche, adresse, rattachement ou adresses du compte AOK, et leurs clients Stripe),
+  estDeLEquipe (resume-pur.ts). Cause du 03/11 : le compte de Melanie n'est rattache a aucune fiche, la vue
+  cockpit_membres_signaux ne l'ecartait pas. Migration 20261103090000 (sites/Aoknowledgecom) : CTE fiches_equipe
+  dans la vue de base, memes colonnes (instantanes et cockpit_membres_contact_recalculer inchanges). Essai du corps en
+  SELECT seul : 87 -> 86 lignes, seule Melanie sort. Le code tient sans elle.
+- Nouvel abonnement de Benoit absent de cockpit_abonnements : pas un rattachement rate, il n'est que dans l'export
+  Stripe du 03/11 (08 h 59) ; AOK-Push-Membres (10 h 08) le rattache (client cus_VYiwug3g38YJ8S, adresse connue).
+- Verifs : node scripts/verifier-reconnaissance.mjs (8 blocs, fausse base), -accueil-groupe (13), -liveclub (63),
+  -relais-accueil, -contact-instantane, -a-contacter, -tips-accueil, -rebonds-email, -agent-equipe, -pieces-support,
+  -suivi-lots, -pause-depot, -annulation-abonnement, -securite-bots, -reouverture-impaye : ok ; tsc et eslint ok.
+- A FAIRE sur GO : push du journal ; migration 20261103090000 (puis Recalculer, ou le passage du lendemain).
+
 ## CONNECTEUR MCP DU COCKPIT POUR TACHE (01/11/2026, commite NON pousse ; migration 20261101200000 ECRITE, NON appliquee)
 
 - Besoin (Brice, 01/11) : le concepteur de Tache ajoute un « connecteur MCP personnalise » ; il doit avoir EXACTEMENT les

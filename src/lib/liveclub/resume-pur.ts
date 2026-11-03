@@ -16,18 +16,24 @@
 /** Ce qu'on sait d'une personne. Tout est facultatif : on dit ce qu'on a. */
 export type Personne = { nom: string | null; email: string | null; pseudo: string | null; telegramId: number | null }
 
+// (03/11, Brice) « Nouveaux abonnés » puis « Entrées dans le groupe »
+// relistaient les memes personnes (Loup Claron, Benoit Richard) : « une seule
+// fois aurait suffi ». Une seule rubrique, « Arrivées » (cle 'nouveaux') :
+// une personne = une ligne, nouveau ou retour (par l'ontologie,
+// reconnaissance.ts), l'abonnement avec ce qui est REELLEMENT paye
+// (detailMontantArrivee), et l'entree dans le groupe ou son absence
+// (detailArrivee). L'ancienne rubrique 'entrees' n'existe plus.
 export type RubriqueResume =
-  | 'nouveaux' | 'arrets' | 'pauses' | 'impayes' | 'sorties' | 'entrees' | 'acces' | 'adresses' | 'rebonds' | 'comptes' | 'humains'
+  | 'nouveaux' | 'arrets' | 'pauses' | 'impayes' | 'sorties' | 'acces' | 'adresses' | 'rebonds' | 'comptes' | 'humains'
   | 'reprises' | 'demandes' | 'contacter' | 'suspens'
 
 /** Les rubriques, dans l'ordre du message. */
 export const RUBRIQUES_RESUME: readonly { cle: RubriqueResume; titre: string }[] = [
-  { cle: 'nouveaux', titre: 'Nouveaux abonnés' },
+  { cle: 'nouveaux', titre: 'Arrivées (nouveaux et retours)' },
   { cle: 'arrets', titre: 'Arrêts demandés ou annulés' },
   { cle: 'pauses', titre: 'Pauses et reprises' },
   { cle: 'impayes', titre: 'Impayés' },
   { cle: 'sorties', titre: 'Sorties du groupe' },
-  { cle: 'entrees', titre: 'Entrées dans le groupe' },
   { cle: 'acces', titre: 'Accès broker, exemptions et tarifs réservés' },
   { cle: 'adresses', titre: 'Adresses rattachées automatiquement' },
   // (31/10) Webhook Resend (rebonds-pur.ts) : refusé par la boîte, marqué comme spam, bloqué par Resend.
@@ -180,8 +186,10 @@ export function evenementDeGeste(
   }
   if (g.resultat !== 'fait') return null
   switch (g.geste) {
+    // (03/11) Dans « Arrivées » : le resume du matin fusionne l'entree avec
+    // l'abonnement de la meme personne (detailArrivee) ; seul, ce texte-ci.
     case 'entree_acceptee':
-      return { rubrique: 'entrees', detail: `entré dans le groupe${RAISON_ENTREE[regle] ?? ''}` }
+      return { rubrique: 'nouveaux', detail: `entré dans le groupe${RAISON_ENTREE[regle] ?? ''}` }
     case 'retrait':
       if (regle === 'desabonne') return { rubrique: 'sorties', detail: 'sorti du groupe : abonnement terminé, fin de la période payée' }
       if (regle === 'impaye_5j') return { rubrique: 'impayes', detail: 'sorti du groupe : paiement en retard depuis plus de 5 jours' }
@@ -373,6 +381,154 @@ export function detailNouvelAbonnement(o: { montant: string | null; remise: bool
 }
 
 // ---------------------------------------------------------------------------
+// (03/11) Les arrivees : une personne, une ligne, et ce qu'elle PAIE
+// ---------------------------------------------------------------------------
+//
+// Brice : « 139 € par mois, avec remise » ne dit pas ce qui est paye. Il veut
+// ce qu'il GAGNE : la facture payee, le prix apres remise et la duree de la
+// remise si elle est temporaire, par exemple « 99 € par mois (remise sur
+// 139 €, pendant 3 mois) ».
+
+/** Une remise lue chez Stripe (remiseDeStripe). Champs nuls : pas lus. */
+export type RemiseLue = { duree: 'once' | 'repeating' | 'forever' | null; mois: number | null; fin: string | null }
+
+/** La premiere facture de l'abonnement (latest_invoice), en centimes. */
+export type FactureLue = { statut: string; payeCentimes: number | null; totalCentimes: number | null; devise: string | null }
+
+function montantEnClair(centimes: number, devise: string): string {
+  const entier = Number.isInteger(centimes / 100)
+  const nombre = entier ? String(centimes / 100) : (centimes / 100).toFixed(2).replace('.', ',')
+  return devise.toLowerCase() === 'eur' ? `${nombre} €` : `${nombre} ${devise.toUpperCase()}`
+}
+
+function parLaPeriode(periodicite: string | null): string {
+  if (!periodicite) return ''
+  if (!/^\d/.test(periodicite)) return ` par ${periodicite}`
+  return /semaines$/.test(periodicite) ? ` toutes les ${periodicite}` : ` tous les ${periodicite}`
+}
+
+const iso = (sec: unknown): string | null =>
+  typeof sec === 'number' && Number.isFinite(sec) && sec > 0 ? new Date(sec * 1000).toISOString() : null
+
+/**
+ * La remise d'un abonnement Stripe (objet brut, `discounts` deplie, ou
+ * l'ancien `discount`), ou null s'il n'en a pas. Le coupon est sur la remise
+ * (`coupon`, anciennes versions de l'API) ou sous `source.coupon` (versions
+ * recentes) ; un coupon reste en identifiant (non deplie) se lit dans
+ * `coupons` (lu a part par l'appelant). Une remise posee mais illisible (ses
+ * identifiants seuls) : { duree: null, mois: null, fin: null }.
+ */
+export function remiseDeStripe(sub: Record<string, unknown>, coupons: ReadonlyMap<string, Record<string, unknown>> = new Map()): RemiseLue | null {
+  const items = (sub.items as { data?: { discounts?: unknown }[] } | undefined)?.data ?? []
+  const toutes: unknown[] = [
+    ...(Array.isArray(sub.discounts) ? sub.discounts : []),
+    ...(sub.discount && typeof sub.discount === 'object' ? [sub.discount] : []),
+    ...items.flatMap(i => (Array.isArray(i.discounts) ? i.discounts : [])),
+  ]
+  if (toutes.length === 0) return null
+  for (const d of toutes) {
+    if (!d || typeof d !== 'object') continue
+    const r = d as { coupon?: unknown; source?: { coupon?: unknown } | null; end?: unknown }
+    const brut = r.coupon ?? r.source?.coupon
+    const coupon = typeof brut === 'string' ? coupons.get(brut) : brut && typeof brut === 'object' ? brut as Record<string, unknown> : undefined
+    const duree = coupon && ['once', 'repeating', 'forever'].includes(String(coupon.duration)) ? coupon.duration as RemiseLue['duree'] : null
+    const mois = typeof coupon?.duration_in_months === 'number' && coupon.duration_in_months > 0 ? coupon.duration_in_months : null
+    return { duree, mois, fin: iso(r.end) }
+  }
+  return { duree: null, mois: null, fin: null }
+}
+
+/** La derniere facture (latest_invoice deplie) d'un abonnement Stripe brut, ou null. */
+export function factureDeStripe(sub: Record<string, unknown>): FactureLue | null {
+  const f = sub.latest_invoice
+  if (!f || typeof f !== 'object') return null
+  const v = f as { status?: unknown; amount_paid?: unknown; total?: unknown; currency?: unknown }
+  return {
+    statut: String(v.status ?? ''),
+    payeCentimes: typeof v.amount_paid === 'number' ? v.amount_paid : null,
+    totalCentimes: typeof v.total === 'number' ? v.total : null,
+    devise: typeof v.currency === 'string' ? v.currency : null,
+  }
+}
+
+/**
+ * Le montant d'une arrivee, ce qui est REELLEMENT paye ou engage :
+ * - sans remise : « 139 € par mois » (et le premier paiement s'il differe) ;
+ * - remise temporaire : « 99 € par mois (remise sur 139 €, pendant 3 mois) »,
+ *   ou « jusqu'au <date> » si seule la fin est connue ;
+ * - remise sans fin : « 99 € par mois (remise sur 139 €, sans limite de durée) » ;
+ * - remise unique : « 99 € le premier paiement (remise unique sur 139 €), puis 139 € par mois » ;
+ * - duree illisible : « 99 € par mois (remise sur 139 €, durée de la remise non lue) ».
+ * Le prix remise est celui de la facture : payee (amount_paid), sinon son
+ * total (« engagés, premier paiement pas encore encaissé »). Facture pas lue
+ * et remise : l'ancien libelle (« 139 € par mois, avec remise »). null si
+ * rien n'est lisible.
+ */
+export function detailMontantArrivee(o: {
+  catalogue: { centimes: number; devise: string } | null
+  periodicite: string | null
+  remise: RemiseLue | null
+  aRemise: boolean
+  facture: FactureLue | null
+}): string | null {
+  const par = parLaPeriode(o.periodicite)
+  const devise = o.catalogue?.devise ?? o.facture?.devise ?? 'eur'
+  const cat = o.catalogue ? montantEnClair(o.catalogue.centimes, o.catalogue.devise) : null
+  const payee = o.facture?.statut === 'paid' && o.facture.payeCentimes !== null
+  const reel = payee ? o.facture!.payeCentimes : o.facture?.totalCentimes ?? null
+  const pasEncaisse = o.facture && !payee ? ', premier paiement pas encore encaissé' : ''
+  const avecRemise = o.aRemise || o.remise !== null
+  if (!avecRemise) {
+    if (!cat) return reel !== null ? `${montantEnClair(reel, devise)}${par}${pasEncaisse}` : null
+    const premier = reel !== null && o.catalogue && reel !== o.catalogue.centimes
+      ? ` (premier paiement : ${montantEnClair(reel, devise)}${payee ? '' : ', pas encore encaissé'})` : pasEncaisse
+    return `${cat}${par}${premier}`
+  }
+  if (reel === null) return cat ? `${cat}${par}, avec remise` : 'avec remise'
+  const prix = montantEnClair(reel, devise)
+  const sur = cat ? `remise sur ${cat}` : 'remise'
+  const r = o.remise
+  if (r?.duree === 'once') return `${prix} le premier paiement (${sur.replace('remise', 'remise unique')})${cat ? `, puis ${cat}${par}` : ''}${pasEncaisse}`
+  if (r?.duree === 'forever') return `${prix}${par} (${sur}, sans limite de durée)${pasEncaisse}`
+  if (r?.mois) return `${prix}${par} (${sur}, pendant ${r.mois} mois)${pasEncaisse}`
+  const fin = dateFr(r?.fin)
+  if (fin) return `${prix}${par} (${sur}, jusqu'au ${fin})${pasEncaisse}`
+  return `${prix}${par} (${sur}, durée de la remise non lue)${pasEncaisse}`
+}
+
+/** Ce qu'on sait d'une arrivee : son genre, son abonnement de la fenetre, son entree dans le groupe. */
+export type Arrivee = {
+  /**
+   * Par l'ontologie (reconnaissance.ts) : nouveau = jamais eu d'abonnement ni
+   * d'acces ; retour = deja membre ; incertain = seul un nom ambigu le relie
+   * a une fiche ; null = pas lu.
+   */
+  genre: 'nouveau' | 'retour' | 'incertain' | null
+  abonnement: { montant: string | null; tarifReserve: boolean; statut: string } | null
+  /** L'entree dans le groupe (regle du geste : abonnement, acces_broker...), null = pas (encore) entre. */
+  entree: { regle: string | null } | null
+}
+
+/**
+ * (03/11) La ligne d'une arrivee : « retour (déjà membre par le passé) ;
+ * abonnement 99 € par mois (remise sur 139 €, pendant 3 mois) ; entré dans le
+ * groupe ». Un abonne pas encore entre : « pas encore entré dans le groupe ».
+ */
+export function detailArrivee(a: Arrivee): string {
+  const morceaux: string[] = []
+  if (a.genre === 'nouveau') morceaux.push('nouveau')
+  if (a.genre === 'retour') morceaux.push('retour (déjà membre par le passé)')
+  if (a.genre === 'incertain') morceaux.push('nouveau ou retour, à vérifier (même nom que plusieurs fiches)')
+  if (a.abonnement) {
+    morceaux.push(`abonnement${a.abonnement.montant ? ` ${a.abonnement.montant}` : ''}`
+      + `${a.abonnement.tarifReserve ? ' (tarif réservé)' : ''}${a.abonnement.statut === 'canceled' ? ', déjà arrêté' : ''}`)
+  }
+  if (a.entree) morceaux.push(`entré dans le groupe${RAISON_ENTREE[a.entree.regle ?? ''] ?? ''}`)
+  else if (a.abonnement && a.abonnement.statut !== 'canceled') morceaux.push('pas encore entré dans le groupe')
+  return morceaux.join(' ; ') || 'arrivée'
+}
+
+// ---------------------------------------------------------------------------
 // Acces, demandes
 // ---------------------------------------------------------------------------
 
@@ -406,6 +562,21 @@ export function detailAttenteHumain(escaladeIso: string, app: string | null): st
 export function attentesHorsEquipe<T extends { telegram_id: bigint | number | null }>(attentes: readonly T[], equipe: Iterable<number>): T[] {
   const ids = new Set([...equipe].map(Number))
   return attentes.filter(a => a.telegram_id === null || !ids.has(Number(a.telegram_id)))
+}
+
+/** (03/11) L'equipe lue par l'ontologie (lireEquipe, reconnaissance.ts). */
+export type EquipeConnue = { fiches: ReadonlySet<string>; telegrams: ReadonlySet<number>; clients: ReadonlySet<string> }
+
+/**
+ * (03/11) Une personne de l'equipe (exemption fondateur, admin, equipe, ou
+ * compte d'Agent AOK) par son compte Telegram, sa fiche ou son client Stripe :
+ * jamais dans « À contacter » ni dans les impayes du resume. Le cas du 03/11 :
+ * l'abonnement personnel de Melanie (99 EUR) en echec de paiement.
+ */
+export function estDeLEquipe(o: { telegramId?: number | null; membreId?: string | null; clientStripe?: string | null }, e: EquipeConnue): boolean {
+  return (typeof o.telegramId === 'number' && e.telegrams.has(o.telegramId))
+    || (!!o.membreId && e.fiches.has(o.membreId))
+    || (!!o.clientStripe && e.clients.has(o.clientStripe))
 }
 
 /** (16/10) Le bot a repris seul la main d'un fil : 24 h sans message de l'equipe (support-pont-pur.ts). */

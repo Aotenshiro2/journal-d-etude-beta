@@ -54,7 +54,8 @@ import { stripeGet } from '@/lib/stripe-actions'
 import { ajouterAHistoriqueAgent, tgCockpit } from '@/lib/agent-cockpit-telegram'
 import { lireSuspensEquipe, nomEquipe } from '@/lib/agent-equipe'
 import { cleStripeLecture } from './config'
-import { listerAbonnementsLiveClub, type AbonnementResume } from './stripe'
+import { lireAbonnementPourMontant, listerAbonnementsLiveClub, type AbonnementResume } from './stripe'
+import { lireEquipe, reconnaitrePersonne } from './reconnaissance'
 import { formaterMontant, libelleTarifReserve, messageErreur, normaliserEmail, parPeriode, relationAbsente } from './pur'
 import { jourParis } from './passage-regles'
 import { phraseAdresse } from './adresses-pur'
@@ -68,10 +69,10 @@ function idsListe(v: unknown): string[] {
 import {
   attentesHorsEquipe, changementsAbonnements, changementsHorsDuBot, cleAnnonce, cleGeste, composerResume, decouperResume,
   detailAccesBroker, detailAContacter, detailAttenteHumain, detailAvecRelais, detailDemande, detailExemption, detailSuspens,
-  detailNouvelAbonnement, detailRepriseBot, detailTarifReserve, entreesHistoriqueResume, episodesAAnnoncer,
+  detailArrivee, detailMontantArrivee, detailRepriseBot, factureDeStripe, remiseDeStripe, detailTarifReserve, entreesHistoriqueResume, episodesAAnnoncer, estDeLEquipe,
   estNouvelAbonnement, evenementDeChangement, evenementDeGeste, instantaneAbonnements, memoireAnnonces, pseudoCroise, relaisParEpisode,
   texteSur,
-  type EvenementResume, type GesteResume, type MembreAContacter, type MotifContact, type Personne,
+  type Arrivee, type EvenementResume, type GesteResume, type MembreAContacter, type MotifContact, type Personne,
 } from './resume-pur'
 import { repriseAutomatique } from './support-pont-pur'
 
@@ -307,6 +308,110 @@ function montantAbonnement(a: AbonnementResume): string | null {
 }
 
 /**
+ * (03/11, Brice) Les ARRIVEES de la fenetre, une ligne par personne : un
+ * nouvel abonnement et l'entree dans le groupe de la meme personne se
+ * rejoignent (meme compte Telegram : celui qui est entre avec cet abonnement,
+ * sinon celui rattache a son client Stripe). Sur la ligne : nouveau ou
+ * retour (reconnaitrePersonne : jamais eu d'abonnement ni d'acces, ou deja
+ * membre), le montant REELLEMENT paye (detailMontantArrivee, lecture Stripe de
+ * la facture et de la remise), l'entree ou « pas encore entré ».
+ * Chaque lecture est facultative : un code dans `erreurs`, l'ancien libelle.
+ */
+async function ajouterArrivees(o: {
+  nouveaux: AbonnementResume[]; entrees: GesteResume[]; jusqua: Date; annuaire: Annuaire; erreurs: string[]
+  ajouter: (e: EvenementResume, p?: Partial<Personne>) => void
+}): Promise<void> {
+  const { nouveaux, entrees, erreurs } = o
+  if (nouveaux.length === 0 && entrees.length === 0) return
+  const idsNouveaux = nouveaux.map(a => a.id)
+  const reservesPayees = idsNouveaux.length === 0 ? [] : await facultatif('reserves_nouveaux', erreurs, () => prisma.$queryRaw<{ abonnement_id: string }[]>`
+    select abonnement_id from public.cockpit_liveclub_tarifs_reserves where abonnement_id = any(${idsNouveaux}::text[])`)
+  const reserves = new Set(reservesPayees.map(r => r.abonnement_id))
+
+  // La personne d'un abonnement : le compte entre avec lui, sinon le compte rattache a son client.
+  const cleDeSub = new Map<string, string>()
+  for (const g of entrees) if (g.abonnement_id && g.telegram_id) cleDeSub.set(g.abonnement_id, `t${g.telegram_id}`)
+  const clients = [...new Set(nouveaux.filter(a => !cleDeSub.has(a.id)).map(a => a.clientStripe).filter((c): c is string => !!c))]
+  const tgDesClients = clients.length === 0 ? [] : await facultatif('rattachements_nouveaux', erreurs, () => prisma.$queryRaw<{ client_stripe: string; telegram_id: bigint }[]>`
+    select distinct on (client_stripe) client_stripe, telegram_id from public.cockpit_liveclub_rattachements
+    where retire_le is null and client_stripe = any(${clients}::text[])
+    order by client_stripe, lie_le desc`)
+  const tgParClient = new Map(tgDesClients.map(r => [r.client_stripe, Number(r.telegram_id)]))
+
+  type EnCours = { cle: string; quand: string; abonnement: AbonnementResume | null; entree: GesteResume | null }
+  const arrivees = new Map<string, EnCours>()
+  const arrivee = (cle: string, quand: string): EnCours => {
+    const a = arrivees.get(cle) ?? { cle, quand, abonnement: null, entree: null }
+    if (Date.parse(quand) < Date.parse(a.quand)) a.quand = quand
+    arrivees.set(cle, a)
+    return a
+  }
+  for (const a of nouveaux) {
+    const tid = a.clientStripe ? tgParClient.get(a.clientStripe) : undefined
+    const x = arrivee(cleDeSub.get(a.id) ?? (tid ? `t${tid}` : `s${a.id}`), a.creeLe ?? o.jusqua.toISOString())
+    if (!x.abonnement) x.abonnement = a
+  }
+  for (const g of entrees) {
+    const x = arrivee(cleGeste(g), g.fait_le)
+    if (!x.entree) x.entree = g
+  }
+
+  // Un abonne sans entree journalisee, mais deja present dans le groupe (lien d'ailleurs) : entre.
+  const sansEntree = [...arrivees.values()].filter(x => !x.entree && /^t\d+$/.test(x.cle)).map(x => x.cle.slice(1))
+  const presents = sansEntree.length === 0 ? [] : await facultatif('presents_arrivees', erreurs, () => prisma.$queryRaw<{ telegram_id: bigint }[]>`
+    select telegram_id from public.cockpit_telegram_membres where present and telegram_id::text = any(${sansEntree}::text[])`)
+  const dansLeGroupe = new Set(presents.map(p => `t${Number(p.telegram_id)}`))
+
+  for (const x of arrivees.values()) {
+    const a = x.abonnement
+    const g = x.entree
+    const c = a?.clientStripe ? await o.annuaire.client(a.clientStripe) : null
+
+    // Ce qui est REELLEMENT paye : la facture et la remise, lues chez Stripe.
+    let montant: string | null = a ? montantAbonnement(a) : null
+    if (a) {
+      try {
+        const { sub, coupons } = await lireAbonnementPourMontant(a.id)
+        montant = detailMontantArrivee({
+          catalogue: a.montantPeriode, periodicite: a.periodicite, aRemise: a.aRemise,
+          remise: remiseDeStripe(sub, coupons), facture: factureDeStripe(sub),
+        }) ?? montant
+      } catch (err) {
+        if (!erreurs.includes('montant_reel')) erreurs.push('montant_reel')
+        if (a.aRemise && montant) montant = `${montant}, avec remise`
+        console.warn(`[liveclub/resume] montant reel illisible, prix catalogue : ${messageErreur(err).slice(0, 120)}`)
+      }
+    }
+
+    // Nouveau ou retour : le genre de l'entree d'abord (compte deja vu), puis l'ontologie.
+    const genreGeste = g?.details?.genre
+    let genre: Arrivee['genre'] = genreGeste === 'retour' || genreGeste === 'connu' ? 'retour' : null
+    if (!genre) {
+      try {
+        const telegramId = g?.telegram_id ?? (/^t\d+$/.test(x.cle) ? Number(x.cle.slice(1)) : null)
+        const r = await reconnaitrePersonne({
+          telegramId, membreId: g?.membre_id ?? null, abonnementId: a?.id ?? g?.abonnement_id ?? null,
+          clientStripe: a?.clientStripe ?? null, emails: [c?.email], nom: c?.nom ?? null, quand: new Date(x.quand),
+        })
+        genre = r.verdict
+      } catch (err) {
+        if (!erreurs.includes('reconnaissance')) erreurs.push('reconnaissance')
+        console.warn(`[liveclub/resume] ontologie illisible, arrivee sans genre : ${messageErreur(err).slice(0, 120)}`)
+      }
+    }
+
+    o.ajouter({
+      rubrique: 'nouveaux', qui: x.cle, quand: x.quand,
+      detail: detailArrivee({
+        genre,
+        abonnement: a ? { montant, tarifReserve: reserves.has(a.id), statut: a.statut } : null,
+        entree: g ? { regle: g.regle } : dansLeGroupe.has(x.cle) ? { regle: null } : null,
+      }),
+    })
+  }
+}
+
+/**
  * Le resume du matin : lit, compose, envoie une fois par jour. Ne jette pas :
  * une panne rend un bilan 'panne' (rien n'est envoye, la ligne du jour n'est
  * pas posee, le resume suivant couvrira la periode).
@@ -396,7 +501,23 @@ export async function resumeDuMatin(o: { maintenant?: Date; apercu?: boolean } =
       select acces_id::text as id, lower(email) as email from public.cockpit_liveclub_acces where acces_id::text = any(${idsAccesRebonds}::text[])`)
     const emailAccesRebond = new Map(accesRebonds.map(a => [a.id, a.email]))
 
+    // (03/11) L'equipe, par l'ontologie (lireEquipe, reconnaissance.ts) :
+    // jamais dans « À contacter » ni dans les impayes. Le cas du 03/11 :
+    // l'abonnement personnel de Melanie en echec listait Melanie a contacter.
+    const equipeLue = await facultatif('equipe_fiches', erreurs, async () => [await lireEquipe()])
+    const equipeOnto = equipeLue[0] ?? { fiches: new Set<string>(), telegrams: new Set<number>(), clients: new Set<string>() }
+    const deLEquipe = (o: { telegramId?: number | null; membreId?: string | null; abonnementId?: string | null }) =>
+      estDeLEquipe({ ...o, clientStripe: o.abonnementId ? parId.get(o.abonnementId)?.clientStripe ?? null : null }, equipeOnto)
+
+    // (03/11) Les entrees dans le groupe vont aux arrivees (plus bas), avec
+    // l'abonnement de la meme personne : une seule ligne.
+    const entreesLues: GesteResume[] = []
+
     for (const g of gestes) {
+      if (g.geste === 'entree_acceptee') {
+        if (g.resultat === 'fait') entreesLues.push(g)
+        continue
+      }
       let phrase: string | null = null
       let phraseCompte: string | null = null
       let cle = cleGeste(g)
@@ -439,22 +560,19 @@ export async function resumeDuMatin(o: { maintenant?: Date; apercu?: boolean } =
         phrase = phraseAdresse(g, email ? normaliserEmail(email) : null)
       }
       const ev = evenementDeGeste(g, { phraseAdresse: phrase, phraseCompte })
+      if (ev && ev.rubrique === 'impayes' && deLEquipe({ telegramId: g.telegram_id, membreId: g.membre_id, abonnementId: g.abonnement_id })) continue
       if (ev) ajouter({ ...ev, qui: cle, quand: g.fait_le })
     }
 
-    // Stripe : nouveaux abonnes, et changements hors du bot.
+    // (03/11) Les arrivees : nouveaux abonnes et entrees dans le groupe, une
+    // ligne par personne (detailArrivee).
+    await ajouterArrivees({
+      nouveaux: abonnements ? abonnements.filter(a => estNouvelAbonnement(a, depuis.toISOString(), jusqua.toISOString())) : [],
+      entrees: entreesLues, jusqua, annuaire, erreurs, ajouter,
+    })
+
+    // Stripe : changements hors du bot.
     if (abonnements) {
-      const nouveaux = abonnements.filter(a => estNouvelAbonnement(a, depuis.toISOString(), jusqua.toISOString()))
-      const idsNouveaux = nouveaux.map(a => a.id)
-      const reservesPayees = idsNouveaux.length === 0 ? [] : await facultatif('reserves_nouveaux', erreurs, () => prisma.$queryRaw<{ abonnement_id: string }[]>`
-        select abonnement_id from public.cockpit_liveclub_tarifs_reserves where abonnement_id = any(${idsNouveaux}::text[])`)
-      const reserves = new Set(reservesPayees.map(r => r.abonnement_id))
-      for (const a of nouveaux) {
-        ajouter({
-          rubrique: 'nouveaux', qui: `s${a.id}`, quand: a.creeLe ?? jusqua.toISOString(),
-          detail: detailNouvelAbonnement({ montant: montantAbonnement(a), remise: a.aRemise, tarifReserve: reserves.has(a.id), statut: a.statut }),
-        })
-      }
       const changements = changementsHorsDuBot(changementsAbonnements(repere?.etat ?? null, instantane ?? {}), gestes)
       for (const c of changements) {
         const ev = evenementDeChangement(c, parId.get(c.abonnementId))
@@ -608,6 +726,8 @@ export async function resumeDuMatin(o: { maintenant?: Date; apercu?: boolean } =
       order by r.membre_id, tm.present desc nulls last, r.lie_le desc`)
     const pseudoRattache = new Map(pseudosRattaches.map(p => [p.membre_id, p.pseudo]))
     for (const m of aAnnoncer) {
+      // (03/11) Jamais une personne de l'equipe (lireEquipe), meme si la vue la laisse passer.
+      if (estDeLEquipe({ membreId: m.membreId }, equipeOnto)) continue
       const r = fiche.get(m.membreId)
       const { pseudo, alerte } = pseudoCroise(r?.telegram, pseudoRattache.get(m.membreId))
       const base = detailAvecRelais(detailAContacter(m, jour), relaisDe.get(cleAnnonce(m.membreId, m.cleEpisode)) ?? [])

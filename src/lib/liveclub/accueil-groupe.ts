@@ -51,8 +51,19 @@
 //   reponses aux quiz depuis le debut : une ligne courte pour un nouveau
 //   (LIGNE_CHALLENGE_CORE_CONTENT), il peut y repondre au fil de sa progression.
 
+//
+// (03/11, Brice) Un revenant par un AUTRE compte Telegram (cas de Benoit
+// Richard : nouveau compte, nouveau client Stripe, ancien abonnement annule
+// le 16/08) recevait le mot « vient d'arriver dans le Live Club » : la regle
+// ne lisait que la ligne du compte Telegram. Le compte jamais vu passe
+// maintenant par l'ontologie des membres (reconnaissance.ts, regles dans
+// reconnaissance-pur.ts) : ancien membre = « bon retour » ; nom ambigu =
+// accueil NEUTRE (la ligne d'Accueil seule, sans « vient d'arriver » ni
+// « bon retour »). Voir genreAvecReconnaissance.
+
 import { URL_FORMATION_LIVECLUB } from './config'
 import { paragrapheLotsAdmission } from './lots-pur'
+import type { Reconnaissance } from './reconnaissance-pur'
 
 export const JOURS_ABSENCE_RETOUR = 30
 
@@ -77,24 +88,43 @@ export function genreEntree(avant: AvantEntree, quand: Date): GenreEntree {
   return absence >= JOURS_ABSENCE_RETOUR * JOUR_MS ? 'retour' : 'connu'
 }
 
-export type Accueil = 'nouveau' | 'retour' | null
+/**
+ * (03/11) Le genre d'entree, l'ontologie comprise. La ligne du compte
+ * Telegram decide d'abord : 'retour' et 'connu' (retour rapide, deja
+ * present, sortie sans date) restent tels quels. Un compte JAMAIS VU
+ * ('nouveau') prend le verdict de l'ontologie (reconnaitrePersonne) : un
+ * ancien membre revenu par un autre compte = 'retour' ; nom ambigu =
+ * 'incertain'. Sans verdict (null) : 'nouveau', comme avant ; l'appelant
+ * qui n'a pas pu lire l'ontologie passe 'incertain' (prudence).
+ */
+export function genreAvecReconnaissance(genre: GenreEntree, r: Reconnaissance | null): GenreEntree | 'incertain' {
+  if (genre !== 'nouveau' || r === null) return genre
+  return r
+}
+
+/** 'neutre' (03/11) : la ligne d'Accueil seule, ni « vient d'arriver » ni « bon retour ». */
+export type Accueil = 'nouveau' | 'retour' | 'neutre' | null
 
 /**
  * Faut-il publier un accueil pour cet evenement chat_member ? Seulement sur
  * une ENTREE (ancien statut dehors, nouveau statut dedans) : un changement de
  * droits d'un membre deja present, ou un rejeu de l'update par Telegram (la
  * ligne dit deja « present »), ne publie rien.
+ * (03/11) `reconnaissance` : le verdict de l'ontologie pour un compte jamais
+ * vu (genreAvecReconnaissance). Absent : la regle d'avant.
  */
 export function accueilAPublier(
   avant: AvantEntree,
   ancienStatut: string | null | undefined,
   nouveauPresent: boolean,
   quand: Date,
+  reconnaissance: Reconnaissance | null = null,
 ): Accueil {
   if (!nouveauPresent) return null
   if (ancienStatut && STATUTS_DEDANS.includes(ancienStatut)) return null
-  const genre = genreEntree(avant, quand)
-  return genre === 'connu' ? null : genre
+  const genre = genreAvecReconnaissance(genreEntree(avant, quand), reconnaissance)
+  if (genre === 'connu') return null
+  return genre === 'incertain' ? 'neutre' : genre
 }
 
 // ---------------------------------------------------------------------------
@@ -225,7 +255,8 @@ export function nomPourAccueil(pseudo: string | null | undefined, prenom: string
  */
 export function texteAccueil(accueil: Exclude<Accueil, null>, nom: string | null): string {
   const qui = nom ? `, ${nom.replace(/^@/, '')}` : ''
-  return accueil === 'nouveau' ? `Bienvenue dans le Live Club${qui} !` : `Bon retour dans le Live Club${qui} !`
+  // (03/11) 'neutre' : la meme ligne que pour un nouveau, qui ne dit ni « nouveau » ni « retour ».
+  return accueil === 'retour' ? `Bon retour dans le Live Club${qui} !` : `Bienvenue dans le Live Club${qui} !`
 }
 
 /**

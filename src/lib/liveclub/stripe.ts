@@ -125,6 +125,31 @@ export async function abonnementsLiveClubParEmail(email: string): Promise<Abonne
   return tous
 }
 
+/**
+ * (03/11) Ce qu'un nouvel abonnement fait REELLEMENT payer, pour le resume du
+ * matin : l'abonnement brut, sa derniere facture et ses remises depliees
+ * (expand latest_invoice et discounts), et les coupons restes en identifiant
+ * (GET /v1/coupons, 3 au plus). Lecture seule. Jette sur une panne :
+ * l'appelant garde l'ancien libelle.
+ */
+export async function lireAbonnementPourMontant(abonnementId: string): Promise<{ sub: Record<string, unknown>; coupons: Map<string, Record<string, unknown>> }> {
+  if (!ID_ABONNEMENT.test(abonnementId)) throw new Error('abonnement invalide (sub_...).')
+  const cle = cleLecture()
+  const q = new URLSearchParams()
+  q.append('expand[]', 'latest_invoice')
+  q.append('expand[]', 'discounts')
+  const sub = await stripeGet(cle, `/v1/subscriptions/${abonnementId}?${q}`)
+  const coupons = new Map<string, Record<string, unknown>>()
+  const ids = new Set<string>()
+  for (const d of Array.isArray(sub.discounts) ? sub.discounts : []) {
+    const r = d as { coupon?: unknown; source?: { coupon?: unknown } | null } | null
+    const c = r && typeof r === 'object' ? r.coupon ?? r.source?.coupon : null
+    if (typeof c === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(c)) ids.add(c)
+  }
+  for (const id of [...ids].slice(0, 3)) coupons.set(id, await stripeGet(cle, `/v1/coupons/${encodeURIComponent(id)}`))
+  return { sub, coupons }
+}
+
 /** Un abonnement Live Club par son id. null s'il n'existe pas ou n'est pas Live Club. */
 export async function lireAbonnement(abonnementId: string): Promise<AbonnementResume | null> {
   if (!ID_ABONNEMENT.test(abonnementId)) return null

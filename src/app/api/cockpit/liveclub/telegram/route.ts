@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { traiterBouton, traiterDemandeAdhesion, traiterMessagePrive } from '@/lib/liveclub/bot-membre'
 import {
-  JOURS_ABSENCE_RETOUR, accueilAPublier, envoisAccueil, nomPourAccueil, type AvantEntree,
+  JOURS_ABSENCE_RETOUR, accueilAPublier, envoisAccueil, genreEntree, nomPourAccueil, type AvantEntree,
 } from '@/lib/liveclub/accueil-groupe'
+import { reconnaitrePersonne } from '@/lib/liveclub/reconnaissance'
+import type { Reconnaissance } from '@/lib/liveclub/reconnaissance-pur'
 import { appelTelegram } from '@/lib/liveclub/telegram'
 import { noterNomTelegram } from '@/lib/liveclub/noms'
 import { chatDeLUpdate } from '@/lib/liveclub/mouvements-pur'
@@ -202,7 +204,23 @@ export async function POST(req: NextRequest) {
   // TOPIC_CLOSED), puis, pour un nouveau seulement, le petit mot de Bla-bla.
   // Independants : appelTelegram ne jette pas, l'echec de l'un n'empeche pas
   // l'autre, et chaque echec est journalise ici, sans rejeu.
-  const accueil = avantLu ? accueilAPublier(avant, cm.old_chat_member?.status, present, quand) : null
+  // (03/11) Un compte JAMAIS VU peut etre un ancien membre revenu par un
+  // autre compte ou une autre adresse (Benoit Richard, 03/11) : l'ontologie
+  // des membres le dit (reconnaissance.ts). Lecture ratee : 'incertain',
+  // l'accueil reste neutre (ni « vient d'arriver » ni « bon retour »).
+  let reconnaissance: Reconnaissance | null = null
+  const entreeVraie = present && !['member', 'administrator', 'creator', 'restricted'].includes(cm.old_chat_member?.status)
+  if (avantLu && entreeVraie && genreEntree(avant, quand) === 'nouveau') {
+    try {
+      const r = await reconnaitrePersonne({ telegramId: u.id, nom: nomAffiche, quand })
+      reconnaissance = r.verdict
+      if (r.verdict !== 'nouveau') console.log(`[liveclub/telegram] compte jamais vu, reconnu par l'ontologie : ${r.verdict} (${r.indice})`)
+    } catch (err) {
+      reconnaissance = 'incertain'
+      console.warn(`[liveclub/telegram] ontologie illisible, accueil neutre : ${(err instanceof Error ? err.message : String(err)).split('\n')[0].slice(0, 160)}`)
+    }
+  }
+  const accueil = avantLu ? accueilAPublier(avant, cm.old_chat_member?.status, present, quand, reconnaissance) : null
   if (accueil) {
     for (const envoi of envoisAccueil(accueil, nomPourAccueil(pseudo, u.first_name))) {
       const r = await appelTelegram('sendMessage', {

@@ -13,7 +13,7 @@ import './resoudre-ts.mjs'
 
 // Import dynamique : accueil-groupe.ts importe './config' sans extension (resoudre-ts.mjs).
 const {
-  JOURS_ABSENCE_RETOUR, accueilAPublier, genreEntree, nomPourAccueil, texteAccueil, texteMotNouveau, envoisAccueil,
+  JOURS_ABSENCE_RETOUR, accueilAPublier, genreEntree, genreAvecReconnaissance, nomPourAccueil, texteAccueil, texteMotNouveau, envoisAccueil,
   texteAdmission, lienSujet, SUJETS_LIVECLUB, SUJETS_HORS_TOUR, SUJET_MOT_NOUVEAU, SUJETS_DU_TOUR,
 } = await import('../src/lib/liveclub/accueil-groupe.ts')
 const { URL_FORMATION_LIVECLUB } = await import('../src/lib/liveclub/config.ts')
@@ -75,6 +75,40 @@ bloc("qui entre (31/10) : la meme regle pour l'accueil du groupe et le message p
     const g = genreEntree(avant, maintenant)
     assert.equal(accueilAPublier(avant, 'left', true, maintenant), g === 'connu' ? null : g)
   }
+})
+
+bloc("(03/11) Benoit Richard : compte Telegram jamais vu, ancien membre par l'ontologie = bon retour, pas « vient d'arriver »", () => {
+  // Le 03/11 a 07 h 47, nouveau compte Telegram (jamais vu), fiche f6a1feb5
+  // avec un abonnement annule le 16/08 : l'ontologie dit 'retour'.
+  const quand = new Date('2026-11-03T06:47:07Z')
+  const accueil = accueilAPublier(null, 'left', true, quand, 'retour')
+  assert.equal(accueil, 'retour')
+  const envois = envoisAccueil(accueil, '@joker33187')
+  assert.deepEqual(envois.map(e => e.ou), ['Accueil'])
+  assert.equal(envois[0].texte, 'Bon retour dans le Live Club, joker33187 !')
+  assert.ok(!envois.some(e => /vient d'arriver/.test(e.texte)))
+  // Nom ambigu (plusieurs fiches) : accueil neutre, la ligne d'Accueil seule.
+  const neutre = accueilAPublier(null, 'left', true, quand, 'incertain')
+  assert.equal(neutre, 'neutre')
+  assert.deepEqual(envoisAccueil(neutre, '@x').map(e => [e.ou, e.texte]), [['Accueil', 'Bienvenue dans le Live Club, x !']])
+  // Vraiment nouveau : comme avant, Accueil puis le mot de Bla-bla.
+  assert.equal(accueilAPublier(null, 'left', true, quand, 'nouveau'), 'nouveau')
+  assert.equal(accueilAPublier(null, 'left', true, quand), 'nouveau')
+  // La ligne du compte Telegram decide d'abord : retour rapide et deja present restent sans accueil.
+  assert.equal(accueilAPublier({ present: false, sortiLe: ilYa(5) }, 'left', true, maintenant, 'retour'), null)
+  assert.equal(accueilAPublier({ present: true, sortiLe: null }, 'left', true, maintenant, 'nouveau'), null)
+  assert.equal(genreAvecReconnaissance('nouveau', 'retour'), 'retour')
+  assert.equal(genreAvecReconnaissance('nouveau', null), 'nouveau')
+  assert.equal(genreAvecReconnaissance('connu', 'nouveau'), 'connu')
+  assert.equal(genreAvecReconnaissance('retour', 'nouveau'), 'retour')
+  // La route demande l'ontologie pour un compte jamais vu, et reste neutre si elle ne se lit pas.
+  const route = lire('src/app/api/cockpit/liveclub/telegram/route.ts')
+  assert.match(route, /genreEntree\(avant, quand\) === 'nouveau'\) \{\s+try \{\s+const r = await reconnaitrePersonne\(\{ telegramId: u\.id, nom: nomAffiche, quand \}\)/)
+  assert.match(route, /reconnaissance = 'incertain'/)
+  assert.match(route, /accueilAPublier\(avant, cm\.old_chat_member\?\.status, present, quand, reconnaissance\)/)
+  // Le message prive aussi : la fiche et l'abonnement du droit passent a l'ontologie.
+  const bot = lire('src/lib/liveclub/bot-membre.ts')
+  assert.match(bot, /reconnaitrePersonne\(\{\s+telegramId, membreId: droit\?\.membreId \?\? null, abonnementId: droit\?\.abonnementId \?\? null,/)
 })
 
 bloc('nom : @pseudo, sinon prenom, sinon rien', () => {
@@ -238,11 +272,11 @@ bloc("le code : deux envois publics independants, message de l'admission mis a j
   const demande = bot.slice(bot.indexOf('export async function traiterDemandeAdhesion('), bot.indexOf("// La dette d'abord (Brice, 30/09) : un payeur rattache dont"))
   const oui = demande.slice(demande.indexOf("if (droit.statut === 'oui')"))
   assert.equal((oui.match(/await envoyer\(/g) ?? []).length, 1)
-  assert.ok(oui.indexOf('lireGenreEntree(u.id)') < oui.indexOf('texteAdmissionPour(entree, droit)'))
+  assert.ok(oui.indexOf('lireGenreEntree(u.id, droit)') < oui.indexOf('texteAdmissionPour(entree, droit)'))
   assert.ok(oui.indexOf('texteAdmissionPour(entree, droit)') < oui.indexOf('approuverDemande(u.id)'))
   // Reprise d'une demande en attente : qui entre est lu avant l'approbation.
   const reprise = bot.slice(bot.indexOf('async function reprendreDemandeEnAttente('), bot.indexOf('async function leverBanSiBanni('))
-  assert.ok(reprise.indexOf('lireGenreEntree(u.id)') > 0 && reprise.indexOf('lireGenreEntree(u.id)') < reprise.indexOf('approuverDemande(u.id)'))
+  assert.ok(reprise.indexOf('lireGenreEntree(u.id, droit)') > 0 && reprise.indexOf('lireGenreEntree(u.id, droit)') < reprise.indexOf('approuverDemande(u.id)'))
   // Les trois reprises envoient le message de l'admission.
   assert.equal((bot.match(/texteAdmissionPour\(reprise\.entree, reprise\.droit\)/g) ?? []).length, 3)
   // L'adresse de l'academie vient de la constante, jamais en dur.

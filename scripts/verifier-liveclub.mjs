@@ -2276,7 +2276,7 @@ const geste = (geste, regle, o = {}) => ({
 
 test('resume : gestes du journal -> rubriques et phrases', () => {
   const ev = (g, o) => evenementDeGeste(g, o)
-  assert.deepEqual(ev(geste('entree_acceptee', 'abonnement')), { rubrique: 'entrees', detail: 'entré dans le groupe' })
+  assert.deepEqual(ev(geste('entree_acceptee', 'abonnement')), { rubrique: 'nouveaux', detail: 'entré dans le groupe' })
   assert.equal(ev(geste('entree_acceptee', 'acces_broker')).detail, 'entré dans le groupe (accès broker)')
   assert.deepEqual(ev(geste('retrait', 'desabonne')), { rubrique: 'sorties', detail: 'sorti du groupe : abonnement terminé, fin de la période payée' })
   assert.equal(ev(geste('retrait', 'impaye_5j')).rubrique, 'impayes')
@@ -2365,7 +2365,7 @@ function matineeFictive() {
     { rubrique: 'impayes', qui: 't504', quand: '2026-10-15T07:00:10Z', ...evenementDeGeste(geste('retrait', 'impaye_5j')) },
     { rubrique: 'impayes', qui: 't505', quand: '2026-10-14T16:00:00Z', ...evenementDeGeste(geste('invitation', 'reouverture_impaye')) },
     { rubrique: 'sorties', qui: 't506', quand: '2026-10-15T07:00:30Z', ...evenementDeGeste(geste('retrait', 'desabonne')) },
-    { rubrique: 'entrees', qui: 't507', quand: '2026-10-14T20:09:00Z', ...evenementDeGeste(geste('entree_acceptee', 'abonnement')) },
+    { qui: 't507', quand: '2026-10-14T20:09:00Z', ...evenementDeGeste(geste('entree_acceptee', 'abonnement')) },
     { rubrique: 'acces', qui: 'esouad@exemple.fr', quand: '2026-10-14T14:00:00Z', detail: detailAccesBroker('2027-04-14') },
     { rubrique: 'acces', qui: 't508', quand: '2026-10-14T15:00:00Z', detail: detailExemption('favorise', null) },
     { rubrique: 'acces', qui: 'epaul@exemple.fr', quand: '2026-10-14T15:30:00Z', detail: detailTarifReserve({ tarif: '49 € par mois', paye: false }) },
@@ -2413,7 +2413,7 @@ test('resume : composition (une ligne par personne, rubriques vides omises, rien
   const vus = lignes.filter(l => titres.includes(l))
   assert.deepEqual(vus, titres)
   // Les nouveaux abonnes dans l'ordre d'arrivee, nom, email et pseudo.
-  const i = lignes.indexOf('Nouveaux abonnés')
+  const i = lignes.indexOf('Arrivées (nouveaux et retours)')
   assert.equal(lignes[i + 1], '- Claire Martin, claire@exemple.fr, @clairem : nouvel abonnement, 139 € par mois')
   assert.equal(lignes[i + 2], '- Yassine Z., yassine.paiement@exemple.fr : nouvel abonnement, 1 € par mois (tarif réservé)')
   // Une personne, une ligne par rubrique : ses evenements separes par « ; ».
@@ -2461,8 +2461,8 @@ test('resume : decoupage en messages Telegram de 4096 caracteres', () => {
   const messages = decouperResume(long)
   assert.ok(messages.length >= 4)
   for (const m of messages) assert.ok(m.length <= 4096, `message de ${m.length} caracteres`)
-  assert.ok(messages[0].startsWith(`${TITRE_RESUME}\n\nNouveaux abonnés\n- `))
-  assert.ok(messages[1].startsWith('Nouveaux abonnés (suite)\n- '))
+  assert.ok(messages[0].startsWith(`${TITRE_RESUME}\n\nArrivées (nouveaux et retours)\n- `))
+  assert.ok(messages[1].startsWith('Arrivées (nouveaux et retours) (suite)\n- '))
   // Aucune ligne perdue ni coupee.
   const lignesAvant = long.split('\n').filter(l => l.startsWith('- '))
   const lignesApres = messages.flatMap(m => m.split('\n')).filter(l => l.startsWith('- '))
