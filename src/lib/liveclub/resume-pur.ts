@@ -565,7 +565,7 @@ export function attentesHorsEquipe<T extends { telegram_id: bigint | number | nu
 }
 
 /** (03/11) L'equipe lue par l'ontologie (lireEquipe, reconnaissance.ts). */
-export type EquipeConnue = { fiches: ReadonlySet<string>; telegrams: ReadonlySet<number>; clients: ReadonlySet<string> }
+export type EquipeConnue = { fiches: ReadonlySet<string>; telegrams: ReadonlySet<number>; clients: ReadonlySet<string>; emails?: ReadonlySet<string> }
 
 /**
  * (03/11) Une personne de l'equipe (exemption fondateur, admin, equipe, ou
@@ -573,10 +573,48 @@ export type EquipeConnue = { fiches: ReadonlySet<string>; telegrams: ReadonlySet
  * jamais dans « À contacter » ni dans les impayes du resume. Le cas du 03/11 :
  * l'abonnement personnel de Melanie (99 EUR) en echec de paiement.
  */
-export function estDeLEquipe(o: { telegramId?: number | null; membreId?: string | null; clientStripe?: string | null }, e: EquipeConnue): boolean {
+export function estDeLEquipe(o: { telegramId?: number | null; membreId?: string | null; clientStripe?: string | null; email?: string | null }, e: EquipeConnue): boolean {
   return (typeof o.telegramId === 'number' && e.telegrams.has(o.telegramId))
     || (!!o.membreId && e.fiches.has(o.membreId))
     || (!!o.clientStripe && e.clients.has(o.clientStripe))
+    || (!!o.email && !!e.emails?.has(o.email.trim().toLowerCase()))
+}
+
+/**
+ * (03/11, retouche de Brice) Les rubriques ou l'equipe a sa place : SES
+ * demandes (cockpit_demandes) et SES demandes restees sans reponse dans Agent
+ * AOK. Partout ailleurs (arrivees, arrets, pauses, impayes, sorties, acces,
+ * adresses, emails, comptes, demandes d'humain, reprises, a contacter), une
+ * personne de l'equipe n'apparait jamais : la resiliation de l'abonnement
+ * personnel de Melanie le 03/11 serait sortie le lendemain dans « Arrêts ».
+ */
+export const RUBRIQUES_DE_L_EQUIPE: ReadonlySet<RubriqueResume> = new Set<RubriqueResume>(['demandes', 'suspens'])
+
+/**
+ * (03/11) Les evenements sans l'equipe, par la cle de la personne (t<compte>,
+ * m<fiche>, s<abonnement> via son client Stripe, e<adresse>) et par ce que
+ * l'annuaire en sait (compte Telegram, adresse). A appeler APRES la lecture
+ * des noms (resoudre), avant composerResume.
+ */
+export function horsEquipe(
+  evenements: readonly EvenementResume[],
+  personnes: ReadonlyMap<string, Personne>,
+  equipe: EquipeConnue,
+  clientDeLAbonnement: (sub: string) => string | null,
+): EvenementResume[] {
+  return evenements.filter(e => {
+    if (RUBRIQUES_DE_L_EQUIPE.has(e.rubrique)) return true
+    const m = /^([tmse])(.+)$/.exec(e.qui)
+    const p = personnes.get(e.qui)
+    const o: { telegramId?: number | null; membreId?: string | null; clientStripe?: string | null; email?: string | null } = {
+      telegramId: m?.[1] === 't' ? Number(m[2]) : null,
+      membreId: m?.[1] === 'm' ? m[2] : null,
+      clientStripe: m?.[1] === 's' ? clientDeLAbonnement(m[2]) : null,
+      email: m?.[1] === 'e' ? m[2] : null,
+    }
+    if (estDeLEquipe(o, equipe)) return false
+    return !estDeLEquipe({ telegramId: p?.telegramId ?? null, email: p?.email ?? null }, equipe)
+  })
 }
 
 /** (16/10) Le bot a repris seul la main d'un fil : 24 h sans message de l'equipe (support-pont-pur.ts). */

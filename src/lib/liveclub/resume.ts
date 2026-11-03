@@ -69,7 +69,7 @@ function idsListe(v: unknown): string[] {
 import {
   attentesHorsEquipe, changementsAbonnements, changementsHorsDuBot, cleAnnonce, cleGeste, composerResume, decouperResume,
   detailAccesBroker, detailAContacter, detailAttenteHumain, detailAvecRelais, detailDemande, detailExemption, detailSuspens,
-  detailArrivee, detailMontantArrivee, detailRepriseBot, factureDeStripe, remiseDeStripe, detailTarifReserve, entreesHistoriqueResume, episodesAAnnoncer, estDeLEquipe,
+  detailArrivee, detailMontantArrivee, detailRepriseBot, factureDeStripe, remiseDeStripe, detailTarifReserve, entreesHistoriqueResume, episodesAAnnoncer, estDeLEquipe, horsEquipe, RUBRIQUES_DE_L_EQUIPE,
   estNouvelAbonnement, evenementDeChangement, evenementDeGeste, instantaneAbonnements, memoireAnnonces, pseudoCroise, relaisParEpisode,
   texteSur,
   type Arrivee, type EvenementResume, type GesteResume, type MembreAContacter, type MotifContact, type Personne,
@@ -505,7 +505,7 @@ export async function resumeDuMatin(o: { maintenant?: Date; apercu?: boolean } =
     // jamais dans « À contacter » ni dans les impayes. Le cas du 03/11 :
     // l'abonnement personnel de Melanie en echec listait Melanie a contacter.
     const equipeLue = await facultatif('equipe_fiches', erreurs, async () => [await lireEquipe()])
-    const equipeOnto = equipeLue[0] ?? { fiches: new Set<string>(), telegrams: new Set<number>(), clients: new Set<string>() }
+    const equipeOnto = equipeLue[0] ?? { fiches: new Set<string>(), telegrams: new Set<number>(), clients: new Set<string>(), emails: new Set<string>() }
     const deLEquipe = (o: { telegramId?: number | null; membreId?: string | null; abonnementId?: string | null }) =>
       estDeLEquipe({ ...o, clientStripe: o.abonnementId ? parId.get(o.abonnementId)?.clientStripe ?? null : null }, equipeOnto)
 
@@ -560,7 +560,8 @@ export async function resumeDuMatin(o: { maintenant?: Date; apercu?: boolean } =
         phrase = phraseAdresse(g, email ? normaliserEmail(email) : null)
       }
       const ev = evenementDeGeste(g, { phraseAdresse: phrase, phraseCompte })
-      if (ev && ev.rubrique === 'impayes' && deLEquipe({ telegramId: g.telegram_id, membreId: g.membre_id, abonnementId: g.abonnement_id })) continue
+      // (03/11, retouche) Toute rubrique de membres : un geste sur la fiche ou le compte de l'equipe ne sort pas.
+      if (ev && !RUBRIQUES_DE_L_EQUIPE.has(ev.rubrique) && deLEquipe({ telegramId: g.telegram_id, membreId: g.membre_id, abonnementId: g.abonnement_id })) continue
       if (ev) ajouter({ ...ev, qui: cle, quand: g.fait_le })
     }
 
@@ -746,7 +747,11 @@ export async function resumeDuMatin(o: { maintenant?: Date; apercu?: boolean } =
 
     // 4. Les noms, emails et pseudos.
     await resoudre(annuaire, new Set(evenements.map(e => e.qui)), parId, erreurs)
-    const texte = composerResume(evenements, annuaire.personnes, { depuis: depuis.toISOString(), jusqua: jusqua.toISOString(), bientot })
+    // (03/11, retouche) L'equipe hors de toutes les rubriques de membres (horsEquipe), les cles relues.
+    // Les comptes d'Agent AOK lus plus haut (cockpit_telegram_comptes) comptent meme si lireEquipe a echoue.
+    for (const id of idsEquipe) (equipeOnto.telegrams as Set<number>).add(id)
+    const sansEquipe = horsEquipe(evenements, annuaire.personnes, equipeOnto, sub => parId.get(sub)?.clientStripe ?? null)
+    const texte = composerResume(sansEquipe, annuaire.personnes, { depuis: depuis.toISOString(), jusqua: jusqua.toISOString(), bientot })
     const lignes = texte ? texte.split('\n').filter(l => l.startsWith('- ')).length : 0
 
     if (apercu) {

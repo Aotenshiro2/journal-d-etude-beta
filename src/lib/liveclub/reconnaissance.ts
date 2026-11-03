@@ -152,7 +152,7 @@ export async function reconnaitrePersonne(p: QuiArrive, db: BaseLecture = prisma
 /** Les motifs d'exemption qui disent « l'equipe » (pas un membre favorise). */
 export const MOTIFS_EQUIPE = ['fondateur', 'admin', 'equipe'] as const
 
-export type Equipe = { fiches: Set<string>; telegrams: Set<number>; clients: Set<string> }
+export type Equipe = { fiches: Set<string>; telegrams: Set<number>; clients: Set<string>; emails: Set<string> }
 
 /**
  * (03/11) L'equipe, par l'ontologie : les comptes Telegram d'une exemption
@@ -164,9 +164,11 @@ export type Equipe = { fiches: Set<string>; telegrams: Set<number>; clients: Set
  * melaniesommer93@yahoo.com) en echec de paiement listait Melanie dans
  * « À contacter » : son compte Telegram n'est rattache a aucune fiche, la vue
  * ne la reconnaissait pas comme exemptee.
+ * (03/11, retouche) Aussi les adresses de ces fiches : le resume ecarte
+ * l'equipe de TOUTES ses rubriques de membres (horsEquipe, resume-pur.ts).
  */
 export async function lireEquipe(db: BaseLecture = prisma): Promise<Equipe> {
-  const lignes = await db.$queryRaw<{ membre_id: string | null; telegram_id: bigint | number | null; client_stripe: string | null }[]>`
+  const lignes = await db.$queryRaw<{ membre_id: string | null; telegram_id: bigint | number | null; client_stripe: string | null; email?: string | null }[]>`
     /* reco:equipe */
     with comptes as (
       select x.telegram_id, x.membre_id, lower(x.email) as email from public.cockpit_liveclub_exemptions x
@@ -182,15 +184,18 @@ export async function lireEquipe(db: BaseLecture = prisma): Promise<Equipe> {
         join public.profile_emails pe on pe.profile_id = c.user_id
         join public.cockpit_membre_emails e on lower(e.email) = lower(pe.email)
     )
-    select null::text as membre_id, c.telegram_id, null::text as client_stripe from comptes c where c.telegram_id is not null
-    union all select f.membre_id::text, null, null from fiches f
-    union all select null, null, a.client_stripe from public.cockpit_abonnements a
-      where a.client_stripe is not null and a.membre_id in (select membre_id from fiches)`
-  const equipe: Equipe = { fiches: new Set(), telegrams: new Set(), clients: new Set() }
+    select null::text as membre_id, c.telegram_id, null::text as client_stripe, null::text as email from comptes c where c.telegram_id is not null
+    union all select f.membre_id::text, null, null, null from fiches f
+    union all select null, null, a.client_stripe, null from public.cockpit_abonnements a
+      where a.client_stripe is not null and a.membre_id in (select membre_id from fiches)
+    union all select null, null, null, lower(e.email) from public.cockpit_membre_emails e
+      where e.membre_id in (select membre_id from fiches)`
+  const equipe: Equipe = { fiches: new Set(), telegrams: new Set(), clients: new Set(), emails: new Set() }
   for (const l of lignes) {
     if (l.membre_id && UUID.test(l.membre_id)) equipe.fiches.add(l.membre_id)
     if (l.telegram_id !== null && l.telegram_id !== undefined) equipe.telegrams.add(Number(l.telegram_id))
     if (l.client_stripe && CLIENT.test(l.client_stripe)) equipe.clients.add(l.client_stripe)
+    if (typeof l.email === 'string' && l.email.includes('@')) equipe.emails.add(l.email.trim().toLowerCase())
   }
   return equipe
 }

@@ -232,6 +232,46 @@ bloc("(03/11) le resume de ce matin : une ligne par personne, nouveau ou retour,
   if (process.env.MONTRER_RESUME === '1') console.log(`\n----- resume du 03/11, nouvelle forme -----\n${texte}\n----- fin -----\n`)
 })
 
+bloc("(03/11, retouche) l'equipe hors de TOUTES les rubriques de membres : la resiliation de Melanie ne sort pas demain dans « Arrêts »", () => {
+  const MEL = '3dba91e5-f42a-4253-9285-6ff4f5d91630'
+  const SUB_MEL = 'sub_1TdRFHCbHiN0O0Xiwsyck1qq'
+  const equipe = { fiches: new Set([MEL]), telegrams: new Set([1899133088, 255151279]), clients: new Set(['cus_UcgbmMjC4VCdN1']), emails: new Set(['sommermelanie@ymail.com', 'melaniesommer93@yahoo.com']) }
+  const clientDe = sub => (sub === SUB_MEL ? 'cus_UcgbmMjC4VCdN1' : sub === 'sub_LOUP' ? 'cus_LOUP' : null)
+  const DEMAIN = '2026-11-04T07:13:00Z'
+  const evenements = [
+    // Ce que le resume de demain aurait dit sans la retouche : l'abonnement resilie via Stripe.
+    { rubrique: 'arrets', qui: `s${SUB_MEL}`, quand: DEMAIN, ...R.evenementDeChangement({ abonnementId: SUB_MEL, genre: 'resilie' }, undefined) },
+    { rubrique: 'pauses', qui: `m${MEL}`, quand: DEMAIN, detail: 'pause posée via Stripe' },
+    { rubrique: 'nouveaux', qui: 'esommermelanie@ymail.com', quand: DEMAIN, detail: 'nouveau ; abonnement 99 € par mois' },
+    { rubrique: 'humains', qui: 't1899133088', quand: DEMAIN, detail: "attend une réponse de l'équipe" },
+    { rubrique: 'impayes', qui: 'pprofil-mel', quand: DEMAIN, detail: 'paiement en échec' },
+    { rubrique: 'contacter', qui: `m${MEL}`, quand: DEMAIN, detail: 'paiement en échec' },
+    // L'equipe garde SES demandes et ses demandes en suspens.
+    { rubrique: 'demandes', qui: 'd1', quand: DEMAIN, detail: '« prévoir un accès »' },
+    { rubrique: 'suspens', qui: 'q1899133088', quand: DEMAIN, detail: '« du coup ? », sans réponse' },
+    // Un membre ordinaire reste.
+    { rubrique: 'arrets', qui: 'ssub_LOUP', quand: DEMAIN, detail: 'arrêt demandé via Stripe' },
+  ]
+  const personnes = new Map([
+    ['pprofil-mel', { nom: 'Mélanie Sommer', email: 'melaniesommer93@yahoo.com', pseudo: null, telegramId: null }],
+    ['ssub_LOUP', { nom: 'Loup Claron', email: 'loup.claron@gmail.com', pseudo: null, telegramId: 1257757953 }],
+    ['d1', { nom: 'melanie', email: null, pseudo: null, telegramId: null }],
+    ['q1899133088', { nom: 'Mélanie', email: null, pseudo: null, telegramId: null }],
+  ])
+  const restent = R.horsEquipe(evenements, personnes, equipe, clientDe)
+  assert.deepEqual(restent.map(e => e.qui), ['d1', 'q1899133088', 'ssub_LOUP'])
+  const texte = R.composerResume(restent, personnes, { depuis: '2026-11-03T07:13:36Z', jusqua: DEMAIN })
+  assert.ok(!/résilié|Mélanie Sommer/.test(texte))
+  assert.ok(texte.includes('- Loup Claron, loup.claron@gmail.com : arrêt demandé via Stripe'))
+  assert.deepEqual([...R.RUBRIQUES_DE_L_EQUIPE].sort(), ['demandes', 'suspens'])
+  // Le resume applique le filtre a tout ce qu'il compose, apres la lecture des noms.
+  const source = lire('src/lib/liveclub/resume.ts')
+  assert.match(source, /const sansEquipe = horsEquipe\(evenements, annuaire\.personnes, equipeOnto,/)
+  assert.match(source, /composerResume\(sansEquipe, annuaire\.personnes,/)
+  // lireEquipe rend aussi les adresses des fiches de l'equipe.
+  assert.match(lire('src/lib/liveclub/reconnaissance.ts'), /select null, null, null, lower\(e\.email\) from public\.cockpit_membre_emails e/)
+})
+
 bloc("arrivee : un abonne pas encore entre, une entree sans nouvel abonnement, un nom ambigu", () => {
   assert.equal(R.detailArrivee({ genre: 'nouveau', abonnement: { montant: '139 € par mois', tarifReserve: false, statut: 'active' }, entree: null }),
     'nouveau ; abonnement 139 € par mois ; pas encore entré dans le groupe')
@@ -249,7 +289,7 @@ bloc("arrivee : un abonne pas encore entre, une entree sans nouvel abonnement, u
 bloc("le code du resume : arrivees fusionnees, equipe ecartee des impayes et d'« À contacter »", () => {
   const source = lire('src/lib/liveclub/resume.ts')
   assert.match(source, /if \(g\.geste === 'entree_acceptee'\) \{\s+if \(g\.resultat === 'fait'\) entreesLues\.push\(g\)\s+continue/)
-  assert.match(source, /if \(ev && ev\.rubrique === 'impayes' && deLEquipe\(/)
+  assert.match(source, /if \(ev && !RUBRIQUES_DE_L_EQUIPE\.has\(ev\.rubrique\) && deLEquipe\(/)
   assert.match(source, /if \(estDeLEquipe\(\{ membreId: m\.membreId \}, equipeOnto\)\) continue/)
   assert.match(source, /await ajouterArrivees\(/)
   assert.ok(!/detailNouvelAbonnement\(/.test(source), "l'ancien libelle du nouvel abonnement n'est plus compose")
