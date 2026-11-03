@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { traiterBouton, traiterDemandeAdhesion, traiterMessagePrive } from '@/lib/liveclub/bot-membre'
 import {
-  JOURS_ABSENCE_RETOUR, accueilAPublier, envoisAccueil, genreEntree, nomPourAccueil, type AvantEntree,
+  JOURS_ABSENCE_RETOUR, accueilAPublier, envoisAccueil, genreEntree, nomPourAccueil, texteAlerteAccueilNonPublie, type AvantEntree,
 } from '@/lib/liveclub/accueil-groupe'
+import { lireAvantEntree } from '@/lib/liveclub/avant-entree'
+import { alerterEquipeTexte } from '@/lib/alerte-equipe-telegram'
 import { reconnaitrePersonne } from '@/lib/liveclub/reconnaissance'
 import type { Reconnaissance } from '@/lib/liveclub/reconnaissance-pur'
 import { appelTelegram } from '@/lib/liveclub/telegram'
@@ -138,12 +140,12 @@ export async function POST(req: NextRequest) {
   // (13/10) L'accueil se decide sur la ligne AVANT l'upsert : jamais vu =
   // nouveau, longtemps parti = retour (accueil-groupe.ts). Lecture ratee = pas
   // d'accueil, la presence est tenue quand meme.
+  // (03/11) Avec la regle du retrait qui l'a sorti (avant-entree.ts) : un
+  // retrait autre qu'un impaye suivi d'une entree = « bon retour ».
   let avant: AvantEntree = null
   let avantLu = true
   try {
-    const lignes = await prisma.$queryRaw<{ present: boolean | null; sorti_le: Date | null }[]>`
-      select present, sorti_le from public.cockpit_telegram_membres where telegram_id = ${u.id}`
-    avant = lignes[0] ? { present: lignes[0].present, sortiLe: lignes[0].sorti_le } : null
+    avant = await lireAvantEntree(u.id)
   } catch {
     avantLu = false
     // (31/10) Jusqu'ici muet : une entree sans accueil ne laissait aucune trace.
@@ -228,7 +230,13 @@ export async function POST(req: NextRequest) {
         ...(envoi.sujet !== null ? { message_thread_id: envoi.sujet } : {}),
         text: envoi.texte,
       })
-      if (!r.ok) console.warn(`[liveclub/telegram] accueil (${accueil}) non publie dans ${envoi.ou} : ${r.erreur.slice(0, 160)}`)
+      if (!r.ok) {
+        console.warn(`[liveclub/telegram] accueil (${accueil}) non publie dans ${envoi.ou} : ${r.erreur.slice(0, 160)}`)
+        // (03/11) Plus d'echec muet : l'equipe le sait (Agent AOK), avec le geste a faire.
+        await alerterEquipeTexte(texteAlerteAccueilNonPublie({
+          ou: envoi.ou, texte: envoi.texte, qui: [nomAffiche, pseudo ? `@${pseudo}` : null].filter(Boolean).join(' ') || null, erreur: r.erreur,
+        }), { journal: '[liveclub/telegram] alerte accueil non publie' })
+      }
     }
   } else if (avantLu && present && avant && avant.present !== true) {
     // (31/10) Une entree d'un compte deja connu, sans accueil voulu : une

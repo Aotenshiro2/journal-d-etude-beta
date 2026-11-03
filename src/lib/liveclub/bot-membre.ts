@@ -111,6 +111,7 @@ import { TEXTE_PAUSE_AVANT_ARRET, chatId, texteAbonnement, texteRaisonSortie, ti
 import { droitLiveClub, type Droit } from './droits'
 import { genreEntree, texteAdmission, type GenreEntree } from './accueil-groupe'
 import { reconnaitrePersonne } from './reconnaissance'
+import { lireAvantEntree } from './avant-entree'
 import { BOUTON_LOTS, texteAccesEnPauseLots, texteAccesFermeDepot } from './lots-pur'
 import { declarerLots } from './lots'
 import { consommerJeton, ErreurTableLiveClub } from './jetons'
@@ -544,9 +545,8 @@ async function demandeLaisseeEnAttente(telegramId: number): Promise<boolean> {
 async function lireGenreEntree(telegramId: number, droit?: Droit): Promise<GenreEntree> {
   let genre: GenreEntree
   try {
-    const lignes = await prisma.$queryRaw<{ present: boolean | null; sorti_le: Date | null }[]>`
-      select present, sorti_le from public.cockpit_telegram_membres where telegram_id = ${telegramId}`
-    genre = genreEntree(lignes[0] ? { present: lignes[0].present, sortiLe: lignes[0].sorti_le } : null, new Date())
+    // (03/11) Avec la regle du retrait qui l'a sorti (avant-entree.ts), comme l'accueil du groupe.
+    genre = genreEntree(await lireAvantEntree(telegramId), new Date())
   } catch (err) {
     console.warn(`[liveclub/bot] entree illisible (presence avant l'entree) : ${messageErreur(err)}`)
     return 'connu'

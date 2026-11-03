@@ -16,7 +16,8 @@
 
 import { prisma } from '@/lib/db'
 import {
-  LIBELLE_RENDRE_LA_MAIN, donneeRendreLaMain, entreesHistoriqueDemandeHumain, referenceFil, texteDemandeHumain,
+  LIBELLE_RENDRE_LA_MAIN, destinataireInfoEquipe, donneeRendreLaMain, entreesHistoriqueDemandeHumain, entreesHistoriqueInfoEquipe,
+  referenceFil, texteDemandeHumain,
   type DemandeHumain,
 } from '@/lib/alerte-equipe-telegram-pur'
 import { envoyerFichierTelegram, telechargerFichierTelegram } from '@/lib/liveclub/telegram'
@@ -106,6 +107,47 @@ export async function alerterEquipeTelegram(d: DemandeHumain, o: OptionsAlerte =
     return livres
   } catch (err) {
     console.warn(`[alerte-equipe] alerte Telegram non envoyee : ${(err instanceof Error ? err.message : String(err)).split('\n')[0].slice(0, 160)}`)
+    return 0
+  }
+}
+
+export type OptionsTexteEquipe = {
+  /** Le compte du cockpit (user_id Supabase) qui ne la recoit pas : celui qui vient d'agir. */
+  sauf?: string | null
+  /** Prefixe du log (jamais le texte). */
+  journal?: string
+}
+
+/**
+ * (03/11) Un texte simple a chaque compte de l'equipe par Agent AOK
+ * (cockpit_telegram_comptes), sauf `sauf`, et dans l'historique de sa
+ * conversation (marqueur MARQUEUR_INFO_EQUIPE) pour qu'une question posee
+ * juste en dessous s'y rapporte. Sert a l'accueil non publie (route du
+ * webhook) et a la reponse d'un membre de l'equipe a un fil Support
+ * (support-reponse.ts). Ne jette jamais ; renvoie le nombre de destinataires.
+ */
+export async function alerterEquipeTexte(texte: string, o: OptionsTexteEquipe = {}): Promise<number> {
+  const journal = o.journal ?? '[alerte-equipe] texte'
+  try {
+    const { tgCockpit, ajouterAHistoriqueAgent } = await import('@/lib/agent-cockpit-telegram')
+    const destinataires = await prisma.$queryRaw<{ telegram_id: bigint; user_id: string }[]>`
+      select telegram_id, user_id::text as user_id from public.cockpit_telegram_comptes order by cree_le`
+    const id = `info-${Date.now().toString(36)}`
+    let livres = 0
+    let vises = 0
+    for (const dest of destinataires) {
+      if (!destinataireInfoEquipe(dest.user_id, o.sauf)) continue
+      const chat = Number(dest.telegram_id)
+      if (!Number.isSafeInteger(chat) || chat <= 0) continue
+      vises++
+      if (!await tgCockpit('sendMessage', { chat_id: chat, text: texte.slice(0, 4000), link_preview_options: { is_disabled: true } })) continue
+      livres++
+      await ajouterAHistoriqueAgent(chat, chat, entreesHistoriqueInfoEquipe(texte, id)).catch(() => false)
+    }
+    console.log(`${journal} : ${livres}/${vises} destinataire(s)`)
+    return livres
+  } catch (err) {
+    console.warn(`${journal} : non envoye : ${(err instanceof Error ? err.message : String(err)).split('\n')[0].slice(0, 160)}`)
     return 0
   }
 }

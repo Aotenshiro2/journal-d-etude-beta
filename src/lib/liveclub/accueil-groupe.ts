@@ -70,12 +70,28 @@ export const JOURS_ABSENCE_RETOUR = 30
 const JOUR_MS = 86_400_000
 const STATUTS_DEDANS = ['member', 'administrator', 'creator', 'restricted']
 
-/** La ligne de cockpit_telegram_membres AVANT l'evenement (null = jamais vu). */
-export type AvantEntree = { present: boolean | null; sortiLe: Date | null } | null
+/**
+ * La ligne de cockpit_telegram_membres AVANT l'evenement (null = jamais vu).
+ * (03/11) `retraitPour` : la regle du geste « retrait » (cockpit_liveclub_gestes)
+ * qui a fait cette sortie, si c'est le bot ou l'equipe qui l'a sorti
+ * ('impaye_5j', 'manuel', 'desabonne'...) ; null ou absent = sortie d'elle-meme
+ * ou inconnue (avant-entree.ts, lireAvantEntree).
+ */
+export type AvantEntree = { present: boolean | null; sortiLe: Date | null; retraitPour?: string | null } | null
+
+/**
+ * (03/11) Le retrait qui ne fait pas un « retour » quand il revient vite : un
+ * impaye regularise (la regle du 13/10). Tout autre retrait (sans abonnement,
+ * abonnement termine, decision de l'equipe) suivi d'une entree = un nouveau
+ * droit = « bon retour » (cas d'EarvinSaintus, 03/11 : sorti le 06/10 sans
+ * abonnement relie, revenu 28 jours plus tard par un acces broker, rien publie).
+ */
+export const RETRAITS_SANS_RETOUR: readonly string[] = ['impaye_5j']
 
 /**
  * (31/10) Qui entre, d'apres la ligne d'AVANT l'entree : jamais vu = nouveau ;
- * dehors depuis au moins JOURS_ABSENCE_RETOUR jours = retour ; sinon connu
+ * dehors depuis au moins JOURS_ABSENCE_RETOUR jours = retour ; (03/11) sorti
+ * plus recemment par un retrait autre qu'un impaye = retour ; sinon connu
  * (retour rapide, ligne qui dit deja « present », ou sortie sans date). La
  * meme regle decide l'accueil du groupe et le message prive de l'admission.
  */
@@ -85,7 +101,10 @@ export function genreEntree(avant: AvantEntree, quand: Date): GenreEntree {
   if (!avant) return 'nouveau'
   if (avant.present === true || !avant.sortiLe) return 'connu'
   const absence = quand.getTime() - avant.sortiLe.getTime()
-  return absence >= JOURS_ABSENCE_RETOUR * JOUR_MS ? 'retour' : 'connu'
+  if (absence >= JOURS_ABSENCE_RETOUR * JOUR_MS) return 'retour'
+  // (03/11) Sorti par le bot ou l'equipe pour autre chose qu'un impaye : il revient avec un nouveau droit.
+  const retrait = avant.retraitPour?.trim()
+  return retrait && !RETRAITS_SANS_RETOUR.includes(retrait) ? 'retour' : 'connu'
 }
 
 /**
@@ -281,6 +300,25 @@ export function envoisAccueil(accueil: Exclude<Accueil, null>, nom: string | nul
   const envois: EnvoiAccueil[] = [{ ou: 'Accueil', sujet: null, texte: texteAccueil(accueil, nom) }]
   if (accueil === 'nouveau') envois.push({ ou: 'Bla-bla', sujet: SUJET_MOT_NOUVEAU, texte: texteMotNouveau(nom) })
   return envois
+}
+
+/**
+ * (03/11, Brice) Un accueil que Telegram refuse ne reste plus muet : l'alerte
+ * a l'equipe (Agent AOK), avec la raison et, pour un sujet ferme
+ * (TOPIC_CLOSED) ou un droit manquant, le geste a faire dans Telegram. Le
+ * texte a publier y est recopie : l'equipe peut le poster a la main ou lancer
+ * scripts/renvoyer-accueil.mjs.
+ */
+export function texteAlerteAccueilNonPublie(e: { ou: EnvoiAccueil['ou']; texte: string; qui: string | null; erreur: string }): string {
+  const erreur = e.erreur.replace(/\s+/g, ' ').trim().slice(0, 160)
+  const ferme = /TOPIC_CLOSED/i.test(erreur)
+  const droit = /not enough rights|CHAT_ADMIN_REQUIRED|CHAT_WRITE_FORBIDDEN|have no rights/i.test(erreur)
+  return [
+    `Accueil du Live Club non publié dans ${e.ou}${e.qui ? ` (${e.qui})` : ''} : Telegram a refusé (${erreur || 'raison inconnue'}).`,
+    ferme ? `Le sujet ${e.ou} est fermé et le bot n'a pas le droit d'y écrire : dans Telegram, groupe Live Club, Administrateurs, @aok_liveclub_bot, coche « Gérer les sujets ».`
+      : droit ? "Le bot n'a pas les droits d'écrire dans le groupe : vérifie ses droits d'administrateur dans Telegram (envoyer des messages, gérer les sujets)." : null,
+    `Le message qui devait partir : « ${e.texte} »`,
+  ].filter(Boolean).join('\n')
 }
 
 // ---------------------------------------------------------------------------

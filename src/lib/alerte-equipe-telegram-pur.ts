@@ -113,6 +113,55 @@ export function entreesHistoriqueDemandeHumain(texte: string, id: string): { rol
   ]
 }
 
+// ---------------------------------------------------------------------------
+// (03/11, Brice) L'equipe au courant : une information simple a chaque compte
+// d'Agent AOK, sauf celui qui vient d'agir (alerterEquipeTexte)
+// ---------------------------------------------------------------------------
+
+export const MARQUEUR_INFO_EQUIPE = "[système] Information de l'équipe (une réponse envoyée à un membre par un autre compte, ou un accueil du Live Club non publié), envoyée automatiquement par Agent AOK (ce n'est pas une question de l'équipe)."
+
+export function entreesHistoriqueInfoEquipe(texte: string, id: string): { role: 'user' | 'assistant'; content: string; id: string }[] {
+  return [
+    { role: 'user', content: MARQUEUR_INFO_EQUIPE, id },
+    { role: 'assistant', content: texte, id: `${id}-texte` },
+  ]
+}
+
+/** Un compte de l'equipe recoit l'information, sauf celui qui vient d'agir (meme user_id, casse ignoree). */
+export function destinataireInfoEquipe(userId: string | null | undefined, sauf: string | null | undefined): boolean {
+  const s = (sauf ?? '').trim().toLowerCase()
+  return !s || (userId ?? '').trim().toLowerCase() !== s
+}
+
+/** L'identifiant Supabase d'un acteur « agent:<uuid> » (executerAction), ou l'uuid tel quel ; null sinon. */
+export function userIdActeur(acteur: string | null | undefined): string | null {
+  const m = typeof acteur === 'string' ? /^(?:agent:)?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(acteur.trim()) : null
+  return m ? m[1].toLowerCase() : null
+}
+
+/**
+ * (03/11, Brice) « Brice a pris la discussion avec Loup » : ce que lisent les
+ * AUTRES comptes de l'equipe quand l'un d'eux repond a un fil Support (Agent
+ * AOK « reponds-lui », carte d'une reponse preparee par Tab, onglet Support),
+ * avec la reponse en citation courte (200 caracteres). Sa reference finit le
+ * texte : « reponds-lui » juste en dessous vise le meme fil.
+ */
+export function texteReponsePartagee(r: {
+  auteur: string | null; qui: string | null; fil: string | null; texte: string; piece?: boolean; canal: 'telegram' | 'site'
+}): string {
+  const auteur = r.auteur?.trim() || "Quelqu'un de l'équipe"
+  const qui = r.qui?.trim() || 'un membre'
+  const message = r.texte.replace(/\s+/g, ' ').trim()
+  const cite = message.length > 200 ? `${message.slice(0, 200)}...` : message
+  const reference = referenceFil(r.fil)
+  return [
+    `${auteur} a pris la discussion avec ${qui}${r.canal === 'telegram' ? ' (bot du Live Club)' : ' (chat du site)'}.`,
+    cite ? `Sa réponse : « ${cite} »` : null,
+    r.piece ? 'Avec une pièce jointe.' : null,
+    reference ? `Le fil complet est dans l'onglet Support (${reference}) : ${LIEN_SUPPORT}` : `Le fil complet est dans l'onglet Support : ${LIEN_SUPPORT}`,
+  ].filter(Boolean).join('\n')
+}
+
 const LIGNE_BOUTON = /^\[bouton\]\s*(.+)$/
 const COMMANDE = /^\/(start|menu)\b/i
 const TRACES_SANS_TEXTE: Record<string, string> = {

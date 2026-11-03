@@ -14,7 +14,7 @@ import './resoudre-ts.mjs'
 // Import dynamique : accueil-groupe.ts importe './config' sans extension (resoudre-ts.mjs).
 const {
   JOURS_ABSENCE_RETOUR, accueilAPublier, genreEntree, genreAvecReconnaissance, nomPourAccueil, texteAccueil, texteMotNouveau, envoisAccueil,
-  texteAdmission, lienSujet, SUJETS_LIVECLUB, SUJETS_HORS_TOUR, SUJET_MOT_NOUVEAU, SUJETS_DU_TOUR,
+  texteAdmission, lienSujet, SUJETS_LIVECLUB, SUJETS_HORS_TOUR, SUJET_MOT_NOUVEAU, SUJETS_DU_TOUR, texteAlerteAccueilNonPublie,
 } = await import('../src/lib/liveclub/accueil-groupe.ts')
 const { URL_FORMATION_LIVECLUB } = await import('../src/lib/liveclub/config.ts')
 
@@ -75,6 +75,47 @@ bloc("qui entre (31/10) : la meme regle pour l'accueil du groupe et le message p
     const g = genreEntree(avant, maintenant)
     assert.equal(accueilAPublier(avant, 'left', true, maintenant), g === 'connu' ? null : g)
   }
+})
+
+bloc("(03/11) EarvinSaintus : sorti par un retrait (sans abonnement) il y a 28 jours, revenu par un acces broker = bon retour", () => {
+  const quand = new Date('2026-11-03T16:15:54Z')
+  const sortie = new Date('2026-10-06T12:06:09Z')
+  // La ligne seule (la regle d'avant) : retour rapide, rien publie. C'est ce qui s'est passe.
+  assert.equal(accueilAPublier({ present: false, sortiLe: sortie }, 'left', true, quand), null)
+  assert.equal(genreEntree({ present: false, sortiLe: sortie, retraitPour: null }, quand), 'connu')
+  // Avec la regle du retrait qui l'a sorti : bon retour, dans Accueil et en prive.
+  const avant = { present: false, sortiLe: sortie, retraitPour: 'manuel' }
+  assert.equal(genreEntree(avant, quand), 'retour')
+  assert.equal(accueilAPublier(avant, 'left', true, quand), 'retour')
+  assert.deepEqual(envoisAccueil('retour', nomPourAccueil('AbdelKarimUSD', 'EarvinSaintus')).map(e => e.texte), ['Bon retour dans le Live Club, AbdelKarimUSD !'])
+  for (const regle of ['manuel', 'desabonne', 'fin_du_test']) assert.equal(genreEntree({ ...avant, retraitPour: regle }, quand), 'retour', regle)
+  // Un impaye regularise vite reste sans accueil (regle du 13/10), comme une sortie d'elle-meme.
+  assert.equal(genreEntree({ present: false, sortiLe: ilYa(5), retraitPour: 'impaye_5j' }, maintenant), 'connu')
+  assert.equal(accueilAPublier({ present: false, sortiLe: ilYa(5), retraitPour: 'impaye_5j' }, 'left', true, maintenant), null)
+  // Deja present, ou sortie sans date : inchange, meme avec un retrait.
+  assert.equal(genreEntree({ present: true, sortiLe: null, retraitPour: 'manuel' }, maintenant), 'connu')
+  assert.equal(genreEntree({ present: false, sortiLe: null, retraitPour: 'manuel' }, maintenant), 'connu')
+  // Les deux lecteurs passent par lireAvantEntree (avant-entree.ts), qui lit le geste « retrait ».
+  const route = lire('src/app/api/cockpit/liveclub/telegram/route.ts')
+  const bot = lire('src/lib/liveclub/bot-membre.ts')
+  const lecteur = lire('src/lib/liveclub/avant-entree.ts')
+  assert.match(route, /avant = await lireAvantEntree\(u\.id\)/)
+  assert.match(bot, /genre = genreEntree\(await lireAvantEntree\(telegramId\), new Date\(\)\)/)
+  assert.match(lecteur, /g\.geste = 'retrait' and g\.resultat = 'fait'/)
+  assert.match(lecteur, /g\.fait_le between m\.sorti_le - interval '1 hour' and m\.sorti_le \+ interval '1 hour'/)
+})
+
+bloc("(03/11) un accueil refuse par Telegram : alerte a l'equipe, avec le geste pour un sujet ferme", () => {
+  const ferme = texteAlerteAccueilNonPublie({ ou: 'Accueil', texte: 'Bienvenue dans le Live Club, Loup !', qui: 'Loup Claron', erreur: 'Bad Request: TOPIC_CLOSED' })
+  assert.ok(ferme.startsWith('Accueil du Live Club non publié dans Accueil (Loup Claron) : Telegram a refusé (Bad Request: TOPIC_CLOSED).'))
+  assert.ok(ferme.includes('« Gérer les sujets »'))
+  assert.ok(ferme.includes('« Bienvenue dans le Live Club, Loup ! »'))
+  const autre = texteAlerteAccueilNonPublie({ ou: 'Bla-bla', texte: 'x', qui: null, erreur: 'Too Many Requests' })
+  assert.ok(!autre.includes('Gérer les sujets') && !autre.includes('()'))
+  for (const t of [ferme, autre]) assert.ok(!/[—–…“”‘’•]/.test(t))
+  const route = lire('src/app/api/cockpit/liveclub/telegram/route.ts')
+  const echec = route.slice(route.indexOf('if (!r.ok) {'))
+  assert.ok(echec.indexOf('await alerterEquipeTexte(texteAlerteAccueilNonPublie(') > 0 && echec.indexOf('await alerterEquipeTexte(') < echec.indexOf('} else if (avantLu'))
 })
 
 bloc("(03/11) Benoit Richard : compte Telegram jamais vu, ancien membre par l'ontologie = bon retour, pas « vient d'arriver »", () => {
@@ -261,7 +302,8 @@ bloc("le code : deux envois publics independants, message de l'admission mis a j
   assert.match(accueil, /for \(const envoi of envoisAccueil\(accueil, nomPourAccueil\(pseudo, u\.first_name\)\)\)/)
   assert.match(accueil, /\.\.\.\(envoi\.sujet !== null \? \{ message_thread_id: envoi\.sujet \} : \{\}\)/)
   // Chaque echec journalise, sans throw entre les deux envois (appelTelegram ne jette pas).
-  assert.match(accueil, /if \(!r\.ok\) console\.warn\(`\[liveclub\/telegram\] accueil \(\$\{accueil\}\) non publie dans \$\{envoi\.ou\}/)
+  // (03/11) Puis l'alerte a l'equipe (alerterEquipeTexte ne jette pas).
+  assert.match(accueil, /if \(!r\.ok\) \{\s*console\.warn\(`\[liveclub\/telegram\] accueil \(\$\{accueil\}\) non publie dans \$\{envoi\.ou\}/)
   assert.ok(!/throw/.test(accueil.slice(0, accueil.indexOf('return NextResponse'))))
   const telegram = lire('src/lib/liveclub/telegram.ts')
   assert.match(telegram, /Appel brut qui ne jette pas/)
