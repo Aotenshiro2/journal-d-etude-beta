@@ -22,7 +22,8 @@ import { centimes, euros, versEuros } from '@/lib/repartition/pur'
 import { nomTelegram } from '@/lib/alerte-equipe-telegram'
 import { rendreVisible } from '@/lib/securite/injection-pur'
 import { SQL_PAUSES_DEPOT } from '@/lib/vues-serveur'
-import { cleStripeEcriture, suiviLotsActif } from './config'
+import { OFFRE_PAUSE_DEPOT, cleStripeEcriture, suiviLotsActif } from './config'
+import { estMelanie } from '@/lib/agent-cockpit-pur'
 import { abonnementsLiveClubDuClient, abonnementsLiveClubParEmail, lireAbonnement, pauser, type AbonnementResume } from './stripe'
 import { rattachementActif } from './rattacher'
 import { envoyer } from './telegram'
@@ -33,9 +34,10 @@ import { suiviLotsDeCommission, type LigneSuiviLots } from './lots-lecture'
 import { limiteLots } from './lots-pur'
 import { dateIso, formaterMontant, messageErreur, relationAbsente, statutDonneDroit, uuidDeActeur } from './pur'
 import {
-  MARQUEUR_ALERTE_LOTS_PAUSE_DEPOT, PausePasPosee, REGLE_MESSAGE_PAUSE_DEPOT, REGLE_PAUSE_DEPOT, RefusPauseDepot, TYPE_PAUSE_DEPOT,
+  MARQUEUR_ALERTE_LOTS_PAUSE_DEPOT, MARQUEUR_DECLARATION_PAUSE_DEPOT, PausePasPosee, REGLE_DECLARATION_PAUSE_DEPOT, REGLE_MESSAGE_PAUSE_DEPOT, REGLE_PAUSE_DEPOT, RefusPauseDepot, TYPE_PAUSE_DEPOT,
   carteCourtePauseDepot, carteLonguePauseDepot, datesPauseDepot, etapesPauseDepot, executerPauseDepotAvec, limiteLotsPauseDepot,
-  lireEtapeMembre, lireParamsPauseDepot, reponseMembrePauseDepot, resultatPauseDepot, texteAlerteLotsPauseDepot,
+  lireDeclarationMembre, lireEtapeMembre, lireParamsPauseDepot, offreDuJour, paramsCarteDeclaration, prevenirEquipeDeclarationAvec,
+  recolterDeclaration, texteMembreDeclaration, type DeclarationDepot, reponseMembrePauseDepot, resultatPauseDepot, texteAlerteLotsPauseDepot,
   type AbonnementPourPauseDepot, type CartePauseDepot, type EtapesPauseDepot, type EtatMembrePauseDepot, type IssueMessagePauseDepot,
   type LectureBasePauseDepot, type OutilsPauseDepot, type ParamsPauseDepot, type PlanPauseDepot,
 } from './pause-depot-pur'
@@ -501,12 +503,71 @@ async function noterDemande(telegramId: number, regle: string, details: Record<s
  * agir (conditions a envoyer, depot a verifier) : la route passe alors le fil
  * en « veut un humain », ce qui envoie l'alerte existante a Brice et Mel.
  */
-export async function parcoursPauseDepotMembre(telegramId: number, entree: unknown): Promise<{ texte: string; veutHumain: boolean; panne: boolean }> {
+export async function parcoursPauseDepotMembre(
+  telegramId: number, entree: unknown, o: { textesDuMembre?: readonly string[] } = {},
+): Promise<{ texte: string; veutHumain: boolean; panne: boolean }> {
   const etape = lireEtapeMembre(entree)
   const etat = await etatMembre(telegramId)
-  const r = reponseMembrePauseDepot(etat, etape)
+  const { aujourdhui } = contexteParis()
+  const r = reponseMembrePauseDepot(etat, etape, offreDuJour(aujourdhui))
+  if (etat.genre === 'abonne' && etape === 'depot_fait') {
+    // (04/11, cas d'Arthur) Montant, date et adresse chez le broker : ceux de
+    // l'outil, sinon recoltes dans ses messages ; la carte (ou ce qui manque)
+    // chez CHAQUE compte de l'equipe, quel que soit l'etat de son fil Support.
+    const d = recolterDeclaration(lireDeclarationMembre(entree, { aujourdhui }), o.textesDuMembre ?? [])
+    await noterDemande(telegramId, r.regle ?? REGLE_DECLARATION_PAUSE_DEPOT, { etape, abonne: true, montant: d.montant, le: d.le })
+    await prevenirEquipeDeclaration(telegramId, d, aujourdhui)
+    return { texte: texteMembreDeclaration(r.texte, d), veutHumain: r.equipe, panne: false }
+  }
   if (r.regle) await noterDemande(telegramId, r.regle, { etape, abonne: etat.genre === 'abonne' })
   return { texte: r.texte, veutHumain: r.equipe, panne: etat.genre === 'panne' }
+}
+
+/**
+ * (04/11) La declaration « depot fait » d'un abonne chez Brice ET Mel : la
+ * carte du clic pre-remplie (controlerPauseDepot) posee dans sa conversation
+ * d'Agent AOK, ou l'alerte avec ce qui manque. Ne jette pas.
+ */
+export async function prevenirEquipeDeclaration(telegramId: number, d: DeclarationDepot, aujourdhui: string): Promise<number> {
+  try {
+    const { tgCockpit, ajouterAHistoriqueAgent, proposerCarteEquipe } = await import('@/lib/agent-cockpit-telegram')
+    const r = await rattachementActif(telegramId).catch(() => null)
+    const nom = await nomTelegram(telegramId)
+    const emailAbonnement = r?.email ?? null
+    const id = `depot-${telegramId}-${Date.now().toString(36)}`
+    const entrees = (texte: string) => [
+      { role: 'user' as const, content: MARQUEUR_DECLARATION_PAUSE_DEPOT, id },
+      { role: 'assistant' as const, content: texte, id: `${id}-texte` },
+    ]
+    const issue = await prevenirEquipeDeclarationAvec({
+      qui: rendreVisible(nom ?? emailAbonnement ?? `compte Telegram u${telegramId}`),
+      email: d.email ?? emailAbonnement, partenaire: OFFRE_PAUSE_DEPOT.partenaire || 'le broker', d,
+    }, {
+      equipe: async () => (await prisma.$queryRaw<{ telegram_id: bigint; libelle: string | null }[]>`
+        select telegram_id, libelle from public.cockpit_telegram_comptes order by cree_le`)
+        .map(l => ({ chat: Number(l.telegram_id), court: estMelanie(l.libelle) }))
+        .filter(l => Number.isSafeInteger(l.chat) && l.chat > 0),
+      carte: async () => {
+        const params = paramsCarteDeclaration({ d, emailAbonnement, client: nom, jourMessage: aujourdhui })
+        if (typeof params === 'string') return { manque: params }
+        const c = await controlerPauseDepot({ type: TYPE_PAUSE_DEPOT as ActionAgent['type'], compte: 'cockpit', params })
+        if ('erreur' in c) return { manque: c.erreur }
+        if (c.manque) return { manque: c.manque }
+        return { action: c.action as unknown as Record<string, unknown>, carte: c.carte, court: c.court }
+      },
+      poserCarte: (chat, action, texte) => proposerCarteEquipe(chat, action, texte, entrees(texte)),
+      envoyer: async (chat, texte) => {
+        if (!await tgCockpit('sendMessage', { chat_id: chat, text: texte.slice(0, 4000), link_preview_options: { is_disabled: true } })) return false
+        await ajouterAHistoriqueAgent(chat, chat, entrees(texte)).catch(() => false)
+        return true
+      },
+    })
+    console.log(`[liveclub/pause-depot] declaration de depot : ${issue.livres}/${issue.vises} destinataire(s), ${issue.cartes} carte(s)`)
+    return issue.livres
+  } catch (err) {
+    console.warn(`[liveclub/pause-depot] declaration de depot non transmise : ${messageErreur(err).slice(0, 160)}`)
+    return 0
+  }
 }
 
 /** (agent-membre.ts) La pause du parcours en cours de ce membre, pour sa consigne. null sur panne. */

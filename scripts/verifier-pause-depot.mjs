@@ -574,7 +574,7 @@ await bloc('bot des membres : outil, consigne, prudence, la reponse du serveur (
   assert.ok(!sans.system.some(b => /GARDE le groupe/.test(b.text)))
   const agent = lire('src/lib/liveclub/agent-membre.ts')
   assert.match(agent, /\|\| bloc\.name === NOM_OUTIL_MEMBRE_PAUSE_DEPOT\)\) \{\n\s+resultats\.push\(\{ type: 'tool_result', tool_use_id: bloc\.id, content: JSON\.stringify\(REFUS_PRUDENCE_MEMBRE\) \}\)/)
-  assert.match(agent, /const r = await parcoursPauseDepotMembre\(telegramId, bloc\.input\)\n\s+if \(r\.veutHumain\) humain = true/)
+  assert.match(agent, /const r = await parcoursPauseDepotMembre\(telegramId, bloc\.input, \{ textesDuMembre \}\)\n\s+if \(r\.veutHumain\) humain = true/)
   // Le serveur : l'alerte existante (veutHumain), une ligne de demande par 24 h, rien d'ecrit d'autre.
   const serveur = lire('src/lib/liveclub/pause-depot.ts')
   assert.match(serveur, /and fait_le > now\(\) - interval '24 hours'/)
@@ -642,6 +642,72 @@ await bloc('cablage : migration aucune, regles du journal coherentes, emails, Mo
   for (const l of serveur.split('\n').filter(x => /console\.(log|warn|error)/.test(x))) {
     assert.ok(!/email|p\.client|qui\b/.test(l), `log : ${l.trim()}`)
   }
+})
+
+// (04/11, cas d'Arthur) Sa declaration « depot fait » du 01/11 n'a donne
+// qu'une alerte generique, sans montant ni carte : personne n'a valide.
+await bloc("declaration de depot (Arthur) : recolte, promo, carte chez Brice ET Mel, jamais avalee", async () => {
+  const COM = CFG.COMMISSION_PAUSE_DEPOT
+  // Le reglage : la promo dans config.ts, aucune date dans le code.
+  assert.ok(COM.promo && /^\d{4}-\d{2}-\d{2}$/.test(COM.promo.du) && /^\d{4}-\d{2}-\d{2}$/.test(COM.promo.au))
+  const promo = { partenaire: 'raisefx', fixeEuros: 650, depotMinimumEuros: 1000, promo: { du: '2026-10-31', au: '2026-11-01', libelle: 'promo Halloween', depotMinimumEuros: 650, fixeEuros: null } }
+  assert.deepEqual(PD.regleCommissionAu('2026-11-01', promo), { minimum: 650, commission: null, promo: 'promo Halloween' })
+  assert.deepEqual(PD.regleCommissionAu('2026-11-02', promo), { minimum: 1000, commission: 650, promo: null })
+  assert.match(PD.offreDuJour('2026-11-01', CFG.OFFRE_PAUSE_DEPOT, promo).depotMinimum, /^650 € \(promo Halloween, jusqu'au 1er novembre 2026 inclus ; 1 000 € ensuite\)$/)
+  assert.equal(PD.offreDuJour('2026-11-04', CFG.OFFRE_PAUSE_DEPOT, promo), CFG.OFFRE_PAUSE_DEPOT)
+  // La recolte : dans les messages DU MEMBRE, le plus recent d'abord.
+  const vide = PD.lireDeclarationMembre({ etape: 'depot_fait' }, { aujourdhui: '2026-11-01' })
+  assert.deepEqual(vide, { montant: null, le: null, email: null })
+  assert.deepEqual(PD.lireDeclarationMembre({ montant: '650 €', le: '2026-11-01', email_broker: 'A@b.fr' }, { aujourdhui: '2026-11-01' }), { montant: 650, le: '2026-11-01', email: 'a@b.fr' })
+  assert.equal(PD.lireDeclarationMembre({ le: '2026-12-01' }, { aujourdhui: '2026-11-01' }).le, null, 'date future')
+  const textes = ['Bonjour je viens de faire le dépôt chez raise FX', "j'ai déposé 650€ sur arturo.broker@example.com"]
+  assert.deepEqual(PD.recolterDeclaration(vide, textes), { montant: 650, le: null, email: 'arturo.broker@example.com' })
+  assert.equal(PD.recolterDeclaration(vide, ['1 000 euros']).montant, 1000)
+  assert.equal(PD.recolterDeclaration(vide, ['je viens de faire le dépôt']).montant, null)
+  // Sans montant : le membre est questionne, l'equipe le sait.
+  assert.match(PD.texteMembreDeclaration(PD.TEXTE_DEPOT_DECLARE_PAUSE, vide), /de combien est ton dépôt \?/)
+  texteMembre(PD.texteMembreDeclaration(PD.TEXTE_DEPOT_DECLARE_PAUSE, vide), 'question du montant')
+  assert.match(PD.paramsCarteDeclaration({ d: vide, emailAbonnement: 'arthur@example.com', client: 'Arthur', jourMessage: '2026-11-01', commission: promo }), /le montant de son dépôt/)
+  // Montant dans la promo : la carte, commission a confirmer (0 € et la note).
+  const d = { montant: 650, le: null, email: null }
+  const p = PD.paramsCarteDeclaration({ d, emailAbonnement: 'arthur@example.com', client: 'Arthur', jourMessage: '2026-11-01', commission: promo })
+  assert.equal(typeof p, 'object')
+  assert.equal(p.montant, 650); assert.equal(p.le, '2026-11-01'); assert.equal(p.commission, 0); assert.equal(p.email, 'arthur@example.com')
+  assert.match(p.note, /promo Halloween/); assert.match(p.note, /Commission à confirmer/)
+  assert.equal(typeof PD.lireParamsPauseDepot(p, { aujourdhui: '2026-11-04' }), 'object', 'la carte se relit au clic')
+  // Hors promo : 650 € est sous le minimum ; 1 000 € = 650 € de commission.
+  assert.match(PD.paramsCarteDeclaration({ d: { ...d, le: '2026-11-03' }, emailAbonnement: 'a@example.com', client: null, jourMessage: '2026-11-04', commission: promo }), /au moins 1 000 €/)
+  assert.equal(PD.paramsCarteDeclaration({ d: { montant: 1000, le: null, email: null }, emailAbonnement: 'a@example.com', client: null, jourMessage: '2026-11-04', commission: promo }).commission, 650)
+  // L'alerte : chaque compte de l'equipe, la carte (longue Brice, courte Mel), une carte qui attend n'est pas remplacee.
+  const envoye = []
+  const outils = (o = {}) => ({
+    equipe: async () => [{ chat: 1, court: false }, { chat: 2, court: true }],
+    carte: o.carte ?? (async () => ({ action: { type: 'pause_depot', compte: 'cockpit', params: p }, carte: 'CARTE LONGUE', court: 'CARTE COURTE' })),
+    poserCarte: async (chat, action, texte) => { envoye.push({ chat, carte: true, texte }); return o.occupee?.includes(chat) ? 'occupee' : 'posee' },
+    envoyer: async (chat, texte) => { envoye.push({ chat, carte: false, texte }); return true },
+  })
+  const qui = { qui: 'Arthur @Arthur3131', email: 'arthur@example.com', partenaire: 'RaiseFx', d }
+  assert.deepEqual(await PD.prevenirEquipeDeclarationAvec(qui, outils()), { vises: 2, livres: 2, cartes: 2 })
+  assert.deepEqual(envoye.map(e => [e.chat, e.carte]), [[1, true], [2, true]])
+  assert.match(envoye[0].texte, /dit que son dépôt chez RaiseFx est fait : 650 €\./)
+  assert.match(envoye[0].texte, /CARTE LONGUE$/); assert.match(envoye[1].texte, /CARTE COURTE$/)
+  for (const e of envoye) { sansOutil(e.texte, 'alerte de declaration'); texteClavier(e.texte, 'alerte de declaration') }
+  envoye.length = 0
+  assert.deepEqual(await PD.prevenirEquipeDeclarationAvec(qui, outils({ occupee: [2] })), { vises: 2, livres: 2, cartes: 1 })
+  assert.match(envoye.at(-1).texte, /Une autre carte attend déjà ta réponse ici/)
+  envoye.length = 0
+  // Sans carte (montant absent, lecture en panne) : l'alerte part quand meme, chez les deux.
+  assert.deepEqual(await PD.prevenirEquipeDeclarationAvec({ ...qui, d: vide }, outils({ carte: async () => ({ manque: 'le montant de son dépôt' }) })), { vises: 2, livres: 2, cartes: 0 })
+  assert.ok(envoye.every(e => !e.carte && /Pas de carte : il manque le montant de son dépôt/.test(e.texte)))
+  envoye.length = 0
+  assert.equal((await PD.prevenirEquipeDeclarationAvec(qui, outils({ carte: async () => { throw new Error('Stripe') } }))).livres, 2)
+  // Le cablage : la declaration d'un abonne passe TOUJOURS par l'alerte du parcours, pas seulement par le fil Support.
+  const serveur = lire('src/lib/liveclub/pause-depot.ts')
+  assert.match(serveur, /if \(etat\.genre === 'abonne' && etape === 'depot_fait'\) \{[\s\S]{0,600}await prevenirEquipeDeclaration\(telegramId, d, aujourdhui\)/)
+  assert.match(serveur, /reponseMembrePauseDepot\(etat, etape, offreDuJour\(aujourdhui\)\)/)
+  assert.match(lire('src/lib/agent-cockpit-telegram.ts'), /where c\.action_en_attente is null\n\s+returning 1 as ok`\n\s+if \(posee\.length === 0\) return 'occupee'/)
+  const outil = M.OUTILS_MEMBRE.find(o => o.name === 'pause_par_depot')
+  for (const k of ['montant', 'le', 'email_broker']) assert.ok(outil.input_schema.properties[k], k)
 })
 
 console.log(`\n${n} blocs ok`)

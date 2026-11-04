@@ -145,6 +145,30 @@ export const OFFRE_PAUSE_DEPOT: Readonly<{ partenaire: string; lien: string; dep
 }
 
 /**
+ * (04/11, Brice) La commission de CE parcours chez le broker de l'offre :
+ * 650 EUR fixes par depot des 1 000 EUR (RaiseFx). Sert a pre-remplir la carte
+ * quand un abonne declare son depot (prevenirEquipeDeclaration) : RaiseFx n'a
+ * pas de taux general en base, seulement son accord en note.
+ */
+//
+// promo : une offre limitee du broker (dates INCLUSES, AAAA-MM-JJ, jour de
+// Paris). Pendant la promo, le bot annonce son minimum, et un depot date dans
+// la promo prend son minimum ; sa commission : fixeEuros, ou null = « a
+// confirmer » (la carte inscrit 0 EUR et le dit en note, a corriger dans le
+// cockpit). null = pas de promo. Promo Halloween de Mel (note de Tab du 01/11) :
+// 650 EUR de depot au lieu de 1 000, jusqu'au 01/11 inclus, debut suppose au
+// 31/10 (premier depot connu) ; commission pas sure (Brice, 04/11).
+export type PromoPauseDepot = { du: string; au: string; libelle: string; depotMinimumEuros: number; fixeEuros: number | null }
+export const COMMISSION_PAUSE_DEPOT: Readonly<{
+  partenaire: string; fixeEuros: number; depotMinimumEuros: number; promo: PromoPauseDepot | null
+}> = {
+  partenaire: 'raisefx',
+  fixeEuros: 650,
+  depotMinimumEuros: 1000,
+  promo: { du: '2026-10-31', au: '2026-11-01', libelle: 'promo Halloween', depotMinimumEuros: 650, fixeEuros: null },
+}
+
+/**
  * `produits` : la liste lue (lireProduitsLiveClub, produits.ts). Sans elle,
  * seuls les deux produits de base sont reconnus.
  */

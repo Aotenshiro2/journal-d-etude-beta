@@ -62,7 +62,7 @@
 // groupe, et l'equipe est prevenue UNE fois dans Agent AOK (texteAlerteLotsPauseDepot),
 // qui lui propose la carte de reprise de l'abonnement.
 
-import { OFFRE_PAUSE_DEPOT } from './config'
+import { COMMISSION_PAUSE_DEPOT, OFFRE_PAUSE_DEPOT } from './config'
 import { calculerReprisePause, dateIso, formaterDateFr, normaliserEmail, phraseQuestion } from './pur'
 import {
   BOUTON_LOTS, DELAI_LOTS_JOURS, ETAPES_LOTS, EXEMPLE_LOTS, RELANCE_LOTS_1_JOURS, RELANCE_LOTS_2_AVANT_FIN_JOURS,
@@ -883,3 +883,184 @@ export function texteAlerteLotsPauseDepot(o: {
 
 /** Le marqueur de l'historique d'Agent AOK : l'alerte n'est pas une question de l'equipe. */
 export const MARQUEUR_ALERTE_LOTS_PAUSE_DEPOT = "[système] Alerte « lots pas tradés, pause par dépôt broker », envoyée automatiquement par le passage du matin (ce n'est pas une question de l'équipe)."
+
+// ---------------------------------------------------------------------------
+// (04/11, cas d'Arthur) La declaration « depot fait » d'un abonne : chez Brice
+// ET Mel, la carte pre-remplie prete a valider, ou l'alerte avec ce qui manque.
+//
+// Avant : la declaration ne passait que par l'alerte generique « un membre
+// demande un humain » (support-pont.ts), qui (1) ne part que si le fil PASSE
+// en attente (deja en attente = rien) et au plus une fois par 10 min, et (2)
+// ne disait ni le parcours, ni le montant, ni la carte a valider : Arthur
+// (01/11 19:42, « je viens de faire le depot chez raise FX ») n'a donne
+// aucune carte, et personne n'a valide avant son renouvellement du 07/11.
+// Maintenant : une alerte propre au parcours, envoyee a chaque compte de
+// l'equipe quel que soit l'etat du fil, avec la carte du clic (controlerPauseDepot)
+// posee dans sa conversation d'Agent AOK. Une carte qui attend deja n'est
+// pas remplacee : l'alerte le dit, la carte en texte.
+// ---------------------------------------------------------------------------
+
+/** Ce que le membre a dit de son depot (outil pause_par_depot, etape depot_fait), rien de devine. */
+export type DeclarationDepot = { montant: number | null; le: string | null; email: string | null }
+
+/** Lecture stricte : un montant illisible, une date mal formee ou future, une adresse invalide = null. */
+export function lireDeclarationMembre(entree: unknown, ctx: { aujourdhui: string }): DeclarationDepot {
+  const e = entree && typeof entree === 'object' ? (entree as Record<string, unknown>) : {}
+  const brutMontant = e.montant === null || e.montant === undefined ? '' : String(e.montant).replace(/€|euros?|eur/gi, '').trim()
+  const m = brutMontant ? lireMontant(brutMontant, 'montant', 1_000_000) : null
+  const brutJour = typeof e.le === 'string' ? e.le.trim() : ''
+  return {
+    montant: typeof m === 'number' ? m : null,
+    le: JOUR.test(brutJour) && brutJour <= ctx.aujourdhui ? brutJour : null,
+    email: normaliserEmail(e.email_broker),
+  }
+}
+
+/** Ajoutee a la reponse au membre quand il n'a pas donne le montant : l'equipe en a besoin pour la carte. */
+export const QUESTION_MONTANT_DEPOT = "Pour que l'équipe aille plus vite : de combien est ton dépôt ? Et si ton compte chez le broker est à une autre adresse email que ton abonnement, donne-la-moi aussi."
+
+export function texteMembreDeclaration(texte: string, d: DeclarationDepot): string {
+  return d.montant === null ? `${texte}\n\n${QUESTION_MONTANT_DEPOT}` : texte
+}
+
+/**
+ * Les parametres de la carte (proposer_pause_depot) d'apres la declaration,
+ * ou ce qui manque, en clair pour l'equipe. Date absente = le jour de son
+ * message (« je viens de faire le depot »). Commission : celle du parcours
+ * (COMMISSION_PAUSE_DEPOT) chez son broker, des le minimum.
+ */
+export function paramsCarteDeclaration(o: {
+  d: DeclarationDepot; emailAbonnement: string | null; client: string | null; jourMessage: string
+  offre?: OffrePauseDepot; commission?: typeof COMMISSION_PAUSE_DEPOT
+}): Record<string, unknown> | string {
+  const offre = o.offre ?? OFFRE_PAUSE_DEPOT
+  const com = o.commission ?? COMMISSION_PAUSE_DEPOT
+  if (!offre.partenaire.trim()) return "le broker de l'offre (conditions de l'offre vides)"
+  if (o.d.montant === null) return "le montant de son dépôt (il ne l'a pas donné, le bot vient de le lui demander)"
+  const email = o.d.email ?? o.emailAbonnement
+  if (!email) return 'son adresse email (aucune adresse reliée à son compte Telegram)'
+  const le = o.d.le ?? o.jourMessage
+  const regle = slugPartenaire(offre.partenaire) === com.partenaire ? regleCommissionAu(le, com) : null
+  if (regle && o.d.montant < regle.minimum) {
+    return `un dépôt d'au moins ${euros(regle.minimum * 100)} (il annonce ${euros(Math.round(o.d.montant * 100))}) : à voir avec lui`
+  }
+  const aConfirmer = Boolean(regle?.promo && regle.commission === null)
+  return {
+    partenaire: offre.partenaire.trim(), email,
+    email_abonnement: o.d.email && o.emailAbonnement && o.emailAbonnement !== o.d.email ? o.emailAbonnement : null,
+    client: o.client, montant: o.d.montant, le, mois: MOIS_PAUSE_DEPOT,
+    commission: regle ? (regle.commission ?? 0) : null,
+    note: [
+      `Déclaré par le membre au bot le ${jourCourt(o.jourMessage)}${o.d.le ? '' : ' (date du dépôt = jour du message)'}.`,
+      regle?.promo ? `Dépôt de la ${regle.promo}.` : null,
+      aConfirmer ? 'Commission à confirmer (0 € inscrit) : à corriger dans le cockpit.' : null,
+    ].filter(Boolean).join(' '),
+  }
+}
+
+/** Le minimum et la commission d'un depot du jour `le` : ceux de la promo si le jour y tombe (dates incluses). commission null = a confirmer. */
+export function regleCommissionAu(le: string, com: typeof COMMISSION_PAUSE_DEPOT = COMMISSION_PAUSE_DEPOT): { minimum: number; commission: number | null; promo: string | null } {
+  const p = com.promo
+  if (p && le >= p.du && le <= p.au) return { minimum: p.depotMinimumEuros, commission: p.fixeEuros, promo: p.libelle }
+  return { minimum: com.depotMinimumEuros, commission: com.fixeEuros, promo: null }
+}
+
+/** L'offre annoncee au membre aujourd'hui : le minimum de la promo en cours, sinon l'offre telle quelle. */
+export function offreDuJour(aujourdhui: string, offre: OffrePauseDepot = OFFRE_PAUSE_DEPOT, com: typeof COMMISSION_PAUSE_DEPOT = COMMISSION_PAUSE_DEPOT): OffrePauseDepot {
+  const p = com.promo
+  if (!p || slugPartenaire(offre.partenaire) !== com.partenaire || aujourdhui < p.du || aujourdhui > p.au || !offre.depotMinimum.trim()) return offre
+  return { ...offre, depotMinimum: `${euros(p.depotMinimumEuros * 100)} (${p.libelle}, jusqu'au ${libelleJour(p.au)} inclus ; ${offre.depotMinimum.trim()} ensuite)` }
+}
+
+const MONTANT_DANS_TEXTE = /(\d{1,3}(?:[ .  ]\d{3})+|\d+)(?:[.,](\d{1,2}))?\s*(?:€|euros?\b|eur\b|e\b)/i
+const EMAIL_DANS_TEXTE = /[^\s@<>(),;:"']+@[^\s@<>(),;:"']+\.[a-z]{2,}/i
+
+/**
+ * (04/11, Brice : « le bot les a lues mais pas recoltees ») Ce que le modele
+ * n'a pas passe a l'outil, recolte dans les messages DU MEMBRE (le plus
+ * recent d'abord) : un montant suivi de sa devise, une adresse email. Rien
+ * n'est pris dans les textes du bot. La date n'est pas devinee.
+ */
+export function recolterDeclaration(d: DeclarationDepot, textesDuMembre: readonly string[]): DeclarationDepot {
+  let { montant, email } = d
+  for (const t of textesDuMembre) {
+    if (montant === null) {
+      const m = MONTANT_DANS_TEXTE.exec(t)
+      if (m) {
+        const n = Number(m[1].replace(/[^\d]/g, '') + (m[2] ? `.${m[2]}` : ''))
+        if (Number.isFinite(n) && n > 0 && n <= 1_000_000) montant = n
+      }
+    }
+    if (email === null) email = normaliserEmail(EMAIL_DANS_TEXTE.exec(t)?.[0])
+  }
+  return { ...d, montant, email }
+}
+
+/** Le texte de l'alerte : la declaration, puis la carte a valider, ou ce qui manque. Sans nom d'outil. */
+export function texteAlerteDeclarationPauseDepot(o: {
+  qui: string; email: string | null; partenaire: string; d: DeclarationDepot
+  carte: string | null; manque: string | null; occupee?: boolean
+}): string {
+  const email = o.email && o.email !== o.qui ? ` (${o.email})` : ''
+  const depot = o.d.montant === null ? '' : ` : ${euros(Math.round(o.d.montant * 100))}${o.d.le ? `, le ${libelleJour(o.d.le)}` : ''}`
+  const lignes = [`Pause par dépôt broker : ${o.qui}${email} dit que son dépôt chez ${o.partenaire} est fait${depot}.`]
+  const demande = `dis-moi « pause par dépôt pour ${o.email ?? o.qui}, dépôt de ... € le JJ/MM » et je prépare la carte.`
+  if (o.carte && !o.occupee) {
+    lignes.push(`Vérifie le dépôt chez ${o.partenaire}, puis valide la carte ci-dessous : elle inscrit le dépôt, pose son accès broker, met son abonnement en pause et le prévient.`, '', o.carte)
+  } else if (o.carte) {
+    lignes.push(`Une autre carte attend déjà ta réponse ici : celle-ci n'a pas pris sa place. Pour la valider ensuite, ${demande}`, '', o.carte)
+  } else {
+    lignes.push(`Pas de carte : il manque ${o.manque ?? 'une information'}. Dès que tu l'as, ${demande}`)
+  }
+  return lignes.join('\n')
+}
+
+/** Le marqueur de l'historique d'Agent AOK : l'alerte n'est pas une question de l'equipe. */
+export const MARQUEUR_DECLARATION_PAUSE_DEPOT = "[système] Alerte « un abonné dit que son dépôt broker est fait (pause par dépôt) », envoyée automatiquement par le bot des membres (ce n'est pas une question de l'équipe)."
+
+export type CarteDeclaration = { action: Record<string, unknown>; carte: string; court: string }
+export type OutilsDeclaration = {
+  /** Chaque compte de l'equipe (cockpit_telegram_comptes) ; court = Melanie (la carte courte). */
+  equipe: () => Promise<{ chat: number; court: boolean }[]>
+  /** La carte du clic (controle compris) ou ce qui manque. Peut jeter. */
+  carte: () => Promise<CarteDeclaration | { manque: string }>
+  /** Pose la carte dans la conversation, sans remplacer une carte qui attend, et l'envoie avec ses boutons. */
+  poserCarte: (chat: number, action: Record<string, unknown>, texte: string) => Promise<'posee' | 'occupee' | 'refusee'>
+  /** Un texte simple (et l'historique). */
+  envoyer: (chat: number, texte: string) => Promise<boolean>
+}
+
+/**
+ * L'alerte a CHAQUE compte de l'equipe, quel que soit l'etat du fil Support.
+ * Ne jette pas : une lecture ratee devient « ce qui manque ». vises = comptes
+ * de l'equipe, livres = alertes parties, cartes = cartes posees.
+ */
+export async function prevenirEquipeDeclarationAvec(
+  o: { qui: string; email: string | null; partenaire: string; d: DeclarationDepot }, outils: OutilsDeclaration,
+): Promise<{ vises: number; livres: number; cartes: number }> {
+  let lue: CarteDeclaration | { manque: string }
+  try {
+    lue = await outils.carte()
+  } catch {
+    lue = { manque: "la lecture avant la carte (Stripe ou la base), qui a échoué : redemande-la-moi dans un instant" }
+  }
+  const equipe = await outils.equipe()
+  let livres = 0
+  let cartes = 0
+  for (const dest of equipe) {
+    try {
+      if ('action' in lue) {
+        const carte = dest.court ? lue.court : lue.carte
+        const issue = await outils.poserCarte(dest.chat, lue.action, texteAlerteDeclarationPauseDepot({ ...o, carte, manque: null }))
+        if (issue === 'posee') { livres++; cartes++; continue }
+        if (issue === 'refusee') continue
+        if (await outils.envoyer(dest.chat, texteAlerteDeclarationPauseDepot({ ...o, carte, manque: null, occupee: true }))) livres++
+      } else if (await outils.envoyer(dest.chat, texteAlerteDeclarationPauseDepot({ ...o, carte: null, manque: lue.manque }))) {
+        livres++
+      }
+    } catch {
+      // Un compte en panne n'empeche pas les autres.
+    }
+  }
+  return { vises: equipe.length, livres, cartes }
+}

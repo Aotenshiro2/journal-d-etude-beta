@@ -250,7 +250,7 @@ export async function repondreAuMembre(
       // (conditions a lui envoyer, depot a verifier) : l'alerte existante part.
       // La boucle s'arrete la, sans texte du modele.
       if (bloc.name === NOM_OUTIL_MEMBRE_PAUSE_DEPOT) {
-        const r = await parcoursPauseDepotMembre(telegramId, bloc.input)
+        const r = await parcoursPauseDepotMembre(telegramId, bloc.input, { textesDuMembre })
         if (r.veutHumain) humain = true
         return r.panne ? { texte: r.texte, repli: true, ...drapeau() } : { texte: r.texte, ...drapeau() }
       }

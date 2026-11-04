@@ -243,6 +243,38 @@ export async function ajouterAHistoriqueAgent(chatId: number, telegramId: number
   return ecrites.length > 0
 }
 
+/**
+ * (04/11) Une carte proposee par le SERVEUR (pas par un tour du modele) dans
+ * la conversation d'un compte de l'equipe : la declaration « depot fait »
+ * d'un abonne (pause-depot.ts). Meme carte que livrerReponse (action en
+ * attente, nonce, boutons), mais elle ne remplace JAMAIS une carte qui attend
+ * deja ('occupee'). Telegram refuse l'envoi : la carte est retiree ('refusee').
+ */
+export async function proposerCarteEquipe(
+  chatId: number, action: Record<string, unknown>, texte: string, lignes: MessageStocke[],
+): Promise<'posee' | 'occupee' | 'refusee'> {
+  const nonce = randomUUID().slice(0, 8)
+  const posee = await prisma.$queryRaw<{ ok: number }[]>`
+    insert into public.cockpit_agent_conversations as c (chat_id, telegram_id, messages, action_en_attente, nonce)
+    values (${chatId}, ${chatId}, ${JSON.stringify(lignes)}::jsonb, ${JSON.stringify(action)}::jsonb, ${nonce})
+    on conflict (chat_id) do update
+    set messages = ${HISTORIQUE_UPSERT}, action_en_attente = excluded.action_en_attente, nonce = excluded.nonce, maj_le = now()
+    where c.action_en_attente is null
+    returning 1 as ok`
+  if (posee.length === 0) return 'occupee'
+  const boutons = {
+    inline_keyboard: [[
+      { text: libelleBoutonConfirmer(String(action.type)), callback_data: `ok:${nonce}` },
+      { text: '❌ Annuler', callback_data: `non:${nonce}` },
+    ]],
+  }
+  if (await envoyerMessages(chatId, decouperMessage(texte), boutons)) return 'posee'
+  await prisma.$executeRaw`
+    update public.cockpit_agent_conversations set action_en_attente = null, nonce = null
+    where chat_id = ${chatId} and nonce = ${nonce}`
+  return 'refusee'
+}
+
 export type CompteCockpitTelegram = { user_id: string; libelle: string | null }
 
 /**
