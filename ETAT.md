@@ -3,6 +3,30 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
+## COCKPIT : CONNEXION PAR LIEN AVEC TOUTE ADRESSE VERIFIEE (05/11/2026, NON commite ; migration 20261105220000 ECRITE, NON appliquee)
+
+- Cas : Melanie (connexion Yahoo, dans cockpit_allowlist) a son Gmail verifie dans profile_emails. signInWithOtp n'envoie
+  qu'a l'email de connexion : avec le Gmail, rien ne partait. Brice : « voire meme tous ses mails » ; le lien = cockpit seul.
+- POST /api/cockpit/lien-magique { email } (publique) : sous verrou, cadence (adresse 5/h et 10/j, IP 10/h et 30/j, total
+  60/h), puis le compte. Un lien part a l'ADRESSE TAPEE seulement si elle est l'email de connexion confirme OU une adresse
+  verified = true d'un compte de cockpit_allowlist (deux comptes du cockpit = ambigu, rien). Reponse identique connue ou non
+  (200), sauf 429 de cadence (vaut pour toute adresse). Email par Resend APRES la reponse (after). Rafale (15/h ou une limite
+  atteinte) : alerterEquipeTexte, une fois par heure, sans adresse ni IP.
+- Le lien : cockpit.aoknowledge.com/auth/lien#lien=<jeton opaque 32 octets> (fragment : jamais envoye au serveur), 15 min,
+  une ouverture ; la base ne garde que son HMAC. Au clic « Ouvrir le Cockpit », POST /api/cockpit/lien-magique/ouvrir { lien } : jeton consomme, compte relu
+  (allowlist, adresse toujours verifiee), PUIS generateLink type 'recovery' sur l'email de connexion (ne cree jamais de compte,
+  contrairement au type magiclink) et token_hash rendu ; le cockpit fait verifyOtp({ token_hash, type: 'recovery' }) : marche
+  sur tout appareil (ni PKCE ni code_verifier).
+- Table cockpit_lien_magique_demandes (journal + compteur) : HMAC de l'adresse, de l'IP et du jeton, issue (envoye,
+  envoi_rate, inconnue, non_verifiee, hors_allowlist, ambigu, limite), compte, expire_le, ouvert_le, alerte. RLS forcee,
+  aucun droit navigateur, purgee a 30 jours.
+- Fichiers : src/lib/cockpit-lien-magique-pur.ts (regles, email, deroule a ports injectes), src/lib/cockpit-lien-magique.ts
+  (base, Supabase admin, Resend), src/app/api/cockpit/lien-magique/route.ts et ouvrir/route.ts, middleware (une entree),
+  scripts/verifier-lien-magique-cockpit.mjs (28 blocs, fausse base et faux Supabase). Cockpit : src/lib/lien-magique.ts,
+  src/pages/AuthLienPage.tsx, LoginPage.tsx (filet signInWithOtp si la route rend 503 ou ne repond pas), App.tsx.
+- Mise en ligne, dans l'ordre : migration, journal, cockpit. Aucune variable a poser. Facultatives : COCKPIT_URL (base des
+  liens), COCKPIT_LIEN_MAGIQUE=off (coupe les deux routes, le cockpit retombe sur signInWithOtp).
+
 ## CANDIDATS DU CARNET POUR UNE POSITION, bouton « Lier » de Pilotage (05/11/2026, commite NON pousse ; aucune migration)
 
 - Brief : D:\6_Societe\Pilotage\BRIEF-LIER-CARNET-FICHE-COMPTE.md ; compte rendu : COMPTE-RENDU-LIER-CARNET.md (meme dossier).

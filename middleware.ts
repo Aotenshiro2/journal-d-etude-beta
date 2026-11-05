@@ -43,7 +43,8 @@ export async function middleware(request: NextRequest) {
   // /api/kit/webhook/ : webhooks Kit des inscriptions par formulaire, secret du chemin verifie dans la route (31/10/2026).
   // /api/mcp-cockpit/ : le connecteur MCP du cockpit pour Tache, secret du chemin (ou Bearer de Tache) verifie dans la route (01/11/2026).
   // /api/academie/suivi : le signal de fermeture de page (sendBeacon) n'a pas d'en-tete Authorization, son jeton est dans le corps ; la route verifie le jeton (en-tete ou corps) et rend 401 sans lui (05/11/2026).
-  const publicPaths = ['/auth', '/api/health', '/guide', '/api/membres/photo', '/api/academie/achat', '/api/academie/catalogue', '/api/academie/suivi', '/api/tab/', '/api/liveclub/stripe', '/api/liveclub/resend', '/api/mcp/', '/api/club/paypal', '/api/pilotage/achat', '/api/newsletter/subscribe', '/api/kit/webhook/', '/api/mcp-cockpit/']
+  // /api/cockpit/lien-magique (+ /ouvrir) : connexion au cockpit par lien avec toute adresse verifiee, sans session ; allowlist, adresse verifiee et cadence verifiees dans la route (05/11/2026).
+  const publicPaths = ['/auth', '/api/health', '/guide', '/api/membres/photo', '/api/academie/achat', '/api/academie/catalogue', '/api/academie/suivi', '/api/tab/', '/api/liveclub/stripe', '/api/liveclub/resend', '/api/mcp/', '/api/club/paypal', '/api/pilotage/achat', '/api/newsletter/subscribe', '/api/kit/webhook/', '/api/mcp-cockpit/', '/api/cockpit/lien-magique']
   const isPublic = pathname === '/' || publicPaths.some(p => pathname.startsWith(p))
   if (isPublic) return supabaseResponse
 
