@@ -15,6 +15,8 @@
 // - J+1 : l'academie ;
 // - J+2 : les autres sujets, avec leur lien, et la ligne du challenge ;
 // - J+4 : les liens utiles (« demande-moi ») ;
+// - J+5 (ajoute le 05/11, Brice : l'indicateur TradingView d'Alex, offert aux
+//   membres) : l'indicateur d'Alex, avec le bouton « Indicateur d'Alex » ;
 // - J+7 : l'abonnement (ou l'acces offert) et ses adresses email.
 //
 // Chaque conseil part du passage quotidien (passage.ts, tache q), le matin, un
@@ -38,6 +40,7 @@
 import { URL_FORMATION_LIVECLUB } from './config'
 import { LIGNE_CHALLENGE_CORE_CONTENT, SUJETS_LIVECLUB, lienSujet } from './accueil-groupe'
 import { jourPlus } from './lots-pur'
+import { BOUTON_INDICATEUR } from './indicateur-pur'
 
 /**
  * (31/10, Brice) Les autres adresses email s'ajoutent au profil, confirmees par
@@ -58,18 +61,21 @@ export const TIPS_ACCUEIL_DEPUIS = '2026-10-31'
 export const TIP_ACADEMIE_JOURS = 1
 export const TIP_SUJETS_JOURS = 2
 export const TIP_LIENS_JOURS = 4
+/** (05/11) L'indicateur d'Alex, entre les liens utiles et l'abonnement (le dernier conseil). */
+export const TIP_INDICATEUR_JOURS = 5
 export const TIP_ABONNEMENT_JOURS = 7
 
 /** Au-dela, plus aucun conseil (un membre parti puis revenu longtemps apres n'en recoit pas). */
 export const TIPS_FENETRE_JOURS = 21
 
-export type CleTip = 'academie' | 'sujets' | 'liens' | 'abonnement'
+export type CleTip = 'academie' | 'sujets' | 'liens' | 'indicateur' | 'abonnement'
 
 /** Le calendrier, dans l'ordre. */
 export const TIPS_ACCUEIL: readonly { cle: CleTip; jours: number }[] = [
   { cle: 'academie', jours: TIP_ACADEMIE_JOURS },
   { cle: 'sujets', jours: TIP_SUJETS_JOURS },
   { cle: 'liens', jours: TIP_LIENS_JOURS },
+  { cle: 'indicateur', jours: TIP_INDICATEUR_JOURS },
   { cle: 'abonnement', jours: TIP_ABONNEMENT_JOURS },
 ]
 
@@ -78,11 +84,12 @@ export const NOMS_TIPS: Readonly<Record<CleTip, string>> = {
   academie: "l'académie",
   sujets: 'les autres sujets du groupe',
   liens: 'les liens utiles',
+  indicateur: "l'indicateur d'Alex",
   abonnement: "l'abonnement et les adresses email",
 }
 
 export function estCleTip(v: unknown): v is CleTip {
-  return v === 'academie' || v === 'sujets' || v === 'liens' || v === 'abonnement'
+  return v === 'academie' || v === 'sujets' || v === 'liens' || v === 'indicateur' || v === 'abonnement'
 }
 
 // ---------------------------------------------------------------------------
@@ -127,6 +134,8 @@ const MOTS_DEJA_PARLES: Readonly<Record<CleTip, RegExp>> = {
   academie: /acad[ée]mie|formation|\bcours\b|\bmodules?\b/i,
   sujets: /\bsujets?\b|explication charts|mindset|core content|macro ?breaker|\bpdf\b|vos r[ée]sultats|challenge|\bquiz\b/i,
   liens: /liens? utiles?|\bbrokers?\b|prop ?firms?|\boutils?\b/i,
+  // (05/11) Un appui sur « Indicateur d'Alex » entre au fil Support : il compte aussi.
+  indicateur: /indicateur|trading ?view/i,
   abonnement: /abonnement|\bpause\b|arr[êe]t(er)?\b|r[ée]silie|adresses? (e-?)?mail|autre (adresse|e-?mail)/i,
 }
 
@@ -186,6 +195,11 @@ export function texteTip(cle: CleTip, o: OptionsTip): string {
         + (lien ? `Ils sont aussi rangés dans le sujet Liens utiles : ${lien}\n` : `Ils sont aussi rangés dans le sujet Liens utiles du groupe.\n`)
         + `Tu cherches l'un d'eux ? Demande-moi, je te donne le bon lien.`
     }
+    // (05/11, Brice : l'indicateur TradingView d'Alex, offert aux membres du Live Club.)
+    case 'indicateur':
+      return `Un bonus réservé aux membres : Alex, membre du Live Club, t'offre l'accès à son indicateur TradingView tant que tu es dans le Live Club.\n`
+        + `Pour l'avoir, appuie sur « ${BOUTON_INDICATEUR.texte} » juste en dessous (ou écris-moi « je veux l'indicateur d'Alex ») : je te demande ton pseudo TradingView et je le transmets à Alex.\n`
+        + `Une question dessus ? Dis-le-moi ici.`
     case 'abonnement':
       return o.accesOffert
         ? `Dernier petit conseil, et après je te laisse tranquille : ton accès au Live Club t'est offert, donc rien à payer ni à gérer de ton côté. `
@@ -201,7 +215,11 @@ export function texteTip(cle: CleTip, o: OptionsTip): string {
   }
 }
 
-/** Le bouton sous un conseil : « Mon abonnement » pour le dernier (le meme que le menu), rien sinon. */
+/**
+ * Le bouton sous un conseil : « Mon abonnement » pour le dernier (le meme que
+ * le menu), « Indicateur d'Alex » sous celui de l'indicateur (05/11), rien sinon.
+ */
 export function boutonsTip(cle: CleTip): { texte: string; data: string }[][] | undefined {
+  if (cle === 'indicateur') return [[{ texte: BOUTON_INDICATEUR.texte, data: BOUTON_INDICATEUR.data }]]
   return cle === 'abonnement' ? [[{ texte: 'Mon abonnement', data: 'm:abo' }]] : undefined
 }

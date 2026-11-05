@@ -7,6 +7,60 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
+## INDICATEUR D'ALEX (05/11/2026, commite NON pousse ; migration 20261105250000 ECRITE, NON appliquee)
+
+- Brice, 05/11 : « je veux que Alex ait acces aux @ telegram des membres du liveclub pour son indicateur de trading
+  [...] il n'a pas de moyen de verifier facilement si un membre s'est desinscrit ». Option choisie : le MEMBRE donne son
+  pseudo TradingView au bot des membres (son clic vaut accord), le bot l'ecrit a Alex dans LEUR conversation, le pseudo
+  est garde chez nous (fiche membre du cockpit), et l'assistant IA d'Alex a une porte MCP a lui.
+- Parcours (bot-membre.ts, indicateur.ts, indicateur-pur.ts) : bouton « Indicateur d'Alex » (m:indic, menu, menu d'un
+  acces offert, conseil d'accueil) ou texte libre (outil indicateur_alex de l'agent : il oriente vers la MEME etape, sans
+  texte du modele, refuse sous prudence). Droit relu en direct (droitLiveClub, la regle du groupe) : non-membre = reponse
+  courte, rien de garde ; inconnu = « reessaie ». Etape = cockpit_liveclub_conversations.action_en_attente (types
+  indicateur_pseudo puis indicateur, nonce, 30 min), lue AVANT l'equipe et l'IA dans traiterMessagePrive ; une phrase
+  garde le parcours habituel, un mot courant fait redemander, « annule » ferme. Pseudo STRICT (lettres, chiffres, . - _,
+  3 a 40, @ de tete retire, aucun lien ni texte libre), puis la CARTE « Ton prenom (..), ton @ (..) et ton pseudo
+  TradingView (..) partent chez Alex, qui gere l'indicateur. Je les envoie ? » [Oui, envoie a Alex ic:] [Laisser tomber
+  ix:]. Clic : droit relu, demande notee sous verrou (meme pseudo = rien, autre = pseudo change), message a Alex tout de
+  suite.
+- Trace : cockpit_liveclub_indicateur (une ligne par demande, une ouverte par compte Telegram, pseudo_transmis = ce
+  qu'Alex a, envoi_reserve_le pose AVANT l'envoi, statut a_transmettre | transmise | partie, depart_le,
+  prevenu_depart_le), lecture allowlist, RLS forcee, aucune ecriture navigateur. cockpit_liveclub_relais.indicateur (Alex
+  par la migration, nom = 'Alex') + actif : le destinataire, relu a chaque envoi, jamais en dur.
+- Messages a Alex (HTML, bot des membres) : presentation une fois en tete du premier ; « Indicateur : nouvelle demande »
+  (prenom, @ ou lien de profil, pseudo, date) ; « pseudo change » ; « X (@x) a quitte le Live Club : retire l'acces de
+  <pseudo> a l'indicateur. » Chacun finit par une ligne machine « #indicateur demande|changement|depart tv=.. [ancien=..]
+  tg=@..|id:.. prenom=".." le=AAAA-MM-JJ ». Refus Telegram : reservation liberee, le passage reessaie, sans doublon.
+- Passage (tache u, apres les conseils, avant Metricgram) : (1) demandes en attente, droit relu juste avant, envoi ;
+  (2) droit des demandes ouvertes, 50 au plus, comptes sortis par CE passage d'abord, puis absents du groupe, puis les
+  plus anciennement relus (pas avant 20 h), non = depart ; (3) departs a dire a Alex. Budget 200 s. Synthese
+  `indicateur` (etat ok | coupe | table_absente | panne | sans_destinataire). LIVECLUB_INDICATEUR=0 coupe les messages a
+  Alex et la tache. Le bouton note aussi le depart si le droit est tombe.
+- MCP de l'assistant d'Alex : POST /api/mcp-alex/<amcp_...> (route publique du middleware, masquee pour Sentry), portee
+  alex_indicateur seule (empreinte « mcp-alex-indicateur: »), 30 appels/min, journal cockpit_tab_acces (route
+  mcp-alex/<outil>), 404 neutre sans le bon secret, 503 sans la migration. Outils en lecture seule : aide,
+  membres_indicateur (depuis facultatif), departs_indicateur (depuis, defaut 30 jours, un an au plus). 1 000 / 500
+  lignes au plus. Jamais l'identifiant Telegram, un email ni un paiement.
+- Cle : scripts/creer-cle-alex-mcp.mjs (modele de creer-cle-tache-mcp.mjs, --essai d'abord), ecrit l'URL dans
+  /mnt/d/6_Societe/Pilotage/Data-Performance/credentials.local/alex-indicateur-mcp.local.json, jamais affichee. PAS LANCE.
+- Cockpit (workspace) : AccesTab portee alex_indicateur (bloc a l'Accueil, is_cockpit_perso seulement, « Couper la cle »),
+  le bloc de ChatGPT ecarte mcp-alex ; fiche membre : RubriqueIndicateur (pseudo, demandee le, transmise le, depart, Alex
+  prevenu), lue a l'ouverture, aucune minuterie.
+- Faire connaitre : conseil d'accueil J+5 « indicateur » (bouton sous le conseil) ; annonce aux membres actuels =
+  texteAnnonceIndicateur(jour de l'annonce) dans indicateur-pur.ts, delai +21 jours, NON envoyee (Brice valide).
+- Verifs : scripts/verifier-indicateur-alex.mjs (17 blocs) ; tsc journal et cockpit ; eslint des fichiers touches ;
+  -liveclub, -relais-accueil, -tips-accueil (calendrier mis a jour), -accueil-groupe, -securite-bots, -mcp-tache, -mcp-gpt,
+  -tab-repondre, -reconnaissance, -pause-depot, -effacement, -parrainage, -diffusion-equipe, -agent-outils-cockpit,
+  -attente-equipe, -pieces-support, -suivi-lots, -depot-perdu, -reouverture-impaye : ok. Aucune base ecrite, aucun envoi,
+  aucune eval, SQL non joue (table absente en prod).
+- MISE EN LIGNE, dans l'ordre : (1) migration 20261105250000 (elle reprend la portee tache_mcp : 20261101200000, toujours
+  NON appliquee en prod au 05/11, ne doit plus passer APRES elle, sinon elle retire alex_indicateur) ; (2) push du journal ;
+  (3) deploiement du cockpit ; (4) node scripts/creer-cle-alex-mcp.mjs --essai puis sans --essai, et l'URL du coffre a
+  Alex ; (5) Brice valide l'annonce et la poste.
+- Limites : l'effacement d'une personne (cockpit_effacer) ne connait pas encore cette table (membre_id passe a nul, la
+  ligne reste) ; un depart se voit au plus tard en 2 a 3 jours pour un membre encore dans le groupe (rotation de 50) ; une
+  pause d'abonnement ou un impaye de plus de 5 jours = depart (la regle du groupe), le membre refait sa demande a son retour.
+
 ## AGENT AOK : LES GESTES DU COCKPIT DEPUIS TELEGRAM, LOT 2 (05/11/2026, EN LIGNE ; aucune migration)
 
 - Brice, 05/11 : « que l'agent puisse faire depuis Telegram les gestes du cockpit ». LOT 2, sur le modele du LOT 1 (memes

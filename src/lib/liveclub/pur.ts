@@ -1282,6 +1282,8 @@ const NOMS_TIPS_ACCUEIL: Readonly<Record<string, string>> = {
   academie: "l'académie",
   sujets: 'les autres sujets du groupe',
   liens: 'les liens utiles',
+  // (05/11) Le conseil de l'indicateur d'Alex (J+5).
+  indicateur: "l'indicateur d'Alex",
   abonnement: "l'abonnement et les adresses email",
 }
 
@@ -1720,6 +1722,8 @@ const LIBELLES_BOUTONS: Record<string, string> = {
   'v:email': "J'ai payé : vérifier mon email",
   // (31/10) = BOUTON_LOTS (lots-pur.ts ; ce module n'importe rien, verifier-suivi-lots.mjs).
   'm:lots': "J'ai tradé mes lots",
+  // (05/11) = BOUTON_INDICATEUR (indicateur-pur.ts ; verifier-indicateur-alex.mjs compare).
+  'm:indic': "Indicateur d'Alex",
   [BOUTON_REGLE.data]: BOUTON_REGLE.texte,
 }
 
@@ -1734,6 +1738,9 @@ export function libelleBouton(data: string): string {
   // (15/10) Le choix d'un compte Telegram (comptes-telegram-pur.ts), jamais le nonce.
   if (/^k:/.test(data)) return 'Utiliser ce compte-ci'
   if (/^n:/.test(data)) return "Ce n'est pas moi"
+  // (05/11) La carte de l'indicateur d'Alex (= LIBELLE_OUI, LIBELLE_NON d'indicateur-pur.ts), jamais le nonce.
+  if (/^ic:/.test(data)) return 'Oui, envoie à Alex'
+  if (/^ix:/.test(data)) return 'Laisser tomber'
   return 'bouton inconnu'
 }
 
