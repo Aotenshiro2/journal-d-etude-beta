@@ -229,6 +229,13 @@ const NoteMapNode = React.memo(function NoteMapNode({ id, data }: NodeProps) {
 const nodeTypes = { noteMap: NoteMapNode, group: GroupNode, concept: ConceptNode }
 const GROUP_COLOR_KEYS = Object.keys(GROUP_COLORS)
 
+// Ce que la carte d'une note affiche (titre, aperçu, date, favicon, badge de
+// source) : identique = la carte garde son objet après une actualisation.
+function memeNote(a: NoteData, b: NoteData): boolean {
+  return a.title === b.title && a.content === b.content && a.favicon === b.favicon && a.sourceUrl === b.sourceUrl
+    && new Date(a.lastModifiedAt).getTime() === new Date(b.lastModifiedAt).getTime()
+}
+
 function autoPosition(index: number): { x: number; y: number } {
   const cols = 4
   const colW = 310
@@ -833,7 +840,7 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
   // ── Picker de concepts (0.1.6) ──────────────────────────────────────────────
   const [conceptPickerOpen, setConceptPickerOpen] = useState(false)
   const dragEnterCounterRef = useRef(0)
-  const { setCenter, screenToFlowPosition, getNode, getInternalNode } = useReactFlow()
+  const { setCenter, screenToFlowPosition, getNode, getNodes, getInternalNode } = useReactFlow()
   const { x: vpX, y: vpY, zoom } = useViewport()
 
   const dotSize = 22 * zoom
@@ -991,6 +998,40 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
+
+  // « Actualiser » (router.refresh) rend une nouvelle liste de notes, mais les
+  // cartes déjà posées gardaient la note du montage (initialNodes n'est
+  // calculé qu'une fois). Quand la liste reçue change, chaque carte reprend sa
+  // note (titre, aperçu, date, favicon, source) sans perdre sa position, sa
+  // sélection ni ses liens : seul `data.note` change, et une carte inchangée
+  // garde le même objet (pas de re-rendu). Une carte dont la note n'est plus
+  // dans la liste (supprimée ailleurs) est retirée de la carte affichée, avec
+  // ses traits, comme au montage ; rien n'est effacé en base. Pas de
+  // minuterie : rien ne se passe sans le bouton ou un geste.
+  const notesSynchronisees = useRef(notes)
+  useEffect(() => {
+    if (notesSynchronisees.current === notes) return
+    notesSynchronisees.current = notes
+    const parId = new Map(notes.map(n => [n.id, n]))
+    const retirees = new Set(getNodes().filter(n => n.type === 'noteMap' && !parId.has(n.id)).map(n => n.id))
+    setNodes(nds => {
+      let change = false
+      const suite = nds.flatMap(n => {
+        if (n.type !== 'noteMap') return [n]
+        const recue = parId.get(n.id)
+        if (!recue) { change = true; return [] }
+        const actuelle = (n.data as { note: NoteData }).note
+        if (memeNote(actuelle, recue)) return [n]
+        change = true
+        return [{ ...n, data: { ...n.data, note: recue } }]
+      })
+      return change ? suite : nds
+    })
+    if (retirees.size > 0) {
+      setEdges(eds => eds.filter(e => !retirees.has(e.source) && !retirees.has(e.target)))
+      setLinkSourceId(id => (id && retirees.has(id) ? null : id))
+    }
+  }, [notes, getNodes, setNodes, setEdges])
 
   // 0.1.7 — le trait s'anime au survol de sa carte, et seulement là (variante 3
   // du labo). `avecSurvol` renvoie `edges` inchangé tant que rien n'est survolé,
