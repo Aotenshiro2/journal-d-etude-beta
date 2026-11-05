@@ -101,6 +101,16 @@ const LIBELLES_BOUTON: Record<string, string> = {
   clips_replay: 'Préparer les clips',
   // Le bouton dit que ca coute : la carte dit combien.
   envoi_opus: 'Envoyer à Opus (payant)',
+  // (05/11, LOT 2) Brice : « que l'agent puisse faire depuis Telegram les gestes du cockpit ».
+  charge_fixe: 'Enregistrer la charge',
+  abonnement_ia: "Enregistrer l'abonnement IA",
+  objectif_publication: "Poser l'objectif",
+  note_fonds: 'Écrire la note',
+  decision_fonds: 'Trancher les propositions',
+  // Payant, comme l'envoi a Opus : la carte dit combien.
+  enquete_fonds: "Lancer l'enquête (payant)",
+  relais_accueil: 'Changer le relais',
+  retrait_adresse: "Retirer l'adresse",
 }
 
 /** Le texte du bouton Confirmer d'une carte : l'action precise, jamais « exécuter l'image ». */
@@ -199,6 +209,15 @@ export const DESCRIPTIONS_OUTILS: Readonly<Record<string, string>> = {
   proposer_decision_clip: 'la carte de décision sur les clips',
   proposer_clips_replay: 'la carte qui prépare les clips du replay',
   proposer_envoi_opus: "la carte d'envoi à Opus",
+  // (05/11, LOT 2)
+  proposer_charge_fixe: 'la carte de charge',
+  proposer_abonnement_ia: "la carte d'abonnement IA",
+  proposer_objectif_publication: "la carte d'objectif de la publication",
+  proposer_note_fonds: 'la carte de note du fonds',
+  proposer_decision_fonds: 'la carte de décision sur les propositions',
+  proposer_enquete_fonds: "la carte d'enquête en ligne",
+  proposer_relais_accueil: "la carte du relais d'accueil",
+  proposer_retrait_adresse: "la carte de retrait d'adresse",
   marquer_fil_traite: 'la demande marquée traitée',
   demandes_en_suspens: 'la liste des demandes en suspens',
   reprendre_demande: 'la relance de la demande',

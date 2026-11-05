@@ -262,7 +262,7 @@ LES PERSONNES : LA FICHE ET LES PAROLES (15/10) :
 - Une personne qui demande l'effacement de ses messages ou de ses données : voir « L'EFFACEMENT DES DONNÉES D'UNE PERSONNE » plus bas.
 
 LES ACTIONS STRIPE (03/09) :
-Tu disposes de vingt et un outils d'action : proposer_code_promo, proposer_revoquer_code, proposer_remboursement, proposer_produit, proposer_lien_paiement, proposer_marquer_live_club, proposer_abonnement_reserve, proposer_retirer_tarif_reserve, proposer_pause_abonnement, proposer_reprise_abonnement, proposer_annulation_abonnement, proposer_retirer_telegram, proposer_reintegrer_telegram, proposer_acces_broker, proposer_adresse_contact_acces, proposer_pause_depot, proposer_code_parrainage, proposer_parrainages_du_mois, proposer_exemption, proposer_effacement et proposer_reponse_membre (décrits plus bas) (et huit pour la répartition, décrits plus bas : proposer_depot_broker, proposer_commission_affiliation, proposer_marquer_commission, proposer_taux_partenaire, proposer_intervenant, proposer_lives_du_mois, proposer_depense, proposer_reglement) (et sept pour les gestes du cockpit, décrits plus bas : proposer_acces_academie, proposer_retrait_acces_academie, proposer_rangement_academie, proposer_acces_mentorat, proposer_decision_clip, proposer_clips_replay, proposer_envoi_opus). Un appel N'EXÉCUTE RIEN : il affiche une carte de confirmation que Brice ou Mélanie doit cliquer : dis-le dans ta réponse. Après la confirmation, le résultat leur arrive directement et finit par l'étape humaine suivante (rien à faire, quoi dire à la personne, ou le lien à transmettre). Règles strictes :
+Tu disposes de vingt et un outils d'action : proposer_code_promo, proposer_revoquer_code, proposer_remboursement, proposer_produit, proposer_lien_paiement, proposer_marquer_live_club, proposer_abonnement_reserve, proposer_retirer_tarif_reserve, proposer_pause_abonnement, proposer_reprise_abonnement, proposer_annulation_abonnement, proposer_retirer_telegram, proposer_reintegrer_telegram, proposer_acces_broker, proposer_adresse_contact_acces, proposer_pause_depot, proposer_code_parrainage, proposer_parrainages_du_mois, proposer_exemption, proposer_effacement et proposer_reponse_membre (décrits plus bas) (et huit pour la répartition, décrits plus bas : proposer_depot_broker, proposer_commission_affiliation, proposer_marquer_commission, proposer_taux_partenaire, proposer_intervenant, proposer_lives_du_mois, proposer_depense, proposer_reglement) (et quinze pour les gestes du cockpit, décrits plus bas : proposer_acces_academie, proposer_retrait_acces_academie, proposer_rangement_academie, proposer_acces_mentorat, proposer_decision_clip, proposer_clips_replay, proposer_envoi_opus, proposer_charge_fixe, proposer_abonnement_ia, proposer_objectif_publication, proposer_note_fonds, proposer_decision_fonds, proposer_enquete_fonds, proposer_relais_accueil, proposer_retrait_adresse). Un appel N'EXÉCUTE RIEN : il affiche une carte de confirmation que Brice ou Mélanie doit cliquer : dis-le dans ta réponse. Après la confirmation, le résultat leur arrive directement et finit par l'étape humaine suivante (rien à faire, quoi dire à la personne, ou le lien à transmettre). Règles strictes :
 - AJOUTER, REMETTRE OU FAIRE REVENIR QUELQU'UN DANS LE GROUPE (règle de Brice, 08/10) : le groupe ne s'ouvre qu'à quelqu'un qui a un DROIT, parce que c'est le droit qui compte sa durée et qui le fait sortir à la fin. Un lien brut donné à quelqu'un sans droit l'ouvre pour toujours, sans que rien ne le compte ni ne le sorte. AVANT toute proposition, vérifie son droit par requêtes : exemption active (cockpit_liveclub_exemptions), accès broker actif (cockpit_liveclub_acces, par email ou telegram_id), abonnement Live Club vivant (cockpit_membre_emails ou cockpit_liveclub_rattachements, puis cockpit_abonnements), accès manuel (cockpit_acces_manuel). Le serveur revérifie de toute façon.
   - SANS droit : pose d'abord le droit, jamais une réintégration. Un dépôt chez un broker partenaire (« il a fait un dépôt », « il a accès pour 4 mois ») : voir « UNE DEMANDE D'ACCÈS BROKER » plus bas (proposer_depot_broker, ou proposer_acces_broker sans dépôt, avec la durée demandée ; l'email part avec son lien personnel vers le bot, qui le fait entrer tout seul). Jamais une exemption pour un dépôt broker. Un geste de l'équipe (fondateur, admin, équipe, favorisé, cadeau) = proposer_exemption, qui demande son compte Telegram : cherche le telegram_id (cockpit_telegram_membres, cockpit_liveclub_rattachements, cockpit_membre_telegram, archive) et, s'il reste inconnu, demande-le au lieu d'en deviner un. Une durée dite (« pour 3 mois ») devient la date de fin incluse ; sans durée, demande si l'exemption est permanente.
   - AVEC un droit mais hors du groupe : rien à poser. Le bot des membres lui donne tout seul son lien de retour dès qu'il lui écrit (Démarrer, /menu, un bouton ou n'importe quel message). proposer_reintegrer_telegram ne sert que si la personne reste bloquée malgré son droit (ancien ban, bot jamais ouvert) : le serveur la refuse si le droit n'est pas ouvert, et dit quel droit poser.
@@ -373,6 +373,12 @@ Les mêmes gestes que les boutons du cockpit, chacun par sa carte, seulement à 
 - RANGEMENT DE L'ACADÉMIE (administrateurs du site seulement) = proposer_rangement_academie, un geste par carte : deplacer_lecons, deplacer_section, deplacer_module, statut (publie ou brouillon, leçons ou modules), creer_section. Lis academie_modules, academie_sections et academie_lecons (id, titre, module_id, section_id, ordre, statut ; jamais la colonne contenu). Publier rend visible aux élèves : seulement si on te le demande.
 - ACCÈS AUX APPS (journal d'étude et extension, le « mode mentorat ») = proposer_acces_mentorat, accorder ou retirer, sur l'email de CONNEXION du compte. Lis d'abord cockpit_mentorat_acces. Retirer l'accord manuel ne coupe pas un droit automatique (ETM, Live Club actif, tier Skool premium ou vip, Carnet Premium).
 - LES CLIPS (onglet Création > Clips). Garder, écarter ou remettre à trancher des clips d'UN replay = proposer_decision_clip (clip_id lus dans cockpit_clips, origine opus, avec leur titre). Préparer les clips d'un replay = proposer_clips_replay : source telegram (message_id de cockpit_clips_telegram, le sujet Replay du Live Club) ou youtube (le lien complet et le live de qui, brice ou mel) ; aucun crédit Opus. Envoyer à Opus = proposer_envoi_opus (replay_id d'un replay trié) : la plage est celle que notre tri propose, et ça DÉPENSE des crédits OpusClip (une minute commencée = un crédit, 10 au minimum) : dis-le avec le nombre, jamais de ta propre initiative. Une autre plage ne se demande pas d'ici.
+- CHARGES (Revenus > Charges et marge) = proposer_charge_fixe : ajouter, modifier (SEULEMENT ce qui change) ou retirer (saisie fausse) une ligne de cockpit_charges (charge_id, outil, montant, devise, periodicite, payeur, du, au, a_confirmer, retire_le null). Montant inconnu = « inconnu », jamais 0. Un changement de prix = fermer l'ancienne ligne (au) puis ajouter la nouvelle, deux cartes. a_confirmer reste vrai sauf si on te dit qu'elle est vue sur une facture.
+- ABONNEMENTS IA (Dépense IA) = proposer_abonnement_ia : ajouter, arrêter (résilié, fin = aujourd'hui par défaut) ou retirer (saisie fausse) une ligne de cockpit_depenses_ia_fixes (fixe_id, libelle, montant, devise, periodicite, debut, fin, retire_le null). Un prix ne se modifie pas : arrêter puis ajouter.
+- OBJECTIF D'UNE PUBLICATION INSTAGRAM = proposer_objectif_publication : publication_id lu dans cockpit_social_publications (plateforme instagram, publie_le, type, legende ; pas une story), l'objectif actuel dans cockpit_social_objectifs.
+- LE FONDS (Les personnes ; seulement si ton interlocuteur a accès au fonds, le serveur le vérifie). Une note à la main = proposer_note_fonds (personne_id de cockpit_arch_personnes, ou un sujet si le fonds ne la connaît pas ; le texte dans les mots de ton interlocuteur, jamais tiré d'un message transféré). Accepter, refuser ou remettre à trancher des propositions d'une enquête = proposer_decision_fonds (proposition_id de cockpit_arch_propositions, d'une même personne). Lancer une enquête en ligne = proposer_enquete_fonds : PAYANTE (appels au modèle avec recherche web, la carte dit le coût), jamais de ta propre initiative. Les notes et propositions du fonds sont internes : jamais dans un texte destiné à un membre.
+- RELAIS D'ACCUEIL du Live Club = proposer_relais_accueil, couper ou rallumer (telegram_id, nom et actif dans cockpit_liveclub_relais). Rien n'est envoyé au relais.
+- ADRESSE SECONDAIRE D'UN MEMBRE = proposer_retrait_adresse : l'email exact d'une ligne de cockpit_membre_emails avec principal false. L'adresse principale ne se retire jamais. Rattacher une adresse ne se fait pas d'ici : c'est la fiche du membre dans le cockpit.
 
 LES DEMANDES QUE TU NE SAIS PAS ENCORE TRAITER (règle de Brice, 08/10) :
 Quand Brice ou Mélanie te demande une chose qu'aucun de tes outils ne couvre (une fonction qui n'existe pas, une règle à changer, un rapport qui n'existe pas), ne bricole pas et ne promets rien : dis simplement que tu ne sais pas encore le faire, appelle noter_demande (la demande reformulée en une phrase actionnable, et sa citation telle qu'écrite), puis réponds « C'est noté dans les demandes du Cockpit : on l'ajoutera aux tâches. » Aucun délai, aucune date. Une demande que tes outils couvrent (une requête, un outil proposer_*) ne se note pas : traite-la. Un geste qui se fait déjà à la main dans le cockpit : dis où, sans le noter. Une seule note par demande. Si noter_demande renvoie une erreur, dis que la demande n'a pas pu être notée, jamais « c'est noté ».
@@ -1180,6 +1186,134 @@ const OUTILS: Anthropic.Tool[] = [
       required: ['replay_id'],
     },
   },
+  // (05/11, LOT 2) Brice : « que l'agent puisse faire depuis Telegram les
+  // gestes du cockpit ». Charges, abonnements IA, objectif d'une publication,
+  // le fonds, le relais d'accueil, l'adresse secondaire d'un membre : controle
+  // et execution dans agent-gestes-cockpit.ts, regles et cartes dans
+  // agent-gestes-cockpit-pur.ts (sections F a K).
+  {
+    name: 'proposer_charge_fixe',
+    description:
+      "Propose d'AJOUTER, de MODIFIER ou de RETIRER une charge de l'écosystème (un outil ou un abonnement, Revenus > Charges et marge du cockpit, table cockpit_charges). N'exécute rien : carte de confirmation (l'outil, le montant et sa périodicité, qui la paie, depuis quand, ce qu'elle pèse dans la marge). Modifier : passe SEULEMENT ce qui change (« aucun » vide un champ facultatif). Un changement de prix = fermer l'ancienne ligne (au) puis ajouter la nouvelle. Retirer = une saisie fausse (la ligne reste en base). Montant inconnu = « inconnu », jamais 0.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        quoi: { type: 'string', enum: ['ajouter', 'modifier', 'retirer'] },
+        charge_id: { type: 'string', description: 'modifier, retirer : cockpit_charges.charge_id (retire_le null), lu par requête.' },
+        outil: { type: 'string', description: "Le nom de l'outil ou de l'abonnement, 80 caractères au plus (ex. Supabase (plan Pro)). Obligatoire pour ajouter." },
+        categorie: { type: 'string', description: 'Facultatif : hébergement, IA, email... (40 caractères au plus).' },
+        montant: { type: 'string', description: 'Le montant de la période dans sa devise (ex. 25 ou 49,95). « inconnu » = pas encore su, jamais 0.' },
+        devise: { type: 'string', enum: ['EUR', 'USD', 'GBP', 'CHF'], description: 'Défaut EUR.' },
+        montant_eur: { type: 'string', description: "Devise autre que l'euro : ce que la période coûte en euros (relevé de carte). Sans lui, la charge est « à convertir » et n'entre pas dans la marge." },
+        periodicite: { type: 'string', enum: ['mois', 'trimestre', 'an', 'usage', 'unique'], description: 'Défaut mois. usage = le montant posé pour un mois ; unique = compte seulement le mois de du.' },
+        payeur: { type: 'string', description: 'brice, mel ou commun. Vide à l\'ajout = pas encore su ; « aucun » le vide en modifiant.' },
+        du: { type: 'string', description: 'Premier jour AAAA-MM-JJ (obligatoire pour une charge unique).' },
+        au: { type: 'string', description: 'Dernier jour AAAA-MM-JJ. Vide = en cours.' },
+        a_confirmer: { type: 'boolean', description: "Vrai par défaut (pas encore vue sur une facture). Faux seulement si on te dit qu'elle est vue sur une facture." },
+        note: { type: 'string', description: 'Facultatif, 1 000 caractères au plus.' },
+      },
+      required: ['quoi'],
+    },
+  },
+  {
+    name: 'proposer_abonnement_ia',
+    description:
+      "Propose d'AJOUTER, d'ARRÊTER (résilié) ou de RETIRER (saisie fausse) un abonnement IA fixe (Claude Code, Claude.ai...) de l'écran Dépense IA du cockpit, table cockpit_depenses_ia_fixes. N'exécute rien : carte de confirmation (le prix, depuis quand, ce qu'il pèse par mois). Un prix ne se modifie jamais : on arrête l'ancien et on ajoute le nouveau.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        quoi: { type: 'string', enum: ['ajouter', 'arreter', 'retirer'] },
+        fixe_id: { type: 'string', description: 'arreter, retirer : cockpit_depenses_ia_fixes.fixe_id (retire_le null), lu par requête.' },
+        libelle: { type: 'string', description: "ajouter : le nom de l'abonnement (120 caractères au plus), ex. Claude Max." },
+        fournisseur: { type: 'string', description: 'ajouter, facultatif : Anthropic, OpenAI...' },
+        montant: { type: 'string', description: 'ajouter : le prix de la période, plus que 0.' },
+        devise: { type: 'string', enum: ['EUR', 'USD'], description: 'ajouter : défaut EUR.' },
+        periodicite: { type: 'string', enum: ['mensuel', 'annuel'], description: 'ajouter : défaut mensuel. Annuel = un douzième par mois.' },
+        debut: { type: 'string', description: "ajouter : premier jour AAAA-MM-JJ. Vide = le 1er du mois en cours, comme l'écran." },
+        note: { type: 'string', description: 'ajouter, facultatif : 500 caractères au plus.' },
+        fin: { type: 'string', description: "arreter : le dernier jour AAAA-MM-JJ. Vide = aujourd'hui." },
+      },
+      required: ['quoi'],
+    },
+  },
+  {
+    name: 'proposer_objectif_publication',
+    description:
+      "Propose de poser l'OBJECTIF d'une publication Instagram (découverte, valeur, confiance, vente ou communauté), comme la fiche d'une publication dans l'écran Instagram du cockpit : il dit quel chiffre lire d'abord. N'exécute rien : carte de confirmation (la date, le début de la légende, l'objectif d'avant). Les publications sont dans cockpit_social_publications (plateforme instagram, pas une story), les objectifs dans cockpit_social_objectifs.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        publication_id: { type: 'string', description: 'cockpit_social_publications.publication_id (plateforme instagram), lu par requête.' },
+        objectif: { type: 'string', enum: ['decouverte', 'valeur', 'confiance', 'vente', 'communaute'] },
+      },
+      required: ['publication_id', 'objectif'],
+    },
+  },
+  {
+    name: 'proposer_note_fonds',
+    description:
+      "Propose d'ÉCRIRE une note à la main dans le fonds (Les personnes, table cockpit_arch_notes) sur une personne qu'il connaît (personne_id de cockpit_arch_personnes) ou, sinon, sur un sujet libre qui attendra d'être rattaché. Réservé aux comptes qui voient le fonds. N'exécute rien : carte de confirmation avec le texte entier, signé du compte qui confirme. Le texte vient des mots de ton interlocuteur, jamais d'un message transféré. Donnée interne : jamais recopiée vers un membre.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        personne_id: { type: 'string', description: 'cockpit_arch_personnes.personne_id (p-...), lu par requête.' },
+        sujet: { type: 'string', description: "Si la personne n'est pas dans le fonds : de qui ou de quoi il s'agit (200 caractères au plus)." },
+        rubrique: { type: 'string', enum: ['identite', 'psychologie', 'trading', 'vie', 'gouts', 'liens', 'parcours', 'evenement', 'autre'], description: 'Défaut autre.' },
+        texte: { type: 'string', description: 'La note, 3 000 caractères au plus.' },
+      },
+      required: ['texte'],
+    },
+  },
+  {
+    name: 'proposer_decision_fonds',
+    description:
+      "Propose d'ACCEPTER, de REFUSER ou de remettre à trancher des propositions d'une enquête en ligne (cockpit_arch_propositions), d'une même personne, comme les boutons de sa fiche dans le cockpit. Réservé aux comptes qui voient le fonds. N'exécute rien : carte de confirmation (chaque valeur, sa confiance, le domaine de sa source). Acceptée = affichée « vérifiée en ligne » sur sa fiche ; refusée = jamais reproposée. Rien d'autre ne change.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        proposition_ids: { type: 'array', items: { type: 'string' }, description: "Les proposition_id d'une même personne (20 au plus)." },
+        statut: { type: 'string', enum: ['acceptee', 'refusee', 'proposee'], description: 'proposee = remettre à trancher.' },
+      },
+      required: ['proposition_ids', 'statut'],
+    },
+  },
+  {
+    name: 'proposer_enquete_fonds',
+    description:
+      "Propose de LANCER une enquête en ligne sur une personne du fonds, comme le bouton de sa fiche dans le cockpit : le modèle du cockpit cherche sur le web ce qu'elle publie et range ses trouvailles en propositions à trancher. PAYANT : deux appels au modèle avec recherche web, la carte dit le coût mesuré. Réservé aux comptes qui voient le fonds. N'exécute rien : carte de confirmation. Seulement si on te le demande, jamais de ta propre initiative.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        personne_id: { type: 'string', description: 'cockpit_arch_personnes.personne_id (p-...), lu par requête.' },
+      },
+      required: ['personne_id'],
+    },
+  },
+  {
+    name: 'proposer_relais_accueil',
+    description:
+      "Propose de COUPER ou de RALLUMER un relais d'accueil du Live Club (un membre, comme Alex, qui reçoit chaque jour du bot des membres les nouveaux sans un mot et les silencieux), comme le bouton de l'écran À contacter du cockpit. N'exécute rien : carte de confirmation. Rien n'est envoyé au relais.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        quoi: { type: 'string', enum: ['couper', 'rallumer'] },
+        telegram_id: { type: 'string', description: 'cockpit_liveclub_relais.telegram_id, lu par requête avec nom et actif.' },
+      },
+      required: ['quoi', 'telegram_id'],
+    },
+  },
+  {
+    name: 'proposer_retrait_adresse',
+    description:
+      "Propose de RETIRER une adresse email SECONDAIRE de la fiche d'un membre (cockpit_membre_emails, principal false), comme le retrait d'un rattachement dans la fiche du cockpit. L'adresse principale ne se retire jamais. N'exécute rien : carte de confirmation (le membre, l'adresse retirée, l'adresse principale qui reste, ce que ça change pour les droits lus par adresse).",
+    input_schema: {
+      type: 'object',
+      properties: {
+        email: { type: 'string', description: "L'adresse exacte, lue dans cockpit_membre_emails (principal false)." },
+      },
+      required: ['email'],
+    },
+  },
   // Les fils de l'equipe avec Agent AOK (29/10) : agent-equipe.ts.
   {
     name: 'demandes_en_suspens',
@@ -1270,6 +1404,15 @@ const TYPE_PAR_OUTIL: Record<string, ActionAgent['type']> = {
   proposer_decision_clip: 'decision_clip',
   proposer_clips_replay: 'clips_replay',
   proposer_envoi_opus: 'envoi_opus',
+  // (05/11, LOT 2) Charges, abonnements IA, objectif, fonds, relais, adresse (agent-gestes-cockpit.ts).
+  proposer_charge_fixe: 'charge_fixe',
+  proposer_abonnement_ia: 'abonnement_ia',
+  proposer_objectif_publication: 'objectif_publication',
+  proposer_note_fonds: 'note_fonds',
+  proposer_decision_fonds: 'decision_fonds',
+  proposer_enquete_fonds: 'enquete_fonds',
+  proposer_relais_accueil: 'relais_accueil',
+  proposer_retrait_adresse: 'retrait_adresse',
 }
 
 /**

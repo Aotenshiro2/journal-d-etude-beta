@@ -1,0 +1,257 @@
+import { randomUUID } from 'node:crypto'
+import type Anthropic from '@anthropic-ai/sdk'
+import { prisma } from '@/lib/db'
+import { aiClient, AI_MODEL, logAiUsage } from '@/lib/ai'
+
+// CHERCHER EN LIGNE CE QU'ON SAIT D'UNE PERSONNE DU FONDS (07/09/2026), le
+// coeur de POST /api/cockpit/enquete. Sorti de la route le 05/11/2026 (LOT 2
+// des gestes du cockpit depuis Agent AOK, Brice : « que l'agent puisse faire
+// depuis Telegram les gestes du cockpit ») : la route (bouton du cockpit) et
+// la carte d'Agent AOK (proposer_enquete_fonds, agent-gestes-cockpit.ts)
+// appellent les memes deux fonctions. La route garde ses reponses.
+//
+// Brice : « même quand une personne n'est pas une personnalité publique,
+// j'aimerais pouvoir faire une recherche sur lui/elle : ses réseaux, une
+// société, une chaîne YouTube, un blog, LinkedIn, Insta, sa localisation. »
+//
+// CE QUE CE MODULE FAIT, ET DANS QUEL ORDRE
+// ------------------------------------------
+//  1. preparerEnquete rassemble ce que le fonds sait DEJA : nom, alias, pseudo,
+//     profils postes, lieux cites, salons, notes ecrites a la main. C'est
+//     l'ANCRAGE : sans lui, chercher « Guillaume » rend n'importe quel
+//     Guillaume. Aucun email, aucun numero de telephone ne part vers le modele
+//     ni vers le web. null = personne inconnue du fonds.
+//  2. menerEnquete : le modele cherche sur le web (outil serveur web_search),
+//     avec des domaines de courtiers de donnees bloques et une consigne ferme ;
+//     un second appel met le compte rendu en PROPOSITIONS structurees, chacune
+//     avec sa source, l'extrait qui la fonde, et POURQUOI on pense que c'est
+//     bien cette personne. Tout entre en `cockpit_arch_propositions` avec
+//     statut « proposee ». Rien ne fusionne : l'humain decide, ligne par ligne.
+//     CELA COUTE : deux appels au modele du cockpit (6 recherches web au plus),
+//     traces dans AiUsage (poste « enquete », un echange par enquete).
+//
+// Ce qui a deja ete refuse par un humain n'est pas repropose. Le droit
+// (cockpit_allowlist.acces_fonds) est verifie par l'appelant.
+
+const BLOQUES = [
+  // Courtiers de données et annuaires de personnes : ce qu'ils vendent n'est
+  // ni public au sens utile, ni fiable, et c'est exactement ce qu'on ne veut
+  // pas voir entrer dans une fiche.
+  'spokeo.com', 'pipl.com', 'whitepages.com', 'truepeoplesearch.com',
+  'beenverified.com', 'peoplefinders.com', 'fastpeoplesearch.com',
+  '118000.fr', '118712.fr', 'pagesblanches.fr', 'annuaire.118712.fr',
+]
+
+type Ancrage = {
+  personne_id: string
+  nom: string
+  alias: string | null
+  telegram: string | null
+  nature: string
+  messages: number
+  premier: string | null
+  dernier: string | null
+}
+
+const SCHEMA_PROPOSITIONS = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['propositions', 'homonymes', 'resume'],
+  properties: {
+    resume: { type: 'string', description: 'Deux phrases : qui semble être cette personne en ligne, et le degré de certitude.' },
+    homonymes: { type: 'string', description: 'Ce qui a été écarté et pourquoi (homonymes, pistes non ancrées). Vide si rien.' },
+    propositions: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['champ', 'valeur', 'source_url', 'extrait', 'pourquoi_lui', 'confiance'],
+        properties: {
+          champ: { type: 'string', enum: ['reseau', 'site', 'societe', 'localisation', 'activite', 'biographie', 'coordonnees', 'autre'] },
+          reseau: { type: 'string', description: 'instagram, youtube, tiktok, linkedin, x, facebook, twitch… quand champ = reseau' },
+          valeur: { type: 'string' },
+          source_url: { type: 'string' },
+          extrait: { type: 'string', description: 'La phrase ou le fragment de la page qui fonde la valeur, court.' },
+          pourquoi_lui: { type: 'string', description: 'L’ancrage : ce qui relie cette page à CETTE personne du fonds (pseudo commun, ville, photo, salon, activité).' },
+          confiance: { type: 'string', enum: ['haute', 'moyenne', 'faible'] },
+        },
+      },
+    },
+  },
+} as const
+
+type Proposition = {
+  champ: string; reseau?: string; valeur: string; source_url: string
+  extrait: string; pourquoi_lui: string; confiance: string
+}
+
+/** Ce que preparerEnquete a lu, a passer a menerEnquete. */
+export type EnquetePreparee = {
+  personneId: string
+  nom: string
+  ancrage: string
+  refusees: { champ: string; valeur: string }[]
+  acceptees: { champ: string; valeur: string }[]
+}
+
+export type IssueEnquete = {
+  enquete_id: string
+  posees: number
+  resume: string
+  homonymes: string
+  sources: number
+}
+
+/** 1. L'ancrage : ce que le fonds sait deja. null = personne inconnue du fonds. Lecture seule. */
+export async function preparerEnquete(personneId: string): Promise<EnquetePreparee | null> {
+  const [personne] = await prisma.$queryRaw<Ancrage[]>`
+    select personne_id, nom, alias, telegram, nature, messages,
+           premier::text as premier, dernier::text as dernier
+    from public.cockpit_arch_personnes where personne_id = ${personneId}`
+  if (!personne) return null
+
+  const reseaux = await prisma.$queryRaw<{ reseau: string; profil: string; fois: number }[]>`
+    select reseau, profil, fois from public.cockpit_arch_reseaux
+    where personne_id = ${personneId} and profil is not null order by fois desc limit 12`
+  const lieux = await prisma.$queryRaw<{ extrait: string }[]>`
+    select extrait from public.cockpit_arch_vies
+    where personne_id = ${personneId} and rubrique in ('geo', 'metier', 'presentations') order by dit_le limit 8`
+  const salons = await prisma.$queryRaw<{ nom: string }[]>`
+    select s.nom from public.cockpit_arch_presences p join public.cockpit_arch_salons s using (salon_id)
+    where p.personne_id = ${personneId} order by p.messages desc nulls last limit 5`
+  // LES NOTES DICTÉES SONT L'ANCRAGE LE PLUS FORT. Premier essai sur James :
+  // la ligne personne disait « James, élève, 466 messages » et le modèle a
+  // refusé de chercher, à raison — un prénom seul n'ancre rien. Or les notes
+  // portaient déjà « James Marshall, @Jamesineurope, The Natural Lifestyles ».
+  // Ce que Brice sait doit partir avec la demande.
+  const notes = await prisma.$queryRaw<{ rubrique: string | null; texte: string }[]>`
+    select rubrique, texte from public.cockpit_arch_notes
+    where personne_id = ${personneId} order by ecrit_le desc limit 8`
+  const refusees = await prisma.$queryRaw<{ champ: string; valeur: string }[]>`
+    select champ, valeur from public.cockpit_arch_propositions
+    where personne_id = ${personneId} and statut = 'refusee'`
+  const acceptees = await prisma.$queryRaw<{ champ: string; valeur: string }[]>`
+    select champ, valeur from public.cockpit_arch_propositions
+    where personne_id = ${personneId} and statut = 'acceptee'`
+
+  const ancrage = [
+    `Nom tel qu'il apparaît sur Telegram : ${personne.nom}`,
+    personne.alias ? `Autres noms ou alias vus : ${personne.alias}` : null,
+    personne.telegram ? `Pseudo Telegram : @${personne.telegram}` : null,
+    `Contexte : membre d'une communauté francophone de trading (${personne.nature}), ${personne.messages} messages entre ${personne.premier ?? '?'} et ${personne.dernier ?? '?'}.`,
+    salons.length ? `Salons fréquentés : ${salons.map((s) => s.nom).join(' · ')}` : null,
+    reseaux.length
+      ? `Profils qu'il ou elle a POSTÉS dans les conversations (l'ancrage le plus fort — vérifie qu'ils sont bien les siens) :\n${reseaux.map((r) => `  - ${r.reseau} : ${r.profil} (${r.fois} fois)`).join('\n')}`
+      : null,
+    lieux.length ? `Ce qu'il ou elle a dit de sa vie (extraits bruts) :\n${lieux.map((l) => `  - « ${l.extrait.slice(0, 200)} »`).join('\n')}` : null,
+    notes.length
+      ? `CE QUE L'ÉQUIPE SAIT DÉJÀ DE CETTE PERSONNE, écrit à la main (c'est l'ancrage le plus fiable, pars de là) :\n${notes.map((n) => `  - [${n.rubrique ?? 'note'}] ${n.texte.replace(/\s+/g, ' ').slice(0, 700)}`).join('\n')}`
+      : null,
+    acceptees.length ? `Déjà vérifié et accepté par un humain (ne pas reproposer) : ${acceptees.map((a) => `${a.champ}=${a.valeur}`).join(' ; ')}` : null,
+    refusees.length ? `Déjà REFUSÉ par un humain (ne pas reproposer, c'était faux ou hors sujet) : ${refusees.map((a) => `${a.champ}=${a.valeur}`).join(' ; ')}` : null,
+  ].filter(Boolean).join('\n')
+
+  return { personneId, nom: personne.nom, ancrage, refusees, acceptees }
+}
+
+const CONSIGNE = [
+  // Brice, 07/09 : « je veux le plus d'infos possible ». Ce qui rapporte le
+  // plus, c'est la PRÉSENCE PUBLIQUE : ce que la personne publie, et les
+  // coordonnées qu'une page pro affiche elle-même. Formulé « dossier sur un
+  // particulier » (domicile, téléphone), le modèle refuse en bloc — Sonnet a
+  // rendu 0 page sur Boris. Formulé « ce qu'il publie », il cherche.
+  'Tu documentes la présence publique en ligne d’une personne pour la fiche d’un CRM d’école de trading : elle est élève ou contact de cette communauté, et l’équipe veut savoir ce qu’elle publie et fait professionnellement.',
+  'Ce qu’on cherche : ses comptes publics (Instagram, YouTube, TikTok, LinkedIn, X, Facebook, Twitch), un site ou blog, une chaîne ou un podcast, son activité et son métier, une société qu’elle dirige ou représente (nom, rôle, ville du siège, SIREN — registres publics Pappers, societe.com, Infogreffe bienvenus), la ville ou région qu’elle affiche publiquement, et les coordonnées professionnelles qu’elle publie elle-même (mentions légales de son site, fiche de sa société, page de contact pro) : téléphone, adresse, email y compris.',
+  'RÈGLES FERMES :',
+  '- Uniquement ce que la personne ou sa société a rendu public, avec la source. Jamais d’information sur des mineurs.',
+  '- Pas d’annuaires de personnes ni de courtiers de données (fiches compilées, souvent fausses, invérifiables). Pas de pages derrière une connexion.',
+  '- L’ANCRAGE avant tout : pour chaque information, dis explicitement ce qui relie la page à CETTE personne (même pseudo que celui posté dans les salons, même ville que celle citée, même activité de trading, photo cohérente, lien depuis un profil déjà sûr). Une page qui ne peut pas être reliée n’est pas une trouvaille, c’est un homonyme : écarte-la et dis-le.',
+  '- Cite la source de chaque affirmation et le fragment exact de la page qui la fonde.',
+  '- Ne conclus rien sur la personnalité, la situation financière ou la vie privée. Tu rapportes des faits publics, tu ne juges pas.',
+  'Commence par les profils déjà postés s’il y en a : ce sont les fils les plus sûrs. Sinon, cherche le nom exact avec « trading », puis les alias.',
+  'Termine par un compte rendu : ce que tu as trouvé avec sources et ancrages, ce que tu as écarté et pourquoi.',
+].join('\n')
+
+/**
+ * 2. La recherche, la mise en propositions, l'ecriture en base. Jette sur une
+ * panne du modele (l'appelant la dit avec aiErrorMessage). `userId` = le
+ * compte qui a demande l'enquete (AiUsage).
+ */
+export async function menerEnquete(userId: string, prep: EnquetePreparee): Promise<IssueEnquete> {
+  const client = aiClient('cockpit')
+  const modele = AI_MODEL.cockpit
+
+  // --- La recherche, en boucle jusqu'à la fin du tour ----------------------
+  const messages: Anthropic.MessageParam[] = [
+    { role: 'user', content: `Voici ce que le fonds sait déjà de la personne :\n\n${prep.ancrage}\n\nEnquête, puis rends ton compte rendu.` },
+  ]
+  let compteRendu = ''
+  let sources: string[] = []
+  // Trace (19/10) : ces appels n'etaient pas comptes. Une enquete = un echange,
+  // recherche web comprise (facturee a la requete, cf. ia-prix.ts).
+  const echange = randomUUID()
+  for (let tour = 0; tour < 6; tour++) {
+    const reponse = await client.messages.create({
+      model: modele,
+      max_tokens: 16000,
+      system: CONSIGNE,
+      // 6 recherches, pas 12 : le coût d'une enquête, ce sont les pages
+      // rendues par chaque recherche (mesuré le 07/09 : 79 pages, 98 000
+      // jetons pour un « rien »). Une personne qui existe en ligne se
+      // trouve en deux ou trois requêtes ; au-delà on paie des homonymes.
+      tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 6, blocked_domains: BLOQUES }],
+      messages,
+    })
+    await logAiUsage(userId, 'cockpit', modele, reponse.usage, null, { usage: 'enquete', echange })
+    // Un tour peut s'arrêter en pause quand la recherche est longue : on
+    // rejoue la réponse telle quelle et on laisse le modèle continuer.
+    if (reponse.stop_reason === 'pause_turn') {
+      messages.push({ role: 'assistant', content: reponse.content })
+      continue
+    }
+    for (const bloc of reponse.content) {
+      if (bloc.type === 'text') compteRendu += bloc.text + '\n'
+      if (bloc.type === 'web_search_tool_result' && Array.isArray(bloc.content)) {
+        for (const r of bloc.content) if (r.type === 'web_search_result') sources.push(r.url)
+      }
+    }
+    break
+  }
+  sources = [...new Set(sources)]
+
+  // --- La mise en propositions ---------------------------------------------
+  const structure = await client.messages.create({
+    model: modele,
+    max_tokens: 8000,
+    system: 'Tu transformes un compte rendu d’enquête en propositions structurées. Tu n’ajoutes rien qui ne soit dans le compte rendu. Chaque proposition garde sa source et son ancrage. Ce qui a été écarté comme homonyme va dans « homonymes », pas dans les propositions.',
+    messages: [{ role: 'user', content: `Compte rendu :\n\n${compteRendu}\n\nURL consultées :\n${sources.join('\n')}` }],
+    output_config: { format: { type: 'json_schema', schema: SCHEMA_PROPOSITIONS } },
+  })
+  await logAiUsage(userId, 'cockpit', modele, structure.usage, null, { usage: 'enquete', echange })
+  const texte = structure.content.find((b) => b.type === 'text')
+  const json = texte && texte.type === 'text' ? JSON.parse(texte.text) : { propositions: [], homonymes: '', resume: '' }
+  const propositions: Proposition[] = Array.isArray(json.propositions) ? json.propositions : []
+
+  // --- En base, en attente d'une décision humaine --------------------------
+  const enqueteId = randomUUID()
+  const dejaVues = new Set([...prep.refusees, ...prep.acceptees].map((a) => `${a.champ}|${a.valeur.toLowerCase()}`))
+  let posees = 0
+  for (const p of propositions) {
+    if (!p.valeur || dejaVues.has(`${p.champ}|${p.valeur.toLowerCase()}`)) continue
+    await prisma.$executeRaw`
+      insert into public.cockpit_arch_propositions
+        (enquete_id, personne_id, champ, reseau, valeur, source_url, extrait, pourquoi_lui, confiance)
+      values (${enqueteId}::uuid, ${prep.personneId}, ${p.champ}, ${p.reseau ?? null}, ${p.valeur.slice(0, 500)},
+              ${(p.source_url ?? '').slice(0, 1000) || null}, ${(p.extrait ?? '').slice(0, 1000) || null},
+              ${(p.pourquoi_lui ?? '').slice(0, 600) || null}, ${p.confiance ?? 'moyenne'})`
+    posees += 1
+  }
+
+  return {
+    enquete_id: enqueteId,
+    posees,
+    resume: typeof json.resume === 'string' ? json.resume : '',
+    homonymes: typeof json.homonymes === 'string' ? json.homonymes : '',
+    sources: sources.length,
+  }
+}

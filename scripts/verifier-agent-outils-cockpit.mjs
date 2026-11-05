@@ -12,12 +12,19 @@
 // - les executeurs posent les colonnes d'acteur (auth.uid() est nul cote
 //   serveur) et les routes du cockpit appellent les memes fonctions ;
 // - aucun tiret long ni caractere hors clavier dans les textes.
+// LOT 2 (05/11, meme phrase de Brice) : huit cartes de plus (charges,
+// abonnements IA, objectif d'une publication Instagram, le fonds : note,
+// decision, enquete en ligne payante, relais d'accueil, adresse secondaire
+// d'un membre), memes verifications, plus : les colonnes d'acteur de chaque
+// table (pose_par, retire_par, ecrit_par, decide_par et decide_le,
+// coupe_par), le droit au fonds a la carte ET au clic, l'enquete qui est
+// celle de la route, et aucune adresse de source ni texte du web dans une carte.
 // Aucune base, aucun reseau, aucun appel au modele.
 // Lancement (Node 22, depuis apps/journal-d-etude) : node scripts/verifier-agent-outils-cockpit.mjs
 // Sort en code 1 au premier ecart.
 
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import './resoudre-ts.mjs'
 
 const P = await import('../src/lib/agent-gestes-cockpit-pur.ts')
@@ -41,6 +48,8 @@ function texteClavier(t, nom) {
 }
 function sansOutil(t, nom) {
   assert.ok(!/proposer_|marquer_fil_traite|requete_sql|clip_ids|acces_id\b|replay_id\b/.test(t), `${nom} : nom d'outil ou de parametre : ${t}`)
+  // (05/11, LOT 2) Les parametres des nouvelles cartes non plus.
+  assert.ok(!/charge_id|fixe_id|publication_id|personne_id|proposition_id|telegram_id|membre_id|empreinte/.test(t), `${nom} : nom de parametre : ${t}`)
 }
 
 const U = (k) => `00000000-0000-4000-8000-${String(k).padStart(12, '0')}`
@@ -63,7 +72,8 @@ const non = (type, params, motif) => {
   return a
 }
 
-const TYPES = ['acces_academie', 'retrait_acces_academie', 'rangement_academie', 'acces_mentorat', 'decision_clip', 'clips_replay', 'envoi_opus']
+const TYPES_LOT2 = ['charge_fixe', 'abonnement_ia', 'objectif_publication', 'note_fonds', 'decision_fonds', 'enquete_fonds', 'relais_accueil', 'retrait_adresse']
+const TYPES = ['acces_academie', 'retrait_acces_academie', 'rangement_academie', 'acces_mentorat', 'decision_clip', 'clips_replay', 'envoi_opus', ...TYPES_LOT2]
 const OUTIL_DE = {
   proposer_acces_academie: 'acces_academie',
   proposer_retrait_acces_academie: 'retrait_acces_academie',
@@ -72,6 +82,15 @@ const OUTIL_DE = {
   proposer_decision_clip: 'decision_clip',
   proposer_clips_replay: 'clips_replay',
   proposer_envoi_opus: 'envoi_opus',
+  // (05/11, LOT 2)
+  proposer_charge_fixe: 'charge_fixe',
+  proposer_abonnement_ia: 'abonnement_ia',
+  proposer_objectif_publication: 'objectif_publication',
+  proposer_note_fonds: 'note_fonds',
+  proposer_decision_fonds: 'decision_fonds',
+  proposer_enquete_fonds: 'enquete_fonds',
+  proposer_relais_accueil: 'relais_accueil',
+  proposer_retrait_adresse: 'retrait_adresse',
 }
 
 // ---------------------------------------------------------------------------
@@ -345,6 +364,378 @@ bloc('envoi a Opus : la plage proposee en minutes:secondes et ses credits (comme
   assert.match(envoi, /values \('envoyer_opus', \$\{p\.replay_id\}, \$\{replay\.personne\}, \$\{uid\}::uuid\)/, 'meme format que le cockpit : ref = replay_id, personne du replay')
 })
 
+// ===========================================================================
+// LOT 2 (05/11)
+// ===========================================================================
+
+const C1 = U(51), F1 = U(61), Q1 = U(71), Q2 = U(72), M9 = U(91)
+const AUJ = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
+
+// ---------------------------------------------------------------------------
+// F. Charges
+// ---------------------------------------------------------------------------
+
+const CH = {
+  outil: 'Supabase (plan Pro)', categorie: 'base et hebergement', montant: 25, devise: 'USD', montant_eur: null, periodicite: 'mois',
+  payeur: 'brice', du: '2026-09-25', au: null, a_confirmer: true, note: null,
+}
+
+bloc('charge : ajouter (defauts de la table), modifier (seulement ce qui change), retirer ; regles de l ecran', () => {
+  const a = ok('charge_fixe', { quoi: 'ajouter', outil: '  Notion  ', montant: '10', payeur: 'Mélanie', du: '2026-11-01' })
+  assert.deepEqual(a.params, {
+    quoi: 'ajouter', charge_id: null, empreinte: null, outil: 'Notion', categorie: null, montant: 10, devise: 'EUR', montant_eur: null,
+    periodicite: 'mois', payeur: 'mel', du: '2026-11-01', au: null, a_confirmer: true, note: null,
+  }, 'a confirmer par defaut, comme la table')
+  assert.equal(ok('charge_fixe', { quoi: 'ajouter', outil: 'Supabase', montant: '25', devise: 'USD', montant_eur: '23,10' }).params.montant_eur, 23.1)
+  assert.equal(ok('charge_fixe', { quoi: 'ajouter', outil: 'Skool', montant: 10, devise: 'EUR', montant_eur: 9 }).params.montant_eur, null, 'en euros, pas d equivalent (comme l ecran)')
+  assert.equal(ok('charge_fixe', { quoi: 'ajouter', outil: 'Kit', montant: 'inconnu' }).params.montant, null, 'un prix inconnu reste inconnu')
+  assert.equal(ok('charge_fixe', { quoi: 'ajouter', outil: 'Kit', a_confirmer: false }).params.a_confirmer, false)
+  assert.equal(ok('charge_fixe', { quoi: 'ajouter', outil: 'Domaine', periodicite: 'annuel', du: '2026-01-01' }).params.periodicite, 'an')
+  non('charge_fixe', { quoi: 'ajouter', montant: 10 }, /outil/)
+  non('charge_fixe', { quoi: 'ajouter', outil: 'x'.repeat(81) }, /80/)
+  non('charge_fixe', { quoi: 'ajouter', outil: 'Kit', montant: '-3' }, /montant/)
+  non('charge_fixe', { quoi: 'ajouter', outil: 'Kit', devise: 'JPY' }, /devise/)
+  non('charge_fixe', { quoi: 'ajouter', outil: 'Kit', periodicite: 'semaine' }, /periodicite/)
+  non('charge_fixe', { quoi: 'ajouter', outil: 'Kit', payeur: 'adil' }, /payeur/)
+  non('charge_fixe', { quoi: 'ajouter', outil: 'Kit', du: '2026-11-31' }, /AAAA-MM-JJ/)
+  non('charge_fixe', { quoi: 'ajouter', outil: 'Kit', du: '2026-11-10', au: '2026-11-01' }, /avant la date de début/)
+  non('charge_fixe', { quoi: 'ajouter', outil: 'Domaine', periodicite: 'unique' }, /unique/)
+  non('charge_fixe', { quoi: 'ajouter', outil: 'Kit', note: 'x'.repeat(1001) }, /1000/)
+  // Modifier : seulement ce qui change ; « aucun » vide un champ facultatif ; un texte vide ou null ne change rien.
+  const m = ok('charge_fixe', { quoi: 'modifier', charge_id: C1, montant: '29', payeur: 'aucun', categorie: '', outil: null })
+  assert.deepEqual(m.params, { quoi: 'modifier', charge_id: C1, empreinte: null, montant: 29, payeur: null })
+  assert.equal(ok('charge_fixe', { quoi: 'modifier', charge_id: C1, au: '2026-11-30', empreinte: 'a1b2c3d4' }).params.empreinte, 'a1b2c3d4')
+  non('charge_fixe', { quoi: 'modifier', charge_id: C1 }, /Rien à modifier/)
+  non('charge_fixe', { quoi: 'modifier', charge_id: 'charge-1', montant: 3 }, /charge_id/)
+  non('charge_fixe', { quoi: 'modifier', charge_id: C1, montant: 3, empreinte: 'xyz' }, /Empreinte/)
+  assert.deepEqual(ok('charge_fixe', { quoi: 'retirer', charge_id: C1.toUpperCase(), montant: 5 }).params, { quoi: 'retirer', charge_id: C1, empreinte: null })
+  non('charge_fixe', { quoi: 'supprimer', charge_id: C1 }, /quoi/)
+})
+
+bloc('charge : la carte dit l outil, le montant, la periodicite, qui paie, depuis quand, et son poids dans la marge', () => {
+  const pa = P.lireParamsCharge({ quoi: 'ajouter', outil: 'Notion', categorie: 'outils', montant: '10', payeur: 'brice', du: '2026-11-01', note: 'plan Plus' })
+  const ca = P.carteCharge({ p: pa, lue: null })
+  assert.match(ca, /^Ajouter la charge « Notion » \(outils\) : 10,00 EUR par mois, payée par Brice, depuis le 01\/11\/2026, en cours\./)
+  assert.match(ca, /Elle compte pour 10,00 € par mois dans la marge\./)
+  assert.match(ca, /À confirmer : pas encore vue sur une facture\./)
+  assert.match(ca, /Note : plan Plus/)
+  const cd = P.carteCharge({ p: pa, lue: null, doublon: { ...CH, outil: 'Notion', devise: 'EUR', montant: 8 } })
+  assert.match(cd, /Attention, une charge « Notion » court déjà \(8,00 EUR par mois, depuis le 25\/09\/2026, en cours\)/)
+  // Le poids dans la marge, comme coutMensuel de l'ecran.
+  assert.match(P.poidsMarge(CH), /^À convertir/)
+  assert.match(P.poidsMarge({ ...CH, montant_eur: 23.1 }), /23,10 € par mois/)
+  assert.match(P.poidsMarge({ ...CH, montant: null }), /un prix inconnu ne compte pas zéro/)
+  assert.match(P.poidsMarge({ ...CH, devise: 'EUR', montant: 120, periodicite: 'an' }), /10,00 € par mois/)
+  assert.match(P.poidsMarge({ ...CH, devise: 'EUR', montant: 1234.5, periodicite: 'unique', du: '2026-11-04' }), /1 234,50 € dans la marge de novembre 2026/)
+  // Modifier : ce qui change, avant et apres.
+  const pm = P.lireParamsCharge({ quoi: 'modifier', charge_id: C1, montant: '29', a_confirmer: false, montant_eur: '26,70' })
+  const cm = P.carteCharge({ p: pm, lue: CH })
+  assert.match(cm, /^Modifier la charge « Supabase \(plan Pro\) » \(base et hebergement\) : 25,00 USD par mois, payée par Brice, depuis le 25\/09\/2026, en cours :/)
+  assert.match(cm, /\n- Montant : 25,00 USD devient 29,00 USD ;\n- Équivalent en euros : vide devient 26,70 € ;\n- À confirmer : oui devient non\.\n/)
+  assert.match(cm, /Ensuite : 29,00 USD par mois \(soit 26,70 € pour la même période\), payée par Brice, .* Elle compte pour 26,70 € par mois dans la marge\./)
+  // Passer en euros vide l'equivalent, comme l'ecran.
+  const apres = P.appliquerCharge({ ...CH, montant_eur: 23.1 }, P.lireParamsCharge({ quoi: 'modifier', charge_id: C1, devise: 'EUR' }))
+  assert.equal(apres.montant_eur, null)
+  assert.deepEqual(P.changementsCharge({ ...CH, montant_eur: 23.1 }, apres), ['devise', 'montant_eur'])
+  // Refus avant la carte.
+  assert.match(P.refusCharge(pm, null), /inconnue ou déjà retirée/)
+  assert.match(P.refusCharge(P.lireParamsCharge({ quoi: 'modifier', charge_id: C1, montant: 25 }), CH), /Rien ne change/)
+  assert.match(P.refusCharge(P.lireParamsCharge({ quoi: 'modifier', charge_id: C1, au: '2026-01-01' }), CH), /avant la date de début/)
+  assert.equal(P.refusCharge(pm, CH), null)
+  const cr = P.carteCharge({ p: P.lireParamsCharge({ quoi: 'retirer', charge_id: C1 }), lue: CH })
+  assert.match(cr, /^Retirer la charge « Supabase \(plan Pro\) »/)
+  assert.match(cr, /mois passés compris\. La ligne reste en base/)
+  // L'empreinte d'une ligne lue.
+  assert.match(P.empreinteLigne([1, 'a', null]), /^[0-9a-f]{8}$/)
+  assert.notEqual(P.empreinteLigne([1, 'a', null]), P.empreinteLigne([1, 'a', 'x']))
+  assert.equal(P.montantFr(1234567.891), '1 234 567,89')
+  for (const t of [ca, cd, cm, cr, P.phraseChargeFaite(pm, CH, P.appliquerCharge(CH, pm)), P.phraseChargeFaite(pa, null, P.chargeAAjouter(pa))]) {
+    texteClavier(t, 'carte charge'); sansOutil(t, 'carte charge')
+  }
+})
+
+// ---------------------------------------------------------------------------
+// G. Abonnements IA
+// ---------------------------------------------------------------------------
+
+const AB = { libelle: 'Claude Max', fournisseur: 'Anthropic', montant: 100, devise: 'USD', periodicite: 'mensuel', debut: '2026-11-01', fin: null, note: null }
+
+bloc('abonnement IA : ajouter (le 1er du mois par defaut, comme l ecran), arreter (aujourd hui par defaut), retirer', () => {
+  const a = ok('abonnement_ia', { quoi: 'ajouter', libelle: ' Claude Max ', fournisseur: 'Anthropic', montant: '100', devise: '$' })
+  assert.deepEqual(a.params, {
+    quoi: 'ajouter', fixe_id: null, libelle: 'Claude Max', fournisseur: 'Anthropic', montant: 100, devise: 'USD',
+    periodicite: 'mensuel', debut: `${AUJ.slice(0, 7)}-01`, note: null, empreinte: null,
+  })
+  assert.equal(ok('abonnement_ia', { quoi: 'ajouter', libelle: 'X', montant: 200, periodicite: 'annuel', debut: '2026-01-15' }).params.debut, '2026-01-15')
+  non('abonnement_ia', { quoi: 'ajouter', libelle: 'X', montant: 0 }, /montant/)
+  non('abonnement_ia', { quoi: 'ajouter', libelle: 'X', montant: 100001 }, /montant/)
+  non('abonnement_ia', { quoi: 'ajouter', libelle: 'X', montant: 10, devise: 'GBP' }, /devise/)
+  non('abonnement_ia', { quoi: 'ajouter', montant: 10 }, /libelle/)
+  assert.deepEqual(ok('abonnement_ia', { quoi: 'Arrêter', fixe_id: F1 }).params, { quoi: 'arreter', fixe_id: F1, fin: AUJ, empreinte: null })
+  assert.equal(ok('abonnement_ia', { quoi: 'arreter', fixe_id: F1, fin: '2026-11-30' }).params.fin, '2026-11-30')
+  assert.deepEqual(ok('abonnement_ia', { quoi: 'retirer', fixe_id: F1, montant: 3 }).params, { quoi: 'retirer', fixe_id: F1, empreinte: null })
+  non('abonnement_ia', { quoi: 'modifier', fixe_id: F1 }, /quoi/)
+  non('abonnement_ia', { quoi: 'arreter', fixe_id: 'x' }, /fixe_id/)
+  const ca = P.carteAbonnementIA({ p: P.lireParamsAbonnementIA({ quoi: 'ajouter', libelle: 'Claude Max', fournisseur: 'Anthropic', montant: 100, devise: 'USD', debut: '2026-11-01' }, '2026-11-05'), lu: null })
+  assert.match(ca, /^Ajouter l'abonnement IA « Claude Max » \(Anthropic\), 100,00 USD par mois depuis le 01\/11\/2026\./)
+  assert.match(ca, /Il compte pour 92,00 € par mois dans la dépense IA \(dollars comptés à 0,92 €\)\./)
+  assert.equal(P.USD_EUR_IA, 0.92)
+  assert.equal(P.mensuelIA({ montant: 1200, devise: 'EUR', periodicite: 'annuel' }), 100, 'un douzieme par mois (fixeDuMois)')
+  const par = P.lireParamsAbonnementIA({ quoi: 'arreter', fixe_id: F1, fin: '2026-11-05' }, '2026-11-05')
+  const cs = P.carteAbonnementIA({ p: par, lu: AB })
+  assert.match(cs, /^Arrêter l'abonnement IA « Claude Max » \(Anthropic\), 100,00 USD par mois depuis le 01\/11\/2026, au 05\/11\/2026\./)
+  assert.match(cs, /Il compte encore pour novembre 2026, plus à partir de décembre 2026\./)
+  assert.match(P.carteAbonnementIA({ p: { ...par, fin: '2026-12-31' }, lu: AB }), /plus à partir de janvier 2027/)
+  assert.match(P.refusAbonnementIA(par, { ...AB, fin: '2026-11-02' }), /déjà arrêté \(le 02\/11\/2026\)/)
+  assert.match(P.refusAbonnementIA({ ...par, fin: '2026-10-01' }, AB), /avant son début/)
+  assert.match(P.refusAbonnementIA(par, null), /inconnu ou déjà retiré/)
+  const cr = P.carteAbonnementIA({ p: P.lireParamsAbonnementIA({ quoi: 'retirer', fixe_id: F1 }, '2026-11-05'), lu: AB })
+  assert.match(cr, /saisie fausse/)
+  for (const t of [ca, cs, cr, P.phraseAbonnementFait(par, AB)]) { texteClavier(t, 'carte abonnement'); sansOutil(t, 'carte abonnement') }
+  // Le meme taux que l'ecran du cockpit, quand le depot est la.
+  const ecran = new URL('../../cockpit/src/lib/depense-ia.ts', import.meta.url)
+  if (existsSync(ecran)) assert.match(readFileSync(ecran, 'utf8'), /export const USD_EUR = 0\.92/)
+})
+
+// ---------------------------------------------------------------------------
+// H. Objectif d'une publication Instagram
+// ---------------------------------------------------------------------------
+
+bloc('objectif d une publication Instagram : la grille de l ecran, la carte nomme la publication (date, debut de legende)', () => {
+  assert.deepEqual(ok('objectif_publication', { publication_id: ' 17890012345 ', objectif: 'Découverte' }).params, { publication_id: '17890012345', objectif: 'decouverte', avant: null })
+  assert.equal(ok('objectif_publication', { publication_id: '1789', objectif: 'communauté', avant: 'sans' }).params.avant, 'sans')
+  non('objectif_publication', { publication_id: '1789', objectif: 'notoriete' }, /objectif/)
+  non('objectif_publication', { publication_id: 'a b', objectif: 'valeur' }, /publication_id/)
+  non('objectif_publication', { publication_id: '1789', objectif: 'valeur', avant: 'nimporte' }, /redemande/)
+  const ecran = new URL('../../cockpit/src/views/analyse/InstagramLecture.tsx', import.meta.url)
+  if (existsSync(ecran)) {
+    const src = readFileSync(ecran, 'utf8')
+    // (l'ecran ecrit l'apostrophe echappee dans une chaine entre apostrophes)
+    for (const o of P.OBJECTIFS_PUBLICATION) {
+      assert.ok(src.includes(`{ cle: '${o.cle}', nom: '${o.nom}', lire: '${o.lire.replace(/'/g, "\\'")}'`), `grille de l'ecran : ${o.cle}`)
+    }
+  }
+  const ch = (c) => String.fromCodePoint(c)
+  const PUB = { publicationId: '1789', publieLe: '2026-11-03', type: 'REELS', legende: `Le DOL en 30 secondes ${ch(0x1f525)} ${ch(0x201c)}la base${ch(0x201d)} ${ch(0x2014)} suite\nligne 2` }
+  const p = P.lireParamsObjectif({ publication_id: '1789', objectif: 'valeur' })
+  const c = P.carteObjectif({ p, pub: PUB, actuel: null })
+  assert.match(c, /^Objectif de la publication Instagram du 03\/11\/2026 \(reel\) « Le DOL en 30 secondes "la base" - suite » : Valeur\./)
+  assert.match(c, /Avant : aucun objectif\./)
+  assert.match(c, /Comment la lire ensuite : regarde d'abord les enregistrements, puis le temps de visionnage\./)
+  assert.match(P.carteObjectif({ p, pub: PUB, actuel: 'decouverte' }), /Avant : Découverte\./)
+  assert.match(P.refusObjectif(p, null, null), /inconnue/)
+  assert.match(P.refusObjectif(p, { ...PUB, type: 'STORY' }, null), /story/)
+  assert.match(P.refusObjectif(p, PUB, 'valeur'), /déjà l'objectif « Valeur »/)
+  assert.equal(P.refusObjectif(p, PUB, 'decouverte'), null)
+  assert.equal(P.extraitClavier('a'.repeat(100), 10), 'aaaaaaaaaa...')
+  for (const t of [c, P.phraseObjectifPose(p, PUB)]) { texteClavier(t, 'carte objectif'); sansOutil(t, 'carte objectif') }
+})
+
+// ---------------------------------------------------------------------------
+// I. Le fonds : note, decision, enquete
+// ---------------------------------------------------------------------------
+
+const PERS = { personneId: 'p-jean-dupont', nom: 'Jean Dupont', nature: 'eleve', messages: 466 }
+
+bloc('fonds : note sur une personne connue ou un sujet, texte entier dans la carte, signee, interne', () => {
+  assert.deepEqual(ok('note_fonds', { personne_id: 'p-jean-dupont', rubrique: 'Trading', texte: '  Il trade le DAX\n\n\n\nle matin  ', sujet: 'ignore' }).params,
+    { personne_id: 'p-jean-dupont', sujet: null, rubrique: 'trading', texte: 'Il trade le DAX\n\nle matin' })
+  assert.deepEqual(ok('note_fonds', { sujet: ' Thomas du coaching du 9 ', texte: 'veut un appel' }).params,
+    { personne_id: null, sujet: 'Thomas du coaching du 9', rubrique: 'autre', texte: 'veut un appel' })
+  assert.equal(ok('note_fonds', { sujet: 'x', texte: `a${String.fromCharCode(0x200b)}b` }).params.texte, 'ab', 'caractere invisible retire')
+  assert.equal(ok('note_fonds', { personne_id: 'p-Jean-2', texte: 'x' }).params.personne_id, 'p-Jean-2', 'identifiant garde tel quel')
+  non('note_fonds', { texte: 'x' }, /personne_id|sujet/)
+  non('note_fonds', { personne_id: 'jean', texte: 'x' }, /personne_id/)
+  non('note_fonds', { sujet: 'x', rubrique: 'secret', texte: 'x' }, /rubrique/)
+  non('note_fonds', { sujet: 'x', texte: '   ' }, /texte/)
+  non('note_fonds', { sujet: 'x', texte: 'x'.repeat(3001) }, /3000/)
+  const c = P.carteNoteFonds({ p: P.lireParamsNoteFonds({ personne_id: 'p-jean-dupont', rubrique: 'trading', texte: 'Il trade le DAX le matin.' }), personne: PERS })
+  assert.match(c, /^Écrire une note dans le fonds sur Jean Dupont \(élève, 466 messages\), rubrique « Son trading » :\n« Il trade le DAX le matin\. »/)
+  assert.match(c, /Signée de ton compte/)
+  assert.match(c, /jamais recopiée vers un membre/)
+  const ps = P.lireParamsNoteFonds({ sujet: 'Thomas', texte: 'x' })
+  const s = P.carteNoteFonds({ p: ps, personne: null })
+  assert.match(s, /^Écrire une note dans le fonds sur « Thomas », rubrique « Autre » :/)
+  assert.match(s, /boîte de réception/)
+  for (const t of [c, s, P.phraseNoteFondsEcrite(ps, null)]) { texteClavier(t, 'carte note'); sansOutil(t, 'carte note') }
+  // Les rubriques de l'ecran du cockpit, quand le depot est la.
+  const ecran = new URL('../../cockpit/src/lib/fonds-archive.ts', import.meta.url)
+  if (existsSync(ecran)) {
+    const src = readFileSync(ecran, 'utf8')
+    for (const cle of Object.keys(P.RUBRIQUES_FONDS)) assert.ok(src.includes(`{ cle: '${cle}',`), `rubrique de l'ecran : ${cle}`)
+  }
+})
+
+bloc('fonds : decision sur des propositions d une meme personne, carte avec valeur, confiance et DOMAINE de la source', () => {
+  assert.deepEqual(ok('decision_fonds', { proposition_ids: [Q1, Q1.toUpperCase(), Q2], statut: 'accepter' }).params, { proposition_ids: [Q1, Q2], statut: 'acceptee', personne_id: null })
+  assert.equal(ok('decision_fonds', { proposition_ids: [Q1], statut: 'proposee', personne_id: 'p-jean-dupont' }).params.personne_id, 'p-jean-dupont')
+  non('decision_fonds', { proposition_ids: [], statut: 'acceptee' }, /proposition_ids/)
+  non('decision_fonds', { proposition_ids: ['x'], statut: 'acceptee' }, /illisible/)
+  non('decision_fonds', { proposition_ids: Array.from({ length: 21 }, (_, i) => U(700 + i)), statut: 'acceptee' }, /20 propositions/)
+  non('decision_fonds', { proposition_ids: [Q1], statut: 'fusionner' }, /statut/)
+  const PROPS = [
+    { propositionId: Q1, personneId: 'p-jean-dupont', champ: 'reseau', reseau: 'instagram', valeur: '@jdtrader', sourceUrl: 'https://www.instagram.com/jdtrader/', confiance: 'haute', statut: 'proposee' },
+    { propositionId: Q2, personneId: 'p-jean-dupont', champ: 'societe', reseau: null, valeur: 'JD Conseil', sourceUrl: 'https://www.pappers.fr/entreprise/jd', confiance: 'moyenne', statut: 'acceptee' },
+  ]
+  const p = P.lireParamsDecisionFonds({ proposition_ids: [Q1, Q2], statut: 'acceptee' })
+  assert.equal(P.refusDecisionFonds(p, PROPS), null)
+  assert.match(P.refusDecisionFonds(p, PROPS.slice(0, 1)), /Proposition inconnue/)
+  assert.match(P.refusDecisionFonds(p, [PROPS[0], { ...PROPS[1], personneId: 'p-autre' }]), /plusieurs personnes/)
+  assert.match(P.refusDecisionFonds(P.lireParamsDecisionFonds({ proposition_ids: [Q2], statut: 'acceptee' }), [PROPS[1]]), /déjà acceptées/)
+  const c = P.carteDecisionFonds({ p, props: PROPS, personne: PERS })
+  assert.match(c, /^Accepter 1 proposition de l'enquête en ligne sur Jean Dupont :\n- Réseau \(instagram\) : « @jdtrader » \(confiance haute, source instagram\.com\)\./)
+  assert.match(c, /Elle s'affiche sur sa fiche comme vérifiée en ligne, signée de ton compte\. Rien d'autre ne change/)
+  assert.match(c, /Déjà acceptées, rien ne change : 1\./)
+  assert.ok(!/https?:|\/entreprise/.test(c), "jamais l'adresse entiere d'une source")
+  const r = P.carteDecisionFonds({ p: P.lireParamsDecisionFonds({ proposition_ids: [Q1, Q2], statut: 'refusee' }), props: PROPS, personne: PERS })
+  assert.match(r, /^Refuser 2 propositions/)
+  assert.match(r, /Refusées, elles restent en base : la prochaine enquête ne les reproposera pas\./)
+  assert.equal(P.domaineSource('pas une url'), 'source illisible')
+  assert.equal(P.domaineSource(null), 'sans source')
+  for (const t of [c, r, P.phraseDecisionFondsFaite(p, 1, PERS)]) { texteClavier(t, 'carte decision fonds'); sansOutil(t, 'carte decision fonds') }
+})
+
+bloc('fonds : enquete en ligne, la carte dit qu elle COUTE (cout mesure, ou pas de mesure) et que rien ne s ajoute seul', () => {
+  assert.deepEqual(ok('enquete_fonds', { personne_id: 'p-jean-dupont', autre: 'x' }).params, { personne_id: 'p-jean-dupont' })
+  non('enquete_fonds', { personne_id: '' }, /personne_id/)
+  non('enquete_fonds', { personne_id: 'p-' }, /personne_id/)
+  const c = P.carteEnqueteFonds({ personne: PERS, etat: { attente: 0, acceptees: 0, refusees: 0, derniere: null }, cout: { n: 12, moyenneEur: 0.854, maxEur: 1.4 } })
+  assert.match(c, /^Lancer une enquête en ligne sur Jean Dupont \(élève, 466 messages\) :/)
+  assert.match(c, /CELA COÛTE : deux appels au modèle du cockpit avec recherche web, environ 0,85 € par enquête \(moyenne des 12 dernières, la plus chère 1,40 €\)\./)
+  assert.match(c, /Rien ne s'ajoute à sa fiche : chaque proposition attend ta décision\./)
+  assert.ok(!/Déjà une enquête/.test(c))
+  const sans = P.carteEnqueteFonds({ personne: PERS, etat: { attente: 3, acceptees: 2, refusees: 1, derniere: '2026-09-07' }, cout: null })
+  assert.match(sans, /CELA COÛTE : .*Pas encore de mesure ici/)
+  assert.match(sans, /Déjà une enquête le 07\/09\/2026 : 3 à trancher, 2 acceptées, 1 refusée/)
+  assert.match(P.phraseEnqueteFaite({ nom: 'Jean Dupont', posees: 0, sources: 14 }), /rien de nouveau à proposer \(14 pages consultées\)/)
+  assert.match(P.phraseEnqueteFaite({ nom: 'Jean Dupont', posees: 4, sources: 14 }), /4 propositions à trancher \(14 pages consultées\)/)
+  for (const t of [c, sans, P.phraseEnqueteFaite({ nom: 'Jean Dupont', posees: 1, sources: 1 })]) { texteClavier(t, 'carte enquete'); sansOutil(t, 'carte enquete') }
+  assert.match(AP.libelleBoutonConfirmer('enquete_fonds'), /payant/, 'le bouton dit que ca coute')
+})
+
+// ---------------------------------------------------------------------------
+// J. Relais d'accueil, K. adresse secondaire
+// ---------------------------------------------------------------------------
+
+bloc('relais d accueil : couper ou rallumer, la carte dit ce qu il ne recoit plus et ses boutons', () => {
+  assert.deepEqual(ok('relais_accueil', { quoi: 'Couper', telegram_id: '2110821350' }).params, { quoi: 'couper', telegram_id: 2110821350 })
+  assert.deepEqual(ok('relais_accueil', { quoi: 'réactiver', telegram_id: 2110821350 }).params, { quoi: 'rallumer', telegram_id: 2110821350 })
+  non('relais_accueil', { quoi: 'supprimer', telegram_id: 1 }, /quoi/)
+  non('relais_accueil', { quoi: 'couper', telegram_id: 'Alex' }, /telegram_id/)
+  const R = { telegramId: 2110821350, nom: 'Alex', actif: true, motifs: ['accueil', 'silence'], enCours: 3, coupeLe: null }
+  const pc = P.lireParamsRelais({ quoi: 'couper', telegram_id: 2110821350 })
+  const c = P.carteRelais({ p: pc, r: R })
+  assert.match(c, /^Couper le relais d'accueil Alex : le bot des membres ne lui envoie plus les nouveaux sans un mot et les silencieux \(14 jours sans message\), dès le prochain passage du matin\./)
+  assert.match(c, /3 membres déjà transmis, pas encore faits, restent à marquer depuis le cockpit/)
+  assert.match(c, /Rien ne lui est envoyé pour le prévenir\./)
+  assert.match(P.carteRelais({ p: pc, r: { ...R, enCours: 1, motifs: ['accueil'] } }), /les nouveaux sans un mot, dès.*\n.*1 membre déjà transmis, pas encore fait, reste/)
+  const pr = P.lireParamsRelais({ quoi: 'rallumer', telegram_id: 2110821350 })
+  const cr = P.carteRelais({ p: pr, r: { ...R, actif: false, coupeLe: '2026-11-02' } })
+  assert.match(cr, /^Rallumer le relais d'accueil Alex \(coupé le 02\/11\/2026\)/)
+  assert.match(P.refusRelais(pc, { ...R, actif: false, coupeLe: '2026-11-02' }), /déjà coupé \(depuis le 02\/11\/2026\)/)
+  assert.match(P.refusRelais(pr, R), /déjà actif/)
+  assert.match(P.refusRelais(pc, null), /inconnu/)
+  for (const t of [c, cr, P.phraseRelaisFait(pc, 'Alex'), P.phraseRelaisFait(pr, 'Alex')]) { texteClavier(t, 'carte relais'); sansOutil(t, 'carte relais') }
+})
+
+bloc('adresse secondaire : jamais la principale ; la carte dit le membre, l adresse retiree, la principale qui reste, ce que ca change', () => {
+  assert.deepEqual(ok('retrait_adresse', { email: ' Bob@X.com ' }).params, { email: 'bob@x.com', membre_id: null })
+  assert.equal(ok('retrait_adresse', { email: 'bob@x.com', membre_id: M9 }).params.membre_id, M9)
+  non('retrait_adresse', { email: 'bob' }, /email/)
+  non('retrait_adresse', { email: 'bob@x.com', membre_id: 'fiche-1' }, /redemande/)
+  const A = { email: 'bob@x.com', membreId: M9, principal: false, verifie: true, nom: 'Jean Dupont', principales: ['jean@x.com'], autres: 1, compteSite: true }
+  const p = P.lireParamsRetraitAdresse({ email: 'bob@x.com' })
+  assert.equal(P.refusRetraitAdresse(p, A), null)
+  assert.match(P.refusRetraitAdresse(p, { ...A, principal: true }), /adresse principale de Jean Dupont : elle porte ses paiements/)
+  assert.match(P.refusRetraitAdresse(p, null), /aucune fiche/)
+  assert.match(P.refusRetraitAdresse({ ...p, membre_id: U(98) }, A), /changé de fiche/)
+  const c = P.carteRetraitAdresse(A)
+  assert.match(c, /^Retirer l'adresse secondaire bob@x\.com \(vérifiée\) de la fiche de Jean Dupont\. Adresse principale qui reste : jean@x\.com \(et 1 autre adresse secondaire\)\./)
+  assert.match(c, /n'est plus relié à cette fiche/)
+  assert.match(c, /Live Club actif, ETM, rang Skool/)
+  assert.match(c, /Un compte du site se connecte avec cette adresse vérifiée/)
+  assert.match(c, /Les paiements restent sur la fiche/)
+  assert.match(P.carteRetraitAdresse({ ...A, compteSite: false, autres: 0, verifie: false }), /Aucun compte du site ne porte cette adresse vérifiée\./)
+  for (const t of [c, P.phraseAdresseRetiree(A)]) { texteClavier(t, 'carte adresse'); sansOutil(t, 'carte adresse') }
+})
+
+// ---------------------------------------------------------------------------
+// LOT 2 : les executeurs (lecture du code, sans base)
+// ---------------------------------------------------------------------------
+
+bloc('LOT 2 : colonnes d acteur posees, parametres relus, empreinte au clic, droit au fonds, enquete de la route', () => {
+  const serveur = lire('src/lib/agent-gestes-cockpit.ts')
+  const lot2 = serveur.slice(serveur.indexOf('async function executerLot2('))
+  assert.ok(lot2.length > 1000)
+  // Charges : pose_par a l'ajout (default auth.uid(), nul ici), retire_par au retrait.
+  assert.match(lot2, /insert into public\.cockpit_charges\n\s+\(outil, categorie, montant, devise, montant_eur, periodicite, payeur, du, au, a_confirmer, note, pose_par\)/)
+  assert.match(lot2, /\$\{c\.note\}::text, \$\{uid\}::uuid\)`/)
+  assert.match(lot2, /update public\.cockpit_charges set retire_le = now\(\), retire_par = \$\{uid\}::uuid/)
+  // Abonnements IA : pose_par (not null), retire_par.
+  assert.match(lot2, /insert into public\.cockpit_depenses_ia_fixes\n\s+\(libelle, fournisseur, montant, devise, periodicite, debut, note, pose_par\)/)
+  assert.match(lot2, /\$\{ab\.note\}::text, \$\{uid\}::uuid\)`/)
+  assert.match(lot2, /update public\.cockpit_depenses_ia_fixes set retire_le = now\(\), retire_par = \$\{uid\}::uuid/)
+  // Objectif : pose_par et pose_le, comme l'upsert de l'ecran.
+  assert.match(lot2, /insert into public\.cockpit_social_objectifs \(plateforme, publication_id, objectif, pose_par, pose_le\)\n\s+values \('instagram', \$\{p\.publication_id\}, \$\{p\.objectif\}, \$\{uid\}::uuid, now\(\)\)/)
+  assert.match(lot2, /do update set objectif = excluded\.objectif, pose_par = excluded\.pose_par, pose_le = excluded\.pose_le/)
+  // Fonds : ecrit_par ; decide_par ET decide_le (le trigger ne pose decide_le que pour authenticated).
+  assert.match(lot2, /insert into public\.cockpit_arch_notes \(personne_id, sujet, rubrique, texte, ecrit_par\)/)
+  assert.match(lot2, /\$\{p\.texte\}, \$\{uid\}::uuid\)`/)
+  assert.match(lot2, /set statut = \$\{p\.statut\}, decide_par = \$\{uid\}::uuid, decide_le = now\(\)/)
+  // Relais : coupe_par par un second update, apres celui d'actif (le trigger le remet a auth.uid()).
+  const relais = lot2.slice(lot2.indexOf("a.type === 'relais_accueil'"), lot2.indexOf("a.type === 'retrait_adresse'"))
+  assert.ok(relais.indexOf('set actif = ') > 0 && relais.indexOf('set actif = ') < relais.indexOf('set coupe_par = ${uid}::uuid'))
+  assert.match(relais, /and not actif`/)
+  // Adresse : jamais la principale, et la fiche lue par la carte.
+  assert.match(lot2, /delete from public\.cockpit_membre_emails\n\s+where email = \$\{p\.email\} and principal = false and membre_id = \$\{p\.membre_id\}::uuid/)
+  // Le fonds : acces_fonds au clic (le compte qui confirme) pour les trois gestes, et avant la carte (le compte qui parle).
+  for (const t of ['note_fonds', 'decision_fonds', 'enquete_fonds']) {
+    const debut = lot2.indexOf(`a.type === '${t}'`)
+    const corps = lot2.slice(debut, lot2.indexOf('if (a.type ===', debut + 10))
+    assert.match(corps, /if \(!\(await voitLeFonds\(uid\)\)\) throw new RefusAction/, `acces au fonds au clic : ${t}`)
+  }
+  assert.match(serveur, /if \(action\.type === 'note_fonds' \|\| action\.type === 'decision_fonds' \|\| action\.type === 'enquete_fonds'\) \{\n\s+if \(!\(await voitLeFonds\(userId\)\)\) return \{ erreur:/)
+  assert.match(serveur, /select 1 as ok from public\.cockpit_allowlist where user_id = \$\{userId\}::uuid and acces_fonds/)
+  // Chaque executeur relit ses parametres (ce qui s'execute est ce qui a ete valide).
+  for (const lecteur of ['lireParamsCharge', 'lireParamsAbonnementIA', 'lireParamsObjectif', 'lireParamsNoteFonds', 'lireParamsDecisionFonds', 'lireParamsEnqueteFonds', 'lireParamsRelais', 'lireParamsRetraitAdresse']) {
+    assert.ok(lot2.includes(`${lecteur}(a.params`), `${lecteur} au clic`)
+  }
+  // Ce qui s'ecrit est ce que la carte a lu : comparaison sous verrou AVANT l'ecriture.
+  for (const [quoi, ecrit] of [
+    ['La charge a changé depuis la carte', 'update public.cockpit_charges'],
+    ["L'abonnement a changé depuis la carte", 'update public.cockpit_depenses_ia_fixes'],
+    ["L'objectif de cette publication a changé", 'insert into public.cockpit_social_objectifs'],
+    ['Les propositions de la carte ont changé', 'update public.cockpit_arch_propositions'],
+    ['refusRetraitAdresse(p, lue)', 'delete from public.cockpit_membre_emails'],
+  ]) {
+    assert.ok(lot2.indexOf(quoi) > 0 && lot2.indexOf(quoi) < lot2.indexOf(ecrit), quoi)
+  }
+  assert.match(lot2, /lireCharge\(tx, p\.charge_id as string, true\)/)
+  assert.match(lot2, /lireAbonnementIA\(tx, p\.fixe_id as string, true\)/)
+  // L'enquete : la meme que la route, sans texte du web dans la phrase du clic.
+  assert.match(lot2, /const \{ menerEnquete, preparerEnquete \} = await import\('@\/lib\/fonds-enquete'\)/)
+  assert.match(lot2, /issue = await menerEnquete\(uid, prep\)/)
+  const enq = lot2.slice(lot2.indexOf("a.type === 'enquete_fonds'"), lot2.indexOf("a.type === 'relais_accueil'"))
+  assert.ok(!/issue\.resume|issue\.homonymes/.test(enq), 'ni resume ni homonymes du modele dans la phrase')
+  const route = lire('src/app/api/cockpit/enquete/route.ts')
+  assert.match(route, /const prep = await preparerEnquete\(personneId\)/)
+  assert.match(route, /const r = await menerEnquete\(userId, prep\)/)
+  assert.match(route, /\{ error: 'Personne inconnue du fonds' \}, \{ status: 404, headers: cors \}/)
+  assert.match(route, /\{ error: 'Réservé aux comptes qui voient le fonds' \}, \{ status: 403, headers: cors \}/)
+  assert.match(route, /\{ error: aiErrorMessage\(err, 'ANTHROPIC_API_KEY_COCKPIT'\) \},\n\s+\{ status: 502, headers: cors \}/)
+  assert.ok(!/messages\.create/.test(route), "plus d'appel au modele dans la route : il est dans fonds-enquete.ts")
+  const fe = lire('src/lib/fonds-enquete.ts')
+  assert.equal([...fe.matchAll(/logAiUsage\(userId, 'cockpit', modele, \w+\.usage, null, \{ usage: 'enquete', echange \}\)/g)].length, 2, 'deux appels, comptes au poste enquete')
+  assert.match(fe, /max_uses: 6/)
+  // La carte de l'enquete, sans cle du modele : affichee sans bouton.
+  assert.match(serveur, /aiKeyFor\('cockpit'\) \? c : \{ \.\.\.c, manque:/)
+  // Le clic de la fenetre du cockpit tient une enquete (une a trois minutes).
+  assert.match(lire('src/app/api/cockpit/agent/action/route.ts'), /export const maxDuration = 300/)
+  // Une table absente ou une contrainte : refus clair, rien n'a change.
+  assert.match(serveur, /if \(relationAbsente\(err\) && TABLES_LOT2\[action\.type\]\)/)
+  assert.match(serveur, /La base a refusé cette écriture \(contrainte de la table\)/)
+})
+
 // ---------------------------------------------------------------------------
 // Commun : resume de secours, logs, type inconnu
 // ---------------------------------------------------------------------------
@@ -358,6 +749,15 @@ bloc('resumeAction et paramsPourLog : une phrase sans tiret long, des logs sans 
     decision_clip: { clip_ids: [U(41)], decision: 'garder', note: 'note secrete' },
     clips_replay: { source: 'youtube', lien: 'https://youtu.be/abc', personne: 'mel' },
     envoi_opus: { replay_id: R1, debut_s: 754, fin_s: 2710.5, credits: 33 },
+    // (05/11, LOT 2)
+    charge_fixe: { quoi: 'ajouter', outil: 'Notion', montant: 10, note: 'note secrete' },
+    abonnement_ia: { quoi: 'ajouter', libelle: 'Claude Max', montant: 100, note: 'note secrete' },
+    objectif_publication: { publication_id: '1789', objectif: 'valeur' },
+    note_fonds: { personne_id: 'p-jean-dupont', texte: 'texte secret' },
+    decision_fonds: { proposition_ids: [Q1], statut: 'acceptee', personne_id: 'p-jean-dupont' },
+    enquete_fonds: { personne_id: 'p-jean-dupont' },
+    relais_accueil: { quoi: 'couper', telegram_id: 2110821350 },
+    retrait_adresse: { email: 'bob@x.com', membre_id: M9 },
   }
   for (const t of TYPES) {
     const a = ok(t, exemples[t])
@@ -366,6 +766,8 @@ bloc('resumeAction et paramsPourLog : une phrase sans tiret long, des logs sans 
     texteClavier(r, `resume ${t}`)
     const log = JSON.stringify(S.paramsPourLog(a))
     assert.ok(!/@|secret|https?:|youtu\.be/.test(log), `${t} : log trop bavard ${log}`)
+    // (05/11, LOT 2) Ni nom de personne du fonds (personne_id en porte un), ni montant, ni identifiant Telegram d'un membre.
+    assert.ok(!/jean|dupont|2110821350|"montant":/.test(log), `${t} : log trop bavard ${log}`)
   }
   assert.match(S.resumeAction(ok('envoi_opus', exemples.envoi_opus)), /33 crédits Opus/)
   assert.equal(P.estTypeGesteCockpit('code_promo'), false)
@@ -400,8 +802,11 @@ bloc('TYPE_PAR_OUTIL, OUTILS, boutons et descriptions sont coherents', () => {
   assert.match(src, /if \(prudence && \(TYPE_PAR_OUTIL\[bloc\.name\] \|\| GESTES_SANS_CARTE\.has\(bloc\.name\)\)\)/)
   assert.ok(AP.DESCRIPTIONS_OUTILS.marquer_fil_traite)
   assert.equal(AP.sansNomsOutils('Je propose proposer_envoi_opus.'), "Je propose la carte d'envoi à Opus.")
-  // Le prompt compte toujours ses outils Stripe a part, et les sept du lot dans leur parenthese.
-  assert.match(src, /\(et sept pour les gestes du cockpit, décrits plus bas : proposer_acces_academie, proposer_retrait_acces_academie, proposer_rangement_academie, proposer_acces_mentorat, proposer_decision_clip, proposer_clips_replay, proposer_envoi_opus\)/)
+  // Le prompt compte toujours ses outils Stripe a part, et les quinze des deux lots dans leur parenthese (sept au LOT 1, huit au LOT 2).
+  const parenthese = /\(et quinze pour les gestes du cockpit, décrits plus bas : ([^)]+)\)/.exec(src)
+  assert.ok(parenthese, 'la parenthese des gestes du cockpit')
+  assert.deepEqual(parenthese[1].split(', '), Object.keys(OUTIL_DE))
+  assert.equal(Object.keys(OUTIL_DE).length, 15)
 })
 
 bloc('la boucle : controle avant la carte (compte qui parle), avant la repartition ; carte composee par le serveur', () => {
@@ -432,7 +837,10 @@ bloc('les executeurs posent les colonnes d acteur (auth.uid() est nul cote serve
   assert.match(serveur, /from public\.cockpit_allowlist a where a\.user_id = \$\{userId\}::uuid/, 'libelle comme le trigger')
   const inserts = [...serveur.matchAll(/insert into public\.cockpit_clips_demandes \(action, ref, personne, pose_par\)/g)]
   assert.equal(inserts.length, 2, 'les deux demandes posent pose_par')
-  assert.equal([...serveur.matchAll(/\$\{uid\}::uuid\)`/g)].length, 2)
+  // (05/11) Compte sur la partie LOT 1 du fichier : le LOT 2 (plus bas) a ses propres inserts, verifies dans son bloc.
+  const lot1 = serveur.slice(0, serveur.indexOf('const TABLES_LOT2'))
+  assert.ok(lot1.length > 1000)
+  assert.equal([...lot1.matchAll(/\$\{uid\}::uuid\)`/g)].length, 2)
   // Academie : la meme fonction que la route, l'acteur agent:<uuid> en pose_par / retire_par.
   assert.match(serveur, /accorderAccesAcademieServeur\(\{ action: 'accorder', \.\.\.p \}, acteur\)/)
   assert.match(serveur, /retirerAccesAcademieServeur\(\{ action: 'retirer', accesId: p\.acces_id, raison: p\.raison \}, acteur\)/)

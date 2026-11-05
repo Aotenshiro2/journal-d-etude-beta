@@ -14,6 +14,9 @@
 //   replay, demande d'envoi a OpusClip, qui DEPENSE des credits).
 // Et un geste SANS carte, « deja traite » par la phrase (marquer_fil_traite),
 // borne a l'ordre du titulaire : ordreFilTraiteExplicite plus bas.
+// LOT 2 (05/11, meme phrase de Brice) : huit cartes de plus, sections F a K
+// (charges, abonnements IA, objectif d'une publication Instagram, le fonds,
+// le relais d'accueil, l'adresse secondaire d'un membre).
 //
 // Fonctions PURES : la lecture stricte des parametres (validerAction, a la
 // carte ET au clic : ce qui s'execute est ce qui a ete valide), les cartes,
@@ -34,6 +37,10 @@ import {
 export const TYPES_GESTES_COCKPIT = [
   'acces_academie', 'retrait_acces_academie', 'rangement_academie', 'acces_mentorat',
   'decision_clip', 'clips_replay', 'envoi_opus',
+  // (05/11, LOT 2) Charges, abonnements IA, objectif d'une publication, fonds,
+  // relais d'accueil, adresse secondaire d'un membre (sections F a K plus bas).
+  'charge_fixe', 'abonnement_ia', 'objectif_publication', 'note_fonds', 'decision_fonds', 'enquete_fonds',
+  'relais_accueil', 'retrait_adresse',
 ] as const
 
 export type TypeGesteCockpit = (typeof TYPES_GESTES_COCKPIT)[number]
@@ -652,6 +659,890 @@ export function carteEnvoiOpus(r: ReplayLu): string {
   ].filter(Boolean).join('\n')
 }
 
+// ===========================================================================
+// LOT 2 (05/11/2026). Brice, 05/11 : « que l'agent puisse faire depuis
+// Telegram les gestes du cockpit ». Huit cartes de plus, sur le meme modele
+// (lecture stricte ici, a la carte ET au clic ; controle et ecriture dans
+// agent-gestes-cockpit.ts) :
+// - charge_fixe : Revenus > Charges et marge (cockpit_charges) : ajouter,
+//   modifier, retirer ;
+// - abonnement_ia : Depense IA > Abonnements (cockpit_depenses_ia_fixes) :
+//   ajouter, arreter, retirer (un prix ne se modifie pas : la table ne
+//   l'ouvre pas, l'ecran non plus) ;
+// - objectif_publication : l'objectif d'une publication Instagram
+//   (cockpit_social_objectifs, upsert) ;
+// - note_fonds, decision_fonds, enquete_fonds : le fonds « Les personnes »
+//   (cockpit_arch_notes, cockpit_arch_propositions, POST /api/cockpit/enquete),
+//   reserve aux comptes qui voient le fonds (cockpit_allowlist.acces_fonds) ;
+// - relais_accueil : couper ou rallumer un relais d'accueil du Live Club
+//   (cockpit_liveclub_relais.actif) ;
+// - retrait_adresse : retirer une adresse SECONDAIRE d'une fiche membre
+//   (cockpit_membre_emails, principal false).
+// ===========================================================================
+
+const RIEN_PROPOSE = "Rien n'a été proposé."
+
+/** Les caracteres invisibles d'un texte libre (largeur nulle, BOM) : retires avant toute ecriture. */
+const INVISIBLES_RE = /[\u200b-\u200d\u2060\ufeff]/g
+
+/** Un texte sur une ligne, sans caractere invisible ; null si vide (pas de borne : la borne est dite par l'appelant). */
+function ligneNette(v: unknown): string | null {
+  if (typeof v !== 'string') return null
+  const t = v.replace(INVISIBLES_RE, '').replace(/\s+/g, ' ').trim()
+  return t || null
+}
+
+/** Un texte de plusieurs lignes : espaces resserres, trois lignes vides au plus deux ; null si vide. */
+function texteLong(v: unknown): string | null {
+  if (typeof v !== 'string') return null
+  const t = v.replace(INVISIBLES_RE, '').replace(/\r\n?/g, '\n').replace(/[^\S\n]+/g, ' ')
+    .replace(/ ?\n ?/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
+  return t || null
+}
+
+function sansAccents(t: string): string {
+  return t.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+}
+
+/** Un mot-cle du modele, en minuscules et sans accents (« Arrêter » -> « arreter »). */
+function motCle(v: unknown): string {
+  return typeof v === 'string' ? sansAccents(v.trim().toLowerCase()) : ''
+}
+
+/** 25 ou « 49,95 » -> un nombre positif ou nul au centime ; null si vide ou « inconnu » ; false si illisible. */
+function lireNombre(v: unknown): number | null | false {
+  if (vide(v)) return null
+  if (typeof v === 'string' && /^(inconnu|inconnue|\?)$/i.test(v.trim())) return null
+  let n: number
+  if (typeof v === 'number') n = v
+  else if (typeof v === 'string') {
+    const t = v.trim().replace(/\s/g, '').replace(/€|eur$/i, '').replace(',', '.')
+    if (!/^\d+(\.\d+)?$/.test(t)) return false
+    n = Number(t)
+  } else return false
+  if (!Number.isFinite(n) || n < 0) return false
+  return Math.round(n * 100) / 100
+}
+
+/** 'AAAA-MM-JJ' d'un vrai jour ; null si vide ; false si illisible. */
+function lireJour(v: unknown): string | null | false {
+  if (vide(v)) return null
+  if (typeof v !== 'string') return false
+  const t = v.trim()
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(t)
+  if (!m) return false
+  return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))).toISOString().slice(0, 10) === t ? t : false
+}
+
+/** vrai, faux, « oui », « non » ; null si ce n'est ni l'un ni l'autre. */
+function lireOuiNon(v: unknown): boolean | null {
+  if (typeof v === 'boolean') return v
+  const m = motCle(v)
+  if (['oui', 'vrai', 'true'].includes(m)) return true
+  if (['non', 'faux', 'false'].includes(m)) return false
+  return null
+}
+
+/** Une empreinte de carte (8 hexadecimaux) : null si absente, false si illisible. */
+function lireEmpreinte(v: unknown): string | null | false {
+  if (vide(v)) return null
+  return typeof v === 'string' && /^[0-9a-f]{8}$/.test(v) ? v : false
+}
+
+/** L'empreinte d'une ligne lue avant la carte : ce que la carte a vu. Le clic refuse si elle a change. */
+export function empreinteLigne(valeurs: readonly unknown[]): string {
+  return fnv1a(JSON.stringify(valeurs))
+}
+
+/** 1234.5 -> « 1 234,50 » (espace simple, jamais insecable). */
+export function montantFr(v: number): string {
+  const [ent, dec] = Math.abs(v).toFixed(2).split('.')
+  return `${v < 0 ? '-' : ''}${ent.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')},${dec}`
+}
+
+const MOIS_FR = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre']
+
+/** '2026-11' (ou un jour) -> « novembre 2026 ». */
+export function moisFr(iso: string | null | undefined): string {
+  const m = /^(\d{4})-(\d{2})/.exec(String(iso ?? ''))
+  return m ? `${MOIS_FR[Number(m[2]) - 1] ?? '?'} ${m[1]}` : '?'
+}
+
+function moisSuivant(iso: string): string {
+  const m = /^(\d{4})-(\d{2})/.exec(iso)
+  if (!m) return '?'
+  const a = Number(m[1])
+  const mo = Number(m[2])
+  return mo === 12 ? `${a + 1}-01` : `${a}-${String(mo + 1).padStart(2, '0')}`
+}
+
+/**
+ * Un texte venu d'ailleurs (legende Instagram, nom du fonds, valeur trouvee
+ * en ligne), en caracteres clavier, sur une ligne, borne : guillemets et
+ * tirets typographiques remplaces, emojis et caracteres invisibles retires.
+ */
+export function extraitClavier(v: string | null | undefined, max: number): string {
+  const t = String(v ?? '')
+    .replace(/[\u2018\u2019\u201a\u2032]/g, "'")
+    .replace(/[\u201c\u201d\u201e\u2033]/g, '"')
+    .replace(/[\u2010-\u2015\u2212]/g, '-')
+    .replace(/\u2026/g, '...')
+    .replace(/[\u2022\u25aa\u25cf\u2192]/g, '-')
+    .replace(/\p{Extended_Pictographic}|[\u{1f1e6}-\u{1f1ff}\u{1f3fb}-\u{1f3ff}]|[\u200b-\u200d\u2060\ufe0e\ufe0f\ufeff]/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return t.length > max ? `${t.slice(0, max).trimEnd()}...` : t
+}
+
+// ---------------------------------------------------------------------------
+// F. Les charges de l'ecosysteme (Revenus > Charges et marge, cockpit_charges)
+// ---------------------------------------------------------------------------
+
+export const DEVISES_CHARGE = ['EUR', 'USD', 'GBP', 'CHF'] as const
+export const PERIODICITES_CHARGE = ['mois', 'trimestre', 'an', 'usage', 'unique'] as const
+export type PeriodiciteCharge = (typeof PERIODICITES_CHARGE)[number]
+export type PayeurCharge = 'brice' | 'mel' | 'commun'
+
+/** Une ligne de cockpit_charges telle que l'ecran l'ecrit (checks de la migration 20261018201000). */
+export type ChampsCharge = {
+  outil: string; categorie: string | null; montant: number | null; devise: (typeof DEVISES_CHARGE)[number]
+  montant_eur: number | null; periodicite: PeriodiciteCharge; payeur: PayeurCharge | null
+  du: string | null; au: string | null; a_confirmer: boolean; note: string | null
+}
+export type CleCharge = keyof ChampsCharge
+export const CLES_CHARGE: readonly CleCharge[] = ['outil', 'categorie', 'montant', 'devise', 'montant_eur', 'periodicite', 'payeur', 'du', 'au', 'a_confirmer', 'note']
+
+/**
+ * Une charge ajoutee sans precision : en euros, par mois, payeur pas encore
+ * su, A CONFIRMER (le defaut de la table : pas encore vue sur une facture).
+ */
+const DEFAUTS_CHARGE: Omit<ChampsCharge, 'outil'> = {
+  categorie: null, montant: null, devise: 'EUR', montant_eur: null, periodicite: 'mois', payeur: null,
+  du: null, au: null, a_confirmer: true, note: null,
+}
+
+export type ParamsCharge = {
+  quoi: 'ajouter' | 'modifier' | 'retirer'
+  charge_id: string | null
+  /** Posee par le controle avant la carte (modifier, retirer), exigee et comparee au clic. */
+  empreinte: string | null
+} & Partial<ChampsCharge>
+
+const PERIODE_CHARGE: Record<PeriodiciteCharge, string> = {
+  mois: 'par mois', trimestre: 'par trimestre', an: 'par an', usage: "à l'usage (pour un mois)", unique: 'une fois',
+}
+const DIVISEUR_CHARGE: Record<PeriodiciteCharge, number> = { mois: 1, trimestre: 3, an: 12, usage: 1, unique: 1 }
+const SYNONYMES_PERIODE: Readonly<Record<string, PeriodiciteCharge>> = {
+  mois: 'mois', mensuel: 'mois', mensuelle: 'mois', trimestre: 'trimestre', trimestriel: 'trimestre', trimestrielle: 'trimestre',
+  an: 'an', annee: 'an', annuel: 'an', annuelle: 'an', usage: 'usage', unique: 'unique', 'une fois': 'unique',
+}
+
+/**
+ * Un champ d'une charge : { v } (null = vide), une erreur, ou null quand le
+ * champ n'est pas donne (absent ou texte vide : rien ne change). Pour vider
+ * un champ facultatif : null ou « aucun ».
+ */
+function lireChampCharge(cle: CleCharge, v: unknown): { v: unknown } | string | null {
+  if (v === undefined || (typeof v === 'string' && !v.trim())) return null
+  const efface = vide(v) || /^(vide|inconnu|inconnue|pas encore su)$/i.test(String(v).trim())
+  switch (cle) {
+    case 'outil': {
+      const t = ligneNette(v)
+      if (!t || efface) return null
+      return t.length > 80 ? 'outil : 80 caractères au plus.' : { v: t }
+    }
+    case 'categorie': case 'note': {
+      if (efface) return { v: null }
+      const t = ligneNette(v)
+      const max = cle === 'note' ? 1000 : 40
+      if (!t) return `${cle} illisible.`
+      return t.length > max ? `${cle} : ${max} caractères au plus.` : { v: t }
+    }
+    case 'montant': case 'montant_eur': {
+      if (efface) return { v: null }
+      const n = lireNombre(v)
+      return n === false || n === null || n > 10_000_000 ? `${cle} : un nombre positif ou nul (« inconnu » = pas encore su).` : { v: n }
+    }
+    case 'devise': {
+      if (efface) return null
+      const t = String(v).trim().toUpperCase().replace('€', 'EUR').replace('$', 'USD')
+      return (DEVISES_CHARGE as readonly string[]).includes(t) ? { v: t } : 'devise : EUR, USD, GBP ou CHF.'
+    }
+    case 'periodicite': {
+      if (efface) return null
+      const p = SYNONYMES_PERIODE[motCle(v)]
+      return p ? { v: p } : 'periodicite : mois, trimestre, an, usage ou unique.'
+    }
+    case 'payeur': {
+      if (efface) return { v: null }
+      const m = motCle(v)
+      const p = m === 'melanie' ? 'mel' : m
+      return p === 'brice' || p === 'mel' || p === 'commun' ? { v: p } : 'payeur : brice, mel ou commun (« aucun » = pas encore su).'
+    }
+    case 'du': case 'au': {
+      if (efface) return { v: null }
+      const j = lireJour(v)
+      return j ? { v: j } : `${cle} : une date AAAA-MM-JJ.`
+    }
+    case 'a_confirmer': {
+      const b = lireOuiNon(v)
+      if (b === null) return efface ? null : 'a_confirmer : vrai (pas encore vue sur une facture) ou faux.'
+      return { v: b }
+    }
+  }
+}
+
+/** Les regles de l'ecran sur une ligne entiere (fin apres debut, une charge unique a sa date). */
+export function regleCharge(c: ChampsCharge): string | null {
+  if (c.du && c.au && c.au < c.du) return 'La date de fin (au) est avant la date de début (du).'
+  if (c.periodicite === 'unique' && !c.du) return 'Une charge unique a besoin de sa date (du).'
+  return null
+}
+
+/** Comme l'ecran : l'equivalent en euros n'existe que pour une autre devise. */
+function normaliserCharge(c: ChampsCharge): ChampsCharge {
+  return c.devise === 'EUR' ? { ...c, montant_eur: null } : c
+}
+
+/** La ligne lue, plus ce que la carte change (modifier), ou la ligne a ajouter (ajouter). */
+export function appliquerCharge(lue: ChampsCharge, p: ParamsCharge): ChampsCharge {
+  const suite = { ...lue } as Record<string, unknown>
+  for (const k of CLES_CHARGE) if (Object.prototype.hasOwnProperty.call(p, k)) suite[k] = p[k]
+  return normaliserCharge(suite as ChampsCharge)
+}
+
+/** La ligne entiere d'une carte « ajouter ». */
+export function chargeAAjouter(p: ParamsCharge): ChampsCharge {
+  return appliquerCharge({ outil: '', ...DEFAUTS_CHARGE }, p)
+}
+
+export function lireParamsCharge(p: Record<string, unknown>): ParamsCharge | string {
+  const quoi = motCle(p.quoi)
+  if (quoi !== 'ajouter' && quoi !== 'modifier' && quoi !== 'retirer') return 'quoi : ajouter, modifier ou retirer.'
+  let id: string | null = null
+  if (quoi !== 'ajouter') {
+    id = uuid(p.charge_id)
+    if (!id) return "charge_id : l'identifiant exact, lu dans cockpit_charges (retire_le null)."
+  }
+  const empreinte = lireEmpreinte(p.empreinte)
+  if (empreinte === false) return 'Empreinte de carte illisible : redemande la carte.'
+  if (quoi === 'retirer') return { quoi, charge_id: id, empreinte }
+  const champs: Record<string, unknown> = {}
+  for (const cle of CLES_CHARGE) {
+    const lu = lireChampCharge(cle, p[cle])
+    if (typeof lu === 'string') return lu
+    if (lu) champs[cle] = lu.v
+  }
+  if (quoi === 'ajouter') {
+    if (!champs.outil) return "outil : le nom de l'outil ou de l'abonnement (80 caractères au plus)."
+    const c = normaliserCharge({ ...DEFAUTS_CHARGE, ...champs } as ChampsCharge)
+    const regle = regleCharge(c)
+    if (regle) return regle
+    return { quoi, charge_id: null, empreinte: null, ...c }
+  }
+  if (!Object.keys(champs).length) return 'Rien à modifier : passe seulement les champs qui changent (« aucun » pour vider un champ facultatif).'
+  if (typeof champs.du === 'string' && typeof champs.au === 'string' && champs.au < champs.du) return 'La date de fin (au) est avant la date de début (du).'
+  return { quoi, charge_id: id, empreinte, ...(champs as Partial<ChampsCharge>) }
+}
+
+function prixCharge(c: Pick<ChampsCharge, 'montant' | 'devise' | 'montant_eur' | 'periodicite'>): string {
+  if (c.montant === null) return `montant inconnu, ${PERIODE_CHARGE[c.periodicite]}`
+  const eur = c.devise !== 'EUR' && c.montant_eur !== null ? ` (soit ${montantFr(c.montant_eur)} € pour la même période)` : ''
+  return `${montantFr(c.montant)} ${c.devise} ${PERIODE_CHARGE[c.periodicite]}${eur}`
+}
+
+function payeurCharge(p: PayeurCharge | null): string {
+  return p === 'brice' ? 'payée par Brice' : p === 'mel' ? 'payée par Mel' : p === 'commun' ? 'payée en commun' : 'payeur pas encore su'
+}
+
+function periodeCharge(c: Pick<ChampsCharge, 'du' | 'au' | 'periodicite'>): string {
+  if (c.periodicite === 'unique') return c.du ? `le ${jourFr(c.du)}` : 'date inconnue'
+  const debut = c.du ? `depuis le ${jourFr(c.du)}` : 'depuis une date inconnue'
+  return c.au ? `${debut}, jusqu'au ${jourFr(c.au)}` : `${debut}, en cours`
+}
+
+/** « « Notion » (outils) : 10,00 EUR par mois, payée par Brice, depuis le 01/11/2026, en cours » */
+function chargeEnClair(c: ChampsCharge): string {
+  return `« ${c.outil} »${c.categorie ? ` (${c.categorie})` : ''} : ${prixCharge(c)}, ${payeurCharge(c.payeur)}, ${periodeCharge(c)}`
+}
+
+/** Ce que la charge pese dans la marge du cockpit (coutMensuel de ChargesEtMarge.tsx). */
+export function poidsMarge(c: ChampsCharge): string {
+  if (c.montant === null) return "Montant inconnu : elle n'entre pas dans la marge tant qu'il manque (un prix inconnu ne compte pas zéro)."
+  const d = DIVISEUR_CHARGE[c.periodicite]
+  const eur = c.devise === 'EUR' ? c.montant / d : c.montant_eur !== null ? c.montant_eur / d : null
+  if (eur === null) return "À convertir : sans son équivalent en euros (relevé de carte), elle n'entre pas dans la marge."
+  if (c.periodicite === 'unique') return `Elle compte ${montantFr(eur)} € dans la marge de ${moisFr(c.du)}.`
+  return `Elle compte pour ${montantFr(eur)} € par mois dans la marge.`
+}
+
+const NOM_CHAMP_CHARGE: Record<CleCharge, string> = {
+  outil: 'Outil', categorie: 'Catégorie', montant: 'Montant', devise: 'Devise', montant_eur: 'Équivalent en euros',
+  periodicite: 'Périodicité', payeur: 'Payeur', du: 'Début', au: 'Fin', a_confirmer: 'À confirmer', note: 'Note',
+}
+
+function valeurCharge(cle: CleCharge, c: ChampsCharge): string {
+  switch (cle) {
+    case 'montant': return c.montant === null ? 'inconnu' : `${montantFr(c.montant)} ${c.devise}`
+    case 'montant_eur': return c.montant_eur === null ? 'vide' : `${montantFr(c.montant_eur)} €`
+    case 'devise': return c.devise
+    case 'periodicite': return PERIODE_CHARGE[c.periodicite]
+    case 'payeur': return c.payeur === 'brice' ? 'Brice' : c.payeur === 'mel' ? 'Mel' : c.payeur === 'commun' ? 'commun' : 'pas encore su'
+    case 'du': case 'au': return c[cle] ? jourFr(c[cle]) : 'vide'
+    case 'a_confirmer': return c.a_confirmer ? 'oui' : 'non'
+    default: return c[cle] === null ? 'vide' : `« ${String(c[cle])} »`
+  }
+}
+
+/** Les champs qui changent vraiment entre la ligne lue et la ligne apres la carte. */
+export function changementsCharge(avant: ChampsCharge, apres: ChampsCharge): CleCharge[] {
+  return CLES_CHARGE.filter(k => avant[k] !== apres[k])
+}
+
+/** Un refus avant la carte (ou au clic), ou null. `lue` = la ligne non retiree, ou null. */
+export function refusCharge(p: ParamsCharge, lue: ChampsCharge | null): string | null {
+  if (p.quoi === 'ajouter') return null
+  if (!lue) return `Charge inconnue ou déjà retirée (cockpit_charges, retire_le null) : relis l'identifiant. ${RIEN_PROPOSE}`
+  if (p.quoi === 'retirer') return null
+  const apres = appliquerCharge(lue, p)
+  if (!changementsCharge(lue, apres).length) return `Rien ne change : la charge « ${lue.outil} » est déjà ainsi. ${RIEN_PROPOSE}`
+  const regle = regleCharge(apres)
+  return regle ? `${regle} ${RIEN_PROPOSE}` : null
+}
+
+export function carteCharge(o: { p: ParamsCharge; lue: ChampsCharge | null; doublon?: ChampsCharge | null }): string {
+  if (o.p.quoi === 'ajouter') {
+    const c = chargeAAjouter(o.p)
+    return [
+      `Ajouter la charge ${chargeEnClair(c)}.`,
+      poidsMarge(c),
+      c.a_confirmer ? 'À confirmer : pas encore vue sur une facture.' : 'Confirmée : vue sur une facture.',
+      c.note ? `Note : ${c.note}` : null,
+      o.doublon ? `Attention, une charge « ${o.doublon.outil} » court déjà (${prixCharge(o.doublon)}, ${periodeCharge(o.doublon)}) : pour un changement de prix, ferme d'abord l'ancienne (date de fin).` : null,
+    ].filter(Boolean).join('\n')
+  }
+  const lue = o.lue as ChampsCharge
+  if (o.p.quoi === 'retirer') {
+    return [
+      `Retirer la charge ${chargeEnClair(lue)}.`,
+      'Elle sort de la liste et de la marge, mois passés compris. La ligne reste en base (retirée, jamais effacée).',
+      "Un changement de prix ne se retire pas : on ferme la ligne (date de fin) et on en ajoute une autre, l'historique reste.",
+    ].join('\n')
+  }
+  const apres = appliquerCharge(lue, o.p)
+  const ch = changementsCharge(lue, apres)
+  return [
+    `Modifier la charge ${chargeEnClair(lue)} :`,
+    ...ch.map((k, i) => `- ${NOM_CHAMP_CHARGE[k]} : ${valeurCharge(k, lue)} devient ${valeurCharge(k, apres)}${i === ch.length - 1 ? '.' : ' ;'}`),
+    `Ensuite : ${prixCharge(apres)}, ${payeurCharge(apres.payeur)}, ${periodeCharge(apres)}. ${poidsMarge(apres)}`,
+  ].join('\n')
+}
+
+export function phraseChargeFaite(p: ParamsCharge, avant: ChampsCharge | null, apres: ChampsCharge): string {
+  if (p.quoi === 'ajouter') return `Charge ajoutée : « ${apres.outil} », ${prixCharge(apres)}. Elle est dans Revenus > Charges et marge. ${poidsMarge(apres)}`
+  if (p.quoi === 'retirer') return `Charge « ${apres.outil} » retirée : elle ne compte plus dans la marge (la ligne reste en base).`
+  const ch = avant ? changementsCharge(avant, apres).map(k => NOM_CHAMP_CHARGE[k].toLowerCase()) : []
+  return `Charge « ${apres.outil} » modifiée (${ch.join(', ')}). ${poidsMarge(apres)}`
+}
+
+// ---------------------------------------------------------------------------
+// G. Les abonnements IA (Depense IA > Abonnements, cockpit_depenses_ia_fixes)
+// ---------------------------------------------------------------------------
+
+/** Le taux des dollars de la depense IA : le meme que depense-ia.ts du cockpit (USD_EUR) et tab/lectures.ts. */
+export const USD_EUR_IA = 0.92
+
+export type ParamsAbonnementIA = {
+  quoi: 'ajouter' | 'arreter' | 'retirer'
+  fixe_id: string | null
+  libelle?: string; fournisseur?: string | null; montant?: number; devise?: 'EUR' | 'USD'
+  periodicite?: 'mensuel' | 'annuel'; debut?: string; note?: string | null
+  /** arreter : le dernier jour compte (aujourd'hui par defaut, comme le bouton). */
+  fin?: string
+  /** Posee par le controle avant la carte (arreter, retirer), exigee et comparee au clic. */
+  empreinte: string | null
+}
+
+export type AbonnementLu = {
+  libelle: string; fournisseur: string | null; montant: number; devise: 'EUR' | 'USD'
+  periodicite: 'mensuel' | 'annuel'; debut: string; fin: string | null; note: string | null
+}
+
+export function lireParamsAbonnementIA(p: Record<string, unknown>, aujourdhui: string): ParamsAbonnementIA | string {
+  const quoi = motCle(p.quoi)
+  if (quoi !== 'ajouter' && quoi !== 'arreter' && quoi !== 'retirer') return 'quoi : ajouter, arreter (résilié) ou retirer (saisie fausse).'
+  const empreinte = lireEmpreinte(p.empreinte)
+  if (empreinte === false) return 'Empreinte de carte illisible : redemande la carte.'
+  if (quoi !== 'ajouter') {
+    const id = uuid(p.fixe_id)
+    if (!id) return "fixe_id : l'identifiant exact, lu dans cockpit_depenses_ia_fixes (retire_le null)."
+    if (quoi === 'retirer') return { quoi, fixe_id: id, empreinte }
+    const fin = vide(p.fin) ? aujourdhui : lireJour(p.fin)
+    if (!fin) return 'fin : le dernier jour AAAA-MM-JJ (vide = aujourd\'hui).'
+    return { quoi, fixe_id: id, fin, empreinte }
+  }
+  const libelle = ligneNette(p.libelle)
+  if (!libelle || libelle.length > 120) return "libelle : le nom de l'abonnement, 1 à 120 caractères (ex. Claude Max)."
+  const fournisseur = vide(p.fournisseur) ? null : ligneNette(p.fournisseur)
+  if (fournisseur && fournisseur.length > 80) return 'fournisseur : 80 caractères au plus.'
+  const montant = lireNombre(p.montant)
+  if (montant === false || montant === null || montant <= 0 || montant > 100_000) return 'montant : le prix de la période, plus que 0 et 100 000 au plus.'
+  const d = vide(p.devise) ? 'EUR' : String(p.devise).trim().toUpperCase().replace('€', 'EUR').replace('$', 'USD')
+  if (d !== 'EUR' && d !== 'USD') return 'devise : EUR ou USD.'
+  const per = vide(p.periodicite) ? 'mensuel' : ({ mensuel: 'mensuel', mois: 'mensuel', annuel: 'annuel', an: 'annuel', annee: 'annuel' } as Record<string, 'mensuel' | 'annuel'>)[motCle(p.periodicite)]
+  if (!per) return 'periodicite : mensuel ou annuel.'
+  const debut = vide(p.debut) ? `${aujourdhui.slice(0, 7)}-01` : lireJour(p.debut)
+  if (!debut) return 'debut : le premier jour AAAA-MM-JJ (vide = le 1er du mois, comme l\'écran).'
+  const note = vide(p.note) ? null : ligneNette(p.note)
+  if (note && note.length > 500) return 'note : 500 caractères au plus.'
+  return { quoi, fixe_id: null, libelle, fournisseur, montant, devise: d, periodicite: per, debut, note, empreinte: null }
+}
+
+function prixAbonnement(a: Pick<AbonnementLu, 'montant' | 'devise' | 'periodicite'>): string {
+  return `${montantFr(a.montant)} ${a.devise} par ${a.periodicite === 'annuel' ? 'an' : 'mois'}`
+}
+
+/** Ce qu'il pese par mois dans la depense IA, en euros (fixeDuMois du cockpit). */
+export function mensuelIA(a: Pick<AbonnementLu, 'montant' | 'devise' | 'periodicite'>): number {
+  const m = a.periodicite === 'annuel' ? a.montant / 12 : a.montant
+  return a.devise === 'USD' ? m * USD_EUR_IA : m
+}
+
+function abonnementEnClair(a: AbonnementLu): string {
+  return `« ${a.libelle} »${a.fournisseur ? ` (${a.fournisseur})` : ''}, ${prixAbonnement(a)} depuis le ${jourFr(a.debut)}`
+}
+
+/** L'abonnement d'une carte « ajouter ». */
+export function abonnementAAjouter(p: ParamsAbonnementIA): AbonnementLu {
+  return {
+    libelle: p.libelle ?? '', fournisseur: p.fournisseur ?? null, montant: p.montant ?? 0, devise: p.devise ?? 'EUR',
+    periodicite: p.periodicite ?? 'mensuel', debut: p.debut ?? '', fin: null, note: p.note ?? null,
+  }
+}
+
+/** Un refus avant la carte (ou au clic), ou null. `lu` = la ligne non retiree, ou null. */
+export function refusAbonnementIA(p: ParamsAbonnementIA, lu: AbonnementLu | null): string | null {
+  if (p.quoi === 'ajouter') return null
+  if (!lu) return `Abonnement IA inconnu ou déjà retiré (cockpit_depenses_ia_fixes, retire_le null) : relis l'identifiant. ${RIEN_PROPOSE}`
+  if (p.quoi === 'arreter') {
+    if (lu.fin) return `L'abonnement « ${lu.libelle} » est déjà arrêté (le ${jourFr(lu.fin)}). ${RIEN_PROPOSE}`
+    if (p.fin && p.fin < lu.debut) return `La fin (${jourFr(p.fin)}) est avant son début (${jourFr(lu.debut)}). ${RIEN_PROPOSE}`
+  }
+  return null
+}
+
+export function carteAbonnementIA(o: { p: ParamsAbonnementIA; lu: AbonnementLu | null }): string {
+  if (o.p.quoi === 'ajouter') {
+    const a = abonnementAAjouter(o.p)
+    return [
+      `Ajouter l'abonnement IA ${abonnementEnClair(a)}.`,
+      `Il compte pour ${montantFr(mensuelIA(a))} € par mois dans la dépense IA${a.periodicite === 'annuel' ? ' (un douzième par mois)' : ''}${a.devise === 'USD' ? ` (dollars comptés à ${montantFr(USD_EUR_IA)} €)` : ''}.`,
+      a.note ? `Note : ${a.note}` : null,
+      "Un prix ne s'efface jamais : pour en changer, on arrête celui-ci et on en ajoute un autre.",
+    ].filter(Boolean).join('\n')
+  }
+  const lu = o.lu as AbonnementLu
+  if (o.p.quoi === 'arreter') {
+    const fin = o.p.fin as string
+    return [
+      `Arrêter l'abonnement IA ${abonnementEnClair(lu)}, au ${jourFr(fin)}.`,
+      `Il compte encore pour ${moisFr(fin)}, plus à partir de ${moisFr(moisSuivant(fin))}. La ligne et son prix restent lisibles.`,
+    ].join('\n')
+  }
+  return [
+    `Retirer l'abonnement IA ${abonnementEnClair(lu)} : c'est pour une saisie fausse.`,
+    'Il sort de la dépense IA, mois passés compris ; la ligne reste en base (retirée, jamais effacée).',
+    "Résilié pour de vrai ? Mieux vaut l'arrêter : son prix reste compté dans les mois où il a couru.",
+  ].join('\n')
+}
+
+export function phraseAbonnementFait(p: ParamsAbonnementIA, a: AbonnementLu): string {
+  if (p.quoi === 'ajouter') return `Abonnement IA ajouté : « ${a.libelle} », ${prixAbonnement(a)} depuis le ${jourFr(a.debut)}. Il est dans Dépense IA > Abonnements.`
+  if (p.quoi === 'arreter') return `Abonnement IA « ${a.libelle} » arrêté au ${jourFr(p.fin)} : il ne compte plus à partir de ${moisFr(moisSuivant(p.fin ?? ''))}.`
+  return `Abonnement IA « ${a.libelle} » retiré (saisie fausse) : il ne compte plus dans la dépense IA.`
+}
+
+// ---------------------------------------------------------------------------
+// H. L'objectif d'une publication Instagram (cockpit_social_objectifs)
+// ---------------------------------------------------------------------------
+
+/** La grille de lecture de Tab (note 60478b43), la meme que InstagramLecture.tsx du cockpit. */
+export const OBJECTIFS_PUBLICATION = [
+  { cle: 'decouverte', nom: 'Découverte', lire: 'la part de non-abonnés touchés et les partages, puis les abonnements gagnés' },
+  { cle: 'valeur', nom: 'Valeur', lire: 'les enregistrements, puis le temps de visionnage' },
+  { cle: 'confiance', nom: 'Confiance', lire: 'les visites du profil, puis les commentaires' },
+  { cle: 'vente', nom: 'Vente', lire: "les clics vers le site et les messages reçus (dans l'appli), puis les visites du profil" },
+  { cle: 'communaute', nom: 'Communauté', lire: 'les commentaires, puis les likes' },
+] as const
+export type ObjectifPublication = (typeof OBJECTIFS_PUBLICATION)[number]['cle']
+const OBJECTIF = Object.fromEntries(OBJECTIFS_PUBLICATION.map(o => [o.cle, o])) as Record<ObjectifPublication, (typeof OBJECTIFS_PUBLICATION)[number]>
+
+export type ParamsObjectif = {
+  publication_id: string; objectif: ObjectifPublication
+  /** Pose par le controle avant la carte (l'objectif lu, 'sans' = aucun), compare au clic. */
+  avant: ObjectifPublication | 'sans' | null
+}
+
+function lireObjectif(v: unknown): ObjectifPublication | null {
+  const m = motCle(v)
+  return Object.prototype.hasOwnProperty.call(OBJECTIF, m) ? (m as ObjectifPublication) : null
+}
+
+export function lireParamsObjectif(p: Record<string, unknown>): ParamsObjectif | string {
+  const id = typeof p.publication_id === 'string' ? p.publication_id.trim() : typeof p.publication_id === 'number' ? String(p.publication_id) : ''
+  if (!/^[0-9A-Za-z_.:-]{1,128}$/.test(id)) return 'publication_id : cockpit_social_publications.publication_id (plateforme instagram), lu par requête.'
+  const objectif = lireObjectif(p.objectif)
+  if (!objectif) return 'objectif : decouverte, valeur, confiance, vente ou communaute.'
+  let avant: ParamsObjectif['avant'] = null
+  if (!vide(p.avant)) {
+    avant = p.avant === 'sans' ? 'sans' : lireObjectif(p.avant)
+    if (!avant) return 'Objectif lu illisible : redemande la carte.'
+  }
+  return { publication_id: id, objectif, avant }
+}
+
+export type PublicationLue = { publicationId: string; publieLe: string | null; type: string | null; legende: string | null }
+
+const TYPE_PUBLICATION: Record<string, string> = { REELS: 'reel', IMAGE: 'photo', CAROUSEL_ALBUM: 'carrousel', VIDEO: 'vidéo', STORY: 'story' }
+
+/** « la publication Instagram du 03/11/2026 (reel) « Le DOL en 30 secondes... » » */
+function publicationEnClair(pub: PublicationLue): string {
+  const legende = extraitClavier((pub.legende ?? '').split('\n')[0], 80)
+  return `la publication Instagram du ${jourFr(pub.publieLe)} (${TYPE_PUBLICATION[pub.type ?? ''] ?? (pub.type ?? 'publication').toLowerCase()})${legende ? ` « ${legende} »` : ''}`
+}
+
+/** Un refus avant la carte (ou au clic), ou null. */
+export function refusObjectif(p: ParamsObjectif, pub: PublicationLue | null, actuel: ObjectifPublication | null): string | null {
+  if (!pub) return `Publication Instagram inconnue (cockpit_social_publications) : relis l'identifiant. ${RIEN_PROPOSE}`
+  if (pub.type === 'STORY') return `Une story n'a pas d'objectif dans l'écran Instagram du cockpit. ${RIEN_PROPOSE}`
+  if (actuel === p.objectif) return `Cette publication a déjà l'objectif « ${OBJECTIF[p.objectif].nom} ». ${RIEN_PROPOSE}`
+  return null
+}
+
+export function carteObjectif(o: { p: ParamsObjectif; pub: PublicationLue; actuel: ObjectifPublication | null }): string {
+  const ob = OBJECTIF[o.p.objectif]
+  return [
+    `Objectif de ${publicationEnClair(o.pub)} : ${ob.nom}.`,
+    `Avant : ${o.actuel ? OBJECTIF[o.actuel]?.nom ?? o.actuel : 'aucun objectif'}.`,
+    `Comment la lire ensuite : regarde d'abord ${ob.lire}.`,
+  ].join('\n')
+}
+
+export function phraseObjectifPose(p: ParamsObjectif, pub: PublicationLue): string {
+  return `Objectif posé : « ${OBJECTIF[p.objectif].nom} » pour la publication Instagram du ${jourFr(pub.publieLe)}. Comment la lire : regarde d'abord ${OBJECTIF[p.objectif].lire}.`
+}
+
+// ---------------------------------------------------------------------------
+// I. Le fonds « Les personnes » : notes, decisions, enquete en ligne
+// ---------------------------------------------------------------------------
+
+/**
+ * L'identifiant d'une personne du fonds (le motif de effacement-pur.ts, sans
+ * tenir compte de la casse comme la route /api/cockpit/enquete) : garde tel
+ * quel, jamais remis en minuscules (cle primaire en texte).
+ */
+export const PERSONNE_FONDS_RE = /^p-[a-z0-9][a-z0-9-]{0,120}$/i
+/** Une note dictee tient dans une carte Telegram (4 096 caracteres en tout). */
+export const MAX_NOTE_FONDS = 3000
+/** Des propositions d'une meme personne, au plus, par carte. */
+export const MAX_PROPOSITIONS_CARTE = 20
+
+/** Les rubriques de l'etude d'une personne, dans l'ordre et les mots de fonds-archive.ts du cockpit. */
+export const RUBRIQUES_FONDS: Readonly<Record<string, string>> = {
+  identite: "Qui c'est", psychologie: 'Ce sur quoi il ou elle bute', trading: 'Son trading', vie: 'Sa vie, ses proches',
+  gouts: 'Ses goûts et contraintes', liens: "Ses liens avec d'autres", parcours: 'Son parcours', evenement: 'Un événement, un lieu', autre: 'Autre',
+}
+
+const NATURE_FONDS: Readonly<Record<string, string>> = {
+  eleve: 'élève', 'eleve-proche': 'élève proche', mentore: 'mentoré', equipe: 'équipe', associe: 'associé',
+  'ancien-associe': 'ancien associé', 'relation-perso': 'relation perso', 'hors-perimetre': 'hors périmètre',
+}
+
+export type PersonneFondsLue = { personneId: string; nom: string; nature: string | null; messages: number }
+
+/** « Jean Dupont (élève, 466 messages) » */
+function personneEnClair(pe: PersonneFondsLue): string {
+  const nature = pe.nature ? NATURE_FONDS[pe.nature] ?? pe.nature.replace(/-/g, ' ') : null
+  return `${extraitClavier(pe.nom, 80) || 'personne sans nom'} (${[nature, `${pe.messages} ${pluriel(pe.messages, 'message', 'messages')}`].filter(Boolean).join(', ')})`
+}
+
+function lirePersonneId(v: unknown): string | null | false {
+  if (vide(v)) return null
+  const t = typeof v === 'string' ? v.trim() : ''
+  return PERSONNE_FONDS_RE.test(t) ? t : false
+}
+
+export type ParamsNoteFonds = { personne_id: string | null; sujet: string | null; rubrique: string; texte: string }
+
+export function lireParamsNoteFonds(p: Record<string, unknown>): ParamsNoteFonds | string {
+  const pid = lirePersonneId(p.personne_id)
+  if (pid === false) return "personne_id : l'identifiant exact de cockpit_arch_personnes (p-...), lu par requête. Inconnue du fonds : passe sujet à la place."
+  const sujet = pid ? null : ligneNette(p.sujet)
+  if (!pid && !sujet) return "Dis de qui ou de quoi il s'agit : personne_id (connue du fonds) ou sujet (texte libre)."
+  if (sujet && sujet.length > 200) return 'sujet : 200 caractères au plus.'
+  const rubrique = vide(p.rubrique) ? 'autre' : motCle(p.rubrique)
+  if (!Object.prototype.hasOwnProperty.call(RUBRIQUES_FONDS, rubrique)) return `rubrique : ${Object.keys(RUBRIQUES_FONDS).join(', ')}.`
+  const texte = texteLong(p.texte)
+  if (!texte) return 'texte : la note, dans les mots de ton interlocuteur (obligatoire).'
+  if (texte.length > MAX_NOTE_FONDS) return `texte : ${MAX_NOTE_FONDS} caractères au plus (découpe en deux notes).`
+  return { personne_id: pid, sujet, rubrique, texte }
+}
+
+export function carteNoteFonds(o: { p: ParamsNoteFonds; personne: PersonneFondsLue | null }): string {
+  const qui = o.personne ? personneEnClair(o.personne) : `« ${o.p.sujet ?? '?'} »`
+  return [
+    `Écrire une note dans le fonds sur ${qui}, rubrique « ${RUBRIQUES_FONDS[o.p.rubrique]} » :`,
+    `« ${o.p.texte} »`,
+    o.personne ? null : 'Le fonds ne connaît pas encore cette personne : la note attend dans la boîte de réception, à rattacher plus tard.',
+    "Signée de ton compte, datée d'aujourd'hui. Donnée interne : elle reste dans le fonds, jamais recopiée vers un membre.",
+  ].filter(Boolean).join('\n')
+}
+
+export function phraseNoteFondsEcrite(p: ParamsNoteFonds, personne: PersonneFondsLue | null): string {
+  const qui = personne ? extraitClavier(personne.nom, 80) : `« ${p.sujet ?? '?'} »`
+  return `Note écrite dans le fonds sur ${qui} (rubrique « ${RUBRIQUES_FONDS[p.rubrique]} »). Elle reste interne.`
+}
+
+export type StatutProposition = 'acceptee' | 'refusee' | 'proposee'
+export type ParamsDecisionFonds = {
+  proposition_ids: string[]; statut: StatutProposition
+  /** Pose par le controle avant la carte (la personne des propositions), compare au clic. */
+  personne_id: string | null
+}
+
+const STATUTS_PROPOSITION: Readonly<Record<string, StatutProposition>> = {
+  acceptee: 'acceptee', accepte: 'acceptee', accepter: 'acceptee',
+  refusee: 'refusee', refuse: 'refusee', refuser: 'refusee',
+  proposee: 'proposee', attente: 'proposee', 'en attente': 'proposee', annuler: 'proposee', remettre: 'proposee', 'a trancher': 'proposee',
+}
+
+export function lireParamsDecisionFonds(p: Record<string, unknown>): ParamsDecisionFonds | string {
+  const brut = Array.isArray(p.proposition_ids) ? p.proposition_ids : typeof p.proposition_ids === 'string' ? [p.proposition_ids] : null
+  if (!brut || brut.length === 0) return 'proposition_ids : les identifiants (cockpit_arch_propositions.proposition_id), au moins un.'
+  const ids: string[] = []
+  for (const x of brut) {
+    const u = uuid(x)
+    if (!u) return `proposition_id illisible : ${String(x).slice(0, 60)}. Relis cockpit_arch_propositions.`
+    if (!ids.includes(u)) ids.push(u)
+  }
+  if (ids.length > MAX_PROPOSITIONS_CARTE) return `${MAX_PROPOSITIONS_CARTE} propositions au plus par carte : découpe.`
+  const statut = STATUTS_PROPOSITION[motCle(p.statut)]
+  if (!statut) return 'statut : acceptee, refusee ou proposee (remettre à trancher).'
+  const pid = lirePersonneId(p.personne_id)
+  if (pid === false) return 'Personne de la carte illisible : redemande la carte.'
+  return { proposition_ids: ids, statut, personne_id: pid }
+}
+
+export type PropositionLue = {
+  propositionId: string; personneId: string; champ: string; reseau: string | null; valeur: string
+  sourceUrl: string | null; confiance: string; statut: string
+}
+
+/** Les champs d'une proposition, dans les mots de fonds-archive.ts du cockpit (CHAMP_DIT). */
+const CHAMP_PROPOSITION: Readonly<Record<string, string>> = {
+  reseau: 'Réseau', site: 'Site ou blog', societe: 'Société', localisation: 'Où il ou elle vit', activite: 'Activité',
+  biographie: 'Parcours', coordonnees: 'Coordonnées', autre: 'Autre',
+}
+
+/** Le domaine d'une source, jamais l'adresse entiere (rien de cliquable venu du web dans une carte). */
+export function domaineSource(url: string | null): string {
+  if (!url) return 'sans source'
+  try {
+    return new URL(url).hostname.replace(/^www\./, '').slice(0, 60) || 'source illisible'
+  } catch {
+    return 'source illisible'
+  }
+}
+
+function propositionEnClair(x: PropositionLue): string {
+  const champ = CHAMP_PROPOSITION[x.champ] ?? x.champ
+  return `${champ}${x.champ === 'reseau' && x.reseau ? ` (${extraitClavier(x.reseau, 20)})` : ''} : « ${extraitClavier(x.valeur, 100)} » (confiance ${extraitClavier(x.confiance, 12)}, source ${domaineSource(x.sourceUrl)})`
+}
+
+const VERBE_STATUT: Record<StatutProposition, string> = { acceptee: 'Accepter', refusee: 'Refuser', proposee: 'Remettre à trancher' }
+const ETAT_STATUT: Record<StatutProposition, [string, string]> = {
+  acceptee: ['acceptée', 'acceptées'], refusee: ['refusée', 'refusées'], proposee: ['remise à trancher', 'remises à trancher'],
+}
+
+/** Un refus avant la carte, ou null : inconnues, de plusieurs personnes, rien qui change. */
+export function refusDecisionFonds(p: ParamsDecisionFonds, props: PropositionLue[]): string | null {
+  const connues = new Set(props.map(x => x.propositionId))
+  const absentes = p.proposition_ids.filter(id => !connues.has(id))
+  if (absentes.length) return `Proposition inconnue : ${absentes.slice(0, 3).join(', ')}. Relis cockpit_arch_propositions. ${RIEN_PROPOSE}`
+  if (new Set(props.map(x => x.personneId)).size > 1) return `Ces propositions concernent plusieurs personnes : une carte par personne. ${RIEN_PROPOSE}`
+  if (props.every(x => x.statut === p.statut)) return `Ces propositions sont déjà ${ETAT_STATUT[p.statut][1]}. ${RIEN_PROPOSE}`
+  return null
+}
+
+export function carteDecisionFonds(o: { p: ParamsDecisionFonds; props: PropositionLue[]; personne: PersonneFondsLue | null }): string {
+  const changent = o.props.filter(x => x.statut !== o.p.statut)
+  const deja = o.props.filter(x => x.statut === o.p.statut)
+  const n = changent.length
+  const lignes = changent.slice(0, 12).map((x, i, t) => `- ${propositionEnClair(x)}${i === t.length - 1 ? '.' : ' ;'}`)
+  const suite: Record<StatutProposition, string> = {
+    acceptee: `${pluriel(n, 'Elle s\'affiche', 'Elles s\'affichent')} sur sa fiche comme vérifiée${n > 1 ? 's' : ''} en ligne, signée${n > 1 ? 's' : ''} de ton compte. Rien d'autre ne change (ni son nom, ni sa nature).`,
+    refusee: `${pluriel(n, 'Refusée, elle reste', 'Refusées, elles restent')} en base : la prochaine enquête ne ${pluriel(n, 'la', 'les')} reproposera pas.`,
+    proposee: `${pluriel(n, 'Elle ne s\'affiche', 'Elles ne s\'affichent')} plus ni comme vérifiée${n > 1 ? 's' : ''} ni comme refusée${n > 1 ? 's' : ''} : à trancher de nouveau.`,
+  }
+  return [
+    `${VERBE_STATUT[o.p.statut]} ${n} ${pluriel(n, 'proposition', 'propositions')} de l'enquête en ligne sur ${o.personne ? extraitClavier(o.personne.nom, 80) : 'cette personne'} :`,
+    ...lignes,
+    n > 12 ? `Et ${n - 12} autres.` : null,
+    suite[o.p.statut],
+    deja.length ? `Déjà ${ETAT_STATUT[o.p.statut][1]}, rien ne change : ${deja.length}.` : null,
+  ].filter(Boolean).join('\n')
+}
+
+export function phraseDecisionFondsFaite(p: ParamsDecisionFonds, n: number, personne: PersonneFondsLue | null): string {
+  return `C'est noté : ${n} ${pluriel(n, 'proposition', 'propositions')} ${ETAT_STATUT[p.statut][n > 1 ? 1 : 0]}${personne ? ` sur ${extraitClavier(personne.nom, 80)}` : ''}.`
+}
+
+export type ParamsEnqueteFonds = { personne_id: string }
+
+export function lireParamsEnqueteFonds(p: Record<string, unknown>): ParamsEnqueteFonds | string {
+  const pid = lirePersonneId(p.personne_id)
+  if (!pid) return "personne_id : l'identifiant exact de cockpit_arch_personnes (p-...), lu par requête."
+  return { personne_id: pid }
+}
+
+/** Ce qui a deja ete propose sur la personne (cockpit_arch_propositions). */
+export type EtatEnquetes = { attente: number; acceptees: number; refusees: number; derniere: string | null }
+/** Le cout mesure des dernieres enquetes (AiUsage, poste « enquete », par echange), ou null s'il n'y en a pas. */
+export type CoutEnquetes = { n: number; moyenneEur: number; maxEur: number } | null
+
+export function carteEnqueteFonds(o: { personne: PersonneFondsLue; etat: EtatEnquetes; cout: CoutEnquetes }): string {
+  const e = o.etat
+  const cout = o.cout && o.cout.n > 0
+    ? `CELA COÛTE : deux appels au modèle du cockpit avec recherche web, environ ${montantFr(o.cout.moyenneEur)} € par enquête (moyenne des ${o.cout.n} dernières, la plus chère ${montantFr(o.cout.maxEur)} €).`
+    : "CELA COÛTE : deux appels au modèle du cockpit avec recherche web (facturée à la requête). Pas encore de mesure ici : le coût sera compté dans Dépense IA, poste « Enquête du fonds »."
+  return [
+    `Lancer une enquête en ligne sur ${personneEnClair(o.personne)} : le modèle cherche sur le web ce qu'il ou elle publie (6 recherches au plus), à partir de ce que le fonds sait déjà (notes comprises), puis range ses trouvailles en propositions.`,
+    cout,
+    "Rien ne s'ajoute à sa fiche : chaque proposition attend ta décision. Compte une à trois minutes, le résultat arrive ici.",
+    e.derniere
+      ? `Déjà une enquête le ${jourFr(e.derniere)} : ${e.attente} à trancher, ${e.acceptees} ${pluriel(e.acceptees, 'acceptée', 'acceptées')}, ${e.refusees} ${pluriel(e.refusees, 'refusée', 'refusées')} (ni les unes ni les autres ne seront reproposées).`
+      : null,
+  ].filter(Boolean).join('\n')
+}
+
+export function phraseEnqueteFaite(o: { nom: string; posees: number; sources: number }): string {
+  const nom = extraitClavier(o.nom, 80)
+  return o.posees > 0
+    ? `Enquête finie sur ${nom} : ${o.posees} ${pluriel(o.posees, 'proposition', 'propositions')} à trancher (${o.sources} ${pluriel(o.sources, 'page consultée', 'pages consultées')}). Elles attendent dans sa fiche (Les personnes) ; d'ici, je peux te proposer de les accepter ou de les refuser.`
+    : `Enquête finie sur ${nom} : rien de nouveau à proposer (${o.sources} ${pluriel(o.sources, 'page consultée', 'pages consultées')}). Rien n'a été ajouté.`
+}
+
+// ---------------------------------------------------------------------------
+// J. Le relais d'accueil du Live Club (cockpit_liveclub_relais.actif)
+// ---------------------------------------------------------------------------
+
+export type ParamsRelais = { quoi: 'couper' | 'rallumer'; telegram_id: number }
+
+export function lireParamsRelais(p: Record<string, unknown>): ParamsRelais | string {
+  const m = motCle(p.quoi)
+  const quoi = m === 'couper' ? 'couper' : ['rallumer', 'reactiver', 'activer'].includes(m) ? 'rallumer' : null
+  if (!quoi) return 'quoi : couper ou rallumer.'
+  const brut = p.telegram_id
+  const n = typeof brut === 'number' ? brut : typeof brut === 'string' && /^\d{1,15}$/.test(brut.trim()) ? Number(brut.trim()) : NaN
+  if (!Number.isSafeInteger(n) || n <= 0) return 'telegram_id : le compte du relais, lu dans cockpit_liveclub_relais (telegram_id, nom, actif).'
+  return { quoi, telegram_id: n }
+}
+
+export type RelaisLu = { telegramId: number; nom: string; actif: boolean; motifs: string[]; enCours: number; coupeLe: string | null }
+
+function recoitRelais(motifs: string[]): string {
+  const a = motifs.includes('accueil')
+  const s = motifs.includes('silence')
+  return a && s ? 'les nouveaux sans un mot et les silencieux (14 jours sans message)' : a ? 'les nouveaux sans un mot' : 'les silencieux (14 jours sans message)'
+}
+
+/** Un refus avant la carte (ou au clic), ou null. */
+export function refusRelais(p: ParamsRelais, r: RelaisLu | null): string | null {
+  if (!r) return `Relais inconnu (cockpit_liveclub_relais) : relis son compte Telegram. ${RIEN_PROPOSE}`
+  if (p.quoi === 'couper' && !r.actif) return `Le relais ${extraitClavier(r.nom, 40)} est déjà coupé${r.coupeLe ? ` (depuis le ${jourFr(r.coupeLe)})` : ''}. ${RIEN_PROPOSE}`
+  if (p.quoi === 'rallumer' && r.actif) return `Le relais ${extraitClavier(r.nom, 40)} est déjà actif. ${RIEN_PROPOSE}`
+  return null
+}
+
+export function carteRelais(o: { p: ParamsRelais; r: RelaisLu }): string {
+  const nom = extraitClavier(o.r.nom, 40)
+  if (o.p.quoi === 'couper') {
+    return [
+      `Couper le relais d'accueil ${nom} : le bot des membres ne lui envoie plus ${recoitRelais(o.r.motifs)}, dès le prochain passage du matin.`,
+      o.r.enCours > 0
+        ? `Ses boutons « C'est fait » ne marchent plus : ${o.r.enCours} ${pluriel(o.r.enCours, 'membre déjà transmis, pas encore fait, reste', 'membres déjà transmis, pas encore faits, restent')} à marquer depuis le cockpit (À contacter).`
+        : "Ses boutons « C'est fait » ne marchent plus (aucun membre transmis en attente).",
+      'Rien ne lui est envoyé pour le prévenir.',
+    ].join('\n')
+  }
+  return [
+    `Rallumer le relais d'accueil ${nom}${o.r.coupeLe ? ` (coupé le ${jourFr(o.r.coupeLe)})` : ''} : le bot des membres lui envoie de nouveau, une fois par jour après le passage du matin, ${recoitRelais(o.r.motifs)}.`,
+    "Ses boutons « C'est fait » remarchent. Rien ne lui est envoyé tout de suite.",
+  ].join('\n')
+}
+
+export function phraseRelaisFait(p: ParamsRelais, nom: string): string {
+  const n = extraitClavier(nom, 40)
+  return p.quoi === 'couper'
+    ? `Relais d'accueil ${n} coupé : plus rien ne lui part dès le prochain passage du matin.`
+    : `Relais d'accueil ${n} rallumé : il reçoit la liste dès le prochain passage du matin.`
+}
+
+// ---------------------------------------------------------------------------
+// K. Retirer une adresse SECONDAIRE d'une fiche membre (cockpit_membre_emails)
+// ---------------------------------------------------------------------------
+
+export type ParamsRetraitAdresse = {
+  email: string
+  /** Pose par le controle avant la carte (la fiche de l'adresse), compare au clic. */
+  membre_id: string | null
+}
+
+export function lireParamsRetraitAdresse(p: Record<string, unknown>): ParamsRetraitAdresse | string {
+  const email = typeof p.email === 'string' ? p.email.trim().toLowerCase() : ''
+  if (!EMAIL_MENTORAT_RE.test(email) || email.length > 320) return "email : l'adresse exacte, lue dans cockpit_membre_emails (principal false)."
+  let membre: string | null = null
+  if (!vide(p.membre_id)) {
+    membre = uuid(p.membre_id)
+    if (!membre) return 'Fiche de la carte illisible : redemande la carte.'
+  }
+  return { email, membre_id: membre }
+}
+
+export type AdresseLue = {
+  email: string; membreId: string; principal: boolean; verifie: boolean; nom: string | null
+  /** Les adresses principales de la fiche (une en principe). */
+  principales: string[]
+  /** Les autres adresses secondaires de la fiche. */
+  autres: number
+  /** Un compte du site porte-t-il cette adresse verifiee ? */
+  compteSite: boolean
+}
+
+/** Un refus avant la carte (ou au clic), ou null. */
+export function refusRetraitAdresse(p: ParamsRetraitAdresse, a: AdresseLue | null): string | null {
+  if (!a) return `L'adresse ${p.email} n'est rattachée à aucune fiche (cockpit_membre_emails). ${RIEN_PROPOSE}`
+  if (a.principal) return `C'est l'adresse principale de ${a.nom ?? 'cette fiche'} : elle porte ses paiements, elle ne se retire ni d'ici ni du cockpit. ${RIEN_PROPOSE}`
+  if (p.membre_id && p.membre_id !== a.membreId) return `Cette adresse a changé de fiche depuis la carte. ${RIEN_PROPOSE}`
+  return null
+}
+
+export function carteRetraitAdresse(a: AdresseLue): string {
+  const principale = a.principales.length ? a.principales.join(', ') : 'aucune adresse principale connue'
+  return [
+    `Retirer l'adresse secondaire ${a.email}${a.verifie ? ' (vérifiée)' : ''} de la fiche de ${a.nom ?? 'ce membre'}. Adresse principale qui reste : ${principale}${a.autres ? ` (et ${a.autres} autre${a.autres > 1 ? 's' : ''} adresse${a.autres > 1 ? 's' : ''} secondaire${a.autres > 1 ? 's' : ''})` : ''}.`,
+    "Ce que ça change : un compte qui se connecte avec cette adresse n'est plus relié à cette fiche. Ce qui se lit par adresse ne passe plus par elle : l'accès aux apps qui vient de la fiche (Live Club actif, ETM, rang Skool), l'ETM et les exemptions pour l'académie, le niveau IA, la reconnaissance au support et au bot du Live Club.",
+    a.compteSite
+      ? 'Un compte du site se connecte avec cette adresse vérifiée : il perd ce qu\'il tenait de cette fiche (un droit posé sur son compte lui-même reste).'
+      : 'Aucun compte du site ne porte cette adresse vérifiée.',
+    'Les paiements restent sur la fiche. La collecte du matin peut la rattacher de nouveau si elle la retrouve dans un paiement.',
+  ].join('\n')
+}
+
+export function phraseAdresseRetiree(a: AdresseLue): string {
+  return `Adresse ${a.email} retirée de la fiche de ${a.nom ?? 'ce membre'}.${a.principales.length ? ` L'adresse principale ${a.principales[0]} reste.` : ''}`
+}
+
 // ---------------------------------------------------------------------------
 // La lecture commune (validerAction), le resume de secours, le log
 // ---------------------------------------------------------------------------
@@ -668,6 +1559,15 @@ export function lireParamsGesteCockpit(
     case 'decision_clip': { const lu = lireParamsDecisionClip(p); return typeof lu === 'string' ? lu : { ...lu } }
     case 'clips_replay': { const lu = lireParamsClipsReplay(p); return typeof lu === 'string' ? lu : { ...lu } }
     case 'envoi_opus': { const lu = lireParamsEnvoiOpus(p); return typeof lu === 'string' ? lu : { ...lu } }
+    // (05/11, LOT 2)
+    case 'charge_fixe': { const lu = lireParamsCharge(p); return typeof lu === 'string' ? lu : { ...lu } }
+    case 'abonnement_ia': { const lu = lireParamsAbonnementIA(p, ctx.aujourdhui); return typeof lu === 'string' ? lu : { ...lu } }
+    case 'objectif_publication': { const lu = lireParamsObjectif(p); return typeof lu === 'string' ? lu : { ...lu } }
+    case 'note_fonds': { const lu = lireParamsNoteFonds(p); return typeof lu === 'string' ? lu : { ...lu } }
+    case 'decision_fonds': { const lu = lireParamsDecisionFonds(p); return typeof lu === 'string' ? lu : { ...lu } }
+    case 'enquete_fonds': { const lu = lireParamsEnqueteFonds(p); return typeof lu === 'string' ? lu : { ...lu } }
+    case 'relais_accueil': { const lu = lireParamsRelais(p); return typeof lu === 'string' ? lu : { ...lu } }
+    case 'retrait_adresse': { const lu = lireParamsRetraitAdresse(p); return typeof lu === 'string' ? lu : { ...lu } }
   }
 }
 
@@ -684,6 +1584,18 @@ export function resumeGesteCockpit(type: TypeGesteCockpit, p: Record<string, unk
     }
     case 'clips_replay': return `Préparer les clips ${p.source === 'youtube' ? `du live YouTube ${String(p.ref ?? '?')}` : `du replay du Live Club ${String(p.ref ?? '?')}`} (aucun crédit Opus).`
     case 'envoi_opus': return `Envoyer à Opus la plage proposée du replay ${String(p.replay_id ?? '?')}${typeof p.credits === 'number' ? ` : ${p.credits} crédits Opus` : ' (des crédits Opus partent)'}.`
+    // (05/11, LOT 2)
+    case 'charge_fixe': return `${p.quoi === 'retirer' ? 'Retirer' : p.quoi === 'modifier' ? 'Modifier' : 'Ajouter'} une charge${typeof p.outil === 'string' ? ` « ${p.outil} »` : ''} (Revenus > Charges et marge).`
+    case 'abonnement_ia': return `${p.quoi === 'retirer' ? 'Retirer' : p.quoi === 'arreter' ? 'Arrêter' : 'Ajouter'} un abonnement IA${typeof p.libelle === 'string' ? ` « ${p.libelle} »` : ''} (Dépense IA).`
+    case 'objectif_publication': return `Poser l'objectif ${String(p.objectif ?? '?')} sur une publication Instagram.`
+    case 'note_fonds': return 'Écrire une note dans le fonds (donnée interne, jamais envoyée à un membre).'
+    case 'decision_fonds': {
+      const n = Array.isArray(p.proposition_ids) ? p.proposition_ids.length : 0
+      return `${p.statut === 'acceptee' ? 'Accepter' : p.statut === 'refusee' ? 'Refuser' : 'Remettre à trancher'} ${n} ${pluriel(n, 'proposition', 'propositions')} du fonds.`
+    }
+    case 'enquete_fonds': return 'Lancer une enquête en ligne sur une personne du fonds (payante : appels au modèle avec recherche web).'
+    case 'relais_accueil': return `${p.quoi === 'rallumer' ? 'Rallumer' : 'Couper'} un relais d'accueil du Live Club.`
+    case 'retrait_adresse': return `Retirer l'adresse secondaire ${String(p.email ?? '?')} d'une fiche membre.`
   }
 }
 
@@ -697,6 +1609,15 @@ export function paramsPourLogGesteCockpit(type: TypeGesteCockpit, p: Record<stri
     case 'decision_clip': return { decision: p.decision ?? null, clips: Array.isArray(p.clip_ids) ? p.clip_ids.length : 0, replay_id: p.replay_id ?? null }
     case 'clips_replay': return { source: p.source ?? null, personne: p.personne ?? null, ref: p.source === 'telegram' ? p.ref ?? null : 'lien' }
     case 'envoi_opus': return { replay_id: p.replay_id ?? null, credits: p.credits ?? null }
+    // (05/11, LOT 2) Ni montant, ni texte, ni email, ni nom ; personne_id porte souvent un nom : jamais logge.
+    case 'charge_fixe': return { quoi: p.quoi ?? null, charge_id: p.charge_id ?? null, champs: CLES_CHARGE.filter(k => k in p) }
+    case 'abonnement_ia': return { quoi: p.quoi ?? null, fixe_id: p.fixe_id ?? null }
+    case 'objectif_publication': return { publication_id: p.publication_id ?? null, objectif: p.objectif ?? null }
+    case 'note_fonds': return { cible: p.personne_id ? 'personne' : 'sujet', rubrique: p.rubrique ?? null }
+    case 'decision_fonds': return { statut: p.statut ?? null, propositions: Array.isArray(p.proposition_ids) ? p.proposition_ids.length : 0 }
+    case 'enquete_fonds': return { enquete: 'oui' }
+    case 'relais_accueil': return { quoi: p.quoi ?? null }
+    case 'retrait_adresse': return { adresse: 'secondaire' }
   }
 }
 

@@ -7,6 +7,53 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
+## AGENT AOK : LES GESTES DU COCKPIT DEPUIS TELEGRAM, LOT 2 (05/11/2026, commite NON pousse ; aucune migration)
+
+- Brice, 05/11 : « que l'agent puisse faire depuis Telegram les gestes du cockpit ». LOT 2, sur le modele du LOT 1 (memes
+  fichiers, memes branchements : les huit types entrent dans TYPES_GESTES_COCKPIT, donc dans validerAction, resumeAction,
+  paramsPourLog et executerAction sans toucher stripe-actions.ts). Huit cartes, communes a Telegram et a la fenetre du cockpit.
+- Charges (Revenus > Charges et marge, cockpit_charges) : proposer_charge_fixe, ajouter | modifier (seulement ce qui change,
+  « aucun » vide un champ) | retirer (retire_le, jamais de delete). Regles de l'ecran (au >= du, unique = sa date, l'equivalent
+  en euros tombe en EUR) ; a_confirmer vrai par defaut (defaut de la table). Carte : outil, montant et periodicite, payeur,
+  depuis quand, poids dans la marge (coutMensuel de l'ecran, « a convertir », « montant inconnu »), doublon qui court deja.
+  Modifier et retirer : empreinte de la ligne (maj_le compris) comparee au clic sous verrou.
+- Abonnements IA (Depense IA, cockpit_depenses_ia_fixes) : proposer_abonnement_ia, ajouter (debut = 1er du mois par defaut,
+  comme l'ecran) | arreter (fin = aujourd'hui par defaut, comme le bouton) | retirer (saisie fausse). Pas de « modifier » :
+  la table n'ouvre que fin, retire_le, retire_par (un prix = arreter puis ajouter). Carte : prix, poids mensuel en euros
+  (USD a 0,92 comme l'ecran), mois ou il cesse de compter.
+- Objectif d'une publication Instagram (cockpit_social_objectifs, upsert) : proposer_objectif_publication. Carte : date, type,
+  debut de legende (en caracteres clavier), objectif d'avant, phrase de lecture de la grille de l'ecran (verifiee contre
+  InstagramLecture.tsx quand le depot est la ; alignee sur 1535dc7). L'objectif lu est compare au clic. Pas une story.
+- Le fonds (Les personnes), reserve a cockpit_allowlist.acces_fonds, verifie a la carte (compte qui parle) ET au clic
+  (compte qui confirme) : proposer_note_fonds (personne_id, ou sujet libre ; texte entier dans la carte, 3 000 caracteres
+  au plus, caracteres invisibles retires ; ecrit_par pose), proposer_decision_fonds (acceptee | refusee | proposee, 20 au
+  plus d'une meme personne ; decide_par ET decide_le poses : le trigger ne pose decide_le que pour authenticated ; la carte
+  montre la valeur et le DOMAINE de la source, jamais l'adresse), proposer_enquete_fonds (PAYANTE : la carte dit le cout
+  MESURE des 20 dernieres enquetes dans AiUsage, poste enquete, ou « pas encore de mesure » ; bouton « Lancer l'enquete
+  (payant) » ; sans ANTHROPIC_API_KEY_COCKPIT, carte sans bouton). Le coeur de POST /api/cockpit/enquete est sorti dans
+  src/lib/fonds-enquete.ts (preparerEnquete, menerEnquete), la route garde ses reponses (401, 403, 400, 404, 502, 200).
+  La phrase du clic ne reprend ni le resume ni les homonymes du modele (texte venu du web) : des chiffres seulement.
+- Relais d'accueil (cockpit_liveclub_relais.actif) : proposer_relais_accueil, couper | rallumer. coupe_par pose par un
+  second update (le trigger le remet a auth.uid(), nul cote serveur). Carte : ce qu'il ne recoit plus, ses boutons
+  « C'est fait » (ne marchent plus coupe), membres transmis en attente. Rien n'est envoye au relais.
+- Adresse secondaire d'un membre (cockpit_membre_emails) : proposer_retrait_adresse, delete seulement principal = false et
+  la fiche lue par la carte. Carte : le membre, l'adresse, la principale qui reste, les autres, ce que ca change (droits lus
+  par adresse, compte du site qui la porte verifiee), la collecte qui peut la remettre.
+- Fichiers : agent-gestes-cockpit-pur.ts (sections F a K), agent-gestes-cockpit.ts (controlerLot2, executerLot2, colonnes
+  d'acteur en tete), fonds-enquete.ts (nouveau), api/cockpit/enquete/route.ts, api/cockpit/agent/action/route.ts
+  (maxDuration 120 -> 300 : une enquete dure une a trois minutes), agent-cockpit.ts (8 outils, TYPE_PAR_OUTIL, prompt :
+  « quinze pour les gestes du cockpit » et six lignes dans « LES GESTES DU COCKPIT, D'ICI »), agent-cockpit-pur.ts.
+- Verifs : scripts/verifier-agent-outils-cockpit.mjs (27 blocs, dont 10 du LOT 2) ; tsc ; eslint des fichiers touches ;
+  -securite-bots, -agent-equipe, -fil-traite, -diffusion-equipe, -reponse-membre, -annulation-abonnement, -adresse-contact,
+  -pause-depot, -effacement, -depot-perdu, -suivi-lots, -academie --hors-ligne, -gestes-academie --hors-ligne,
+  -repartition, -liveclub, -tab-repondre, -relais-accueil, -reconnaissance : ok. verifier-parrainage ECHOUE sans lien
+  avec ce lot : sa ligne 768 attend select('intervenant,lives') dans apps/cockpit/src/views/revenus/DetailMois.tsx, que
+  3ca122d (autre conversation, 05/11 18:37) a passe en select('*'). Aucune base, aucun envoi, aucune eval.
+- Limites : un abonnement IA ne se modifie pas (la table ne l'ouvre pas) ; rattacher une adresse n'est pas outille (seul
+  le retrait l'etait dans le brief) ; deux enquetes simultanees sur la meme personne ne sont pas bloquees (comme le
+  bouton). Mise en ligne : push du journal seul, aucune migration ; la table cockpit_social_objectifs
+  (20261105200000) doit etre en base pour l'objectif (sinon refus clair).
+
 ## AGENT AOK : LES GESTES DU COCKPIT DEPUIS TELEGRAM, LOT 1 (05/11/2026, commite NON pousse ; aucune migration)
 
 - Brice, 05/11 : « que l'agent puisse faire depuis Telegram les gestes du cockpit ». LOT 1 seulement (un lot 2 suivra).
