@@ -1,5 +1,19 @@
 # ETAT du journal d etudes
 
+## CARNET 1.8.14 : DIAGNOSTIC ET LECTURE D'UNE CAPTURE D'ORDRE (05/11/2026, EN LIGNE sur GO de Brice ; aucune migration)
+
+- Briefs : D:\6_Societe\Pilotage\BRIEF-CARNET-1814-DIAGNOSTIC.md et BRIEF-CARNET-1814-CARTE-DE-PRIX.md.
+- POST /api/carnet/diagnostic (Bearer du Carnet) : corps borne a 32 Ko, liste blanche des champs, cadence 5 par jour tenue EN
+  MEMOIRE de l'instance (une instance froide repart de zero ; une table serait a ecrire si besoin) ; message compact a
+  l'equipe par alerterEquipeTexte, textes libres passes par analyserTexte. Pur : src/lib/carnet-diagnostic-pur.ts ;
+  verifier-diagnostic-carnet.mjs (9 blocs).
+- POST /api/carnet/lire-ordre : capture du panneau d'ordre ou de l'outil Position lue par l'IA (produit pilotage, meme modele,
+  une ligne AiUsage au poste 'document', quota du palier ; 429 / 413), reponse { lecture, quota }, null quand illisible.
+  Pur : src/lib/lire-ordre-pur.ts ; verifier-lire-ordre.mjs (9 blocs). Pas encore de lecture reelle testee (cle absente en
+  local) : premiere vraie lecture = essai de Brice.
+- Note.trades[].prix garde sens, typeOrdre, risque (prix-carnet.ts) ; la synthese prend la direction du broker, puis le sens
+  choisi, puis le sens deduit du stop ; la fiche (detail) montre Ordre et Risque.
+
 ## 05/11/2026 : charge sur Supabase, suite (lot de l'Orchestrateur, regle de Brice « recharger a l'action »)
 - Accueil : plus aucun router.refresh() automatique (ni minuterie, ni focus) ; bouton « Actualiser mes notes » en bas de la barre de droite (NoteMapCanvas, ActionBarre.enCours de CanvasToolbar) ; Actualiser met aussi a jour les cartes deja posees (memeNote), une carte dont la note est supprimee ailleurs est retiree de l'affichage.
 - Academie, lecons ecrites : credit envoye au depart de la lecon, en arriere-plan et a la fermeture (plus d'envoi periodique), borne par le temps ecoule et un plafond de 2 h (PLAFOND_TEXTE_S) ; « lue » = profondeur >= 90 % (colonne academie_progression.profondeur_max, migration 20261105233000 appliquee le 05/11) ou texte_fin, ET temps actif >= 30 % d'une lecture a 200 mots/min (plancher 30 s). Videos inchangees.
