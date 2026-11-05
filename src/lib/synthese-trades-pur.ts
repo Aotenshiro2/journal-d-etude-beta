@@ -24,7 +24,7 @@ import {
   type CauseCarnet, type IssueCarnet, type JugementCarnet, type NoteDuCarnet, type PeriodeCarnet,
 } from './carnet-sur-positions'
 import { nettoyerInstrument, nettoyerPrix } from './prix-carnet'
-import type { VuePosition } from './positions'
+import { positionDe, type Execution, type VuePosition } from './positions'
 
 export type Sens = 1 | -1
 
@@ -60,7 +60,27 @@ export interface Effectif {
   executions: number
   /** Le nombre de comptes (compte Pilotage et compte du broker) qui portent le trade. */
   comptes: number
+  /**
+   * Les exécutions de la PREMIÈRE position (un compte, comme `taille` : les
+   * copies ont les mêmes), dans l'ordre de leur sortie : chacune porte son prix
+   * d'entrée et son prix de sortie, d'où les sorties partielles (brief J2,
+   * l'échelle de la fiche). Vide quand l'appelant n'a pas fourni les exécutions.
+   */
+  sorties: SortieBroker[]
 }
+
+/** Une exécution du broker (un aller-retour apparié par la plateforme). */
+export interface SortieBroker {
+  entree: number | null
+  /** null tant que l'exécution est ouverte. */
+  prix: number | null
+  quantite: number
+  /** Instant ISO de la sortie, null si ouverte. */
+  le: string | null
+}
+
+/** Ce qu'il faut d'une exécution pour lire les sorties d'une position. */
+export type ExecutionSortie = Pick<Execution, 'id' | 'positionId' | 'prixEntree' | 'prixSortie' | 'quantite' | 'sortiLe'>
 
 export type SortieVsPlan = 'tp' | 'avant-tp' | 'stop' | 'avant-stop' | 'au-dela-stop'
 
@@ -86,6 +106,8 @@ export interface TradeSynthese {
   segmentId: string
   noteId: string
   noteTitle: string | null
+  /** Sa place dans Note.trades, à partir de 1 (« Trade 2 » sur le badge de la note). */
+  ordre: number
   /** Tapé dans le Carnet, sinon le symbole du broker de la première position liée. */
   instrument: string | null
   /** Instants ISO. */
@@ -200,8 +222,25 @@ function ponderee(positions: VuePosition[], champ: 'prixEntree' | 'prixSortie'):
 const parEntree = (a: VuePosition, b: VuePosition) =>
   (a.entreLe < b.entreLe ? -1 : a.entreLe > b.entreLe ? 1 : 0) || (a.positionId < b.positionId ? -1 : a.positionId > b.positionId ? 1 : 0)
 
-/** L'effectif des positions liées à un trade du Carnet ; null sans position. */
-export function effectifDesPositions(liees: VuePosition[]): Effectif | null {
+/**
+ * Les sorties d'une position : ses exécutions, de la première sortie à la
+ * dernière (les ouvertes à la fin), à égalité par id. Aucune exécution
+ * fournie = liste vide.
+ */
+export function sortiesDeLaPosition(positionId: string, executions: readonly ExecutionSortie[]): SortieBroker[] {
+  const instant = (d: Date | null) => (d ? d.getTime() : Number.POSITIVE_INFINITY)
+  return executions
+    .filter(e => positionDe(e) === positionId)
+    .sort((a, b) => instant(a.sortiLe) - instant(b.sortiLe) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    .map(e => ({ entree: e.prixEntree, prix: e.prixSortie, quantite: e.quantite, le: e.sortiLe ? e.sortiLe.toISOString() : null }))
+}
+
+/**
+ * L'effectif des positions liées à un trade du Carnet ; null sans position.
+ * @param executions les exécutions du membre (ou au moins celles de ces
+ *   positions), pour les sorties partielles ; sans elles, `sorties` est vide.
+ */
+export function effectifDesPositions(liees: VuePosition[], executions: readonly ExecutionSortie[] = []): Effectif | null {
   if (liees.length === 0) return null
   const positions = [...liees].sort(parEntree)
   const devises = new Set(positions.map(p => p.devise))
@@ -222,6 +261,7 @@ export function effectifDesPositions(liees: VuePosition[]): Effectif | null {
     dureeSec: Number.isFinite(fin) && Number.isFinite(debut) ? Math.round((fin - debut) / 1000) : null,
     executions: positions.reduce((s, p) => s + p.executions, 0),
     comptes: new Set(positions.map(p => JSON.stringify([p.compteId, p.compte]))).size,
+    sorties: sortiesDeLaPosition(positions[0].positionId, executions),
   }
 }
 
@@ -287,6 +327,8 @@ export interface EntreeSynthese {
   /** Les blocs image des notes rattachés à un segment, dans l'ordre de la note. */
   captures: { messageId: string; tradeRef: string | null; contenu: string }[]
   periode: PeriodeCarnet
+  /** Les exécutions du membre, pour les sorties partielles (Effectif.sorties) ; absentes = sorties vides. */
+  executions?: readonly ExecutionSortie[]
 }
 
 /**
@@ -295,7 +337,7 @@ export interface EntreeSynthese {
  * positions du broker entrées dans la période sans trade du Carnet (sans lien,
  * ou liées à un segment disparu), et le résumé.
  */
-export function synthetiser({ notes, positions, jugements, captures, periode }: EntreeSynthese): Synthese {
+export function synthetiser({ notes, positions, jugements, captures, periode, executions = [] }: EntreeSynthese): Synthese {
   const segments = segmentsLus(notes)
   const dans = (t: number) => (periode.depuis === null || t >= periode.depuis) && (periode.jusqu === null || t < periode.jusqu)
   const liees = new Map<string, VuePosition[]>()
@@ -305,6 +347,14 @@ export function synthetiser({ notes, positions, jugements, captures, periode }: 
     if (l) l.push(p)
     else liees.set(p.segmentRef, [p])
   }
+  // Les exécutions rangées par position : chaque trade ne lit que les siennes.
+  const parPosition = new Map<string, ExecutionSortie[]>()
+  for (const e of executions) {
+    const l = parPosition.get(positionDe(e))
+    if (l) l.push(e)
+    else parPosition.set(positionDe(e), [e])
+  }
+  const executionsDe = (ps: VuePosition[]) => ps.flatMap(p => parPosition.get(p.positionId) ?? [])
   const derniers = derniersJugements(jugements)
   const images = new Map<string, { url: string; messageId: string }[]>()
   for (const c of captures) {
@@ -319,7 +369,8 @@ export function synthetiser({ notes, positions, jugements, captures, periode }: 
   for (const s of segments.values()) {
     if (!dans(s.startedAt)) continue
     const prevu = lirePrevu(s.segment)
-    const effectif = effectifDesPositions(liees.get(s.segmentRef) ?? [])
+    const lieesIci = liees.get(s.segmentRef) ?? []
+    const effectif = effectifDesPositions(lieesIci, executionsDe(lieesIci))
     const cooldown = objet(s.segment.cooldown) ?? {}
     const closedAt = nombre(s.segment.closedAt)
     const j = derniers.get(s.segmentRef)
@@ -327,6 +378,7 @@ export function synthetiser({ notes, positions, jugements, captures, periode }: 
       segmentId: s.segmentRef,
       noteId: s.noteId,
       noteTitle: s.noteTitle,
+      ordre: s.ordre,
       instrument: nettoyerInstrument(s.segment.instrument) ?? effectif?.positions[0].symbole ?? null,
       startedAt: new Date(s.startedAt).toISOString(),
       closedAt: closedAt !== null && Number.isFinite(new Date(closedAt).getTime()) ? new Date(closedAt).toISOString() : null,

@@ -10,8 +10,8 @@ import { IMAGE_TYPES } from '@/lib/utils'
 
 /**
  * La synthèse des trades du membre (brief J1, J4, 05/11/2026), en LECTURE
- * seule : le « prévu » tapé dans le Carnet face à l'« effectif » du broker. Pas
- * d'écran (l'écran « Mes trades » attend le labo de Brice) ; des données propres,
+ * seule : le « prévu » tapé dans le Carnet face à l'« effectif » du broker. Lue
+ * par l'écran « Mes trades » (/journal, brief J2) ; des données propres,
  * lisibles par API. Auth getUserId : cookie du journal ou Bearer du Carnet ;
  * CORS comme les routes de Pilotage. Tout est borné au userId du jeton.
  *
@@ -24,7 +24,8 @@ import { IMAGE_TYPES } from '@/lib/utils'
  * de la note le plus proche avant le trade, cooldown du trade), le dernier
  * jugement et ses captures (blocs image de la note rattachés au trade, URL
  * http(s) seulement) ; les positions du broker de la période sans trade du
- * Carnet ; le résumé.
+ * Carnet ; le résumé. Brief J2 : chaque trade porte son `ordre` dans la note,
+ * et l'effectif ses `sorties` (les exécutions d'un compte : sorties partielles).
  */
 
 const METHODES = 'GET, OPTIONS'
@@ -73,6 +74,7 @@ export async function GET(req: NextRequest) {
       jugements,
       captures: messages.map(m => ({ messageId: m.id, tradeRef: m.tradeRef, contenu: m.content })),
       periode,
+      executions,
     })
     return NextResponse.json(synthese, { headers: cors })
   } catch (err) {

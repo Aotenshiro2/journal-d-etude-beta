@@ -265,6 +265,27 @@ bloc('resume : lies, prevus sans broker, broker sans note, ecart d entree en R e
   assert.equal(S.synthetiser({ notes: [], positions: [], jugements: [], captures: [], periode }).resume.ecartEntreeMoyen, null)
 })
 
+bloc('brief J2 : sorties du broker = executions de la premiere position, par sortie (ouvertes a la fin) ; ordre du trade dans la note', () => {
+  const t = hm => new Date(iso(hm))
+  const execs = [
+    { id: 'e2', positionId: 'a', prixEntree: 20100.25, prixSortie: 20131, quantite: 1, sortiLe: t('10:30') },
+    { id: 'a', positionId: 'a', prixEntree: 20100.25, prixSortie: 20120.5, quantite: 1, sortiLe: t('10:12') },
+    { id: 'b', positionId: null, prixEntree: 20100.5, prixSortie: 20125, quantite: 2, sortiLe: t('10:20') }, // la copie : position b
+    { id: 'o', positionId: 'a', prixEntree: 20101, prixSortie: null, quantite: 1, sortiLe: null },
+  ]
+  const e = S.effectifDesPositions([pos('b', { compteId: 'cB', entreLe: iso('10:02') }), pos('a', { entreLe: iso('10:01'), quantite: 3 })], execs)
+  assert.deepEqual(e.sorties, [
+    { entree: 20100.25, prix: 20120.5, quantite: 1, le: iso('10:12') },
+    { entree: 20100.25, prix: 20131, quantite: 1, le: iso('10:30') },
+    { entree: 20101, prix: null, quantite: 1, le: null },
+  ])
+  assert.deepEqual(S.effectifDesPositions([pos('a')]).sorties, []) // sans executions fournies
+  const r = S.synthetiser({ notes, positions, jugements: [], captures: [], periode, executions: [{ id: 'a', positionId: 'a', prixEntree: 20001, prixSortie: 20030, quantite: 1, sortiLe: t('10:20') }] })
+  assert.deepEqual(r.trades.map(x => [x.segmentId, x.ordre]), [['s2', 2], ['s1', 1]])
+  assert.deepEqual(r.trades.find(x => x.segmentId === 's1').effectif.sorties, [{ entree: 20001, prix: 20030, quantite: 1, le: iso('10:20') }])
+  assert.match(lire('../src/app/api/trades/synthese/route.ts'), /periode,\s*executions,\s*\}\)/)
+})
+
 bloc('bornes et captures : date seule (jour compris) ou instant ISO, illisible = NaN ; URL http(s) seulement', () => {
   assert.equal(S.lireBorne('2026-10-05', false), Date.parse('2026-10-05T00:00:00Z'))
   assert.equal(S.lireBorne('2026-10-05', true), Date.parse('2026-10-06T00:00:00Z'))
