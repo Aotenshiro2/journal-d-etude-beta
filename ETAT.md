@@ -3,6 +3,26 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
+## TRADES : IMPORT DANS LE CARNET, MES TRADES, FICHE, TUTORIEL (05/11/2026, branche trades-carnet-journal, commite NON pousse ; aucune migration)
+
+- Decide par Brice le 05/11 (suite des retours de Flow du 02/11). Briefs : D:\6_Societe\Pilotage\BRIEF-TRADES-J1-JOURNAL.md et
+  BRIEF-TRADES-J2-JOURNAL.md ; labos LABO-MES-TRADES-V1.html et V2.html (meme dossier). Choix : vues 4, curseur 2, fiche 1,
+  guide 3 a la premiere ouverture puis guide 2.
+- Dedoublonnage par compte (copy trading) : src/lib/doublons-compte.ts, l'idExterne porte |compte:<compteId> (sauf Quantower,
+  qui porte deja le compte) ; les anciennes cles restent reconnues sur leur compte. Positions : champ compte ; PATCH lier
+  { positionIds, segmentRef, ajouter } (un segment porte plusieurs copies) et delier { segmentRef } ; anciennes formes
+  inchangees. Limite : lieA ne nomme qu'une copie ; « Mon edge » de Pilotage compterait un jugement porte par 3 copies 3 fois.
+- GET /api/trades/synthese (lecture seule, cookie ou Bearer du Carnet) : prevu (Note.trades[].prix), effectif (TradeImport
+  lies), ecarts, ressenti, jugement, captures. Calculs purs : src/lib/synthese-trades-pur.ts. Note.trades[].prix accepte
+  stop, tp, partiels (src/lib/prix-carnet.ts).
+- /journal = « Mes trades » (src/components/mes-trades/ : VuesMesTrades, CurseurSortie, FicheTrade) ; fiche
+  /journal?trade=<segmentId> ; le badge de trade d'une note y mene. /guide : carrousel a la premiere ouverture
+  (user_metadata.guide_journal_vu), puis la page pas a pas ; vignettes public/guide/etape-1..9.webp ; textes dans
+  src/lib/guide-journal.ts.
+- Verifier : verifier-doublons-compte, -liens-multiples, -synthese-trades, -mes-trades (+ imports-trades, documents).
+- A pousser AVANT la publication du Carnet 1.8.13, qui appelle ces routes. Pas verifie contre la vraie base : essai reel
+  apres la mise en ligne (import par le Carnet, Lier, fiche).
+
 ## COCKPIT : CONNEXION PAR LIEN AVEC TOUTE ADRESSE VERIFIEE (05/11/2026, NON commite ; migration 20261105220000 ECRITE, NON appliquee)
 
 - Cas : Melanie (connexion Yahoo, dans cockpit_allowlist) a son Gmail verifie dans profile_emails. signInWithOtp n'envoie

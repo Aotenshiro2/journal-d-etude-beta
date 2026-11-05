@@ -40,7 +40,7 @@ export const BLOCS_NOTE = ['Texte', 'Capture', 'Trade', 'Warmup', 'Cooldown', 'D
 const etapes: Omit<EtapeGuide, 'image'>[] = [
   {
     temps: 'noter', titre: 'Noter pendant la séance',
-    texte: 'Dans le Carnet, ton analyse, tes captures, puis « Lancer un trade » au moment où tu entres. Tape ton entrée, ton stop et ton TP.',
+    texte: 'Dans le Carnet, ton analyse, tes captures, puis « Lancer un trade » au moment où tu entres. Tape ton entrée, ton stop et ton TP. Le Carnet capture ton graphique au lancement et à la clôture.',
     vignette: 'Carnet : une note avec un trade lancé',
   },
   {
