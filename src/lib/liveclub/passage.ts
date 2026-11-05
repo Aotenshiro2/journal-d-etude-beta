@@ -117,6 +117,7 @@ import { adresseEnvoi } from './adresse-envoi'
 import { preparerBienvenue } from './bienvenue'
 import { rapprocherTarifsReserves } from './reserves'
 import { filetParrainages } from './parrainage'
+import { cartesFinDeMois } from '@/lib/cartes-fin-de-mois'
 import { resumeDuMatin } from './resume'
 import { relaisDuMatin } from './relais'
 import { recalculerAContacter } from './contact-instantane'
@@ -268,7 +269,9 @@ export type SynthesePassage = {
    * prevenus en prive, alertes a l'equipe, notifications reprises ou
    * incertaines. etat : ok, sans_code, table_absente, stripe_illisible...
    */
-  parrainages: { etat: string; lues: number; notees: number; prevenus: number; equipe: number; reprises: number; incertains: number; erreurs: number }
+  parrainages: { etat: string; lues: number; notees: number; prevenus: number; equipe: number; reprises: number; incertains: number; annulees: number; erreurs: number }
+  /** (t) Cartes de fin de mois (05/11, cartes-fin-de-mois.ts) : commissions de parrainage et lives des intervenants proposes a declarer. */
+  cartes_fin_de_mois: { etat: string; parrainage: number; lives: number; alertes: number; erreurs: number }
   /**
    * (m) Resume du matin a l'equipe (15/10, resume.ts) : son etat (envoye,
    * rien, deja_fait, coupe, table_absente...), ses lignes et le nombre de
@@ -3492,7 +3495,8 @@ function nouveauContexte(maintenant: Date): Contexte {
       tips: { envoyes: 0, sautes: 0, decales: 0, absents: 0, sans_droit: 0, equipe: 0, deja_faits: 0, inconnus: 0, echecs: 0, coupe: false },
       purge: { conversations: 0 },
       tarifs_reserves: { payees: 0, en_attente: 0, illisibles: 0 },
-      parrainages: { etat: 'pas_lance', lues: 0, notees: 0, prevenus: 0, equipe: 0, reprises: 0, incertains: 0, erreurs: 0 },
+      parrainages: { etat: 'pas_lance', lues: 0, notees: 0, prevenus: 0, equipe: 0, reprises: 0, incertains: 0, annulees: 0, erreurs: 0 },
+      cartes_fin_de_mois: { etat: 'pas_lance', parrainage: 0, lives: 0, alertes: 0, erreurs: 0 },
       resume: { etat: 'pas_lance', lignes: 0, livres: 0 },
       relais: { etat: 'pas_lance', lignes: 0, livres: 0 },
       a_contacter: { etat: 'pas_lance', risque: 0, a_venir: 0 },
@@ -3656,9 +3660,20 @@ export async function passageQuotidien(maintenant: Date = new Date()): Promise<S
     const b = await filetParrainages(maintenant)
     ctx.s.parrainages = {
       etat: b.etat, lues: b.lues, notees: b.notees, prevenus: b.prevenus, equipe: b.equipe,
-      reprises: b.reprises, incertains: b.incertains, erreurs: b.erreurs,
+      reprises: b.reprises, incertains: b.incertains, annulees: b.annulees, erreurs: b.erreurs,
     }
     if (b.etat === 'stripe_illisible' || b.etat === 'base_illisible' || b.erreurs > 0) erreur(ctx, `parrainages_${b.etat === 'ok' ? 'erreurs' : b.etat}`)
+  })
+  // (t) Les cartes de fin de mois (05/11, cartes-fin-de-mois.ts) : APRES le
+  // filet (un remboursement du jour change la carte), AVANT le resume. Au
+  // debut du mois suivant (et des le premier passage apres le deploiement pour
+  // un mois deja fini), la carte des commissions de parrainage et celle des
+  // lives de chaque intervenant, pre-remplies, a Brice et Melanie. Rien ne
+  // s'ecrit sans leur clic. Table de memoire absente : rien, sans erreur.
+  await etape('cartes_fin_de_mois', async () => {
+    const b = await cartesFinDeMois(maintenant)
+    ctx.s.cartes_fin_de_mois = b
+    if (b.erreurs > 0) erreur(ctx, 'cartes_fin_de_mois_erreurs')
   })
   await etape('purge', () => tachePurge(ctx))
 

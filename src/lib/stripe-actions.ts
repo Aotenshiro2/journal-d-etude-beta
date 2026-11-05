@@ -44,7 +44,8 @@ import { lireParamsReponseMembre } from '@/lib/reponse-membre-pur'
 import { lireParamsAdresseContact, paramsPourLogContact, resumeAdresseContact } from '@/lib/liveclub/adresse-contact-pur'
 import { lireParamsPauseDepot, paramsPourLogPauseDepot, resumePauseDepot } from '@/lib/liveclub/pause-depot-pur'
 import {
-  complementCodePromo, lireParamsCodeParrainage, lireParrainCodePromo, paramsPourLogParrainage, resumeCodeParrainage,
+  complementCodePromo, libelleDepenseParrainage, lireParamsCodeParrainage, lireParamsDeclaration, lireParrainCodePromo,
+  paramsPourLogParrainage, resumeCodeParrainage,
 } from '@/lib/liveclub/parrainage-pur'
 import {
   lireParamsAnnulation, lireAbonnementStripe, produitsDeAbonnement, choisirAbonnement, refusAnnulation,
@@ -172,6 +173,9 @@ export type ActionAgent = {
     // desactive. Compte 'cockpit' (une ligne de cockpit_liveclub_parrains).
     // liveclub/parrainage.ts et parrainage-pur.ts.
     | 'code_parrainage'
+    // (05/11) La declaration des commissions de parrainage d'un mois en
+    // depense du Live Club (ou son remplacement). Compte 'cockpit'.
+    | 'declaration_parrainage'
     // Acces payant a un tarif particulier (13/10) : lien de paiement d'un
     // produit, et marquage d'un produit existant comme produit Live Club.
     | 'lien_paiement' | 'marquer_live_club'
@@ -211,6 +215,7 @@ export function paramsPourLog(a: ActionAgent): Record<string, unknown> {
   if (a.type === 'pause_depot') return paramsPourLogPauseDepot(a.params)
   // (05/11) Code de parrainage : ni pseudo, ni email, ni nom.
   if (a.type === 'code_parrainage') return paramsPourLogParrainage(a.params)
+  if (a.type === 'declaration_parrainage') return { mois: a.params.mois, du: a.params.du, remplace: a.params.remplace ? 'oui' : 'non' }
   // Code promo (05/11, parrain possible) : sans le nom ni le pseudo du parrain.
   if (a.type === 'code_promo') {
     const p = a.params
@@ -714,6 +719,15 @@ export function validerAction(brut: unknown): ActionAgent | string {
     return { type: 'code_parrainage', compte: 'cockpit', params: { ...lu } }
   }
 
+  // (05/11) La declaration des commissions de parrainage d'un mois fini. du et
+  // remplace ne sont poses que par le controle (ou la carte de fin de mois) ;
+  // le clic refuse si la base a bouge depuis.
+  if (a.type === 'declaration_parrainage') {
+    const lu = lireParamsDeclaration(p, { moisCourant: moisParis(new Date()) })
+    if (typeof lu === 'string') return lu
+    return { type: 'declaration_parrainage', compte: 'cockpit', params: { ...lu } }
+  }
+
   // Les actions du groupe Telegram n'ont pas de compte Stripe.
   if (a.type === 'retirer_telegram' || a.type === 'reintegrer_telegram') {
     const telegramId = lireTelegramId(p.telegram_id)
@@ -931,6 +945,7 @@ export function resumeAction(a: ActionAgent): string {
   if (a.type === 'pause_depot') return resumePauseDepot(p)
   // (05/11) Code de parrainage : la carte detaillee vient du controle (carteCodeParrainage).
   if (a.type === 'code_parrainage') return resumeCodeParrainage(p)
+  if (a.type === 'declaration_parrainage') return `Déclarer en dépense du Live Club les ${libelleDepenseParrainage(String(p.mois)).toLowerCase()}.`
   if (a.type === 'code_promo') {
     const reduc = p.pourcentage != null
       ? `${p.pourcentage} %`
@@ -1381,6 +1396,10 @@ export async function executerAction(a: ActionAgent, acteur = 'agent'): Promise<
   if (a.type === 'code_parrainage') {
     const { executerCodeParrainage } = await import('@/lib/liveclub/parrainage')
     return executerCodeParrainage(a, acteur)
+  }
+  if (a.type === 'declaration_parrainage') {
+    const { executerDeclarationParrainage } = await import('@/lib/liveclub/parrainage')
+    return executerDeclarationParrainage(a, acteur)
   }
 
   // ── Groupe Telegram ───────────────────────────────────────────────────────

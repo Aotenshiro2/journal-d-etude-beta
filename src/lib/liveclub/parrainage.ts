@@ -30,17 +30,32 @@ import { cleStripeEcriture, cleStripeLecture } from './config'
 import { lireAbonnement } from './stripe'
 import { envoyer } from './telegram'
 import { tracerMessageBot } from './support-pont'
-import { messageErreur, relationAbsente } from './pur'
+import { messageErreur, relationAbsente, uuidDeActeur } from './pur'
 import {
-  DELAI_INCERTAIN_MIN, FENETRE_FILET_JOURS,
-  alerterPourFilleul, carteCodeParrainage, codeApres, codesDesRemises, jourParisDe, lireParamsCodeParrainage, notifierFilleul,
-  texteParrain, traiterFactureFilleul, traiterFactures,
-  type BilanFilet, type CodeParrainage, type FactureFilleul, type FilleulANotifier, type IssueFilleul, type NotificationFinale,
-  type OutilsParrainage, type ParamsCodeParrainage, type ParrainCodePromo,
+  DELAI_INCERTAIN_MIN, FENETRE_FILET_JOURS, OFFRE_LIVE_CLUB,
+  alerterPourFilleul, carteCodeParrainage, carteDeclaration, codeApres, codesDesRemises, detailParParrain, etatDeclaration,
+  factureRemboursee, jourParisDe, libelleDepenseParrainage, lireParamsCodeParrainage, lireParamsDeclaration, lireRemboursement,
+  notifierFilleul, phraseAVerser, texteAlerteRemboursement, texteParrain, traiterFactureFilleul, traiterFactures,
+  type BilanFilet, type CodeParrainage, type EtatDeclaration, type FactureFilleul, type FilleulANotifier, type FilleulDuMois,
+  type IssueFilleul, type NotificationFinale, type OutilsParrainage, type ParamsCodeParrainage, type ParrainCodePromo,
 } from './parrainage-pur'
 
 const MIGRATION = '20261105120000_cockpit_liveclub_parrainage'
+/** (05/11) La declaration du mois, l'annulation par remboursement, la memoire des cartes de fin de mois. */
+const MIGRATION_DECLARATION = '20261105190000_cockpit_parrainage_declaration'
 const ABSENTE = `Les tables du parrainage n'existent pas encore (migration ${MIGRATION} à appliquer) : rien n'est enregistré.`
+
+// La repartition (nom et cote du produit, solde du mois) : import dynamique,
+// repartition/serveur.ts importe ce fichier (l'avertissement du mois).
+async function nomOffre(offreId: string): Promise<string | null> {
+  return (await import('@/lib/repartition/serveur')).nomOffre(offreId)
+}
+async function coteDuProduit(offreId: string): Promise<'brice' | 'mel' | null> {
+  return (await import('@/lib/repartition/serveur')).coteDuProduit(offreId)
+}
+async function phraseSoldeDuMois(mois: string): Promise<string | null> {
+  return (await import('@/lib/repartition/serveur')).phraseSoldeDuMois(mois)
+}
 
 // ---------------------------------------------------------------------------
 // Lectures en base
@@ -114,8 +129,8 @@ async function codesDeLaFacture(f: FactureFilleul): Promise<string[]> {
 }
 
 /** Les factures PAYEES des derniers jours, remises et codes promo deplies (le filet). Jette sur une panne. */
-async function facturesRecentes(maintenantMs: number): Promise<unknown[]> {
-  const depuis = Math.floor(maintenantMs / 1000) - FENETRE_FILET_JOURS * 86_400
+async function facturesRecentes(maintenantMs: number, depuisSec?: number): Promise<unknown[]> {
+  const depuis = depuisSec ?? Math.floor(maintenantMs / 1000) - FENETRE_FILET_JOURS * 86_400
   const toutes: unknown[] = []
   let apres: string | null = null
   for (let page = 0; page < 5; page++) {
@@ -209,6 +224,20 @@ async function marquerNotification(filleulId: string, issue: NotificationFinale)
     where filleul_id = ${filleulId}::uuid`
 }
 
+type Lecteur = Pick<typeof prisma, '$queryRaw'>
+
+/** Les filleuls deja notes de CE parrain, tous ses codes compris (meme compte Telegram ou meme pseudo), annules exclus. */
+async function compterFilleuls(db: Lecteur, c: CodeParrainage): Promise<number> {
+  const compte = await db.$queryRaw<{ n: number }[]>`
+    select count(*)::int as n from public.cockpit_liveclub_filleuls fi
+    join public.cockpit_liveclub_parrains p on p.code_id = fi.code_id
+    where fi.statut <> 'annulee' and (
+      p.code_id = ${c.codeId}::uuid
+      or (${c.telegramId}::bigint is not null and p.parrain_telegram_id = ${c.telegramId}::bigint)
+      or (${c.pseudo}::text is not null and lower(p.parrain_pseudo) = lower(${c.pseudo}::text)))`
+  return compte[0]?.n ?? 0
+}
+
 async function noter(e: Parameters<OutilsParrainage['noter']>[0], calcul: Parameters<OutilsParrainage['noter']>[1]) {
   const f = e.facture
   const c = e.code
@@ -218,15 +247,7 @@ async function noter(e: Parameters<OutilsParrainage['noter']>[0], calcul: Parame
     const deja = await tx.$queryRaw<{ n: number }[]>`
       select count(*)::int as n from public.cockpit_liveclub_filleuls where abonnement_id = ${f.abonnementId}`
     if ((deja[0]?.n ?? 0) > 0) return null
-    // Les filleuls deja notes de CE parrain, tous ses codes compris (meme compte Telegram ou meme pseudo).
-    const compte = await tx.$queryRaw<{ n: number }[]>`
-      select count(*)::int as n from public.cockpit_liveclub_filleuls fi
-      join public.cockpit_liveclub_parrains p on p.code_id = fi.code_id
-      where fi.statut <> 'annulee' and (
-        p.code_id = ${c.codeId}::uuid
-        or (${c.telegramId}::bigint is not null and p.parrain_telegram_id = ${c.telegramId}::bigint)
-        or (${c.pseudo}::text is not null and lower(p.parrain_pseudo) = lower(${c.pseudo}::text)))`
-    const k = calcul(compte[0]?.n ?? 0)
+    const k = calcul(await compterFilleuls(tx, c))
     const lignes = await tx.$queryRaw<{ filleul_id: string }[]>`
       insert into public.cockpit_liveclub_filleuls
         (code_id, code, abonnement_id, client_stripe, facture_id, prenom, paye_le, montant_paye, devise,
@@ -240,17 +261,25 @@ async function noter(e: Parameters<OutilsParrainage['noter']>[0], calcul: Parame
   })
 }
 
-function outilsServeur(codes?: () => Promise<CodeParrainage[]>): OutilsParrainage {
+async function dejaNote(abonnementId: string): Promise<boolean> {
+  const l = await prisma.$queryRaw<{ n: number }[]>`
+    select count(*)::int as n from public.cockpit_liveclub_filleuls where abonnement_id = ${abonnementId}`
+  return (l[0]?.n ?? 0) > 0
+}
+
+/**
+ * Les outils du traitement. `aBlanc` (rattrapage, 05/11) : tout est LU pour de
+ * vrai (Stripe, base, compte du parrain), rien n'est ecrit ni envoye ; ce qui
+ * serait fait va dans `journal` (les rangs se comptent comme au vrai passage).
+ */
+function outilsServeur(o: { codes?: () => Promise<CodeParrainage[]>; aBlanc?: boolean; journal?: string[] } = {}): OutilsParrainage {
   let cache: Promise<CodeParrainage[]> | null = null
-  return {
+  const journal = o.journal ?? []
+  const vrais: OutilsParrainage = {
     maintenant: () => new Date().toISOString(),
-    codesParrainage: codes ?? (() => (cache ??= lireCodesParrainage())),
+    codesParrainage: o.codes ?? (() => (cache ??= lireCodesParrainage())),
     codesDeLaFacture,
-    dejaNote: async (abonnementId) => {
-      const l = await prisma.$queryRaw<{ n: number }[]>`
-        select count(*)::int as n from public.cockpit_liveclub_filleuls where abonnement_id = ${abonnementId}`
-      return (l[0]?.n ?? 0) > 0
-    },
+    dejaNote,
     estLiveClub: async (abonnementId) => (await lireAbonnement(abonnementId)) !== null,
     prenomFiche,
     noter,
@@ -259,6 +288,32 @@ function outilsServeur(codes?: () => Promise<CodeParrainage[]>): OutilsParrainag
     envoyerParrain,
     alerterEquipe: (texte) => alerterEquipeTexte(texte, { journal: '[liveclub/parrainage] alerte a l equipe' }),
     marquerNotification,
+  }
+  if (!o.aBlanc) return vrais
+  const notes = new Map<string, number>()
+  let n = 0
+  return {
+    ...vrais,
+    noter: async (e, calcul) => {
+      if (await dejaNote(e.facture.abonnementId)) return null
+      const cle = e.code.telegramId !== null ? `t${e.code.telegramId}` : e.code.pseudo ? `p${e.code.pseudo.toLowerCase()}` : `c${e.code.codeId}`
+      const avant = notes.get(cle) ?? 0
+      notes.set(cle, avant + 1)
+      const k = calcul(await compterFilleuls(prisma, e.code) + avant)
+      journal.push(`FILLEUL : ${e.prenom ?? '(sans prénom)'}, code ${e.code.code} (${e.code.parrain}), payé le ${jourParisDe(e.facture.payeLe)}, `
+        + `${(e.facture.montant / 100).toFixed(2)} ${e.facture.devise}, rang ${k.rang}, ${k.tauxPct} %, commission ${(k.commission / 100).toFixed(2)}, mois ${e.mois}`)
+      return { filleulId: `a-blanc-${++n}`, ...k }
+    },
+    reserverNotification: async () => true,
+    marquerNotification: async () => {},
+    envoyerParrain: async (telegramId, texte) => {
+      journal.push(`  -> message privé au compte ${telegramId} (si Telegram le refuse : alerte à l'équipe) : ${texte}`)
+      return 'ok'
+    },
+    alerterEquipe: async (texte) => {
+      journal.push(`  -> alerte à l'équipe :\n${texte.split('\n').map(l => `     ${l}`).join('\n')}`)
+      return 1
+    },
   }
 }
 
@@ -286,11 +341,20 @@ export async function parrainageApresPaiement(evenement: unknown): Promise<Issue
   }
 }
 
-export type BilanParrainages = BilanFilet & { etat: string; reprises: number; incertains: number }
+export type BilanParrainages = BilanFilet & { etat: string; reprises: number; incertains: number; annulees: number }
 
 const BILAN_VIDE = (etat: string): BilanParrainages => ({
-  etat, lues: 0, notees: 0, prevenus: 0, equipe: 0, a_reprendre: 0, ignorees: 0, deja: 0, erreurs: 0, reprises: 0, incertains: 0,
+  etat, lues: 0, notees: 0, prevenus: 0, equipe: 0, a_reprendre: 0, ignorees: 0, deja: 0, erreurs: 0, reprises: 0, incertains: 0, annulees: 0,
 })
+
+/** Le debut d'un jour de Paris (AAAA-MM-JJ), en secondes : minuit a Paris, ete comme hiver. */
+function debutJourParis(jour: string): number {
+  for (const decalage of ['+02:00', '+01:00']) {
+    const t = Date.parse(`${jour}T00:00:00${decalage}`)
+    if (jourParisDe(new Date(t).toISOString()) === jour && jourParisDe(new Date(t - 1000).toISOString()) !== jour) return Math.floor(t / 1000)
+  }
+  return Math.floor(Date.parse(`${jour}T00:00:00Z`) / 1000)
+}
 
 type LigneANotifier = {
   filleul_id: string; code_id: string; prenom: string | null; paye_le: Date; montant: number; devise: string
@@ -303,9 +367,18 @@ type LigneANotifier = {
  * ne fait rien) ; (2) les filleuls notes depuis plus de 30 minutes dont le
  * parrain n'a pas ete prevenu : a reprendre (envoi rate et alerte non livree)
  * = on recommence ; tentative restee sans resultat = envoi INCERTAIN, l'equipe
- * est prevenue avec la phrase, rien n'est renvoye au parrain. Ne jette pas.
+ * est prevenue avec la phrase, rien n'est renvoye au parrain ; (3) (05/11)
+ * les premiers paiements rembourses : commission annulee (verifierRemboursements).
+ * Ne jette pas.
+ *
+ * (05/11) Le RATTRAPAGE (scripts/rattraper-parrainages.mjs, une fois apres le
+ * deploiement, sur GO) : `depuisJour` = '2026-10-22' (date des codes) au lieu
+ * des 7 derniers jours ; `aBlanc` = tout est lu, rien n'est ecrit ni envoye,
+ * `journal` recoit ce qui serait fait (ni reprises ni remboursements a blanc).
  */
-export async function filetParrainages(maintenant: Date = new Date()): Promise<BilanParrainages> {
+export async function filetParrainages(
+  maintenant: Date = new Date(), o: { depuisJour?: string; aBlanc?: boolean; journal?: string[] } = {},
+): Promise<BilanParrainages> {
   let codes: CodeParrainage[]
   try {
     codes = await lireCodesParrainage()
@@ -315,17 +388,18 @@ export async function filetParrainages(maintenant: Date = new Date()): Promise<B
     return BILAN_VIDE('base_illisible')
   }
   if (!codes.some(c => c.actif)) return BILAN_VIDE('sans_code')
-  const outils = outilsServeur(async () => codes)
+  const outils = outilsServeur({ codes: async () => codes, aBlanc: o.aBlanc, journal: o.journal })
 
   let factures: unknown[]
   let bilan: BilanParrainages
   try {
-    factures = await facturesRecentes(maintenant.getTime())
-    bilan = { ...await traiterFactures(factures, outils), etat: 'ok', reprises: 0, incertains: 0 }
+    factures = await facturesRecentes(maintenant.getTime(), o.depuisJour ? debutJourParis(o.depuisJour) : undefined)
+    bilan = { ...await traiterFactures(factures, outils), etat: 'ok', reprises: 0, incertains: 0, annulees: 0 }
   } catch (err) {
     console.warn(`[liveclub/parrainage] factures illisibles : ${messageErreur(err).slice(0, 160)}`)
     bilan = { ...BILAN_VIDE('stripe_illisible') }
   }
+  if (o.aBlanc) return bilan
 
   // (2) Les notifications restees en plan.
   let lignes: LigneANotifier[] = []
@@ -367,27 +441,247 @@ export async function filetParrainages(maintenant: Date = new Date()): Promise<B
       bilan.erreurs++
     }
   }
+
+  // (3) Les premiers paiements rembourses depuis (05/11).
+  const r = await verifierRemboursements()
+  bilan.annulees = r.annulees
+  bilan.erreurs += r.erreurs
   console.log(`[liveclub/parrainage] filet : ${JSON.stringify(bilan)}`)
   return bilan
 }
 
 // ---------------------------------------------------------------------------
-// Lectures pour la repartition, le resume du matin et l'API de Tab
+// Le remboursement (Brice, 05/11) : « la commission est annulée s'il a été
+// remboursé ». Filet du matin, et webhook charge.refunded (meme fonction).
 // ---------------------------------------------------------------------------
 
-/** Les commissions de parrainage A VERSER d'un mois (statut a_verser). Table absente ou panne : rien. */
-export async function lireAVerserParrainages(mois: string): Promise<{ parrain: string; commission: number; devise: string }[]> {
+/** Les filleuls relus au plus : ceux payes depuis 120 jours, encore dus. */
+const MAX_REMBOURSEMENTS = 50
+
+/**
+ * Les filleuls encore dus (a_verser, declaree) payes depuis 120 jours, ou ceux
+ * d'un client (webhook) : leur facture relue chez Stripe (paiements, charge
+ * depliee). Remboursee en entier : statut annulee, commission a 0 (gardee dans
+ * commission_initiale). Deja declaree : alerte a l'equipe (la carte de
+ * correction suit au passage). Rien au parrain. Ne jette pas.
+ */
+export async function verifierRemboursements(o: { client?: string } = {}): Promise<{ annulees: number; erreurs: number }> {
+  let lignes: { filleul_id: string; facture_id: string; mois: string }[]
   try {
-    const lignes = await prisma.$queryRaw<{ parrain: string; commission: number; devise: string }[]>`
-      select p.parrain, f.commission::float8 as commission, f.devise
-      from public.cockpit_liveclub_filleuls f join public.cockpit_liveclub_parrains p on p.code_id = f.code_id
-      where f.mois = ${mois} and f.statut = 'a_verser'
-      order by f.paye_le`
-    return lignes.map(l => ({ parrain: l.parrain, commission: Math.round(Number(l.commission) * 100), devise: l.devise }))
+    lignes = await prisma.$queryRaw<{ filleul_id: string; facture_id: string; mois: string }[]>`
+      select filleul_id::text as filleul_id, facture_id, mois from public.cockpit_liveclub_filleuls
+      where statut in ('a_verser', 'declaree') and facture_id is not null
+        and (${o.client ?? null}::text is null or client_stripe = ${o.client ?? null}::text)
+        and paye_le > now() - interval '120 days'
+      order by paye_le limit ${MAX_REMBOURSEMENTS}::int`
   } catch (err) {
-    if (!relationAbsente(err)) console.warn(`[liveclub/parrainage] a verser illisible : ${messageErreur(err).slice(0, 160)}`)
+    if (!relationAbsente(err)) console.warn(`[liveclub/parrainage] remboursements illisibles : ${messageErreur(err).slice(0, 160)}`)
+    return { annulees: 0, erreurs: relationAbsente(err) ? 0 : 1 }
+  }
+  let annulees = 0
+  let erreurs = 0
+  for (const l of lignes) {
+    try {
+      const q = new URLSearchParams({ invoice: l.facture_id, limit: '10' })
+      q.append('expand[]', 'data.payment.charge')
+      const paiements = await lireStripe(`/v1/invoice_payments?${q}`)
+      if (!factureRemboursee(paiements.data)) continue
+      if (await annulerFilleul(l.filleul_id, l.mois)) annulees++
+    } catch (err) {
+      console.warn(`[liveclub/parrainage] remboursement non verifie : ${messageErreur(err).slice(0, 160)}`)
+      erreurs++
+    }
+  }
+  return { annulees, erreurs }
+}
+
+/** L'annulation d'UN filleul rembourse, sous le verrou du mois ; l'alerte s'il etait deja declare. */
+async function annulerFilleul(filleulId: string, mois: string): Promise<boolean> {
+  const issue = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`select count(*)::int as n from (select pg_advisory_xact_lock(hashtextextended(${`liveclub:parrainage:mois:${mois}`}::text, 0))) as verrou`
+    const avant = await tx.$queryRaw<{ statut: string; commission: number; prenom: string | null; code: string; parrain: string }[]>`
+      select f.statut, f.commission::float8 as commission, f.prenom, f.code, p.parrain
+      from public.cockpit_liveclub_filleuls f join public.cockpit_liveclub_parrains p on p.code_id = f.code_id
+      where f.filleul_id = ${filleulId}::uuid for update of f`
+    const a = avant[0]
+    if (!a || (a.statut !== 'a_verser' && a.statut !== 'declaree')) return null
+    await tx.$executeRaw`
+      update public.cockpit_liveclub_filleuls
+      set statut = 'annulee', commission_initiale = commission, commission = 0, annulee_le = now(), annulee_raison = 'rembourse'
+      where filleul_id = ${filleulId}::uuid`
+    return a
+  })
+  if (!issue) return false
+  console.info(`[liveclub/parrainage] filleul annule (premier paiement rembourse)${issue.statut === 'declaree' ? ', deja declare : alerte a l equipe' : ''}`)
+  if (issue.statut === 'declaree') {
+    const e = await lireEtatDeclaration(mois)
+    await alerterEquipeTexte(texteAlerteRemboursement({
+      prenom: issue.prenom, parrain: issue.parrain, code: issue.code, commission: Math.round(Number(issue.commission) * 100),
+      mois, depense: e?.depense?.montant ?? null, du: e?.du ?? 0,
+    }), { journal: '[liveclub/parrainage] remboursement apres declaration' })
+  }
+  return true
+}
+
+/** Le webhook charge.refunded (signe) : les filleuls de ce client relus. 'panne' : Stripe rejoue. */
+export async function parrainageApresRemboursement(evenement: unknown): Promise<{ etat: 'ok' | 'panne'; annulees: number }> {
+  const r = lireRemboursement(evenement)
+  if (!r) return { etat: 'ok', annulees: 0 }
+  const v = await verifierRemboursements({ client: r.client })
+  return { etat: v.erreurs > 0 ? 'panne' : 'ok', annulees: v.annulees }
+}
+
+// ---------------------------------------------------------------------------
+// La declaration du mois (Brice, 05/11) : les commissions d'un mois deviennent
+// UNE depense du Live Club, par carte (parrainage-pur.ts, carteDeclaration).
+// ---------------------------------------------------------------------------
+
+/**
+ * Ou en est la declaration d'un mois : ses filleuls et la depense vivante.
+ * null = tables ou colonnes absentes (migrations 20261105120000 et
+ * 20261105190000), ou base illisible : ni avertissement ni carte.
+ */
+export async function lireEtatDeclaration(mois: string, db: Lecteur = prisma): Promise<EtatDeclaration | null> {
+  try {
+    const filleuls = await db.$queryRaw<{ filleul_id: string; parrain: string; prenom: string | null; commission: number; statut: FilleulDuMois['statut']; depense_id: string | null }[]>`
+      select f.filleul_id::text as filleul_id, p.parrain, f.prenom, f.commission::float8 as commission, f.statut, f.depense_id::text as depense_id
+      from public.cockpit_liveclub_filleuls f join public.cockpit_liveclub_parrains p on p.code_id = f.code_id
+      where f.mois = ${mois} order by f.paye_le`
+    const depenses = await db.$queryRaw<{ depense_id: string; montant: number; pose_le: Date }[]>`
+      select depense_id::text as depense_id, montant::float8 as montant, pose_le from public.cockpit_depenses
+      where parrainage_mois = ${mois} and retire_le is null order by pose_le desc limit 1`
+    const d = depenses[0]
+    return etatDeclaration(
+      filleuls.map(f => ({
+        filleulId: f.filleul_id, parrain: f.parrain, prenom: f.prenom, commission: Math.round(Number(f.commission) * 100),
+        statut: f.statut, depenseId: f.depense_id,
+      })),
+      d ? { depenseId: d.depense_id, montant: Math.round(Number(d.montant) * 100), poseLe: d.pose_le.toISOString() } : null,
+    )
+  } catch (err) {
+    if (!relationAbsente(err) && !/42703|column .* does not exist/i.test(messageErreur(err))) {
+      console.warn(`[liveclub/parrainage] declaration illisible : ${messageErreur(err).slice(0, 160)}`)
+    }
+    return null
+  }
+}
+
+/** Les mois finis (3 derniers au plus) dont la declaration n'est pas a jour : la carte de fin de mois. */
+export async function moisADeclarer(moisCourant: string): Promise<{ mois: string; etat: EtatDeclaration }[]> {
+  let mois: { mois: string }[]
+  try {
+    mois = await prisma.$queryRaw<{ mois: string }[]>`
+      select distinct mois from public.cockpit_liveclub_filleuls where mois < ${moisCourant} order by mois desc limit 3`
+  } catch {
     return []
   }
+  const sortie: { mois: string; etat: EtatDeclaration }[] = []
+  for (const m of mois) {
+    const etat = await lireEtatDeclaration(m.mois)
+    if (etat && !etat.aJour) sortie.push({ mois: m.mois, etat })
+  }
+  return sortie
+}
+
+/** L'avertissement de la repartition d'un mois (Revenus) : null une fois la declaration a jour. */
+export async function phraseParrainagesDuMois(mois: string, moisCourant: string): Promise<string | null> {
+  const e = await lireEtatDeclaration(mois)
+  return e ? phraseAVerser(e, mois, { moisCourant }) : null
+}
+
+export type ControleDeclaration = { action: ActionAgent; carte: string; court: string; manque: string | null } | { erreur: string }
+
+/** Avant la carte (lecture seule) : l'etat du mois, la carte composee par le serveur. */
+export async function controlerDeclarationParrainage(action: ActionAgent): Promise<ControleDeclaration> {
+  const moisCourant = jourParisDe(new Date().toISOString()).slice(0, 7)
+  const p = lireParamsDeclaration(action.params, { moisCourant })
+  if (typeof p === 'string') return { erreur: p }
+  const e = await lireEtatDeclaration(p.mois)
+  if (!e) return { erreur: `Les tables du parrainage ne sont pas encore à jour (migrations ${MIGRATION} et ${MIGRATION_DECLARATION} à appliquer) : rien à déclarer.` }
+  const produit = (await nomOffre(OFFRE_LIVE_CLUB)) ?? 'Live Club'
+  const c = carteDeclaration(p.mois, e, { produit })
+  if (!c) {
+    return {
+      erreur: e.depense
+        ? `Les commissions de parrainage ${deMoisLibelle(p.mois)} sont déjà déclarées (${(e.depense.montant / 100).toFixed(2).replace('.', ',')} €, le ${jourParisDe(e.depense.poseLe)}) : rien à refaire.`
+        : `Aucune commission de parrainage pour ${p.mois} : rien à déclarer.`,
+    }
+  }
+  return {
+    action: { ...action, compte: 'cockpit', params: { mois: p.mois, du: e.du, remplace: e.depense?.depenseId ?? null } },
+    carte: c.carte, court: c.court, manque: null,
+  }
+}
+
+function deMoisLibelle(mois: string): string {
+  return libelleDepenseParrainage(mois).replace('Commissions de parrainage ', '')
+}
+
+/**
+ * Le clic : sous le verrou du mois, l'etat relu doit etre celui de la carte
+ * (sinon refus, redemander la carte) ; l'ancienne depense retiree s'il y en a
+ * une, la nouvelle posee (produit Live Club, cote Mel, payee par Mel), les
+ * filleuls dus passes « declaree ». Une seule depense vivante par mois (index
+ * unique de la base).
+ */
+export async function executerDeclarationParrainage(action: ActionAgent, acteur: string): Promise<string> {
+  const posePar = uuidDeActeur(acteur)
+  if (!posePar) throw new Error("Auteur de l'action illisible : rien n'a été écrit.")
+  const moisCourant = jourParisDe(new Date().toISOString()).slice(0, 7)
+  const p = lireParamsDeclaration(action.params, { moisCourant })
+  if (typeof p === 'string') throw new RefusAction(`${p} Rien n'a été fait.`)
+  const produit = (await nomOffre(OFFRE_LIVE_CLUB)) ?? null
+  if (!produit) throw new RefusAction(`Le produit ${OFFRE_LIVE_CLUB} est introuvable dans cockpit_offres : rien n'a été déclaré.`)
+  const cote = (await coteDuProduit(OFFRE_LIVE_CLUB)) ?? 'mel'
+  try {
+    const r = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`select count(*)::int as n from (select pg_advisory_xact_lock(hashtextextended(${`liveclub:parrainage:mois:${p.mois}`}::text, 0))) as verrou`
+      const e = await lireEtatDeclaration(p.mois, tx)
+      if (!e) throw new RefusAction(`Les tables du parrainage ne sont pas encore à jour (migration ${MIGRATION_DECLARATION} à appliquer) : rien n'a été déclaré.`)
+      if (e.aJour) throw new RefusAction(`Déjà à jour : les commissions de parrainage ${deMoisLibelle(p.mois)} sont déclarées. Rien n'a été refait.`)
+      if ((p.du !== null && p.du !== e.du) || p.remplace !== (e.depense?.depenseId ?? null)) {
+        throw new RefusAction(`Les commissions de parrainage ${deMoisLibelle(p.mois)} ont changé depuis la carte (dû : ${(e.du / 100).toFixed(2).replace('.', ',')} €) : redemande-la, rien n'a été fait.`)
+      }
+      if (e.depense) {
+        await tx.$executeRaw`
+          update public.cockpit_depenses set retire_le = now(), retire_par = ${posePar}::uuid
+          where depense_id = ${e.depense.depenseId}::uuid and retire_le is null`
+      }
+      let depenseId: string | null = null
+      if (e.du > 0) {
+        const lignes = await tx.$queryRaw<{ depense_id: string }[]>`
+          insert into public.cockpit_depenses (libelle, montant, mois, payee_par, cote, offre_id, note, pose_par, via, parrainage_mois)
+          values (${libelleDepenseParrainage(p.mois)}, ${(e.du / 100).toFixed(2)}::numeric, ${p.mois}, ${cote}, ${cote}, ${OFFRE_LIVE_CLUB},
+            ${detailParParrain(e.dus).slice(0, 500)}, ${posePar}::uuid, 'agent', ${p.mois})
+          returning depense_id::text as depense_id`
+        depenseId = lignes[0].depense_id
+        const ids = e.dus.map(f => f.filleulId)
+        await tx.$executeRaw`
+          update public.cockpit_liveclub_filleuls set statut = 'declaree', depense_id = ${depenseId}::uuid
+          where filleul_id::text = any(${ids}::text[]) and statut in ('a_verser', 'declaree')`
+      }
+      return { e, depenseId }
+    })
+    const solde = await phraseSoldeDuMois(p.mois).catch(() => null)
+    const quoi = r.depenseId
+      ? `Dépense ajoutée à ${nomMoisDe(p.mois)} : ${libelleDepenseParrainage(p.mois)}, ${detailParParrain(r.e.dus)} = ${(r.e.du / 100).toFixed(2).replace('.', ',')} €, `
+        + `produit ${produit}, côté ${cote === 'mel' ? 'Mel' : 'Brice'}, payée par ${cote === 'mel' ? 'Mel' : 'Brice'}.`
+      : `Dépense des commissions de parrainage ${deMoisLibelle(p.mois)} retirée : plus rien à verser ce mois-là.`
+    return `${quoi}${r.e.depense && r.depenseId ? ' L\'ancienne dépense est retirée.' : ''}${solde ? `\n${solde}` : ''}`
+      + '\nReste à verser les commissions aux parrains (hors du cockpit).'
+  } catch (err) {
+    if (relationAbsente(err) || /42703|column .* does not exist/i.test(messageErreur(err))) {
+      throw new RefusAction(`Les tables du parrainage ne sont pas encore à jour (migration ${MIGRATION_DECLARATION} à appliquer) : rien n'a été déclaré.`)
+    }
+    if (/23505|unique/i.test(messageErreur(err))) {
+      throw new RefusAction(`Les commissions de parrainage ${deMoisLibelle(p.mois)} viennent d'être déclarées : rien n'a été refait.`)
+    }
+    throw err
+  }
+}
+
+function nomMoisDe(mois: string): string {
+  return deMoisLibelle(mois).replace(/^d'|^de /, '')
 }
 
 export type FilleulFenetre = {

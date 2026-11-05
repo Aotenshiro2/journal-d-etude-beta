@@ -68,6 +68,12 @@ export function nomMois(mois: string): string {
   return MOIS_FR[Number(mois.slice(5, 7)) - 1] ?? mois
 }
 
+/** '2026-10' -> « d'octobre », '2026-11' -> « de novembre ». */
+export function deMois(mois: string): string {
+  const nom = nomMois(mois)
+  return /^[aeiou]/.test(nom) ? `d'${nom}` : `de ${nom}`
+}
+
 /** '2026-11-03' -> '3 novembre'. */
 export function jourCourtFr(jour: string): string {
   return `${Number(jour.slice(8, 10))} ${nomMois(jour)}`
@@ -337,7 +343,8 @@ export function texteParrain(o: ContexteTexte): string {
     ? `${qui} vient de rejoindre le Live Club`
     : `${qui} a rejoint le Live Club le ${jourCourtFr(jour)}`
   const mois = moisDuJour(jour)
-  const quand = mois === moisDuJour(aujourdhui) ? 'à la fin du mois' : `fin ${nomMois(mois)}`
+  // (05/11, rattrapage) Un mois deja passe : la commission est comptee avec celles de ce mois-la.
+  const quand = mois === moisDuJour(aujourdhui) ? 'à la fin du mois' : `avec les commissions ${deMois(mois)}`
   const palier = o.rang === o.palier + 1
     ? ` C'est ton ${rangLisible(o.rang)} filleul : à partir de lui, ta commission passe à ${pourcent(o.tauxPct)}.`
     : ''
@@ -373,7 +380,8 @@ export function texteAlerteEquipe(o: ContexteTexte & {
   return [
     `Nouveau filleul du Live Club : ${filleul}, abonnement payé le ${jourCourtFr(jour)} avec le code ${o.code} ${deNom(parrain)}.`,
     `Premier paiement ${montantLisible(o.montant, o.devise)}, commission ${euros(o.commission, o.devise)} `
-      + `(${pourcent(o.tauxPct)}, ${rangLisible(o.rang)} filleul), à verser fin ${nomMois(mois)}.`,
+      + `(${pourcent(o.tauxPct)}, ${rangLisible(o.rang)} filleul), `
+      + `${mois === moisDuJour(jourParisDe(o.maintenant)) ? `à verser fin ${nomMois(mois)}` : `comptée avec les commissions ${deMois(mois)}`}.`,
     raison,
     `Phrase à lui transmettre :\n« ${o.texte} »`,
   ].join('\n\n')
@@ -398,24 +406,193 @@ export function detailResumeParrainage(o: {
     + phraseNotification(o.notification, o.parrain)
 }
 
-/**
- * (Revenus, repartition_du_mois) Ce qu'il faut verser aux parrains pour ce
- * mois : un avertissement, PAS une ligne du calcul. Qui paie les commissions
- * de parrainage n'est pas decide (question a Brice, 05/11) : tant qu'il ne
- * l'est pas, la repartition Brice / Mel ne les deduit pas, et le dit.
- */
-export function phraseAVerser(lignes: readonly { parrain: string; commission: number; devise: string }[], mois: string): string | null {
-  if (lignes.length === 0) return null
-  const parParrain = new Map<string, number>()
-  let total = 0
-  for (const l of lignes) {
-    parParrain.set(l.parrain, (parParrain.get(l.parrain) ?? 0) + l.commission)
-    total += l.commission
+// ---------------------------------------------------------------------------
+// LA DECLARATION DU MOIS (Brice, 05/11 : « les commissions sont dans les
+// dépenses du Live Club, comme pour les lives d'Adrien »). Les commissions d'un
+// mois deviennent UNE depense rattachee au produit Live Club (cote Mel,
+// deduite avant le 70/30, payee par Mel), par une CARTE d'Agent AOK : proposee
+// d'elle-meme par le passage au debut du mois suivant, ou demandee. Une seule
+// declaration vivante par mois (index unique sur cockpit_depenses.parrainage_mois).
+// Une declaration qui ne correspond plus (un filleul ajoute ou rembourse apres
+// coup) se REMPLACE par la meme carte : l'ancienne depense est retiree, la
+// nouvelle posee, jamais d'ecriture toute seule.
+// ---------------------------------------------------------------------------
+
+export const TYPE_DECLARATION_PARRAINAGE = 'declaration_parrainage'
+export const NOM_OUTIL_AGENT_DECLARATION = 'proposer_parrainages_du_mois'
+/** Le produit Live Club dans cockpit_offres (celui des lives d'Adrien). */
+export const OFFRE_LIVE_CLUB = 'live-club'
+
+/** Un filleul du mois, tel que la declaration le lit. */
+export type FilleulDuMois = {
+  filleulId: string
+  parrain: string
+  prenom: string | null
+  /** Centimes (0 pour un filleul annule). */
+  commission: number
+  statut: 'a_verser' | 'declaree' | 'versee' | 'annulee'
+  depenseId: string | null
+}
+
+/** La depense vivante des commissions de parrainage du mois, s'il y en a une. */
+export type DepenseParrainage = { depenseId: string; montant: number; poseLe: string }
+
+export type EtatDeclaration = {
+  /** Ce qui est du ce mois-ci : la somme des filleuls non annules (centimes). */
+  du: number
+  /** Les filleuls non annules. */
+  dus: FilleulDuMois[]
+  /** La depense vivante, ou null. */
+  depense: DepenseParrainage | null
+  /** Vrai : la depense vivante couvre exactement les filleuls dus (ou rien n'est du ni declare). */
+  aJour: boolean
+}
+
+/** Ou en est la declaration d'un mois. */
+export function etatDeclaration(filleuls: readonly FilleulDuMois[], depense: DepenseParrainage | null): EtatDeclaration {
+  const dus = filleuls.filter(f => f.statut !== 'annulee')
+  const du = dus.reduce((s, f) => s + f.commission, 0)
+  const aJour = depense
+    ? depense.montant === du && dus.every(f => f.depenseId === depense.depenseId)
+    : dus.length === 0
+  return { du, dus, depense, aJour }
+}
+
+/** « Commissions de parrainage d'octobre » : le libelle de la depense. */
+export function libelleDepenseParrainage(mois: string): string {
+  return `Commissions de parrainage ${deMois(mois)}`
+}
+
+/** « Alex 19,80 € (Thomas), Fab 19,80 € (un nouveau membre) » : par parrain, ses filleuls entre parentheses. */
+export function detailParParrain(dus: readonly FilleulDuMois[]): string {
+  const parParrain = new Map<string, { total: number; prenoms: string[] }>()
+  for (const f of dus) {
+    const x = parParrain.get(f.parrain) ?? { total: 0, prenoms: [] }
+    x.total += f.commission
+    x.prenoms.push(f.prenom ?? NOUVEAU_MEMBRE)
+    parParrain.set(f.parrain, x)
   }
-  const detail = [...parParrain.entries()].sort((a, b) => b[1] - a[1]).map(([p, c]) => `${p} ${euros(c)}`).join(', ')
-  return `Parrainages du Live Club : ${euros(total)} à verser aux parrains fin ${nomMois(mois)} `
-    + `(${lignes.length} filleul${lignes.length > 1 ? 's' : ''} : ${detail}). `
-    + "Pas déduit de ce calcul : qui paie les commissions de parrainage reste à décider."
+  return [...parParrain.entries()].map(([p, x]) => `${p} ${euros(x.total)} (${x.prenoms.join(', ')})`).join(', ')
+}
+
+/**
+ * La carte de la declaration (longue pour Brice, courte pour Mel), ou null si
+ * rien n'est a faire. Exemple : « Commissions de parrainage d'octobre : Alex
+ * 19,80 € (Thomas), Fab 19,80 € (Lucie) = 39,60 €. Déclarer en dépense du
+ * Live Club ? »
+ */
+export function carteDeclaration(mois: string, e: EtatDeclaration, o: { produit?: string } = {}): { carte: string; court: string } | null {
+  if (e.aJour) return null
+  const produit = o.produit ?? 'Live Club'
+  const tete = `Commissions de parrainage ${deMois(mois)}`
+  if (e.dus.length === 0 && e.depense) {
+    const court = `${tete} : plus rien à verser (filleuls remboursés). Retirer la dépense de ${euros(e.depense.montant)} ?`
+    return { court, carte: `${court} La répartition ${deMois(mois)} ne la comptera plus.` }
+  }
+  const somme = `${detailParParrain(e.dus)} = ${euros(e.du)}`
+  if (e.depense) {
+    const court = `${tete} : ${somme}. Remplacer la dépense de ${euros(e.depense.montant)} par ${euros(e.du)} ?`
+    return {
+      court,
+      carte: `${court} L'ancienne dépense est retirée, la nouvelle compte dans la répartition ${deMois(mois)} `
+        + `(produit ${produit}, côté Mel, déduite avant le 70/30, payée par Mel).`,
+    }
+  }
+  const court = `${tete} : ${somme}. Déclarer en dépense du ${produit} ?`
+  return {
+    court,
+    carte: `${court} Comme les lives d'Adrien : rattachée au produit ${produit}, côté Mel, déduite avant le 70/30, payée par Mel. `
+      + 'Les filleuls de ce mois passent « déclarés ».',
+  }
+}
+
+/**
+ * Ce que la carte attend de trouver au clic : le mois, ce qui est du, et la
+ * depense qu'elle remplace (ou aucune). Si la base a bouge entre la carte et
+ * le clic, le clic refuse et dit de redemander la carte.
+ */
+export type ParamsDeclaration = { mois: string; du: number | null; remplace: string | null }
+
+export function lireParamsDeclaration(p: Record<string, unknown>, o: { moisCourant: string }): ParamsDeclaration | string {
+  const mois = String(p.mois ?? '').trim()
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(mois)) return 'mois : AAAA-MM, le mois des commissions de parrainage (un mois fini).'
+  if (mois >= o.moisCourant) return `Les commissions de parrainage se déclarent une fois le mois fini : ${nomMois(mois)} n'est pas terminé.`
+  let du: number | null = null
+  if (p.du !== null && p.du !== undefined && p.du !== '') {
+    const n = Number(p.du)
+    if (!Number.isInteger(n) || n < 0) return 'du : posé par le serveur (centimes).'
+    du = n
+  }
+  const remplace = typeof p.remplace === 'string' && UUID.test(p.remplace) ? p.remplace : null
+  return { mois, du, remplace }
+}
+
+/**
+ * (Revenus, repartition_du_mois) L'avertissement du mois tant que la
+ * declaration n'est pas a jour : ce qui reste a declarer, ou la depense qui ne
+ * correspond plus. null = a jour (ou rien) : l'avertissement disparait.
+ */
+export function phraseAVerser(e: EtatDeclaration, mois: string, o: { moisCourant: string }): string | null {
+  if (e.aJour) return null
+  const fini = mois < o.moisCourant
+  const suite = fini
+    ? 'Une carte pour le déclarer en dépense du Live Club arrive dans Agent AOK.'
+    : 'Ce montant sera déclaré en dépense du Live Club au début du mois prochain, par une carte dans Agent AOK.'
+  if (e.depense) {
+    return `Parrainages du Live Club : la dépense déclarée (${euros(e.depense.montant)}) ne correspond plus à ce qui est dû `
+      + `(${euros(e.du)}${e.dus.length ? ` : ${detailParParrain(e.dus)}` : ''}). Une carte pour la corriger arrive dans Agent AOK.`
+  }
+  return `Parrainages du Live Club : ${euros(e.du)} à verser aux parrains ${fini ? `pour ${nomMois(mois)}` : `fin ${nomMois(mois)}`} `
+    + `(${e.dus.length} filleul${e.dus.length > 1 ? 's' : ''} : ${detailParParrain(e.dus)}). Pas encore déduit de ce calcul. ${suite}`
+}
+
+/** La memoire de la carte proposee d'elle-meme : une par etat du mois (un changement en donne une nouvelle). */
+export function cleCarteDeclaration(mois: string, e: EtatDeclaration): string {
+  return `parrainage:${mois}:${e.du}:${e.dus.length}:${e.depense?.depenseId ?? 'aucune'}`
+}
+
+// ---------------------------------------------------------------------------
+// LE REMBOURSEMENT (Brice, 05/11 : « la commission est annulée s'il a été
+// remboursé »). Premier paiement rembourse en entier : statut annulee,
+// commission a 0. Deja dans une declaration : l'equipe est alertee (la carte
+// de correction suit), pas de correction automatique de l'argent. Rien au parrain.
+// ---------------------------------------------------------------------------
+
+/** Un evenement charge.refunded signe : le client Stripe a relire, ou null. */
+export function lireRemboursement(brut: unknown): { client: string } | null {
+  if (!brut || typeof brut !== 'object') return null
+  const e = brut as { type?: unknown; data?: { object?: unknown } }
+  if (e.type !== 'charge.refunded') return null
+  const c = e.data?.object as { object?: unknown; customer?: unknown } | undefined
+  if (!c || c.object !== 'charge') return null
+  const client = texte(c.customer)
+  return client && ID_CLIENT.test(client) ? { client } : null
+}
+
+/**
+ * Les paiements d'une facture (GET /v1/invoice_payments, charge depliee) :
+ * remboursee = un paiement paye dont la charge est remboursee EN ENTIER. Un
+ * remboursement partiel ne fait rien (question a Brice).
+ */
+export function factureRemboursee(paiements: unknown): boolean {
+  if (!Array.isArray(paiements)) return false
+  return paiements.some((p) => {
+    const charge = (p as { payment?: { charge?: unknown } | null } | null)?.payment?.charge
+    if (!charge || typeof charge !== 'object') return false
+    const c = charge as { refunded?: unknown; amount?: unknown; amount_refunded?: unknown }
+    return c.refunded === true || (typeof c.amount === 'number' && c.amount > 0 && c.amount_refunded === c.amount)
+  })
+}
+
+/** L'alerte a l'equipe : un filleul rembourse dont la commission etait deja declaree. */
+export function texteAlerteRemboursement(o: {
+  prenom: string | null; parrain: string; code: string; commission: number; mois: string; depense: number | null; du: number
+}): string {
+  const tete = `Parrainage annulé : le premier paiement de ${o.prenom ?? NOUVEAU_MEMBRE} (filleul ${deNom(o.parrain)}, code ${o.code}) a été remboursé. `
+    + `Sa commission de ${euros(o.commission)} est annulée, rien n'est dit à ${o.parrain}.`
+  if (o.depense === null) return tete
+  return `${tete}\n\nElle était déjà dans la dépense « ${libelleDepenseParrainage(o.mois)} » (${euros(o.depense)}) : à corriger. `
+    + `La carte qui la corrige (${euros(o.depense)} -> ${euros(o.du)}) arrive au prochain passage du matin, ou demande-la-moi.`
 }
 
 // ---------------------------------------------------------------------------
@@ -557,7 +734,15 @@ export type BilanFilet = { lues: number; notees: number; prevenus: number; equip
 /** Le filet du matin : chaque facture de la liste, une par une ; une erreur n'arrete pas les autres. */
 export async function traiterFactures(factures: readonly unknown[], outils: OutilsParrainage): Promise<BilanFilet> {
   const b: BilanFilet = { lues: factures.length, notees: 0, prevenus: 0, equipe: 0, a_reprendre: 0, ignorees: 0, deja: 0, erreurs: 0 }
-  for (const brut of factures) {
+  // (05/11) Les plus anciennes d'abord : le rang des filleuls suit l'ordre des paiements
+  // (Stripe rend les plus recentes en tete, le rattrapage remonte au 22/10).
+  const quand = (f: unknown) => {
+    const o = f as { status_transitions?: { paid_at?: unknown } | null; created?: unknown } | null
+    const t = o?.status_transitions?.paid_at ?? o?.created
+    return typeof t === 'number' ? t : 0
+  }
+  const ordre = [...factures].sort((a, b) => quand(a) - quand(b))
+  for (const brut of ordre) {
     try {
       const r = await traiterFactureFilleul(brut, 'passage', outils)
       if (r.etat === 'ignore') b.ignorees++

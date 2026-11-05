@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { verifierSignature } from '@/lib/academie/achat-pur'
 import { reouvertureApresPaiement } from '@/lib/liveclub/passage'
 import { lireFacturePayee } from '@/lib/liveclub/reouverture-stripe-pur'
-import { lireFactureFilleul } from '@/lib/liveclub/parrainage-pur'
-import { parrainageApresPaiement } from '@/lib/liveclub/parrainage'
+import { lireFactureFilleul, lireRemboursement } from '@/lib/liveclub/parrainage-pur'
+import { parrainageApresPaiement, parrainageApresRemboursement } from '@/lib/liveclub/parrainage'
 import { messageErreur } from '@/lib/liveclub/pur'
 
 /**
@@ -22,7 +22,10 @@ import { messageErreur } from '@/lib/liveclub/pur'
  *   email), une seule fois par reouverture ;
  * - (05/11) le PARRAINAGE : la premiere facture d'un abonnement payee avec le
  *   code promo d'un membre (parrainage.ts) note le filleul et sa commission et
- *   previent le parrain, une seule fois par abonnement.
+ *   previent le parrain, une seule fois par abonnement ;
+ * - (05/11) charge.refunded : les filleuls de ce client dont le premier
+ *   paiement est rembourse en entier sont annules (parrainage.ts). A AJOUTER
+ *   chez Stripe a la destination du webhook le jour ou elle est creee.
  * Tout autre evenement : 200, ignore. 500 = Stripe renvoie plus tard (et le
  * passage du lendemain matin reste le filet des deux). Jamais d'email ni
  * d'identifiant dans un log : des comptes seulement.
@@ -50,7 +53,9 @@ export async function POST(req: NextRequest) {
   const facture = lireFacturePayee(evenement)
   // (05/11) Un premier paiement avec une remise : peut-etre un filleul (aucun appel tant que ce n'est pas le cas).
   const filleulPossible = lireFactureFilleul(evenement) !== null
-  if (!facture && !filleulPossible) return NextResponse.json({ ok: true, ignore: true })
+  // (05/11) Un remboursement (charge.refunded) : les filleuls de ce client relus (commission annulee).
+  const remboursement = lireRemboursement(evenement)
+  if (!facture && !filleulPossible && !remboursement) return NextResponse.json({ ok: true, ignore: true })
 
   let panne = false
   const reponse: Record<string, unknown> = { ok: true }
@@ -79,6 +84,12 @@ export async function POST(req: NextRequest) {
     const p = await parrainageApresPaiement(evenement)
     if (p.etat === 'panne') panne = true
     reponse.parrainage = p.issue ?? p.etat
+  }
+
+  if (remboursement) {
+    const r = await parrainageApresRemboursement(evenement)
+    if (r.etat === 'panne') panne = true
+    reponse.filleuls_annules = r.annulees
   }
 
   if (panne) return NextResponse.json({ ok: false, erreur: 'indisponible' }, { status: 500 })

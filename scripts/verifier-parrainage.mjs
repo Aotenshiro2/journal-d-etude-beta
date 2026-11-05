@@ -282,10 +282,26 @@ await bloc('date : un paiement d un autre jour (filet du matin) est date, un aut
     prenom: 'Thomas', code: 'SAUCISSON', commission: 1980, devise: 'eur', tauxPct: 20, rang: 2, palier: 10,
     payeLe: '2026-10-31T22:30:00.000Z', maintenant: '2026-11-01T07:00:00.000Z',
   })
-  // 31/10 22 h 30 UTC = 31/10 23 h 30 a Paris : octobre.
+  // 31/10 22 h 30 UTC = 31/10 23 h 30 a Paris : octobre, mois fini (rattrapage du 05/11).
   assert.equal(t, 'Bonne nouvelle : Thomas a rejoint le Live Club le 31 octobre grâce à ton code SAUCISSON. '
-    + 'Ta commission de 19,80 € (20 % de son premier paiement) sera comptée fin octobre. Merci à toi !')
+    + "Ta commission de 19,80 € (20 % de son premier paiement) sera comptée avec les commissions d'octobre. Merci à toi !")
   texteMembre(t, 'message date')
+  // Meme mois, autre jour : la date, et « à la fin du mois ».
+  const t2 = P.texteParrain({
+    prenom: 'Lucie', code: 'BARBU17', commission: 1980, devise: 'eur', tauxPct: 20, rang: 3, palier: 10,
+    payeLe: '2026-11-03T09:00:00.000Z', maintenant: '2026-11-05T07:00:00.000Z',
+  })
+  assert.match(t2, /^Bonne nouvelle : Lucie a rejoint le Live Club le 3 novembre grâce à ton code BARBU17\. .* sera comptée à la fin du mois\./)
+  assert.equal(P.deMois('2026-10'), "d'octobre")
+  assert.equal(P.deMois('2026-08'), "d'août")
+  assert.equal(P.deMois('2026-11'), 'de novembre')
+  // L'alerte a l'equipe d'un mois fini dit la meme chose.
+  const a = P.texteAlerteEquipe({
+    prenom: 'Thomas', code: 'SAUCISSON', commission: 1980, devise: 'eur', tauxPct: 20, rang: 2, palier: 10,
+    payeLe: '2026-10-25T10:00:00.000Z', maintenant: '2026-11-06T07:00:00.000Z',
+    parrain: 'Fab', pseudo: 'Nyfab34', montant: 9900, email: null, raison: 'refus', texte: 'x',
+  })
+  assert.match(a, /commission 19,80 € \(20 %, 2e filleul\), comptée avec les commissions d'octobre\./)
 })
 
 // ---------------------------------------------------------------------------
@@ -462,12 +478,16 @@ await bloc('resume du matin et repartition : une ligne par filleul, ce qui reste
   assert.ok(texte.includes("Parrainages (nouveaux filleuls)\n- Thomas Martin, thomas.essai@exemple.fr : filleul d'Alex"), texte)
   texteClavier(texte, 'resume')
 
-  assert.equal(P.phraseAVerser([], '2026-11'), null)
-  const v = P.phraseAVerser([
-    { parrain: 'Alex', commission: 1980, devise: 'eur' }, { parrain: 'Fab', commission: 1980, devise: 'eur' }, { parrain: 'Alex', commission: 2970, devise: 'eur' },
-  ], '2026-11')
-  assert.equal(v, 'Parrainages du Live Club : 69,30 € à verser aux parrains fin novembre (3 filleuls : Alex 49,50 €, Fab 19,80 €). '
-    + 'Pas déduit de ce calcul : qui paie les commissions de parrainage reste à décider.')
+  // (05/11) L'avertissement suit l'etat de la declaration (bloc « declaration » plus bas).
+  const vide = P.etatDeclaration([], null)
+  assert.equal(P.phraseAVerser(vide, '2026-11', { moisCourant: '2026-11' }), null)
+  const v = P.phraseAVerser(P.etatDeclaration([
+    { filleulId: 'a', parrain: 'Alex', prenom: 'Thomas', commission: 1980, statut: 'a_verser', depenseId: null },
+    { filleulId: 'b', parrain: 'Fab', prenom: null, commission: 1980, statut: 'a_verser', depenseId: null },
+    { filleulId: 'c', parrain: 'Alex', prenom: 'Lucie', commission: 2970, statut: 'a_verser', depenseId: null },
+    { filleulId: 'd', parrain: 'Alex', prenom: 'Rembourse', commission: 0, statut: 'annulee', depenseId: null },
+  ], null), '2026-11', { moisCourant: '2026-11' })
+  assert.match(v, /^Parrainages du Live Club : 69,30 € à verser aux parrains fin novembre \(3 filleuls : Alex 49,50 € \(Thomas, Lucie\), Fab 19,80 € \(un nouveau membre\)\)\. Pas encore déduit de ce calcul\./)
   texteClavier(v, 'avertissement de la repartition')
 })
 
@@ -483,11 +503,11 @@ await bloc('cablage : Agent AOK (outil, prompt, controle, bouton, filet sansNoms
   assert.match(src, /LE PARRAINAGE PAR CODE DU LIVE CLUB/)
   assert.match(src, /cockpit_liveclub_parrains \(05\/11\)/)
   assert.match(src, /cockpit_liveclub_filleuls \(05\/11\)/)
-  // Le prompt compte ses outils d'action : vingt depuis le parrainage (05/11).
-  const phrase = /Tu disposes de vingt outils d'action : ([^(]+) \(décrits plus bas\)/.exec(src)
+  // Le prompt compte ses outils d'action : vingt et un depuis la declaration des parrainages (05/11).
+  const phrase = /Tu disposes de vingt et un outils d'action : ([^(]+) \(décrits plus bas\)/.exec(src)
   assert.ok(phrase, 'la phrase des outils d action')
   const noms = phrase[1].split(/, | et /)
-  assert.equal(noms.length, 20)
+  assert.equal(noms.length, 21)
   assert.ok(noms.includes('proposer_code_parrainage'))
   // Chaque outil a sa description (filet sansNomsOutils), le nouveau compris.
   const outils = [...src.matchAll(/^\s+name: '([a-z_]+)',$/gm)].map(m => m[1])
@@ -519,7 +539,7 @@ await bloc('cablage : webhook signe, filet du passage, resume, Tab, repartition'
   assert.match(tab, /to_regclass\('public\.cockpit_liveclub_filleuls'\)/)
   assert.match(tab, /parrainages: \{/)
   const rep = lire('src/lib/repartition/serveur.ts')
-  assert.match(rep, /lireAVerserParrainages\(mois\)/)
+  assert.match(rep, /phraseParrainagesDuMois\(mois, moisCourant\)/)
   const serveur = lire('src/lib/liveclub/parrainage.ts')
   // Aucun nom, email ni texte de message dans un log.
   for (const m of serveur.matchAll(/console\.(log|info|warn|error)\(([^\n]+)\)/g)) {
@@ -556,6 +576,211 @@ await bloc('migration : tables, droits, trois codes, MELMOM2 refuse, aucun point
   assert.ok(m.includes("parrain_pseudo ~ '^[A-Za-z0-9_]{3,32}$'"))
   assert.ok(m.includes("code ~ '^[A-Za-z0-9_-]{3,30}$'"))
   assert.ok(m.includes('char_length(prenom) between 2 and 24'))
+})
+
+// ---------------------------------------------------------------------------
+// 11. (05/11, decisions de Brice) Declaration du mois, rattrapage, remboursement, lives
+// ---------------------------------------------------------------------------
+
+const L = await import('../src/lib/repartition/lives-reperes-pur.ts')
+
+const fm = (o) => ({ filleulId: o.id, parrain: o.parrain, prenom: o.prenom ?? null, commission: o.commission ?? 1980, statut: o.statut ?? 'a_verser', depenseId: o.depenseId ?? null })
+const DEP = '44444444-4444-4444-8444-444444444444'
+
+await bloc('declaration : etat du mois, carte « Déclarer en dépense du Live Club ? », remplacement, retrait', () => {
+  const octobre = [fm({ id: 'f1', parrain: 'Alex', prenom: 'Thomas' }), fm({ id: 'f2', parrain: 'Fab', prenom: 'Lucie' })]
+  const e = P.etatDeclaration(octobre, null)
+  assert.equal(e.du, 3960)
+  assert.equal(e.aJour, false)
+  assert.equal(P.libelleDepenseParrainage('2026-10'), "Commissions de parrainage d'octobre")
+  const c = P.carteDeclaration('2026-10', e)
+  assert.equal(c.court, "Commissions de parrainage d'octobre : Alex 19,80 € (Thomas), Fab 19,80 € (Lucie) = 39,60 €. Déclarer en dépense du Live Club ?")
+  assert.match(c.carte, /rattachée au produit Live Club, côté Mel, déduite avant le 70\/30, payée par Mel/)
+  texteClavier(c.carte, 'carte de declaration')
+  // Un parrain, deux filleuls ; un filleul sans prenom.
+  assert.equal(P.detailParParrain([fm({ id: 'a', parrain: 'Alex', prenom: 'Thomas' }), fm({ id: 'b', parrain: 'Alex' })]), 'Alex 39,60 € (Thomas, un nouveau membre)')
+  // Declaree et a jour : pas de carte, pas d'avertissement.
+  const declares = octobre.map(f => ({ ...f, statut: 'declaree', depenseId: DEP }))
+  const aJour = P.etatDeclaration(declares, { depenseId: DEP, montant: 3960, poseLe: '2026-11-06T08:00:00.000Z' })
+  assert.equal(aJour.aJour, true)
+  assert.equal(P.carteDeclaration('2026-10', aJour), null)
+  assert.equal(P.phraseAVerser(aJour, '2026-10', { moisCourant: '2026-11' }), null)
+  // Un filleul rattrape apres la declaration : la carte remplace la depense.
+  const tard = P.etatDeclaration([...declares, fm({ id: 'f3', parrain: 'Nadège', prenom: 'Inès' })], { depenseId: DEP, montant: 3960, poseLe: '2026-11-06T08:00:00.000Z' })
+  assert.equal(tard.aJour, false)
+  assert.match(P.carteDeclaration('2026-10', tard).court, /= 59,40 €\. Remplacer la dépense de 39,60 € par 59,40 € \?$/)
+  // Un filleul rembourse apres la declaration : la carte corrige.
+  const rembourse = P.etatDeclaration([declares[0], { ...declares[1], statut: 'annulee', commission: 0 }], { depenseId: DEP, montant: 3960, poseLe: 'x' })
+  assert.equal(rembourse.du, 1980)
+  assert.match(P.carteDeclaration('2026-10', rembourse).court, /Remplacer la dépense de 39,60 € par 19,80 € \?$/)
+  // Tous rembourses : la carte retire la depense.
+  const vide = P.etatDeclaration(declares.map(f => ({ ...f, statut: 'annulee', commission: 0 })), { depenseId: DEP, montant: 3960, poseLe: 'x' })
+  assert.match(P.carteDeclaration('2026-10', vide).court, /plus rien à verser .* Retirer la dépense de 39,60 € \?$/)
+  // Rien du tout : rien.
+  assert.equal(P.etatDeclaration([], null).aJour, true)
+  // La memoire change avec l'etat : une nouvelle carte pour un nouvel etat, jamais deux fois la meme.
+  assert.notEqual(P.cleCarteDeclaration('2026-10', e), P.cleCarteDeclaration('2026-10', tard))
+  assert.equal(P.cleCarteDeclaration('2026-10', e), P.cleCarteDeclaration('2026-10', P.etatDeclaration(octobre, null)))
+  assert.ok(P.cleCarteDeclaration('2026-10', tard).length <= 200)
+})
+
+await bloc('declaration : parametres de la carte, un mois fini seulement ; avertissement de Revenus', () => {
+  assert.deepEqual(P.lireParamsDeclaration({ mois: '2026-10', du: 3960, remplace: DEP }, { moisCourant: '2026-11' }), { mois: '2026-10', du: 3960, remplace: DEP })
+  assert.deepEqual(P.lireParamsDeclaration({ mois: '2026-10' }, { moisCourant: '2026-11' }), { mois: '2026-10', du: null, remplace: null })
+  assert.match(P.lireParamsDeclaration({ mois: '2026-11' }, { moisCourant: '2026-11' }), /une fois le mois fini/)
+  assert.match(P.lireParamsDeclaration({ mois: '2026-13' }, { moisCourant: '2026-11' }), /^mois :/)
+  assert.match(P.lireParamsDeclaration({ mois: '2026-10', du: -1 }, { moisCourant: '2026-11' }), /^du :/)
+  const e = P.etatDeclaration([fm({ id: 'f1', parrain: 'Alex', prenom: 'Thomas' })], null)
+  const courant = P.phraseAVerser(e, '2026-11', { moisCourant: '2026-11' })
+  assert.equal(courant, 'Parrainages du Live Club : 19,80 € à verser aux parrains fin novembre (1 filleul : Alex 19,80 € (Thomas)). '
+    + 'Pas encore déduit de ce calcul. Ce montant sera déclaré en dépense du Live Club au début du mois prochain, par une carte dans Agent AOK.')
+  const fini = P.phraseAVerser(e, '2026-10', { moisCourant: '2026-11' })
+  assert.match(fini, /pour octobre .* Une carte pour le déclarer en dépense du Live Club arrive dans Agent AOK\.$/)
+  const perime = P.phraseAVerser(P.etatDeclaration([], { depenseId: DEP, montant: 1980, poseLe: 'x' }), '2026-10', { moisCourant: '2026-11' })
+  assert.match(perime, /la dépense déclarée \(19,80 €\) ne correspond plus à ce qui est dû \(0,00 €\)/)
+  for (const t of [courant, fini, perime]) texteClavier(t, 'avertissement')
+})
+
+await bloc('rattrapage : les factures depuis le 22/10, les plus anciennes d abord (rang juste)', async () => {
+  const { etat, outils } = monde()
+  const recente = facture({ sub: 'sub_EssaiRecent01', discounts: [remise('BARBU17')], payeSec: Math.floor(Date.parse('2026-11-02T10:00:00Z') / 1000) })
+  const ancienne = facture({ sub: 'sub_EssaiAncien01', discounts: [remise('BARBU17')], payeSec: Math.floor(Date.parse('2026-10-25T10:00:00Z') / 1000) })
+  // Stripe rend les plus recentes en tete : le rattrapage les remet dans l'ordre des paiements.
+  const b = await P.traiterFactures([recente, ancienne], outils)
+  assert.equal(b.notees, 2)
+  assert.equal(etat.lignes.get('sub_EssaiAncien01').rang, 1)
+  assert.equal(etat.lignes.get('sub_EssaiRecent01').rang, 2)
+  assert.equal(etat.lignes.get('sub_EssaiAncien01').entree.mois, '2026-10')
+  // Le message du rattrapage d'octobre : « a rejoint le ... », compte avec octobre.
+  const oct = etat.messages.find(m => /25 octobre/.test(m.texte))
+  assert.equal(oct.texte, 'Bonne nouvelle : Thomas a rejoint le Live Club le 25 octobre grâce à ton code BARBU17. '
+    + "Ta commission de 19,80 € (20 % de son premier paiement) sera comptée avec les commissions d'octobre. Merci à toi !")
+  texteMembre(oct.texte, 'message du rattrapage')
+  // Le script : a blanc par defaut, fenetre au 22/10, --oui pour de vrai.
+  const s = lire('scripts/rattraper-parrainages.mjs')
+  assert.match(s, /const EXECUTER = args\.includes\('--oui'\)/)
+  assert.match(s, /val\('depuis'\) \?\? '2026-10-22'/)
+  assert.match(s, /aBlanc: !EXECUTER/)
+  const serveur = lire('src/lib/liveclub/parrainage.ts')
+  assert.match(serveur, /if \(!o\.aBlanc\) return vrais/)
+  assert.match(serveur, /reserverNotification: async \(\) => true,\n\s+marquerNotification: async \(\) => \{\},/)
+  assert.match(serveur, /if \(o\.aBlanc\) return bilan/)
+})
+
+await bloc('remboursement : charge.refunded lu, remboursement entier seulement, alerte si deja declaree, rien au parrain', () => {
+  assert.deepEqual(P.lireRemboursement({ type: 'charge.refunded', data: { object: { object: 'charge', customer: 'cus_EssaiThomas01' } } }), { client: 'cus_EssaiThomas01' })
+  assert.equal(P.lireRemboursement({ type: 'charge.succeeded', data: { object: { object: 'charge', customer: 'cus_EssaiThomas01' } } }), null)
+  assert.equal(P.lireRemboursement({ type: 'charge.refunded', data: { object: { object: 'charge', customer: null } } }), null)
+  assert.equal(P.factureRemboursee([{ payment: { charge: { refunded: true, amount: 9900, amount_refunded: 9900 } } }]), true)
+  assert.equal(P.factureRemboursee([{ payment: { charge: { refunded: false, amount: 9900, amount_refunded: 9900 } } }]), true)
+  assert.equal(P.factureRemboursee([{ payment: { charge: { refunded: false, amount: 9900, amount_refunded: 4000 } } }]), false, 'partiel')
+  assert.equal(P.factureRemboursee([{ payment: { charge: 'ch_pas_deplie' } }]), false)
+  assert.equal(P.factureRemboursee(null), false)
+  const avant = P.texteAlerteRemboursement({ prenom: 'Thomas', parrain: 'Alex', code: 'BARBU17', commission: 1980, mois: '2026-10', depense: null, du: 0 })
+  assert.equal(avant, "Parrainage annulé : le premier paiement de Thomas (filleul d'Alex, code BARBU17) a été remboursé. Sa commission de 19,80 € est annulée, rien n'est dit à Alex.")
+  const apres = P.texteAlerteRemboursement({ prenom: 'Thomas', parrain: 'Alex', code: 'BARBU17', commission: 1980, mois: '2026-10', depense: 3960, du: 1980 })
+  assert.match(apres, /déjà dans la dépense « Commissions de parrainage d'octobre » \(39,60 €\) : à corriger\. La carte qui la corrige \(39,60 € -> 19,80 €\) arrive au prochain passage du matin, ou demande-la-moi\.$/)
+  texteClavier(apres, 'alerte de remboursement')
+  const serveur = lire('src/lib/liveclub/parrainage.ts')
+  assert.match(serveur, /set statut = 'annulee', commission_initiale = commission, commission = 0, annulee_le = now\(\), annulee_raison = 'rembourse'/)
+  assert.match(serveur, /if \(issue\.statut === 'declaree'\) \{/)
+  // L'annulation n'envoie rien au parrain : pas d'envoi dans annulerFilleul.
+  const annuler = serveur.slice(serveur.indexOf('async function annulerFilleul'), serveur.indexOf('export async function parrainageApresRemboursement'))
+  assert.ok(!/envoyer|envoyerParrain/.test(annuler))
+  const route = lire('src/app/api/liveclub/stripe/route.ts')
+  assert.match(route, /parrainageApresRemboursement\(evenement\)/)
+})
+
+await bloc('lives : ligne du dimanche, carte de fin de mois, memoire', () => {
+  assert.equal(L.nomJour('2026-10-14'), 'mercredi')
+  assert.equal(L.estDimanche('2026-11-08'), true)
+  assert.equal(L.estDimanche('2026-11-05'), false)
+  assert.equal(L.lundiDe('2026-11-08'), '2026-11-02')
+  assert.equal(L.lundiDe('2026-11-02'), '2026-11-02')
+  assert.equal(L.moisPrecedent('2026-11'), '2026-10')
+  assert.equal(L.moisPrecedent('2027-01'), '2026-12')
+  assert.equal(L.ligneLivesSemaine(['2026-10-28', '2026-11-01', '2026-11-03', '2026-11-05', '2026-11-03'], '2026-11-08'),
+    '2 lives repérés cette semaine (mardi 3, jeudi 5) ; 3 ce mois-ci')
+  // Semaine a cheval sur deux mois.
+  assert.equal(L.ligneLivesSemaine(['2026-10-28', '2026-11-01'], '2026-11-01'), '2 lives repérés cette semaine (mercredi 28, dimanche 1) ; 1 ce mois-ci')
+  assert.equal(L.ligneLivesSemaine(['2026-11-03'], '2026-11-15'), '0 live repéré cette semaine ; 1 ce mois-ci')
+  const c = L.carteLives({ intervenant: 'Adrien', mois: '2026-10', jours: ['2026-10-22', '2026-10-14', '2026-10-21'], prixUnitaire: 7500, produit: 'Live Club', complement: 'Live Club est côté Mel.' })
+  assert.equal(c.court, "Lives d'Adrien en octobre : 3 repérés (14, 21, 22/10), 3 x 75 € = 225 €. Déclarer en dépense du Live Club ?")
+  assert.match(c.carte, /^Lives d'Adrien en octobre .* Live Club est côté Mel\.$/)
+  texteClavier(c.carte, 'carte des lives')
+  assert.equal(L.cleCarteLives('Adrien', 'live-club', '2026-10', 3), 'lives:adrien:live-club:2026-10:3')
+  // Le resume du matin : la rubrique, une ligne par intervenant, le dimanche seulement.
+  assert.ok(RS.RUBRIQUES_RESUME.some(r => r.cle === 'lives'))
+  const resume = lire('src/lib/liveclub/resume.ts')
+  assert.match(resume, /if \(estDimanche\(jour\)\) \{/)
+  assert.match(resume, /rubrique: 'lives', qui: `i\$\{intervenant\}`/)
+})
+
+await bloc('cartes de fin de mois : proposees par le passage, jamais ecrites sans clic, une par etat', () => {
+  const src = lire('src/lib/cartes-fin-de-mois.ts')
+  assert.match(src, /proposerCarteEquipe\(dest\.chat/)
+  assert.match(src, /const texte = dest\.court \? t\.court : t\.carte/, 'carte courte pour Mel')
+  assert.match(src, /insert into public\.cockpit_cartes_auto \(cle\) values \(\$\{cle\}\) on conflict \(cle\) do nothing/)
+  assert.match(src, /if \(r\.livres === 0\) \{ await liberer\(cle\)/)
+  // Les lives : la carte des lives du mois (meme clic), deja declares = pas de carte, tout intervenant avec un compte Telegram.
+  assert.match(src, /type: 'lives_du_mois', compte: 'cockpit'/)
+  assert.match(src, /await livesDejaDeclares\(l\.intervenant, l\.offreId, mois\)\) continue/)
+  assert.match(src, /from public\.cockpit_intervenants where telegram_id is not null/)
+  assert.match(src, /controlerActionRepartition\(action\)/)
+  assert.match(src, /sansNomsOutils\(controle\.erreur\)/, 'aucun nom d outil dans le texte a l equipe')
+  // Aucune ecriture de depense ici : seulement la memoire des cartes.
+  assert.ok(!/insert into public\.cockpit_depenses|update public\.cockpit_liveclub_filleuls/.test(src))
+  const passage = lire('src/lib/liveclub/passage.ts')
+  const iParrainages = passage.indexOf("etape('parrainages'")
+  const iCartes = passage.indexOf("etape('cartes_fin_de_mois'")
+  const iResume = passage.indexOf("etape('resume'")
+  assert.ok(iParrainages > 0 && iParrainages < iCartes && iCartes < iResume, 'filet, puis cartes, puis resume')
+  // Agent AOK : la carte demandee (meme carte), bouton, filet sansNomsOutils, carte courte.
+  const agent = lire('src/lib/agent-cockpit.ts')
+  assert.match(agent, /name: 'proposer_parrainages_du_mois'/)
+  assert.match(agent, /proposer_parrainages_du_mois: 'declaration_parrainage'/)
+  assert.match(agent, /controlerDeclarationParrainage\(action\)/)
+  assert.match(agent, /carteCourte = controle\.court/)
+  assert.equal(AP.sansNomsOutils('Je te propose proposer_parrainages_du_mois.'), 'Je te propose la carte des commissions de parrainage du mois.')
+  assert.ok(AP.libelleBoutonConfirmer('declaration_parrainage').endsWith('Déclarer en dépense du Live Club'))
+  const sa = lire('src/lib/stripe-actions.ts')
+  assert.match(sa, /a\.type === 'declaration_parrainage'\) \{\n\s+const lu = lireParamsDeclaration\(p, \{ moisCourant: moisParis\(new Date\(\)\) \}\)/)
+  assert.match(sa, /executerDeclarationParrainage\(a, acteur\)/)
+  // Le clic : verrou du mois, etat relu, ancienne depense retiree, nouvelle posee, filleuls declares.
+  const serveur = lire('src/lib/liveclub/parrainage.ts')
+  assert.match(serveur, /liveclub:parrainage:mois:\$\{p\.mois\}/)
+  assert.match(serveur, /update public\.cockpit_depenses set retire_le = now\(\), retire_par = \$\{posePar\}::uuid/)
+  assert.match(serveur, /insert into public\.cockpit_depenses \(libelle, montant, mois, payee_par, cote, offre_id, note, pose_par, via, parrainage_mois\)/)
+  assert.match(serveur, /set statut = 'declaree', depense_id = \$\{depenseId\}::uuid/)
+  assert.match(serveur, /a change|ont changé depuis la carte/)
+  // Revenus : l'avertissement lit l'etat de la declaration (il disparait une fois a jour).
+  assert.match(lire('src/lib/repartition/serveur.ts'), /await phraseParrainagesDuMois\(mois, moisCourant\)/)
+  // L'ecran du cockpit : les lives reperes a cote de « Aucun live déclaré ».
+  const cockpit = lire('../cockpit/src/views/revenus/DetailMois.tsx')
+  assert.match(cockpit, /supabase\.from\('cockpit_lives_detectes'\)\.select\('intervenant,lives'\)\.eq\('mois', d\.mois\)/)
+  assert.match(cockpit, /vide=\{`Aucun live déclaré ce mois-ci\.\$\{phraseReperes\}`\}/)
+})
+
+await bloc('migration de la declaration : colonnes, index d une declaration vivante, memoire, points-virgules', () => {
+  const m = lire('../../sites/Aoknowledgecom/supabase/migrations/20261105190000_cockpit_parrainage_declaration.sql')
+  assert.match(m, /add column if not exists depense_id uuid references public\.cockpit_depenses \(depense_id\)/)
+  assert.match(m, /check \(statut in \('a_verser', 'declaree', 'versee', 'annulee'\)\)/)
+  assert.match(m, /add column if not exists parrainage_mois text/)
+  assert.match(m, /create unique index if not exists cockpit_depenses_parrainage_du_mois_idx\s+on public\.cockpit_depenses \(parrainage_mois\) where retire_le is null and parrainage_mois is not null/)
+  assert.match(m, /create table if not exists public\.cockpit_cartes_auto/)
+  assert.match(m, /revoke all on public\.cockpit_cartes_auto from anon, authenticated/)
+  for (const [i, l] of m.split('\n').entries()) {
+    if (!l.includes(';')) continue
+    assert.ok(!l.trim().startsWith('--'), `ligne ${i + 1} : point-virgule dans un commentaire`)
+    assert.equal(l.indexOf(';'), l.trimEnd().length - 1, `ligne ${i + 1} : point-virgule au milieu`)
+  }
+  const ordres = m.split(';').map(s => s.trim()).filter(Boolean)
+  for (const o of ordres) assert.equal((o.match(/'/g) ?? []).length % 2, 0, `apostrophes impaires : ${o.slice(0, 60)}`)
+  // Chaque ordre se termine : aucun ordre colle au suivant (le 1er essai l'avait oublie).
+  for (const o of ordres) {
+    const sansCommentaires = o.split('\n').filter(l => !l.trim().startsWith('--')).join('\n').trim()
+    assert.ok(!/\n\s*\n\s*(alter|create|comment|revoke|grant|notify|insert|drop)\b/i.test(sansCommentaires), `deux ordres sans point-virgule : ${sansCommentaires.slice(0, 80)}`)
+  }
 })
 
 console.log(`\n${n} blocs ok`)

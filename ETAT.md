@@ -3,7 +3,44 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
-## PARRAINAGE PAR CODE DU LIVE CLUB (05/11/2026, LOCAL, non commite ; migration 20261105120000 ECRITE, NON appliquee)
+## PARRAINAGE : DECLARATION, RATTRAPAGE, REMBOURSEMENT ; LIVES DES INTERVENANTS (05/11/2026 soir, decisions de Brice ; NON commite ; migration 20261105190000 ECRITE, NON appliquee)
+
+- Par-dessus le lot commite (journal 3dd62ee, migration d14c468), modifications NON commitees.
+- QUI PAIE (Brice) : « dans les dépenses du Live Club, comme pour les lives d'Adrien ». Au debut du mois suivant, le
+  passage (etape 'cartes_fin_de_mois', src/lib/cartes-fin-de-mois.ts, apres 'parrainages', avant le resume) pose chez
+  Brice et Mel (courte pour Mel) la carte « Commissions de parrainage d'octobre : Alex 19,80 € (Thomas), ... = 39,60 €.
+  Déclarer en dépense du Live Club ? » (proposerCarteEquipe, jamais par-dessus une carte qui attend : texte seul et
+  « redemande-la-moi »). Clic (type 'declaration_parrainage', parrainage.ts executerDeclarationParrainage) : sous verrou du
+  mois, etat relu = celui de la carte sinon refus ; ancienne depense retiree s'il y en a une ; depense « Commissions de
+  parrainage d'octobre » (offre live-club, cote du produit = Mel, payee par Mel, parrainage_mois) ; filleuls 'declaree'
+  + depense_id. Une seule depense vivante par mois (index unique). Avertissement de Revenus : disparait une fois a jour,
+  revient si la declaration ne correspond plus (filleul ajoute ou rembourse) ; la carte qui REMPLACE suit. Outil Agent AOK
+  proposer_parrainages_du_mois (21 outils d'action) pour la redemander.
+- RATTRAPAGE : scripts/rattraper-parrainages.mjs [--depuis 2026-10-22] [--oui] : le filet avec une fenetre au 22/10, A
+  BLANC par defaut (tout lu, rien ecrit ni envoye, la liste dit chaque filleul et le message). Factures traitees de la plus
+  ancienne a la plus recente (rang juste). Mois fini : « sera comptée avec les commissions d'octobre ».
+- REMBOURSEMENT : premier paiement rembourse EN ENTIER (GET /v1/invoice_payments, charge depliee) = statut annulee,
+  commission 0 (commission_initiale), annulee_le ; filet du matin (filleuls dus payes depuis 120 jours, 50 au plus) et
+  webhook charge.refunded (a ajouter a la destination Stripe le jour du branchement). Deja declare : alerte a l'equipe
+  dans Agent AOK, la carte de correction suit, aucune correction automatique. Rien au parrain. Remboursement partiel : rien.
+- ARRET LE 1er MOIS sans remboursement : rien code (Brice et Mel en parlent), la commission reste due. 30 % : non
+  retroactif, compte depuis toujours (confirme).
+- LIVES D'ADRIEN (et de tout intervenant avec telegram_id dans cockpit_intervenants) : resume du DIMANCHE, rubrique « Lives
+  des intervenants (repérés dans Annonce) » (« Adrien : 2 lives repérés cette semaine (mardi 3, jeudi 5) ; 3 ce
+  mois-ci ») ; carte de fin de mois « Lives d'Adrien en octobre : 3 repérés (14, 21, 22/10), 3 x 75 € = 225 €. Déclarer
+  en dépense du Live Club ? », clic = carte des lives du mois existante ; deja declares : pas de carte ; tarif inconnu :
+  texte seul. Octobre partira au premier passage apres le deploiement. Regles pures : src/lib/repartition/lives-reperes-pur.ts.
+- Cockpit (apps/cockpit, DetailMois.tsx, bloc Lives) : le nombre repere (vue cockpit_lives_detectes) a cote de « Aucun
+  live déclaré ». tsc du cockpit ok (pas de config eslint dans apps/cockpit).
+- Migration 20261105190000_cockpit_parrainage_declaration.sql : filleuls (depense_id, commission_initiale, annulee_le,
+  annulee_raison, statut declaree), cockpit_depenses.parrainage_mois + index unique, table cockpit_cartes_auto (memoire
+  des cartes, serveur seulement). Sans elle : ni declaration, ni annulation, ni carte de fin de mois ; le reste marche.
+- Verifs : verifier-parrainage.mjs 24 blocs ; tsc ; eslint ; -liveclub, -annulation-abonnement, -pause-depot,
+  -adresse-contact (21 outils), -repartition, -depot-perdu et voisins : ok. Aucune base, aucun Stripe, aucun envoi, aucune eval.
+- A FAIRE sur GO, dans cet ordre : migrations 20261105120000 puis 20261105190000 ; push du journal (et du cockpit) ;
+  scripts/rattraper-parrainages.mjs a blanc puis --oui, le jour meme ; le passage suivant propose les cartes d'octobre.
+
+## PARRAINAGE PAR CODE DU LIVE CLUB (05/11/2026, commite 3dd62ee NON pousse ; migration 20261105120000 ECRITE, NON appliquee)
 
 - Faits (chat « Code promo live club », 22/10) : codes Stripe d'Adil, compte melanie, BARBU17 = Alex (@Alex17310,
   u2110821350), SAUCISSON = Fab (@Nyfab34), 10kONEDAY = Nadege (@NadegeNQ) ; 99 EUR/mois au lieu de 139 ; MELMOM2 = code
@@ -31,8 +68,8 @@ reste dans TODO.md.
   /membres, cle parrainages (codes, filleuls de la periode ; to_regclass avant, la transaction READ ONLY ne casse pas) ;
   repartition : AVERTISSEMENT « X EUR a verser aux parrains fin <mois> ... pas deduit de ce calcul » (onglet Revenus et
   repartition_du_mois), aucune ligne du calcul.
-- CHOIX COMMISSION : la ligne a verser vit dans cockpit_liveclub_filleuls (commission figee, mois, statut a_verser) et
-  n'entre PAS dans la repartition. proposer_commission_affiliation compterait un argent RECU (faux sens) ; une depense
+- CHOIX COMMISSION (PERIME le 05/11 au soir : Brice a tranche, voir la section au-dessus) : la ligne a verser vit dans
+  cockpit_liveclub_filleuls (commission figee, mois, statut a_verser) et n'entre PAS dans la repartition. proposer_commission_affiliation compterait un argent RECU (faux sens) ; une depense
   tout de suite deciderait qui paie. QUESTION A BRICE : qui paie (depense rattachee au Live Club, cote Mel avant le 70/30
   comme les lives d'Adrien = recommandation ; commune 50/50 ; Mel seule) ; puis une carte « commissions de parrainage
   versees » (depense + statut versee) reste a faire. Autres questions : rattraper les filleuls du 22/10 au jour du
