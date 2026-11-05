@@ -3,6 +3,26 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
+## CHARGE SUR SUPABASE : ACCUEIL ET SUIVI DE L'ACADEMIE (05/11/2026, GO de Brice « Oui, lance-les » ; commite NON pousse ; aucune migration)
+
+- Cadre : PLAN-MIGRATION-SUPABASE-VPS.md, section 6 (D:\6_Societe\Pilotage\Data-Performance\).
+- Accueil (NoteMapCanvas.tsx) : router.refresh() passait toutes les 60 s et a chaque focus ; chaque passage relit toutes
+  les notes avec leur contenu, la carte et deux fois la session (middleware + page). Maintenant : au retour sur
+  l'onglet ou la fenetre (focus ou visibilitychange, 30 s d'ecart minimum) et toutes les 5 min onglet visible. Le drop
+  d'une note pas encore listee se resout toujours contre /api/notes.
+- Suivi (route /api/academie/suivi) : le jeton peut venir du corps quand l'en-tete manque (jetonDeLaRequete, pur.ts),
+  pour le signal de fermeture du site (sendBeacon, text/plain) ; chemin ajoute aux publicPaths du middleware, la route
+  verifie le jeton et rend 401 sans lui. Les autres routes de l'academie exigent toujours l'en-tete. Le site v3 envoie
+  toutes les 2 min (30 s avant) et retire credit_s, pas les secondes envoyees. 2 min = le plafond : INTERVALLE_MAX_S
+  (120 s) ; pour 5 min, relever INTERVALLE_MAX_S a 330 s ET deployer le journal avant le site.
+- Mesure : scripts/diag-charge-base.mjs (lecture seule, transaction READ ONLY ; --motif <texte>). Le 05/11 (stats
+  depuis le 02/11 15:49) : 17 rendus de l'accueil, 411 signaux du suivi, 1 ouverture du cockpit ; les gros postes sont
+  ailleurs (pgbouncer.get_auth 4 962 appels, verrou de Realtime, Studio, 6 172 UPDATE de Message a la sync des notes).
+- Verifs : tsc, eslint des fichiers touches, verifier-academie --hors-ligne (47 blocs), verifiers du middleware : ok
+  (verifier-kit-defauts et verifier-pilotage-paliers echouaient deja, sans lien).
+- A FAIRE sur GO : pousser le journal AVANT le site v3 (sinon le signal de fermeture recoit 401, sans perte : les
+  signaux normaux passent toujours).
+
 ## PARRAINAGE : DECLARATION, RATTRAPAGE, REMBOURSEMENT ; LIVES DES INTERVENANTS (05/11/2026 soir, decisions de Brice ; NON commite ; migration 20261105190000 ECRITE, NON appliquee)
 
 - Par-dessus le lot commite (journal 3dd62ee, migration d14c468) ; commite f78976b, puis la retouche ci-dessous.

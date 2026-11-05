@@ -11,10 +11,16 @@ import { messageErreur, relationAbsente } from '@/lib/liveclub/pur'
  *
  * Appel : Authorization: Bearer <access_token Supabase du site>, corps
  *   { lecon, evenement, position_s?, secondes?, vu? }
- *   - evenement 'lecture' (toutes les 30 s pendant la lecture), 'pause',
- *     'fin' : videos ; position_s = position du lecteur ; secondes = temps
- *     REELLEMENT joue depuis le dernier signal accepte (sauts exclus, mesure
- *     par la page avec les evenements timeupdate et seeked de player.js).
+ *   Signal de fermeture de page (05/11/2026) : navigator.sendBeacon ne porte
+ *   pas d'en-tete, le jeton vient alors dans le corps ({ ..., jeton }, en
+ *   text/plain, sans prevol CORS) ; chemin public dans middleware.ts, le jeton
+ *   reste verifie ici. La reponse n'est pas lue par la page.
+ *   - evenement 'lecture' (toutes les 2 min pendant la lecture depuis le
+ *     05/11, 30 s avant), 'pause', 'fin' : videos ; position_s = position du
+ *     lecteur ; secondes = temps REELLEMENT joue et pas encore credite (sauts
+ *     exclus, mesure par la page avec les evenements timeupdate et seeked de
+ *     player.js ; la page retire ce que credit_s rend, le reste repart au
+ *     signal suivant).
  *   - evenement 'texte' : texte ou pdf ; secondes = temps ou la page etait
  *     visible depuis le dernier signal accepte. 'texte_fin' : le texte a ete
  *     lu jusqu'en bas (memes champs).
@@ -60,16 +66,19 @@ export async function POST(req: NextRequest) {
   const refus = (erreur: string, status: number, extra?: Record<string, unknown>) =>
     refusAcademie(erreur, status, headers, extra)
 
+  // Le corps d'abord : le signal de fermeture (sendBeacon, sans en-tete) y porte son jeton.
+  const corps: unknown = await req.json().catch(() => ({}))
+
   let userId: string | null
   try {
-    userId = await compteDuJeton(req)
+    userId = await compteDuJeton(req, corps)
   } catch (err) {
     console.warn(`[academie/suivi] verification du jeton impossible : ${messageErreur(err)}`)
     return refus('indisponible', 503)
   }
   if (!userId) return refus('jeton', 401)
 
-  const lu = lireSignal(await req.json().catch(() => ({})))
+  const lu = lireSignal(corps)
   if (!lu) return refus('signal', 400)
 
   let issue: IssueEnregistrement

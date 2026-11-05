@@ -839,18 +839,33 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
   const canvasRef = useRef<HTMLDivElement>(null)
   const spotlightRef = useRef<HTMLDivElement>(null)
 
-  // Fraîcheur des notes sans recharger la page : une note qui vient d'être
-  // synchronisée depuis l'extension apparaît dans la liste (et se résout au
-  // drop) via un refresh au retour sur l'onglet + toutes les 60 s.
+  // Fraîcheur des notes sans recharger la page : une note synchronisée depuis
+  // l'extension (ou modifiée ailleurs) apparaît au retour sur l'onglet ou la
+  // fenêtre, et au plus tard 5 minutes après, onglet visible.
+  // Chaque refresh relit TOUTES les notes avec leur contenu, la carte, et deux
+  // fois la session (middleware + page). Il passait toutes les 60 s et à
+  // chaque focus de la fenêtre (plan de migration Supabase, section 6,
+  // 05/11/2026). Le drop d'une note pas encore listée se résout seul contre
+  // /api/notes (onDrop, plus bas), sans attendre ce refresh.
+  const dernierRefreshRef = useRef(Date.now())
   useEffect(() => {
-    const onFocus = () => router.refresh()
-    window.addEventListener('focus', onFocus)
-    const interval = setInterval(() => {
-      if (!document.hidden) router.refresh()
-    }, 60_000)
+    const PERIODE_MS = 5 * 60_000
+    // focus et visibilitychange arrivent souvent ensemble : un seul refresh.
+    const RETOUR_MIN_MS = 30_000
+    const rafraichir = (ecartMin: number) => {
+      if (document.visibilityState !== 'visible') return
+      if (Date.now() - dernierRefreshRef.current < ecartMin) return
+      dernierRefreshRef.current = Date.now()
+      router.refresh()
+    }
+    const auRetour = () => rafraichir(RETOUR_MIN_MS)
+    window.addEventListener('focus', auRetour)
+    document.addEventListener('visibilitychange', auRetour)
+    const tic = setInterval(() => rafraichir(PERIODE_MS), 60_000)
     return () => {
-      window.removeEventListener('focus', onFocus)
-      clearInterval(interval)
+      window.removeEventListener('focus', auRetour)
+      document.removeEventListener('visibilitychange', auRetour)
+      clearInterval(tic)
     }
   }, [router])
 

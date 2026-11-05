@@ -26,12 +26,12 @@
 //   node scripts/verifier-academie.mjs [--hors-ligne] [chemin du coffre]
 
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import {
   CacheCourt, appareilCourt, appliquerSignal, cheminDansBucket, cheminFichierPropre, conclureLiveClub, etatLecon, ipDuClient,
-  leconVue, lireCsvAcces, lireDemandeLecture, lireDemandeRessource, lireOffresSections, lireSignal, lireUuid, liveClubUtile,
+  jetonDeLaRequete, leconVue, lireCsvAcces, lireDemandeLecture, lireDemandeRessource, lireOffresSections, lireSignal, lireUuid, liveClubUtile,
   ouvertureLecon, ouvertureModule, ouvertureSection, preparerDroits, progressionDuModule, ressourcesPropres, trierRaisons,
-  ECART_MIN_S, MAX_RESSOURCES, SEUIL_VU,
+  ECART_MIN_S, INTERVALLE_MAX_S, JETON_MAX, MARGE_S, MAX_RESSOURCES, SEUIL_VU, VITESSE_MAX,
   autoriserEdition, champsModifies, estAdmin, fusionImport, lireCibleEdition, lireDemandeEdition, planEdition, LIMITES_EDITION,
 } from '../src/lib/academie/pur.ts'
 import { configBibliotheque, configBunny, jetonLecture, lienLecture, signerLecture, DUREE_LIEN_S } from '../src/lib/academie/bunny.ts'
@@ -496,6 +496,26 @@ bloc('texte : le temps visible, borne au temps ecoule (1x + 5 s)', () => {
   assert.equal(r.maj.journal.positionS, null)
 })
 
+// Le lecteur du site espace ses signaux (05/11/2026, plan de migration Supabase,
+// section 6) : 2 min au lieu de 30 s. Le serveur borne l'ecart compte a
+// INTERVALLE_MAX_S : au-dela, une lecture continue a 2x perdrait du temps.
+bloc('signal toutes les 2 min : 2 min jouees a 2x sont creditees en entier, video et texte', () => {
+  const v = appliquerSignal(etat({ maintenant: plus(60 + 120) }), signal({ positionS: 340, secondes: 240 }))
+  assert.equal(v.credit, 240)
+  const t = etat({ type: 'texte', dureeS: 600, secondesVues: 0, pourcentage: 0, positionMaxS: 0, dernierePositionS: 0, maintenant: plus(60 + 120) })
+  assert.equal(appliquerSignal(t, signal({ evenement: 'texte', secondes: 120 })).credit, 120)
+  // Au-dela de INTERVALLE_MAX_S, le serveur rogne : la page garde le reste (credit_s) pour le signal suivant.
+  assert.equal(appliquerSignal(etat({ maintenant: plus(60 + 300) }), signal({ secondes: 600 })).credit, INTERVALLE_MAX_S * VITESSE_MAX + MARGE_S)
+  const site = new URL('../../../sites/Aoknowledgecom/v3/src/academie/suivi.ts', import.meta.url)
+  if (existsSync(site)) {
+    const m = readFileSync(site, 'utf8').match(/const INTERVALLE_MS = ([\d_]+)/)
+    assert.ok(m, 'INTERVALLE_MS introuvable dans le suivi du site')
+    const intervalleS = Number(m[1].replace(/_/g, '')) / 1000
+    assert.ok(intervalleS <= INTERVALLE_MAX_S, `le site envoie toutes les ${intervalleS} s, le serveur ne compte que ${INTERVALLE_MAX_S} s`)
+    assert.ok(intervalleS >= 60, `le site envoie toutes les ${intervalleS} s : trop souvent pour la base`)
+  }
+})
+
 // ---------------------------------------------------------------------------
 // 3. Corps de requete et utilitaires
 // ---------------------------------------------------------------------------
@@ -519,6 +539,25 @@ bloc('corps de requete : lecon, video, signal', () => {
   // 'non_vu' (decochage) = vu: false ; 'texte_fin' accepte.
   assert.deepEqual(lireSignal({ lecon: id, evenement: 'non_vu' }).signal, { evenement: 'vu', positionS: null, secondes: null, vu: false })
   assert.equal(lireSignal({ lecon: id, evenement: 'texte_fin', secondes: 12 }).signal.evenement, 'texte_fin')
+})
+
+bloc('jeton : en-tete Bearer, ou corps pour le signal de fermeture (sendBeacon) ; route du suivi publique', () => {
+  assert.equal(jetonDeLaRequete('Bearer  abc '), 'abc')
+  assert.equal(jetonDeLaRequete('Bearer abc', { jeton: 'autre' }), 'abc')
+  // En-tete Bearer vide : refuse, le corps ne le remplace pas.
+  assert.equal(jetonDeLaRequete('Bearer ', { jeton: 'abc' }), null)
+  assert.equal(jetonDeLaRequete(null, { jeton: ' abc ' }), 'abc')
+  assert.equal(jetonDeLaRequete('Basic x', { jeton: 'abc' }), 'abc')
+  // Sans corps passe (toutes les autres routes) : en-tete exige.
+  assert.equal(jetonDeLaRequete(null), null)
+  assert.equal(jetonDeLaRequete(null, { jeton: 42 }), null)
+  assert.equal(jetonDeLaRequete(null, { jeton: '' }), null)
+  assert.equal(jetonDeLaRequete(null, { jeton: 'x'.repeat(JETON_MAX + 1) }), null)
+  assert.equal(jetonDeLaRequete(null, 'jeton'), null)
+  const mw = readFileSync(new URL('../middleware.ts', import.meta.url), 'utf8')
+  assert.match(mw, /const publicPaths = \[[^\]]*'\/api\/academie\/suivi'[,\]]/)
+  const route = readFileSync(new URL('../src/app/api/academie/suivi/route.ts', import.meta.url), 'utf8')
+  assert.match(route, /compteDuJeton\(req, corps\)/)
 })
 
 bloc('ressources, IP, appareil', () => {

@@ -4,7 +4,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import { appareilCourt, ipDuClient } from './pur'
+import { appareilCourt, ipDuClient, jetonDeLaRequete } from './pur'
 
 // Le site en production et le dev local (Vite, port par defaut). Le CORS
 // n'est pas la barriere de securite (le jeton et le droit le sont) : il dit
@@ -46,19 +46,18 @@ export function refusAcademie(erreur: string, status: number, headers: Record<st
   return NextResponse.json({ ok: false, erreur, ...extra }, { status, headers })
 }
 
-// Un access_token Supabase fait environ 1 ko ; au-dela, ce n'en est pas un.
-const MAX_JETON = 4096
-
 /**
  * L'identifiant du compte du jeton Bearer, ou null (absent, mal forme,
  * refuse). Jette si Supabase Auth est injoignable : la route en fait un 503,
  * pas un 401 (ce n'est pas la faute du membre).
+ *
+ * corps : seulement pour la route du suivi (05/11/2026), qui accepte le jeton
+ * dans le corps quand l'en-tete manque (sendBeacon a la fermeture de la page,
+ * jetonDeLaRequete). Les autres routes ne le passent pas : en-tete exige.
  */
-export async function compteDuJeton(req: NextRequest): Promise<string | null> {
-  const entete = req.headers.get('authorization') ?? ''
-  if (!entete.startsWith('Bearer ')) return null
-  const jeton = entete.slice(7).trim()
-  if (!jeton || jeton.length > MAX_JETON) return null
+export async function compteDuJeton(req: NextRequest, corps?: unknown): Promise<string | null> {
+  const jeton = jetonDeLaRequete(req.headers.get('authorization'), corps)
+  if (!jeton) return null
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
