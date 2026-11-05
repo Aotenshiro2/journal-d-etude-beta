@@ -11,7 +11,10 @@
 // Tables : sites/Aoknowledgecom/supabase/migrations/20261015210000_academie_tables.sql,
 // etats et « vu » a 60 % : 20261016110000_academie_etats_vu.sql (vu_le, vu_par,
 // evenement texte_fin). Ces requetes demandent les deux migrations ;
-// SQL_NOTER_RESSOURCE demande aussi 20261016140000_academie_ressources_protegees.sql.
+// SQL_NOTER_RESSOURCE demande aussi 20261016140000_academie_ressources_protegees.sql,
+// SQL_ETAT_SIGNAL_PROFONDEUR et SQL_APPLIQUER_SIGNAL_PROFONDEUR demandent
+// 20261105233000_academie_profondeur_texte.sql (suivi.ts s'en passe tant
+// qu'elle n'est pas appliquee).
 // Toutes les colonnes uuid sortent en ::text, les compteurs en ::int.
 
 // ---------------------------------------------------------------------------
@@ -259,6 +262,27 @@ select p.position_max_s, p.derniere_position_s, p.secondes_vues, p.pourcentage, 
 `
 
 /**
+ * SQL_ETAT_SIGNAL, plus la profondeur max atteinte et le nombre de mots du
+ * texte (lecon ecrite lue = bas atteint ET temps actif, 05/11/2026). Demande
+ * la migration 20261105233000_academie_profondeur_texte.sql (colonne
+ * profondeur_max) : sans elle, Postgres repond 42703 et suivi.ts repasse par
+ * SQL_ETAT_SIGNAL (ancienne regle). Les mots : les suites de caracteres sans
+ * blanc du contenu, comme minutesDeLecture du site.
+ */
+export const SQL_ETAT_SIGNAL_PROFONDEUR = `
+select p.position_max_s, p.derniere_position_s, p.secondes_vues, p.pourcentage, p.terminee_le,
+       p.marquee_vue_le, p.vu_le, p.derniere_vue_le, p.dernier_signal_le, p.nb_signaux,
+       p.profondeur_max,
+       case when l.type = 'texte' and l.contenu is not null
+            then (select count(*)::int from regexp_matches(l.contenu, '[^[:space:]]+', 'g'))
+       end as mots,
+       l.type, l.duree_s, l.statut, now() as maintenant
+  from public.academie_progression p
+  join public.academie_lecons l on l.id = p.lecon_id
+ where p.user_id = $1::uuid and p.lecon_id = $2::uuid
+`
+
+/**
  * Applique un signal accepte, en UN ordre (mise a jour + journal) :
  * $1 compte, $2 lecon, $3 nb_signaux lu (verrou optimiste : un signal
  * concurrent ne met rien a jour), $4 position_max_s, $5 derniere_position_s,
@@ -268,8 +292,14 @@ select p.position_max_s, p.derniere_position_s, p.secondes_vues, p.pourcentage, 
  * $14 appareil, $15 vu ('poser', 'retirer' ou null), $16 vu_par (la voie,
  * gardee seulement si la lecon n'etait pas deja vue). Aucune ligne rendue =
  * le signal a perdu la course.
+ * SQL_APPLIQUER_SIGNAL_PROFONDEUR : la meme, plus $17 profondeur_max (0-100,
+ * jamais baissee) ; demande la migration 20261105233000.
  */
-export const SQL_APPLIQUER_SIGNAL = `
+export const SQL_APPLIQUER_SIGNAL = sqlAppliquerSignal(false)
+export const SQL_APPLIQUER_SIGNAL_PROFONDEUR = sqlAppliquerSignal(true)
+
+function sqlAppliquerSignal(profondeur: boolean): string {
+  return `
 with maj as (
   update public.academie_progression p set
     position_max_s = $4::int,
@@ -288,7 +318,8 @@ with maj as (
     vu_par = case $15::text
       when 'poser' then case when p.vu_le is null then $16::text else p.vu_par end
       when 'retirer' then null
-      else p.vu_par end,
+      else p.vu_par end,${profondeur ? `
+    profondeur_max = greatest(p.profondeur_max, $17::smallint),` : ''}
     dernier_signal_le = now(),
     nb_signaux = p.nb_signaux + 1
   where p.user_id = $1::uuid and p.lecon_id = $2::uuid and p.nb_signaux = $3::int
@@ -301,6 +332,7 @@ with maj as (
 )
 select maj.*, (select count(*)::int from journal) as journalise from maj
 `
+}
 
 /**
  * $1 = compte, $2 = ip, $3 = appareil. Une connexion a l'academie, notee au
