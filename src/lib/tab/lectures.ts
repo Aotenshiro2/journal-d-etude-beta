@@ -25,6 +25,7 @@ import { STATUTS_FIL_EN_CLAIR, statutFil } from '@/lib/tab/repondre-pur'
 import { dernieresPropositions } from '@/lib/tab/repondre'
 import { SQL_PAUSES_DEPOT } from '@/lib/vues-serveur'
 import { sourcesAContacter } from '@/lib/liveclub/contact-instantane'
+import { lectureInstagram } from '@/lib/tab/instagram'
 import {
   centimes, couper, decalerJour, eurosExact, eurosTuile, joursDuMois, jourLisible, moisLisible, moisPrecedent,
   paginer, pourcentage, unMoisAvant, type Pagination, type Periode,
@@ -85,6 +86,17 @@ async function facultatif<T>(notes: string[], quoi: string, f: () => Promise<T[]
     if (!relationAbsente(err)) throw err
     notes.push(`${quoi} : table absente en base, rien à lire.`)
     return []
+  }
+}
+
+/** Comme facultatif, pour une lecture qui rend un objet (ou null). */
+async function facultatifUn<T>(notes: string[], quoi: string, f: () => Promise<T | null>): Promise<T | null> {
+  try {
+    return await f()
+  } catch (err) {
+    if (!relationAbsente(err)) throw err
+    notes.push(`${quoi} : table absente en base, rien à lire.`)
+    return null
   }
 }
 
@@ -665,17 +677,21 @@ export async function youtube(c: Ctx): Promise<Sortie> {
 export async function reseaux(c: Ctx): Promise<Sortie> {
   const { tx, periode: p } = c
   const notes: string[] = []
+  // INSTAGRAM (05/11/2026, note de Tab 60478b43) : sa propre lecture (instagram.ts), avec
+  // les comptes UNIQUES touches, les abonnements gagnes et perdus, les reperes et la grille
+  // de lecture. La Page Facebook garde le resume ci-dessous (somme des jours, dite telle).
+  const instagram = await facultatifUn(notes, 'cockpit_social_* (Instagram)', () => lectureInstagram(c, notes))
   const social = await facultatif(notes, 'cockpit_social_jour', () => q(tx, `
     select plateforme, sum(nouveaux_abonnes)::int as nouveaux_abonnes, sum(desabonnes)::int as desabonnes,
       sum(couverture)::bigint as couverture_cumulee_jour_par_jour, sum(vues)::bigint as vues, sum(impressions)::bigint as impressions,
       sum(interactions)::bigint as interactions, sum(visites_profil)::bigint as visites_profil,
       (array_agg(abonnes order by jour desc) filter (where abonnes is not null))[1] as abonnes_fin,
       (array_agg(abonnes order by jour) filter (where abonnes is not null))[1] as abonnes_debut
-    from public.cockpit_social_jour where jour between $1::date and $2::date group by 1 order by 1`, p.du, p.au))
+    from public.cockpit_social_jour where plateforme = 'facebook' and jour between $1::date and $2::date group by 1 order by 1`, p.du, p.au))
   const publications = await facultatif(notes, 'cockpit_social_publications', () => q(tx, `
     select plateforme, ${H('publie_le')} as publie_le, type, left(legende, 300) as legende, lien, j_aime, commentaires, partages,
       enregistrements, couverture, vues, interactions
-    from public.cockpit_social_publications where ${JP('publie_le')} between $1::date and $2::date
+    from public.cockpit_social_publications where plateforme = 'facebook' and ${JP('publie_le')} between $1::date and $2::date
     order by interactions desc nulls last limit $3`, p.du, p.au, c.pag.limite))
   const telegram = await facultatif(notes, 'cockpit_telegram_abonnes_solde', () => q(tx, `
     select groupe, (array_agg(abonnes order by jour) )[1] as abonnes_debut, (array_agg(abonnes order by jour desc))[1] as abonnes_fin,
@@ -693,17 +709,18 @@ export async function reseaux(c: Ctx): Promise<Sortie> {
       and sublabel between $1 and $2 order by sublabel desc`, p.du, p.au)
   return {
     libelle: `Réseaux ${p.libelle}`,
-    sources: ['cockpit_social_jour et cockpit_social_publications (Page Facebook, Instagram)', 'cockpit_telegram_abonnes_solde et cockpit_telegram_activite_jour', 'cockpit_metrics_monthly (newsletter Kit)', 'cockpit_top_items kit_broadcasts'],
+    sources: ['cockpit_social_jour, cockpit_social_publications, cockpit_social_comptes (reperes) et cockpit_social_objectifs (Instagram, Page Facebook)', 'cockpit_telegram_abonnes_solde et cockpit_telegram_activite_jour', 'cockpit_metrics_monthly (newsletter Kit)', 'cockpit_top_items kit_broadcasts'],
     donnees: {
-      instagram_et_facebook: social,
-      publications_les_plus_engageantes: publications,
+      instagram,
+      facebook: social,
+      publications_facebook_les_plus_engageantes: publications,
       telegram_abonnes: telegram,
       telegram_activite: activite,
       newsletter_kit_par_mois: kit,
       newsletters_envoyees: envois,
     },
-    lignes: social.length + publications.length + telegram.length + kit.length,
-    notes: [...notes, 'La couverture est une somme de couvertures quotidiennes (une personne vue deux jours compte deux fois). Les chiffres YouTube sont dans /youtube.'],
+    lignes: (instagram ? 1 : 0) + social.length + publications.length + telegram.length + kit.length,
+    notes: [...notes, 'Facebook : la couverture est une somme de couvertures quotidiennes (une personne vue deux jours compte deux fois). Instagram : comptes uniques donnés par Meta (bloc instagram, commence par en_bref). Les chiffres YouTube sont dans /youtube.'],
   }
 }
 
