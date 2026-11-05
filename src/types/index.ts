@@ -55,6 +55,10 @@ export interface TradePrixData {
   stop?: number
   tp?: number
   partiels?: { prix: number; taille?: number }[]
+  /** Carnet 1.8.14 : le sens CHOISI, le type d'ordre, le risque (bornés par prix-carnet.ts). */
+  sens?: 'achat' | 'vente'
+  typeOrdre?: 'marche' | 'limite' | 'stop'
+  risque?: { montant: number; unite: 'USD' | '%' }
 }
 
 // Segment de trade (stocké en Json sur Note, source de vérité extension)

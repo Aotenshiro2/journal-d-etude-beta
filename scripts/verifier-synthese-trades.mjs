@@ -61,6 +61,26 @@ bloc('nettoyage : nombres finis, 10 partiels au plus, instrument de 20 caractere
   const types = lire('../src/types/index.ts')
   assert.match(types, /export interface TradePrixData \{[\s\S]*?partiels\?: \{ prix: number; taille\?: number \}\[\]/)
   assert.match(types, /export interface TradeSegmentData \{[\s\S]*?prix\?: TradePrixData[\s\S]*?instrument\?: string/)
+  assert.match(types, /export interface TradePrixData \{[\s\S]*?sens\?: 'achat' \| 'vente'[\s\S]*?typeOrdre\?: 'marche' \| 'limite' \| 'stop'[\s\S]*?risque\?: \{ montant: number; unite: 'USD' \| '%' \}/)
+})
+
+bloc('nettoyage (Carnet 1.8.14) : sens, type d ordre et risque gardes s ils sont valables, bornes sinon', () => {
+  const prix = { entree: 27287, stop: 27245.5, tp: 27350.5, taille: 6, sens: 'achat', typeOrdre: 'limite', risque: { montant: 100, unite: 'USD' } }
+  assert.deepEqual(P.nettoyerPrix(prix), prix)
+  assert.deepEqual(P.nettoyerPrix({ sens: 'vente', typeOrdre: 'marche', risque: { montant: 1.5, unite: '%' } }), { sens: 'vente', typeOrdre: 'marche', risque: { montant: 1.5, unite: '%' } })
+  // Valeurs hors liste ou douteuses : retirees, jamais devinees.
+  assert.deepEqual(P.nettoyerPrix({ sens: 'long', typeOrdre: 'market', risque: { montant: 100, unite: 'EUR' } }), {})
+  assert.deepEqual(P.nettoyerPrix({ risque: { montant: 150, unite: '%' } }), {})
+  assert.deepEqual(P.nettoyerPrix({ risque: { montant: -5, unite: 'USD' } }), {})
+  assert.deepEqual(P.nettoyerPrix({ risque: { montant: P.RISQUE_MAX, unite: 'USD' } }), {})
+  assert.deepEqual(P.nettoyerPrix({ risque: 'beaucoup' }), {})
+  // Le risque est reduit a { montant, unite } : une cle de plus ne passe pas.
+  assert.deepEqual(P.nettoyerPrix({ risque: { montant: 100, unite: 'USD', note: 'x'.repeat(5000) } }), { risque: { montant: 100, unite: 'USD' } })
+  assert.deepEqual(P.nettoyerRisque({ montant: 2, unite: '%' }), { montant: 2, unite: '%' })
+  assert.equal(P.nettoyerRisque(null), null)
+  // Un segment d'une note d'avant la 1.8.14 reste intact.
+  const ancien = { id: 's9', startedAt: 9, prix: { entree: 1, stop: 0.5 } }
+  assert.deepEqual(P.nettoyerSegment(ancien), ancien)
 })
 
 // ── Le prevu, le sens, le R ─────────────────────────────────────────────────
@@ -68,16 +88,39 @@ bloc('nettoyage : nombres finis, 10 partiels au plus, instrument de 20 caractere
 bloc('prevu : rPrevu = |tp - entree| / |entree - stop| ; null sans l un des trois ou risque nul ; sens du stop', () => {
   assert.deepEqual(prevu({ entree: 20000, stop: 19990, tp: 20030, taille: 2, partiels: [{ prix: 20015 }] }), {
     entree: 20000, stop: 19990, tp: 20030, taille: 2, sortie: null, partiels: [{ prix: 20015, taille: null }], rPrevu: 3,
+    sens: null, typeOrdre: null, risque: null,
   })
   assert.equal(S.calculerRPrevu(1.1, 1.102, 1.095), 2.5) // short sur EURUSD
   assert.equal(S.calculerRPrevu(100, null, 110), null)
   assert.equal(S.calculerRPrevu(100, 95, null), null)
   assert.equal(S.calculerRPrevu(100, 100, 110), null)
-  assert.deepEqual(S.lirePrevu({}), { entree: null, stop: null, tp: null, taille: null, sortie: null, partiels: [], rPrevu: null })
+  assert.deepEqual(S.lirePrevu({}), {
+    entree: null, stop: null, tp: null, taille: null, sortie: null, partiels: [], rPrevu: null, sens: null, typeOrdre: null, risque: null,
+  })
   assert.equal(S.sensDuTrade('short', 100, 95), -1) // la direction du broker passe d'abord
   assert.equal(S.sensDuTrade(null, 100, 95), 1)
   assert.equal(S.sensDuTrade(null, 100, 105), -1)
   assert.equal(S.sensDuTrade(null, 100, null), null)
+})
+
+bloc('sens (Carnet 1.8.14) : le sens CHOISI prime sur le sens deduit du stop, jamais sur le broker', () => {
+  assert.equal(S.sensDuTrade(null, 100, 95, 'vente'), -1) // le stop dirait long
+  assert.equal(S.sensDuTrade(null, 100, 105, 'achat'), 1) // le stop dirait short
+  assert.equal(S.sensDuTrade(null, null, null, 'vente'), -1)
+  assert.equal(S.sensDuTrade('long', 100, 95, 'vente'), 1) // le broker a execute un long
+  assert.equal(S.sensDuTrade(null, 100, 95, null), 1)
+  const p = prevu({ entree: 20000, stop: 19990, sens: 'vente', typeOrdre: 'stop', risque: { montant: 1, unite: '%' } })
+  assert.equal(p.sens, 'vente')
+  assert.equal(p.typeOrdre, 'stop')
+  assert.deepEqual(p.risque, { montant: 1, unite: '%' })
+  // Sans direction du broker, les ecarts s'orientent par le sens choisi : une vente prevue a 20 000, faite a 20 001 = mieux.
+  const e = S.effectifDesPositions([pos('a', { direction: null, prixEntree: 20001, prixSortie: 19990, quantite: 1 })])
+  const ecarts = S.ecartsDuTrade(p, e, ms('10:00'))
+  assert.equal(ecarts.entree, -1)
+  assert.equal(ecarts.rReel, 1.1)
+  // Sans sens choisi, le stop sous l'entree dit long : le meme ecart devient « moins bien ».
+  const sansSens = S.ecartsDuTrade(prevu({ entree: 20000, stop: 19990 }), e, ms('10:00'))
+  assert.equal(sansSens.entree, 1)
 })
 
 // ── Les ecarts ──────────────────────────────────────────────────────────────

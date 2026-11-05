@@ -8,8 +8,9 @@
 // calcule. scripts/verifier-synthese-trades.mjs le charge tel quel.
 //
 // Conventions :
-// - sens : direction de la position, sinon déduit du stop (stop sous l'entrée =
-//   long, au-dessus = short), sinon inconnu (écarts orientés à null) ;
+// - sens : direction de la position, sinon le sens CHOISI dans le Carnet
+//   (prix.sens, 1.8.14), sinon déduit du stop (stop sous l'entrée = long,
+//   au-dessus = short), sinon inconnu (écarts orientés à null) ;
 // - écarts d'entrée et de sortie orientés par le sens, POSITIF = moins bon
 //   (long payé plus cher ou vendu plus bas, short vendu plus bas ou racheté plus haut) ;
 // - risque = |entrée prévue - stop| (stop tapé, sinon celui du broker ;
@@ -23,7 +24,7 @@ import {
   derniersJugements, emotionAuDepart, segmentsLus,
   type CauseCarnet, type IssueCarnet, type JugementCarnet, type NoteDuCarnet, type PeriodeCarnet,
 } from './carnet-sur-positions'
-import { nettoyerInstrument, nettoyerPrix } from './prix-carnet'
+import { nettoyerInstrument, nettoyerPrix, type RisqueCarnet, type SensCarnet, type TypeOrdreCarnet } from './prix-carnet'
 import { positionDe, type Execution, type VuePosition } from './positions'
 
 export type Sens = 1 | -1
@@ -38,6 +39,10 @@ export interface Prevu {
   partiels: { prix: number; taille: number | null }[]
   /** |tp - entrée| / |entrée - stop|, les trois tapés ; null sinon. */
   rPrevu: number | null
+  /** Carnet 1.8.14 : le sens CHOISI (pas celui que le stop laisse deviner), le type d'ordre, le risque ; null s'ils n'ont pas été saisis. */
+  sens: SensCarnet | null
+  typeOrdre: TypeOrdreCarnet | null
+  risque: RisqueCarnet | null
 }
 
 /** Ce que le broker a exécuté : les positions liées au trade du Carnet (les copies comprises). */
@@ -196,13 +201,24 @@ export function lirePrevu(segment: unknown): Prevu {
     sortie: nombre(p.sortie),
     partiels: (p.partiels ?? []).map(q => ({ prix: q.prix, taille: q.taille ?? null })),
     rPrevu: calculerRPrevu(entree, stop, tp),
+    sens: p.sens ?? null,
+    typeOrdre: p.typeOrdre ?? null,
+    risque: p.risque ?? null,
   }
 }
 
-/** Le sens : la direction de la position, sinon le stop par rapport à l'entrée, sinon null. */
-export function sensDuTrade(direction: string | null | undefined, entree: number | null, stop: number | null): Sens | null {
+/**
+ * Le sens : la direction de la position (ce que le broker a exécuté), sinon le
+ * sens CHOISI dans le Carnet (1.8.14), sinon le stop par rapport à l'entrée,
+ * sinon null. Le sens choisi prime sur le sens déduit, jamais sur le broker.
+ */
+export function sensDuTrade(
+  direction: string | null | undefined, entree: number | null, stop: number | null, sensChoisi?: SensCarnet | null,
+): Sens | null {
   if (direction === 'long') return 1
   if (direction === 'short') return -1
+  if (sensChoisi === 'achat') return 1
+  if (sensChoisi === 'vente') return -1
   if (entree !== null && stop !== null && stop !== entree) return stop < entree ? 1 : -1
   return null
 }
@@ -293,7 +309,7 @@ export function ecartsDuTrade(prevu: Prevu, effectif: Effectif, startedAt: numbe
   const premiere = effectif.positions[0]
   const stop = prevu.stop ?? effectif.stop
   const entreeRef = prevu.entree ?? effectif.entree
-  const sens = sensDuTrade(premiere.direction, entreeRef, stop)
+  const sens = sensDuTrade(premiere.direction, entreeRef, stop, prevu.sens)
   const risque = entreeRef !== null && stop !== null && Math.abs(entreeRef - stop) > 0 ? arrondi(Math.abs(entreeRef - stop)) : null
   const { entree, sortie } = effectif
   const entreeMs = Date.parse(premiere.entreLe)

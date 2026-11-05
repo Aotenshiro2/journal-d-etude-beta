@@ -120,16 +120,41 @@ export function heureDe(iso: string, heureAffichee = false): string {
 
 // -- Le sens et la pastille ---------------------------------------------------
 
-/** Le sens : la direction du broker, sinon le stop face à l'entrée, sinon le TP face à l'entrée. */
+/** Le sens : la direction du broker, sinon le sens choisi dans le Carnet (1.8.14), sinon le stop face à l'entrée, sinon le TP face à l'entrée. */
 export function sensDe(t: TradeSynthese): Sens | null {
   const entree = t.prevu.entree ?? t.effectif?.entree ?? null
-  const s = sensDuTrade(t.effectif?.positions[0]?.direction, entree, t.prevu.stop ?? t.effectif?.stop ?? null)
+  const s = sensDuTrade(t.effectif?.positions[0]?.direction, entree, t.prevu.stop ?? t.effectif?.stop ?? null, t.prevu.sens)
   if (s !== null) return s
   if (entree !== null && t.prevu.tp !== null && t.prevu.tp !== entree) return t.prevu.tp > entree ? 1 : -1
   return null
 }
 
 export const libelleSens = (s: Sens | null) => (s === 1 ? 'long' : s === -1 ? 'short' : null)
+
+// -- Le plan d'entrée tapé dans le Carnet (1.8.14) ----------------------------
+
+const MOTS_ORDRE = { marche: 'au marché', limite: 'limite', stop: 'stop' } as const
+
+/** Le sens et le type d'ordre prévus : « Achat limite », « Vente au marché », « Ordre stop » ; null sans l'un ni l'autre. */
+export function texteOrdrePrevu(p: Pick<TradeSynthese['prevu'], 'sens' | 'typeOrdre'>): string | null {
+  const sens = p.sens === 'achat' ? 'Achat' : p.sens === 'vente' ? 'Vente' : null
+  const ordre = p.typeOrdre ? MOTS_ORDRE[p.typeOrdre] : null
+  if (sens && ordre) return `${sens} ${ordre}`
+  if (sens) return sens
+  return ordre ? `Ordre ${ordre}` : null
+}
+
+/** Le risque prévu : « 100 USD », « 1 % du compte » ; null sans risque. */
+export function texteRisquePrevu(p: Pick<TradeSynthese['prevu'], 'risque'>): string | null {
+  if (!p.risque) return null
+  return p.risque.unite === '%' ? `${formatNombre(p.risque.montant)} % du compte` : `${formatNombre(p.risque.montant)} USD`
+}
+
+/** Le sens exécuté par le broker, dans les mots de la carte : « Achat », « Vente » ; null s'il n'est pas dit. */
+export function texteSensBroker(t: TradeSynthese): string | null {
+  const d = t.effectif?.positions[0]?.direction
+  return d === 'long' ? 'Achat' : d === 'short' ? 'Vente' : null
+}
 
 export type Ton = 'vert' | 'ambre' | 'rouge' | 'neutre' | 'gris'
 export interface Pastille { texte: string; ton: Ton }

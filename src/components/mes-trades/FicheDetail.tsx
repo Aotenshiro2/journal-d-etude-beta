@@ -1,8 +1,9 @@
 'use client'
 
 // Le détail d'un trade (fiche 1 du labo, brief J2) : le tableau Prévu (toi) /
-// Effectif (broker) / Écart, comme le panneau du Carnet, pour entrée, stop, TP,
-// taille, chaque sortie et R ; puis le ressenti, le jugement et la capture en
+// Effectif (broker) / Écart, comme le panneau du Carnet, pour l'ordre et le
+// risque quand le Carnet 1.8.14 les a saisis, entrée, stop, TP, taille, chaque
+// sortie et R ; puis le ressenti, le jugement et la capture en
 // blocs. Les écarts de prix suivent UNE convention, celle du panneau « Ton
 // entrée » : orientés par le sens, positif = moins bien (texteEcart) ; vert
 // quand c'est mieux, ambre quand c'est moins bien au-delà d'un dixième du
@@ -11,7 +12,9 @@
 import type { ReactNode } from 'react'
 import { Heart, Image as ImageIcon, PenLine } from 'lucide-react'
 import type { TradeSynthese } from '@/lib/synthese-trades-pur'
-import { formatNombre, formatPrix, formatR, lignesDeSortie, orienteSortie, sensDe, texteEcart } from '@/lib/mes-trades-pur'
+import {
+  formatNombre, formatPrix, formatR, lignesDeSortie, orienteSortie, sensDe, texteEcart, texteOrdrePrevu, texteRisquePrevu, texteSensBroker,
+} from '@/lib/mes-trades-pur'
 import { SURFACE, TEINTES, TeteBloc } from './commun'
 import { ContenuCaptures, ContenuJugement, ContenuRessenti } from './fiche-commun'
 
@@ -39,6 +42,19 @@ export default function FicheDetail({ trade, integre = false }: { trade: TradeSy
 
   // Un écart d'un dixième du risque au plus reste neutre.
   const proche = (x: number) => risque !== null && Math.abs(x) <= risque / 10 + 1e-9
+  // Carnet 1.8.14 : le sens et le type d'ordre prévus face au sens exécuté, puis le risque tapé.
+  // Seulement quand le membre les a saisis : les trades d'avant gardent leur tableau.
+  const ordrePrevu = texteOrdrePrevu(p)
+  if (ordrePrevu) {
+    const sensBroker = texteSensBroker(trade)
+    const inverse = p.sens !== null && sensBroker !== null && sensBroker !== (p.sens === 'achat' ? 'Achat' : 'Vente')
+    lignes.push({
+      libelle: 'Ordre', prevu: ordrePrevu, effectif: sensBroker ?? absent(),
+      ecart: inverse ? 'sens inverse' : '', couleur: inverse ? TEINTES.ambre : undefined,
+    })
+  }
+  const risquePrevu = texteRisquePrevu(p)
+  if (risquePrevu) lignes.push({ libelle: 'Risque', prevu: <Nb>{risquePrevu}</Nb>, effectif: absent(), ecart: '' })
   {
     const oriente = trade.ecarts?.entree ?? (p.entree !== null && e?.entree != null ? orienteSortie(e.entree, p.entree, sens) : null)
     lignes.push({
