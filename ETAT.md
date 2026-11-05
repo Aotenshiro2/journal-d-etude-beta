@@ -1,5 +1,9 @@
 # ETAT du journal d etudes
 
+## 05/11/2026 : charge sur Supabase, suite (lot de l'Orchestrateur, regle de Brice « recharger a l'action »)
+- Accueil : plus aucun router.refresh() automatique (ni minuterie, ni focus) ; bouton « Actualiser mes notes » en bas de la barre de droite (NoteMapCanvas, ActionBarre.enCours de CanvasToolbar) ; Actualiser met aussi a jour les cartes deja posees (memeNote), une carte dont la note est supprimee ailleurs est retiree de l'affichage.
+- Academie, lecons ecrites : credit envoye au depart de la lecon, en arriere-plan et a la fermeture (plus d'envoi periodique), borne par le temps ecoule et un plafond de 2 h (PLAFOND_TEXTE_S) ; « lue » = profondeur >= 90 % (colonne academie_progression.profondeur_max, migration 20261105233000 appliquee le 05/11) ou texte_fin, ET temps actif >= 30 % d'une lecture a 200 mots/min (plancher 30 s). Videos inchangees.
+
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
