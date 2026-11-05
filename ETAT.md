@@ -7,6 +7,43 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
+## AGENT AOK : LES GESTES DU COCKPIT DEPUIS TELEGRAM, LOT 1 (05/11/2026, commite NON pousse ; aucune migration)
+
+- Brice, 05/11 : « que l'agent puisse faire depuis Telegram les gestes du cockpit ». LOT 1 seulement (un lot 2 suivra).
+  Sept cartes (communes a Telegram et a la fenetre du cockpit, revalidees au clic par validerAction) et un geste sans carte.
+- Academie : proposer_acces_academie (email, offre = slug, fin incluse, raison obligatoire ; carte : la personne, l'offre et ce
+  qu'elle ouvre, la fin, compte verifie ou non) et proposer_retrait_acces_academie (acces_id, raison ; carte : source, dates,
+  « un achat n'est pas rembourse »). Meme ecriture que POST /api/cockpit/academie : le coeur de la route est sorti dans
+  src/lib/academie/gestes-cockpit.ts (route inchangee dans ses reponses), pose_par / retire_par = 'agent:<uuid>'.
+- Rangement : proposer_rangement_academie (deplacer_lecons, deplacer_section, deplacer_module, statut publie|brouillon,
+  creer_section), reserve aux admins du site (profiles.role, comme /api/academie/arbre, verifie a la carte ET au clic). La carte
+  nomme par le titre, dit ou ca va, « VISIBLE AUX ELEVES » pour publier, les lecons non publiables et les slugs renommes ; une
+  empreinte des elements nommes est comparee au clic sous le verrou de l'arbre (catalogue change = refus). executerGeste avec
+  par = uuid du compte (academie_editions), cache du catalogue vide.
+- Acces aux apps : proposer_acces_mentorat (accorder | retirer, email de connexion, note). Coeur de /api/cockpit/mentorat sorti
+  dans src/lib/mentorat-acces.ts (route inchangee). MentoratGrant n'a pas de colonne d'auteur.
+- Clips : proposer_decision_clip (garder | ecarter | annuler, clips opus d'UN replay ; decide_le, decide_par, decide_label poses
+  a la main : le trigger ne les pose que si auth.uid() n'est pas nul), proposer_clips_replay (proposer_telegram avec le
+  message_id, ou proposer_youtube avec un lien youtube.com/youtu.be ; pose_par pose a la main, pose_label par le trigger ; aucun
+  credit) et proposer_envoi_opus (envoyer_opus, ref = replay_id comme le cockpit ; la carte dit la plage en m:ss et les credits
+  = max(10, minutes commencees), comme clips.py ; la plage est relue et comparee au clic). Bouton « Envoyer à Opus (payant) ».
+- « Deja traite » par la phrase : marquer_fil_traite, SANS carte (GESTES_SANS_CARTE, refuse sous prudence), seulement si le
+  message du titulaire de ce tour le dit (ordreFilTraiteExplicite : traite, regle, gere, repondu, c'est bon... ou un « oui » a
+  une proposition de l'agent). Le fil se resout comme pour rendre la main ; traiterFilHorsBot(fil, userId du tour) ;
+  phraseFilTraite rendue au modele.
+- Fichiers : src/lib/agent-gestes-cockpit-pur.ts (regles, cartes, phrases), src/lib/agent-gestes-cockpit.ts (controle et
+  execution), src/lib/academie/gestes-cockpit.ts, src/lib/mentorat-acces.ts, les deux routes, stripe-actions.ts (type, validation,
+  resume, log, execution), agent-cockpit.ts (outils, TYPE_PAR_OUTIL, prompt : section « LES GESTES DU COCKPIT, D'ICI » et
+  « DÉJÀ TRAITÉ »), agent-cockpit-pur.ts (boutons, descriptions), reponse-membre.ts (marquerFilTraitePourAgent).
+- Cockpit (apps/cockpit) non touche : la carte s'affiche et se confirme (resume + carte_id), l'entete LIBELLE_ACTION reste vide
+  pour ces types (deja le cas pour adresse_contact, pause_depot, code_parrainage). Acces.tsx affiche « posé par agent:<uuid> ».
+- Verifs : scripts/verifier-agent-outils-cockpit.mjs (17 blocs, hors ligne) ; tsc ; eslint des fichiers touches ;
+  verifier-securite-bots (regex GESTES_SANS_CARTE mise a jour), -agent-equipe, -fil-traite, -diffusion-equipe, -reponse-membre,
+  -annulation-abonnement, -adresse-contact, -pause-depot, -effacement, -depot-perdu, -suivi-lots, -academie --hors-ligne,
+  -parrainage, -repartition, -liveclub, -tab-repondre, -gestes-academie --hors-ligne : ok. Aucune base, aucun envoi, aucune eval.
+- Limite : une plage d'envoi autre que plage_proposee n'est pas possible d'ici (la demande envoyer_opus ne porte que le
+  replay_id ; clips.py prend toujours la plage proposee). Mise en ligne : push du journal seul, aucune migration.
+
 ## SUPPORT : BOUTON « DÉJÀ TRAITÉ » (05/11/2026, EN LIGNE ; aucune migration)
 
 - Brice : un fil regle hors du bot gardait « veut un humain » pour rien (« Rendre la main au bot » n'apparait que si

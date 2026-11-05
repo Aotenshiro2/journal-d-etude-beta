@@ -92,6 +92,15 @@ const LIBELLES_BOUTON: Record<string, string> = {
   reglement: 'Noter le règlement',
   effacement: "Lancer l'effacement",
   reponse_membre: 'Envoyer la réponse',
+  // (05/11, LOT 1) Les gestes du cockpit depuis Agent AOK (agent-gestes-cockpit-pur.ts).
+  acces_academie: "Accorder l'accès académie",
+  retrait_acces_academie: "Retirer l'accès académie",
+  rangement_academie: 'Appliquer le rangement',
+  acces_mentorat: "Changer l'accès aux apps",
+  decision_clip: 'Enregistrer la décision',
+  clips_replay: 'Préparer les clips',
+  // Le bouton dit que ca coute : la carte dit combien.
+  envoi_opus: 'Envoyer à Opus (payant)',
 }
 
 /** Le texte du bouton Confirmer d'une carte : l'action precise, jamais « exécuter l'image ». */
@@ -182,6 +191,15 @@ export const DESCRIPTIONS_OUTILS: Readonly<Record<string, string>> = {
   proposer_effacement: "la carte d'effacement",
   proposer_reponse_membre: 'la carte de réponse au membre',
   rendre_la_main_au_bot: 'la main rendue au bot',
+  // (05/11, LOT 1) Les gestes du cockpit depuis Agent AOK.
+  proposer_acces_academie: "la carte d'accès à l'académie",
+  proposer_retrait_acces_academie: "la carte de retrait d'accès à l'académie",
+  proposer_rangement_academie: "la carte de rangement de l'académie",
+  proposer_acces_mentorat: "la carte d'accès aux apps",
+  proposer_decision_clip: 'la carte de décision sur les clips',
+  proposer_clips_replay: 'la carte qui prépare les clips du replay',
+  proposer_envoi_opus: "la carte d'envoi à Opus",
+  marquer_fil_traite: 'la demande marquée traitée',
   demandes_en_suspens: 'la liste des demandes en suspens',
   reprendre_demande: 'la relance de la demande',
   poser_question_equipe: "la question à l'équipe",

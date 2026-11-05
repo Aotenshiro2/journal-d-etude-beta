@@ -361,7 +361,8 @@ bloc('le code branche la securite : prompts, outils, verrous, gardes', () => {
   for (const nom of ['poser_question_equipe', 'rapporter_reponse_equipe']) assert.match(agent, new RegExp(`name: '${nom}'`))
   assert.match(agent, /retroactif: \{ type: 'boolean'/)
   assert.match(agent, /accord: \{ type: 'string'/)
-  assert.match(agent, /GESTES_SANS_CARTE = new Set\(\['reprendre_demande', 'rendre_la_main_au_bot', 'poser_question_equipe', 'rapporter_reponse_equipe'\]\)/)
+  // (05/11) marquer_fil_traite (« deja traite » par la phrase) : un geste sans carte de plus, refuse lui aussi sous prudence.
+  assert.match(agent, /GESTES_SANS_CARTE = new Set\(\['reprendre_demande', 'rendre_la_main_au_bot', 'poser_question_equipe', 'rapporter_reponse_equipe', 'marquer_fil_traite'\]\)/)
   assert.match(agent, /if \(prudence && \(TYPE_PAR_OUTIL\[bloc\.name\] \|\| GESTES_SANS_CARTE\.has\(bloc\.name\)\)\)/)
   assert.match(agent, /content: await surveillerResultat\(resultat\)/)
   const tg = lire('src/lib/agent-cockpit-telegram.ts')
