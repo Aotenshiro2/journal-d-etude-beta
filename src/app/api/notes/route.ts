@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db'
 import { getUserId } from '@/lib/api-auth'
 import { extractWikilinks } from '@/lib/wikilinks'
+import { nettoyerTradesCarnet } from '@/lib/prix-carnet'
 import crypto from 'crypto'
 
 export async function GET(req: NextRequest) {
@@ -113,7 +114,9 @@ export async function POST(req: NextRequest) {
     ? concepts.filter((c: unknown): c is string => typeof c === 'string' && c.trim().length > 0)
     : null
 
-  const cleanTrades = Array.isArray(trades) ? trades.filter((t: unknown) => t != null && typeof t === 'object') : null
+  // Segments de trade : les objets seulement, tels quels ; `prix` (entrée, sortie,
+  // taille, stop, TP, partiels) et `instrument` du Carnet gardés et bornés (05/11/2026).
+  const cleanTrades = nettoyerTradesCarnet(trades)
 
   // Warmups de séance (multi-séances) — JSON, source de vérité extension, comme trades
   const cleanWarmups = Array.isArray(warmups) ? warmups.filter((w: unknown) => w != null && typeof w === 'object') : null

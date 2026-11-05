@@ -46,12 +46,29 @@ export interface AnnotationData {
   reviewedAt?: Date | string | null
 }
 
+// Les prix tapés dans le panneau du trade du Carnet (« prévu », 05/11/2026) :
+// nombres finis, 10 partiels au plus (bornés par prix-carnet.ts à l'écriture).
+export interface TradePrixData {
+  entree?: number
+  sortie?: number
+  taille?: number
+  stop?: number
+  tp?: number
+  partiels?: { prix: number; taille?: number }[]
+}
+
 // Segment de trade (stocké en Json sur Note, source de vérité extension)
 export interface TradeSegmentData {
   id: string
   startedAt: number
   closedAt?: number
   outcome?: 'gain' | 'perte' | 'be'
+  /** R saisi par le membre. */
+  r?: number
+  cooldown?: { emotion?: string; error?: string; lesson?: string; doneAt?: number }
+  prix?: TradePrixData
+  /** L'instrument du trade (« NQ », « MNQ », « ES », « EURUSD »), 20 caractères au plus. */
+  instrument?: string
 }
 
 export interface CanvasData {
