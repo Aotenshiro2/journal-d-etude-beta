@@ -799,7 +799,7 @@ export async function resumeDuMatin(o: { maintenant?: Date; apercu?: boolean } =
     if (!await reserverJour({ jour, depuis, jusqua, statut: 'en_cours', etat: instantane, annonces })) return bilan('deja_fait')
 
     const destinataires = await prisma.$queryRaw<{ telegram_id: bigint }[]>`
-      select telegram_id from public.cockpit_telegram_comptes order by cree_le`
+      select telegram_id from public.cockpit_telegram_comptes where diffusion = 'equipe' order by cree_le`
     const messages = decouperResume(texte)
     let livres = 0
     for (const d of destinataires) {

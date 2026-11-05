@@ -100,7 +100,7 @@ export async function proposerCorrectionPseudo(
     if (o.envoyer !== false) {
       const [relais] = await db.$queryRaw<{ nom: string }[]>`select nom from public.cockpit_liveclub_relais where telegram_id = ${relaisId}`
       const texte = texteProposition({ relais: relais?.nom ?? 'Le relais', nom: m.nom, pseudo, pseudoFiche: m.pseudoFiche, pseudoCompte: m.pseudoCompte, aUnCompte: m.aUnCompte })
-      const equipe = await db.$queryRaw<{ telegram_id: bigint }[]>`select telegram_id from public.cockpit_telegram_comptes order by cree_le`
+      const equipe = await db.$queryRaw<{ telegram_id: bigint }[]>`select telegram_id from public.cockpit_telegram_comptes where diffusion = 'equipe' order by cree_le`
       let livres = 0
       for (const d of equipe) {
         const chat = Number(d.telegram_id)

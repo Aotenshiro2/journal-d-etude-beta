@@ -110,7 +110,7 @@ async function prevenirEquipe(texte: string): Promise<boolean> {
   try {
     const { tgCockpit } = await import('@/lib/agent-cockpit-telegram')
     const dest = await prisma.$queryRaw<{ telegram_id: bigint }[]>`
-      select telegram_id from public.cockpit_telegram_comptes order by cree_le`
+      select telegram_id from public.cockpit_telegram_comptes where diffusion = 'equipe' order by cree_le`
     for (const d of dest) {
       const chat = Number(d.telegram_id)
       if (!Number.isSafeInteger(chat) || chat <= 0) continue

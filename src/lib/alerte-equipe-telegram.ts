@@ -13,10 +13,16 @@
 // l'image du message s'il en porte une : telechargee avec le jeton du bot des
 // membres, renvoyee par sendPhoto avec celui d'Agent AOK, en memoire
 // seulement. Image illisible : l'alerte dit « a voir dans l'onglet Support ».
+// (05/11, Brice) Adil repond aussi au support depuis Agent AOK : son compte a
+// diffusion = 'support' (migration 20261105230000). L'alerte du support part a
+// TOUS les comptes ; le texte libre (alerterEquipeTexte) ne part qu'aux comptes
+// 'equipe', sauf `support: true` (reponse de l'equipe a un fil Support). Toute
+// autre diffusion a l'equipe filtre sur diffusion = 'equipe'
+// (scripts/verifier-diffusion-equipe.mjs le garde).
 
 import { prisma } from '@/lib/db'
 import {
-  LIBELLE_RENDRE_LA_MAIN, destinataireInfoEquipe, donneeRendreLaMain, entreesHistoriqueDemandeHumain, entreesHistoriqueInfoEquipe,
+  clavierAlerte, destinataireInfoEquipe, entreesHistoriqueDemandeHumain, entreesHistoriqueInfoEquipe,
   referenceFil, texteDemandeHumain,
   type DemandeHumain,
 } from '@/lib/alerte-equipe-telegram-pur'
@@ -80,7 +86,8 @@ export async function alerterEquipeTelegram(d: DemandeHumain, o: OptionsAlerte =
       }
       : d
     const texte = texteDemandeHumain({ ...sure, image: o.image ? (image ? 'jointe' : 'onglet') : null })
-    const bouton = o.rendreLaMain && d.fil ? donneeRendreLaMain(d.fil) : null
+    // (05/11) « Rendre la main au bot » (fils du bot, si demande) et « Déjà traité » (toute demande d'un humain).
+    const clavier = clavierAlerte(d, !!o.rendreLaMain)
     const reference = referenceFil(d.fil)
 
     const id = `humain-${Date.now().toString(36)}`
@@ -90,7 +97,7 @@ export async function alerterEquipeTelegram(d: DemandeHumain, o: OptionsAlerte =
       if (!Number.isSafeInteger(chat) || chat <= 0) continue
       if (!await tgCockpit('sendMessage', {
         chat_id: chat, text: texte.slice(0, 4000), link_preview_options: { is_disabled: true },
-        ...(bouton ? { reply_markup: { inline_keyboard: [[{ text: LIBELLE_RENDRE_LA_MAIN, callback_data: bouton }]] } } : {}),
+        ...(clavier.length > 0 ? { reply_markup: { inline_keyboard: clavier } } : {}),
       })) continue
       livres++
       if (image) {
@@ -116,6 +123,8 @@ export type OptionsTexteEquipe = {
   sauf?: string | null
   /** Prefixe du log (jamais le texte). */
   journal?: string
+  /** Un texte du SUPPORT : part aussi aux comptes diffusion = 'support' (Adil). Sinon, l'equipe seule. */
+  support?: boolean
 }
 
 /**
@@ -131,7 +140,8 @@ export async function alerterEquipeTexte(texte: string, o: OptionsTexteEquipe = 
   try {
     const { tgCockpit, ajouterAHistoriqueAgent } = await import('@/lib/agent-cockpit-telegram')
     const destinataires = await prisma.$queryRaw<{ telegram_id: bigint; user_id: string }[]>`
-      select telegram_id, user_id::text as user_id from public.cockpit_telegram_comptes order by cree_le`
+      select telegram_id, user_id::text as user_id from public.cockpit_telegram_comptes
+      where diffusion = 'equipe' or ${o.support === true}::boolean order by cree_le`
     const id = `info-${Date.now().toString(36)}`
     let livres = 0
     let vises = 0

@@ -101,7 +101,7 @@ async function partagerReponseAvecLEquipe(p: {
     }
     await alerterEquipeTexte(
       texteReponsePartagee({ auteur: nom, qui, fil: p.filId, texte: p.texte, piece: p.piece, canal: p.canal }),
-      { sauf: userId, journal: `${p.journal} reponse partagee avec l'equipe` },
+      { sauf: userId, journal: `${p.journal} reponse partagee avec l'equipe`, support: true },
     )
   } catch (err) {
     console.warn(`${p.journal} reponse non partagee avec l'equipe : ${premiereLigne(err)}`)

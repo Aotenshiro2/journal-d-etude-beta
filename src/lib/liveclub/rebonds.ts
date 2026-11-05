@@ -267,7 +267,7 @@ async function alerterEquipe(texte: string, texteHistorique: string, id: string)
   try {
     const { tgCockpit, ajouterAHistoriqueAgent } = await import('@/lib/agent-cockpit-telegram')
     const equipe = await prisma.$queryRaw<{ telegram_id: bigint }[]>`
-      select telegram_id from public.cockpit_telegram_comptes order by cree_le`
+      select telegram_id from public.cockpit_telegram_comptes where diffusion = 'equipe' order by cree_le`
     let livres = 0
     for (const dest of equipe) {
       const chat = Number(dest.telegram_id)

@@ -370,6 +370,38 @@ export const INTERVALLE_ALERTES_MS = 10 * 60 * 1000
 /** La ligne « [système] » posee au fil quand l'equipe est prevenue : elle date la derniere alerte. */
 export const LIGNE_EQUIPE_PREVENUE = 'Équipe prévenue (Agent AOK et email).'
 
+// (05/11, Brice) « DÉJÀ TRAITÉ » : une demande d'humain reglee HORS du bot
+// (WhatsApp, email, en direct) gardait « veut un humain » pour rien. Le bouton
+// (onglet Support du cockpit, ou sous l'alerte d'Agent AOK) sort le fil de
+// l'attente et pose cette ligne, au nom de qui l'a marque. Rien n'est dit au
+// membre. Elle rend aussi la main au bot (comme LIGNE_MAIN_RENDUE) et vaut
+// « humain passé » dans le cockpit. Tous les fils : bot, site, extension.
+export const DEBUT_LIGNE_FIL_TRAITE = 'Traité hors du bot'
+
+/** La ligne « [système] » (sans le prefixe) d'un fil marque traite, au nom de qui l'a marque. */
+export function ligneFilTraite(par: string | null | undefined): string {
+  const nom = (par ?? '').replace(/\s+/g, ' ').trim().slice(0, 40)
+  return `${DEBUT_LIGNE_FIL_TRAITE} par ${nom || "l'équipe"} : le membre a eu sa réponse.`
+}
+
+/** Une ligne « Traité hors du bot » du fil ? */
+export function estLigneFilTraite(m: { role?: unknown; content?: unknown } | null | undefined): boolean {
+  return !!m && m.role === 'system' && typeof m.content === 'string'
+    && m.content.startsWith(`${PREFIXE_SYSTEME}${DEBUT_LIGNE_FIL_TRAITE} `)
+}
+
+/**
+ * Le fil tel que le MEMBRE le relit (GET /api/support/thread : chat du site,
+ * de la Masterclass, extension) : sans les lignes « [système] », reservees a
+ * l'equipe. Ces ecrans affichent tout role inconnu comme une reponse de
+ * l'assistant.
+ */
+export function messagesPourLeMembre(fil: unknown): unknown[] {
+  return Array.isArray(fil)
+    ? fil.filter((m) => !(m && typeof m === 'object' && (m as { role?: unknown }).role === 'system'))
+    : []
+}
+
 type MessageFil = { role?: unknown; content?: unknown; at?: unknown }
 
 function messages(x: unknown): MessageFil[] {
@@ -402,7 +434,7 @@ export function periodeEquipe(fil: unknown): { debut: number; dernierHumainT: nu
       if (debut < 0 || rendue || expiree) debut = i
       rendue = false
       dernier = t
-    } else if (estLigne(l[i], LIGNE_MAIN_RENDUE)) {
+    } else if (estLigne(l[i], LIGNE_MAIN_RENDUE) || estLigneFilTraite(l[i])) {
       rendue = true
     }
   }
@@ -447,6 +479,21 @@ export function phraseMainRendue(
   return issue.dejaAuBot
     ? `Le bot avait déjà la main${ref} : rien n'a changé.`
     : `C'est fait${ref} : le bot reprend la main et répond de nouveau à ses messages écrits. Le membre n'est pas prévenu.`
+}
+
+/** (05/11) Ce que dit Agent AOK apres « Déjà traité » sous une alerte. Rien n'est dit au membre. */
+export function phraseFilTraite(
+  issue: { ok: true; dejaTraite: boolean; telegram: boolean; prevenus: number } | { ok: false; raison: string },
+  reference: string | null,
+): string {
+  const ref = reference ? ` (${reference})` : ''
+  if (!issue.ok) return `Ce fil Support${ref} n'existe plus : rien n'a changé.`
+  if (issue.dejaTraite) return `Cette demande${ref} n'attendait plus personne : rien n'a changé.`
+  return [
+    `C'est noté${ref} : la demande est marquée traitée, le signalement est levé dans le Cockpit. Rien n'est envoyé au membre.`,
+    issue.telegram ? 'Le bot reprend ses messages écrits.' : null,
+    issue.prevenus > 0 ? "Le reste de l'équipe est prévenu." : null,
+  ].filter(Boolean).join(' ')
 }
 
 

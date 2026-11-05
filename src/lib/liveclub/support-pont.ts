@@ -41,7 +41,7 @@ import { expurgerLiensInvitation, phraseGeste, type GesteLu } from './pur'
 import { masquerCodes } from './verification-pur'
 import type { Bouton } from './telegram'
 import {
-  PREFIXE_SYSTEME, LIGNE_EQUIPE_PREVENUE, LIGNE_MAIN_RENDUE, alerteAutorisee, estImage, quiRepond,
+  PREFIXE_SYSTEME, LIGNE_EQUIPE_PREVENUE, LIGNE_MAIN_RENDUE, alerteAutorisee, estImage, ligneFilTraite, quiRepond,
   DEBUT_ATTENTE_HUMAIN, LIGNE_DEMANDE_ANNULEE, alertePartieDepuis,
   type PieceSupport,
 } from './support-pont-pur'
@@ -436,6 +436,53 @@ export async function rendreLaMainAuBot(threadId: string): Promise<IssueMainRend
   if (!maj[0]) return { ok: false, raison: 'introuvable' }
   // Ecrit : le bot reprend vraiment la main (un fil en attente le faisait taire).
   return { ok: true, dejaAuBot: false, messages: maj[0].messages, escalatedAt: null }
+}
+
+export type IssueFilMarqueTraite =
+  | {
+      ok: true; dejaTraite: boolean; messages: unknown; escalatedAt: null
+      /** Le fil, pour dire a l'equipe de qui il s'agit. */
+      app: string; telegramId: number | null; email: string | null
+    }
+  | { ok: false; raison: 'introuvable' }
+
+/**
+ * « Déjà traité » (Brice, 05/11) : une demande d'humain reglee hors du bot.
+ * Le fil sort de l'attente et recoit la ligne « [système] Traité hors du bot
+ * par <par> : le membre a eu sa réponse. » (qui rend aussi la main au bot).
+ * Rien n'est dit au membre. Tous les fils (bot, site, extension). Un fil qui
+ * n'attend personne : rien n'est ecrit (dejaTraite). L'ecriture est
+ * conditionnee a l'attente : deux clics croises n'ecrivent qu'une ligne.
+ * Jette si la base ne repond pas.
+ */
+export async function marquerFilTraite(threadId: string, par: string | null): Promise<IssueFilMarqueTraite> {
+  const lire = async () => (await prisma.$queryRaw<{
+    app: string; messages: unknown; attend: boolean; telegram_id: bigint | null; email: string | null
+  }[]>`
+    select t.app, t.messages, t."escalatedAt" is not null as attend, t."telegramId" as telegram_id,
+      coalesce(nullif(btrim(t."contactEmail"), ''), u.email) as email
+    from public."SupportThread" t
+    left join auth.users u on u.id::text = t."userId"
+    where t.id = ${threadId} limit 1`)[0]
+  const l = await lire()
+  if (!l) return { ok: false, raison: 'introuvable' }
+  const tg = l.telegram_id === null ? null : Number(l.telegram_id)
+  const fil = { app: l.app, telegramId: tg !== null && Number.isSafeInteger(tg) ? tg : null, email: l.email }
+  if (!l.attend) return { ok: true, dejaTraite: true, messages: l.messages, escalatedAt: null, ...fil }
+  const ligne: MessageFil = { role: ROLE_SUPPORT.systeme, content: `${PREFIXE_SYSTEME}${ligneFilTraite(par)}`, at: new Date().toISOString() }
+  const maj = await prisma.$queryRaw<{ messages: unknown }[]>`
+    update public."SupportThread" set
+      messages = coalesce(messages, '[]'::jsonb) || ${JSON.stringify([ligne])}::jsonb,
+      "escalatedAt" = null,
+      "updatedAt" = timezone('utc', now())
+    where id = ${threadId} and "escalatedAt" is not null
+    returning messages`
+  if (!maj[0]) {
+    // Un autre clic l'a marque entre la lecture et l'ecriture.
+    const apres = await lire()
+    return { ok: true, dejaTraite: true, messages: apres?.messages ?? l.messages, escalatedAt: null, ...fil }
+  }
+  return { ok: true, dejaTraite: false, messages: maj[0].messages, escalatedAt: null, ...fil }
 }
 
 export type OptionsTrace = {

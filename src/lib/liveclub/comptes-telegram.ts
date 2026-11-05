@@ -132,7 +132,7 @@ export async function alerterEquipeCompte(alerte: AlerteCompte, id: string): Pro
   let destinataires: { telegram_id: bigint }[]
   try {
     destinataires = await prisma.$queryRaw<{ telegram_id: bigint }[]>`
-      select telegram_id from public.cockpit_telegram_comptes order by cree_le`
+      select telegram_id from public.cockpit_telegram_comptes where diffusion = 'equipe' order by cree_le`
   } catch (err) {
     console.warn(`[liveclub/comptes] alerte ${alerte.genre} non envoyee, comptes de l'equipe illisibles : ${codeErreur(err)}`)
     return 0
