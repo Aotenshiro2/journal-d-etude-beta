@@ -281,10 +281,10 @@ await bloc('Agent AOK : outil, consigne, bouton, controle, carte courte, filet s
   }
   assert.equal(AP.sansNomsOutils('Je te propose proposer_adresse_contact_acces pour Fabien.'), "Je te propose la carte d'adresse de contact pour Fabien.")
   assert.equal(AP.sansNomsOutils('Voici la carte `proposer_adresse_contact_acces`.'), "Voici la carte d'adresse de contact.")
-  // Le prompt compte ses outils d'action (dix-neuf depuis la pause par depot broker, 01/11).
-  const phrase = /Tu disposes de dix-neuf outils d'action : ([^(]+) \(décrits plus bas\)/.exec(src)
+  // Le prompt compte ses outils d'action (dix-neuf depuis la pause par depot broker, 01/11 ; vingt depuis le code de parrainage, 05/11).
+  const phrase = /Tu disposes de vingt outils d'action : ([^(]+) \(décrits plus bas\)/.exec(src)
   assert.ok(phrase)
-  assert.equal(phrase[1].split(/, | et /).length, 19)
+  assert.equal(phrase[1].split(/, | et /).length, 20)
   assert.ok(phrase[1].includes('proposer_adresse_contact_acces'))
 
   // Validation, resume, execution, log.

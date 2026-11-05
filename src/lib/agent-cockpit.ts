@@ -29,6 +29,7 @@ import { controlerActionEffacement } from '@/lib/effacement'
 import { controlerReponseMembre, rendreLaMainPourAgent } from '@/lib/reponse-membre'
 import { controlerAdresseContact } from '@/lib/liveclub/adresse-contact'
 import { controlerPauseDepot } from '@/lib/liveclub/pause-depot'
+import { controlerCodeParrainage } from '@/lib/liveclub/parrainage'
 import type { PieceAgent } from '@/lib/liveclub/support-pont-pur'
 import { OUTIL_GENERER_POST, genererPostPourAgent } from '@/lib/generation-agent'
 import { avecVuesServeur } from '@/lib/vues-serveur'
@@ -90,6 +91,8 @@ Les tables et vues du cockpit (schéma public, PostgreSQL) :
 - cockpit_liveclub_pauses_depot (01/11, VUE CALCULÉE par le serveur, lisible par requete_sql comme une vue) : acces_id, email (celle du broker), telegram_id, nom, pseudo, abonnement_id (sub_...), broker, debut, acces_jusquau (dernier jour de l'accès, inclus), paye_jusquau (fin de la période payée avant la pause), reprise_le (reprise des prélèvements, le même jour que acces_jusquau), depot, commission (attendue), commission_statut, lots_faits_le, en_cours (bool : accès ni retiré, ni sorti, pas fini), pose_le. LES ABONNÉS EN « PAUSE + ACCÈS PAR DÉPÔT BROKER » : une ligne par accès de ce parcours. Leur marqueur au journal : geste 'acces_broker', regle 'pause_depot' (details acces_id, abonnement_id, commission_id, reprise_le) ; la pause elle-même : geste 'pause', regle 'pause_depot' (details paye_jusquau, reprise_le). Autres lignes du parcours : 'pause_depot_demande' (le membre a demandé l'offre au bot), 'pause_depot_declare' (il dit que son dépôt est fait), 'pause_depot_lots' (lots pas faits à la fin du délai, équipe prévenue), et le message au membre (geste 'rappel', regle 'pause_depot_message').
 - cockpit_liveclub_produits : produit_id, compte (melanie), nom, pose_par, pose_le, note, retire_le, role ('tarif_reserve' = le produit commun des tarifs réservés, « Live Club (tarif réservé) »). Les produits Stripe qui OUVRENT LE LIVE CLUB, les deux produits de base compris : un abonné à l'un d'eux entre par le bot, la page de bienvenue le reconnaît, le passage quotidien le compte et la collecte classe ses paiements en live-club. Actif = retire_le is null. Inscrits par proposer_produit (live_club vrai), proposer_marquer_live_club, ou par le serveur pour un tarif réservé.
 - cockpit_liveclub_tarifs_reserves : reserve_id, qui, email, telegram_id, produit_id, price_id, tarif_cree (vrai = tarif créé pour cette personne), montant (euros), devise, recurrence (month|year), lien_id, lien_url (son lien de paiement personnel, email prérempli), cree_par, cree_le, paye_le (null = en attente de paiement), abonnement_id, retire_le, retire_par, note. Les TARIFS RÉSERVÉS : un prix PERSONNEL ouvert à UNE personne, celle de cet email, et à personne d'autre. Active = retire_le is null. Une ligne ne dit RIEN du prix d'une autre personne, même si le nom du produit évoque un groupe (« Live Club ETM », « élève », « symbolique ») : sans réservation à son email, quelqu'un d'autre paie le prix public.
+- cockpit_liveclub_parrains (05/11) : code_id, code (le code promo tel que saisi, comparé sans la casse : upper(code)), parrain (son prénom ou son nom), parrain_pseudo (sans @), parrain_telegram_id, parrain_email, taux_pct (20 : % du premier paiement du filleul), taux_palier_pct (30), palier (10 : le taux du palier à partir du 11e filleul), depuis (date : un paiement d'avant ne compte pas), actif (bool), pose_par, pose_le, maj_par, maj_le, note. LES CODES DE PARRAINAGE du Live Club : quel code promo appartient à quel membre. Un parrain peut avoir plusieurs codes : compte ses filleuls par parrain_telegram_id ou parrain_pseudo, pas par code seul.
+- cockpit_liveclub_filleuls (05/11) : filleul_id, code_id (joins cockpit_liveclub_parrains), code, abonnement_id (sub_..., le filleul : cockpit_abonnements.abonnement_id = 'stripe:' || abonnement_id, puis membre_id vers cockpit_membres_etat pour son nom), client_stripe, facture_id, prenom (null = « un nouveau membre »), paye_le, montant_paye (euros, ce qu'il a réellement payé), devise, rang (n-ième filleul de ce parrain), taux_pct (appliqué, figé), commission (euros, figée), mois (AAAA-MM : à verser à la fin de ce mois), statut (a_verser|versee|annulee), versee_le, notification (parrain = prévenu en privé par le bot ; equipe = phrase envoyée à Brice et Mélanie ici ; a_reprendre ; incertain), notifie_le, source (webhook|passage), cree_le. UNE ligne par abonnement filleul, notée au premier paiement. Table absente = migration pas encore appliquée : aucun parrainage n'est encore noté.
 - cockpit_demandes : demande_id, cree_le, auteur (libellé du compte Telegram de l'équipe, ou 'cockpit:<uuid>' depuis la fenêtre du cockpit), source (agent_cockpit|agent_telegram), texte (la demande reformulée), citation (telle qu'écrite), statut (nouvelle|au_picker|faite|refusee), traite_le, note. Les demandes de l'équipe que tu as notées faute d'outil (noter_demande). En attente = statut 'nouvelle'.
 - cockpit_decoupages : id, auteur (uuid), auteur_label (Brice, Melanie, Adil...), titre (de quoi on veut parler), phrase (l'idée en une phrase), usage (savoir|production), parent_idee (la plus grande idée au-dessus, facultative), noeuds (jsonb, tableau plat des pièces : id, parent (null = directement sous la ligne), ordre, texte, marque (v = vécu, b = cas de banque-contenus, i = idées du moment, m = thèse sans cas, q = trou à questionner, fait, a_faire, null = pas encore adossé), source, question, mure (bool, tient en une phrase)), guide (jsonb, état du mode guidé), cree_le, maj_le, retire_le, retire_par. Les sujets et productions DÉCOUPÉS dans l'onglet Création (méthode 5 x 5) : la ligne est l'aïeul, ses pièces sont dans noeuds, la numérotation (1.5.2) se calcule par ordre parmi les frères. Actif = retire_le is null. Pour « qu'est-ce que j'ai déjà découpé sur X » : titre, phrase ou parent_idee ILIKE, et jsonb_array_elements(noeuds)->>'texte' ILIKE.
 - cockpit_inspirations : id (B-M-01, M-T-14...), personne (brice|mel), axe (mindset|technique), role (forme = texte écrit publié, modèle de voix ; matiere = live, vidéo, coaching, PDF), format (lettre A à AH), format_cible, objectifs (text[]), canal, canal_registre, date_pub (texte, parfois partielle), source, texte (verbatim), image, declencheur, pourquoi, refus, reactions, concepts (text[]), extra (jsonb). La base d'inspirations de posts, miroir des JSONL (npm run pousser:inspirations). Lecture seule.
@@ -257,7 +260,7 @@ LES PERSONNES : LA FICHE ET LES PAROLES (15/10) :
 - Une personne qui demande l'effacement de ses messages ou de ses données : voir « L'EFFACEMENT DES DONNÉES D'UNE PERSONNE » plus bas.
 
 LES ACTIONS STRIPE (03/09) :
-Tu disposes de dix-neuf outils d'action : proposer_code_promo, proposer_revoquer_code, proposer_remboursement, proposer_produit, proposer_lien_paiement, proposer_marquer_live_club, proposer_abonnement_reserve, proposer_retirer_tarif_reserve, proposer_pause_abonnement, proposer_reprise_abonnement, proposer_annulation_abonnement, proposer_retirer_telegram, proposer_reintegrer_telegram, proposer_acces_broker, proposer_adresse_contact_acces, proposer_pause_depot, proposer_exemption, proposer_effacement et proposer_reponse_membre (décrits plus bas) (et huit pour la répartition, décrits plus bas : proposer_depot_broker, proposer_commission_affiliation, proposer_marquer_commission, proposer_taux_partenaire, proposer_intervenant, proposer_lives_du_mois, proposer_depense, proposer_reglement). Un appel N'EXÉCUTE RIEN : il affiche une carte de confirmation que Brice ou Mélanie doit cliquer : dis-le dans ta réponse. Après la confirmation, le résultat leur arrive directement et finit par l'étape humaine suivante (rien à faire, quoi dire à la personne, ou le lien à transmettre). Règles strictes :
+Tu disposes de vingt outils d'action : proposer_code_promo, proposer_revoquer_code, proposer_remboursement, proposer_produit, proposer_lien_paiement, proposer_marquer_live_club, proposer_abonnement_reserve, proposer_retirer_tarif_reserve, proposer_pause_abonnement, proposer_reprise_abonnement, proposer_annulation_abonnement, proposer_retirer_telegram, proposer_reintegrer_telegram, proposer_acces_broker, proposer_adresse_contact_acces, proposer_pause_depot, proposer_code_parrainage, proposer_exemption, proposer_effacement et proposer_reponse_membre (décrits plus bas) (et huit pour la répartition, décrits plus bas : proposer_depot_broker, proposer_commission_affiliation, proposer_marquer_commission, proposer_taux_partenaire, proposer_intervenant, proposer_lives_du_mois, proposer_depense, proposer_reglement). Un appel N'EXÉCUTE RIEN : il affiche une carte de confirmation que Brice ou Mélanie doit cliquer : dis-le dans ta réponse. Après la confirmation, le résultat leur arrive directement et finit par l'étape humaine suivante (rien à faire, quoi dire à la personne, ou le lien à transmettre). Règles strictes :
 - AJOUTER, REMETTRE OU FAIRE REVENIR QUELQU'UN DANS LE GROUPE (règle de Brice, 08/10) : le groupe ne s'ouvre qu'à quelqu'un qui a un DROIT, parce que c'est le droit qui compte sa durée et qui le fait sortir à la fin. Un lien brut donné à quelqu'un sans droit l'ouvre pour toujours, sans que rien ne le compte ni ne le sorte. AVANT toute proposition, vérifie son droit par requêtes : exemption active (cockpit_liveclub_exemptions), accès broker actif (cockpit_liveclub_acces, par email ou telegram_id), abonnement Live Club vivant (cockpit_membre_emails ou cockpit_liveclub_rattachements, puis cockpit_abonnements), accès manuel (cockpit_acces_manuel). Le serveur revérifie de toute façon.
   - SANS droit : pose d'abord le droit, jamais une réintégration. Un dépôt chez un broker partenaire (« il a fait un dépôt », « il a accès pour 4 mois ») : voir « UNE DEMANDE D'ACCÈS BROKER » plus bas (proposer_depot_broker, ou proposer_acces_broker sans dépôt, avec la durée demandée ; l'email part avec son lien personnel vers le bot, qui le fait entrer tout seul). Jamais une exemption pour un dépôt broker. Un geste de l'équipe (fondateur, admin, équipe, favorisé, cadeau) = proposer_exemption, qui demande son compte Telegram : cherche le telegram_id (cockpit_telegram_membres, cockpit_liveclub_rattachements, cockpit_membre_telegram, archive) et, s'il reste inconnu, demande-le au lieu d'en deviner un. Une durée dite (« pour 3 mois ») devient la date de fin incluse ; sans durée, demande si l'exemption est permanente.
   - AVEC un droit mais hors du groupe : rien à poser. Le bot des membres lui donne tout seul son lien de retour dès qu'il lui écrit (Démarrer, /menu, un bouton ou n'importe quel message). proposer_reintegrer_telegram ne sert que si la personne reste bloquée malgré son droit (ancien ban, bot jamais ouvert) : le serveur la refuse si le droit n'est pas ouvert, et dit quel droit poser.
@@ -301,6 +304,12 @@ Tu disposes de dix-neuf outils d'action : proposer_code_promo, proposer_revoquer
   3. Qui est en pause par dépôt, jusqu'à quand, chez quel broker : requete_sql sur la vue cockpit_liveclub_pauses_depot (voir le schéma), en_cours vrai pour celles qui courent.
   4. Ses lots : le suivi s'applique (message, relances, carte « lots à vérifier »). Lots pas faits à la fin du délai : il garde le groupe, son abonnement reste en pause, et une alerte arrive ici. La suite est une décision de Brice ou de Mélanie : reprendre son abonnement = proposer_reprise_abonnement (abonnement_id dans la vue), ou attendre ses lots.
   5. Côté membre : un abonné qui demande l'offre au bot des membres déclenche l'alerte « un membre demande un humain » avec son message, tant que les conditions (broker, lien d'affiliation, dépôt minimum, lots) ne sont pas dans le bot ; et quand il dit que son dépôt est fait, la même alerte. Vérifier chez le broker, puis cette carte.
+- LE PARRAINAGE PAR CODE DU LIVE CLUB (règles de Brice, 05/11). Un membre a un code promo Stripe à lui (compte melanie) : BARBU17 pour Alex, SAUCISSON pour Fab, 10kONEDAY pour Nadège. Un nouveau qui s'abonne avec ce code paie le Live Club 99 EUR par mois au lieu de 139, et le membre, son parrain, touche 20 % du PREMIER paiement de son filleul, à verser à la fin du mois (30 % à partir de son 11e filleul). MELMOM2 est le code de Mélanie : ce n'est pas un parrainage.
+  1. Ce qui est AUTOMATIQUE, sans carte (le serveur, sur un paiement confirmé par Stripe) : au premier paiement d'un abonnement avec un code de parrainage actif, le filleul est noté une seule fois, sa commission calculée sur ce qu'il a réellement payé, et le parrain reçoit un message privé du bot des membres avec le prénom du filleul. Un parrain que le bot ne peut pas joindre : tu reçois ici l'alerte avec la phrase à lui transmettre. Tu n'as rien à proposer pour ça, et pas d'email au parrain sans son accord.
+  2. « Le code X est celui de Y », « ajoute le code de parrainage X pour Y », « Y passe à 25 % », « désactive le code de parrainage X » = proposer_code_parrainage, UNE carte. Pour un nouveau code : le code, le parrain (son prénom) et son @pseudo Telegram, ou son numéro de compte (cherche-le dans cockpit_telegram_membres, cockpit_liveclub_rattachements, cockpit_membre_telegram ; inconnu, passe le pseudo seul, le serveur le cherchera au moment de le prévenir). Les taux (20 %, 30 % à partir du 11e) et la date de départ (aujourd'hui) ne se passent que s'ils sont dits. Une modification ne passe que ce qui change. Ce qui manque : une question à ton interlocuteur ; quand tout est là, la carte tout de suite, en une phrase.
+  3. Créer le code chez Stripe ET l'enregistrer comme code de parrainage : proposer_code_promo (compte melanie) avec parrain et parrain_pseudo, UNE carte. Sans parrain, un code promo reste un code promo ordinaire.
+  4. « Combien de filleuls pour Alex ? », « qui est arrivé avec BARBU17 ? », « combien à verser aux parrains ce mois-ci ? » : requete_sql sur cockpit_liveclub_filleuls joint à cockpit_liveclub_parrains (code_id), statut différent de annulee ; le nom complet d'un filleul par cockpit_abonnements puis cockpit_membres_etat (voir le schéma). Un filleul d'avant la mise en service n'est pas noté : dis-le si on te le demande, sans deviner.
+  5. Les commissions de parrainage NE SONT PAS déduites dans repartition_du_mois : elle les signale en avertissement, parce que qui les paie n'est pas encore décidé. Ne les ajoute pas en dépense sans qu'on te le demande.
 - N'appelle un outil d'action QUE si on te le demande explicitement. Jamais de ta propre initiative, jamais « pendant que j'y suis ».
 - Une seule action proposée à la fois.
 - Le compte doit être certain : melanie = le Live Club (tout son récurrent), aoknowledge = le comptant et les abonnements des apps (Carnet Premium, Pilotage Premium, Premium Duo). En cas de doute, demande.
@@ -480,6 +489,11 @@ const OUTILS: Anthropic.Tool[] = [
         duree_mois: { type: 'number', description: 'Obligatoire si duree=repeating (1-24).' },
         max_utilisations: { type: 'number', description: 'Plafond de rachats. Vide = illimité.' },
         expire_le: { type: 'string', description: 'YYYY-MM-DD. Vide = jamais.' },
+        // (05/11) Le parrainage par code : le code devient aussi le code de parrainage de ce membre.
+        parrain: { type: 'string', description: 'Facultatif, compte melanie seulement : le prénom du membre dont c\'est le code de parrainage (ses filleuls seront notés et lui prévenu). Vide = code promo ordinaire.' },
+        parrain_pseudo: { type: 'string', description: 'Facultatif : son @pseudo Telegram.' },
+        parrain_telegram_id: { type: 'string', description: 'Facultatif : son numéro de compte Telegram (u123...).' },
+        parrain_email: { type: 'string', description: 'Facultatif : son email.' },
       },
       required: ['compte', 'code'],
     },
@@ -645,6 +659,30 @@ const OUTILS: Anthropic.Tool[] = [
         note: { type: 'string', description: 'Facultatif : contexte court.' },
       },
       required: ['partenaire', 'email', 'montant'],
+    },
+  },
+  // (05/11) Le parrainage par code du Live Club : liveclub/parrainage.ts,
+  // regles et textes dans parrainage-pur.ts. Une ligne de cockpit_liveclub_parrains.
+  {
+    name: 'proposer_code_parrainage',
+    description:
+      "Propose d'enregistrer, modifier ou désactiver le CODE DE PARRAINAGE d'un membre du Live Club (« le code BARBU17 est celui d'Alex, @Alex17310 »). N'exécute rien : carte de confirmation, composée par le serveur (nouveau code, ou ce qui change). Une fois cliquée, chaque nouvel abonné qui paie avec ce code est noté comme filleul à son premier paiement, sa commission calculée (20 % de ce premier paiement, 30 % à partir du 11e filleul, par défaut), et le parrain prévenu en privé par le bot. Le code promo lui-même doit exister chez Stripe (sinon : la carte de code promo, avec le parrain). MELMOM2 (le code de Mélanie) est refusé.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        code: { type: 'string', description: 'Le code promo, tel qu\'il est chez Stripe (la casse ne compte pas).' },
+        parrain: { type: 'string', description: 'Son prénom (obligatoire pour un nouveau code).' },
+        pseudo: { type: 'string', description: 'Facultatif : son @pseudo Telegram.' },
+        telegram_id: { type: 'string', description: 'Facultatif : son numéro de compte Telegram (u123...), s\'il est connu.' },
+        email: { type: 'string', description: 'Facultatif : son email, s\'il est connu.' },
+        taux_pct: { type: 'number', description: 'Facultatif : le % du premier paiement du filleul. Vide = 20 (ou inchangé).' },
+        taux_palier_pct: { type: 'number', description: 'Facultatif : le % au-delà du palier. Vide = 30 (ou inchangé).' },
+        palier: { type: 'integer', description: 'Facultatif : le nombre de filleuls après lequel le taux du palier s\'applique. Vide = 10 (ou inchangé).' },
+        depuis: { type: 'string', description: 'Facultatif : AAAA-MM-JJ, les paiements à partir de ce jour comptent. Vide = aujourd\'hui (ou inchangé).' },
+        actif: { type: 'boolean', description: 'Facultatif : faux pour désactiver le code de parrainage, vrai pour le réactiver.' },
+        note: { type: 'string', description: 'Facultatif : contexte court.' },
+      },
+      required: ['code'],
     },
   },
   {
@@ -1060,6 +1098,7 @@ const TYPE_PAR_OUTIL: Record<string, ActionAgent['type']> = {
   proposer_acces_broker: 'acces_broker',
   proposer_adresse_contact_acces: 'adresse_contact',
   proposer_pause_depot: 'pause_depot',
+  proposer_code_parrainage: 'code_parrainage',
   proposer_exemption: 'exemption',
   proposer_depot_broker: 'depot_broker',
   proposer_commission_affiliation: 'commission_affiliation',
@@ -1493,6 +1532,24 @@ export async function boucleAgent(
             action = controle.action
             carte = controle.carte
             carteCourte = controle.court
+            manqueControle = controle.manque
+          } else if (action.type === 'code_parrainage') {
+            // (05/11) Le code de parrainage d'un membre : la ligne existante
+            // et le compte Telegram du parrain lus en base, la carte composee
+            // par le serveur (nouveau code ou ce qui change).
+            let controle: Awaited<ReturnType<typeof controlerCodeParrainage>>
+            try {
+              controle = await controlerCodeParrainage(action)
+            } catch (err) {
+              const raison = err instanceof Error ? err.message.split('\n').filter(Boolean).pop() ?? '' : String(err)
+              controle = { erreur: `Lecture impossible avant la carte (${raison.slice(0, 200)}) : réessaie dans un instant.` }
+            }
+            if ('erreur' in controle) {
+              resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify({ erreur: controle.erreur }), is_error: true })
+              continue
+            }
+            action = controle.action
+            carte = controle.carte
             manqueControle = controle.manque
           } else if (action.compte === 'cockpit') {
             let controle: Awaited<ReturnType<typeof controlerActionRepartition>>

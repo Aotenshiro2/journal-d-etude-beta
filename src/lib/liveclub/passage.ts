@@ -116,6 +116,7 @@ import { annulerReservationEmail, creerJeton, jetonExistant } from './jetons'
 import { adresseEnvoi } from './adresse-envoi'
 import { preparerBienvenue } from './bienvenue'
 import { rapprocherTarifsReserves } from './reserves'
+import { filetParrainages } from './parrainage'
 import { resumeDuMatin } from './resume'
 import { relaisDuMatin } from './relais'
 import { recalculerAContacter } from './contact-instantane'
@@ -261,6 +262,13 @@ export type SynthesePassage = {
    * passage ; en_attente : rien de paye ; illisibles : tarif pas lu chez Stripe.
    */
   tarifs_reserves: { payees: number; en_attente: number; illisibles: number }
+  /**
+   * (s) Parrainage par code (05/11, parrainage.ts) : le filet du webhook.
+   * Factures payees des 7 derniers jours lues, filleuls notes, parrains
+   * prevenus en prive, alertes a l'equipe, notifications reprises ou
+   * incertaines. etat : ok, sans_code, table_absente, stripe_illisible...
+   */
+  parrainages: { etat: string; lues: number; notees: number; prevenus: number; equipe: number; reprises: number; incertains: number; erreurs: number }
   /**
    * (m) Resume du matin a l'equipe (15/10, resume.ts) : son etat (envoye,
    * rien, deja_fait, coupe, table_absente...), ses lignes et le nombre de
@@ -3484,6 +3492,7 @@ function nouveauContexte(maintenant: Date): Contexte {
       tips: { envoyes: 0, sautes: 0, decales: 0, absents: 0, sans_droit: 0, equipe: 0, deja_faits: 0, inconnus: 0, echecs: 0, coupe: false },
       purge: { conversations: 0 },
       tarifs_reserves: { payees: 0, en_attente: 0, illisibles: 0 },
+      parrainages: { etat: 'pas_lance', lues: 0, notees: 0, prevenus: 0, equipe: 0, reprises: 0, incertains: 0, erreurs: 0 },
       resume: { etat: 'pas_lance', lignes: 0, livres: 0 },
       relais: { etat: 'pas_lance', lignes: 0, livres: 0 },
       a_contacter: { etat: 'pas_lance', risque: 0, a_venir: 0 },
@@ -3637,6 +3646,19 @@ export async function passageQuotidien(maintenant: Date = new Date()): Promise<S
   await etape('tarifs_reserves', async () => {
     ctx.s.tarifs_reserves = await rapprocherTarifsReserves()
     if (ctx.s.tarifs_reserves.illisibles > 0) erreur(ctx, 'tarifs_reserves_illisibles')
+  })
+  // (s) Parrainage par code (05/11, parrainage.ts) : le filet du webhook
+  // invoice.paid (pas encore branche chez Stripe : c'est donc ce passage qui
+  // note les filleuls et previent les parrains). Lit Stripe lui-meme, sans la
+  // liste du passage. AVANT le resume, qui dit les nouveaux filleuls. Ne jette
+  // pas ; table absente (migration 20261105120000) : rien, sans erreur.
+  await etape('parrainages', async () => {
+    const b = await filetParrainages(maintenant)
+    ctx.s.parrainages = {
+      etat: b.etat, lues: b.lues, notees: b.notees, prevenus: b.prevenus, equipe: b.equipe,
+      reprises: b.reprises, incertains: b.incertains, erreurs: b.erreurs,
+    }
+    if (b.etat === 'stripe_illisible' || b.etat === 'base_illisible' || b.erreurs > 0) erreur(ctx, `parrainages_${b.etat === 'ok' ? 'erreurs' : b.etat}`)
   })
   await etape('purge', () => tachePurge(ctx))
 

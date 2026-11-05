@@ -20,6 +20,8 @@ import { accorderAccesBroker, prerequisAccesBroker } from '@/lib/liveclub/acces'
 import { fermetureDepotPerduActive, nomBot } from '@/lib/liveclub/config'
 import { ALERTE_CARTE_PERTE_FERME, PHRASE_CARTE_PERTE_FERME, PHRASE_CARTE_REGULARISATION } from '@/lib/liveclub/lots-pur'
 import { relationAbsente, uuidDeActeur } from '@/lib/liveclub/pur'
+import { lireAVerserParrainages } from '@/lib/liveclub/parrainage'
+import { phraseAVerser } from '@/lib/liveclub/parrainage-pur'
 import {
   type Commission, type Cote, type Depense, type DepenseLives, type Litige, type NatureReglement, type Reglement, type Repartition,
   litigeDeLigne, phraseReglement,
@@ -455,7 +457,7 @@ async function chargerMois(mois: string, moisCourant: string) {
     }
   }
 
-  const repartition = repartitionDuMois({
+  const calcul = repartitionDuMois({
     mois,
     moisCourant,
     ventes,
@@ -467,6 +469,14 @@ async function chargerMois(mois: string, moisCourant: string) {
     horsStripe,
     nomsOffres,
   })
+  // (05/11) Les commissions de parrainage du Live Club A VERSER ce mois-ci
+  // (liveclub/parrainage.ts) : un avertissement, PAS une ligne du calcul. Qui
+  // les paie (part de Mel, part commune...) est une question a Brice : tant
+  // qu'elle n'est pas tranchee, le solde ne les deduit pas, et l'ecran Revenus
+  // le dit. Table absente : rien.
+  const aVerser = await lireAVerserParrainages(mois)
+  const phraseParrains = phraseAVerser(aVerser, mois)
+  const repartition = phraseParrains ? { ...calcul, avertissements: [...calcul.avertissements, phraseParrains] } : calcul
   const cotes = await cotesDesProduits([...new Set(intervenants.map(i => i.offre_id))])
     .catch(() => ({} as Record<string, Cote>))
   const tarifs = tarifsDuMois(intervenants, depenses, mois, nomsOffres, cotes)

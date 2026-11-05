@@ -24,12 +24,14 @@ export type Personne = { nom: string | null; email: string | null; pseudo: strin
 // (detailMontantArrivee), et l'entree dans le groupe ou son absence
 // (detailArrivee). L'ancienne rubrique 'entrees' n'existe plus.
 export type RubriqueResume =
-  | 'nouveaux' | 'arrets' | 'pauses' | 'impayes' | 'sorties' | 'acces' | 'adresses' | 'rebonds' | 'comptes' | 'humains'
+  | 'nouveaux' | 'parrainages' | 'arrets' | 'pauses' | 'impayes' | 'sorties' | 'acces' | 'adresses' | 'rebonds' | 'comptes' | 'humains'
   | 'reprises' | 'demandes' | 'contacter' | 'suspens'
 
 /** Les rubriques, dans l'ordre du message. */
 export const RUBRIQUES_RESUME: readonly { cle: RubriqueResume; titre: string }[] = [
   { cle: 'nouveaux', titre: 'Arrivées (nouveaux et retours)' },
+  // (05/11) Une ligne par nouveau filleul (parrainage-pur.ts, detailResumeParrainage).
+  { cle: 'parrainages', titre: 'Parrainages (nouveaux filleuls)' },
   { cle: 'arrets', titre: 'Arrêts demandés ou annulés' },
   { cle: 'pauses', titre: 'Pauses et reprises' },
   { cle: 'impayes', titre: 'Impayés' },

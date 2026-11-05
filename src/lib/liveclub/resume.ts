@@ -61,6 +61,8 @@ import { jourParis } from './passage-regles'
 import { phraseAdresse } from './adresses-pur'
 import { idsDuDetail, libelleCourt, phraseCompteResume } from './comptes-telegram-pur'
 import { estRegleRebond, phraseRebondResume } from './rebonds-pur'
+import { lireFilleulsFenetre } from './parrainage'
+import { detailResumeParrainage } from './parrainage-pur'
 
 /** Une liste d'identifiants (texte) d'un champ de details, ou rien. */
 function idsListe(v: unknown): string[] {
@@ -615,6 +617,14 @@ export async function resumeDuMatin(o: { maintenant?: Date; apercu?: boolean } =
       if (r.paye_le && r.paye_le > depuis && r.paye_le <= jusqua) {
         ajouter({ rubrique: 'acces', qui: `e${r.email}`, quand: r.paye_le.toISOString(), detail: detailTarifReserve({ tarif, paye: true }) }, p)
       }
+    }
+
+    // (05/11) Les nouveaux filleuls (parrainage.ts) : une ligne chacun, la
+    // personne par son abonnement (nom, email, @ resolus plus bas), le code,
+    // le parrain, la commission et s'il a ete prevenu. Table absente : rien.
+    const filleuls = await facultatif('parrainages', erreurs, () => lireFilleulsFenetre(depuis, jusqua))
+    for (const x of filleuls) {
+      ajouter({ rubrique: 'parrainages', qui: `s${x.abonnementId}`, quand: x.creeLe, detail: detailResumeParrainage(x) })
     }
 
     // Demandes d'humain en attente (toutes : les nouvelles comptent comme mouvement).

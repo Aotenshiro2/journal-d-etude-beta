@@ -3,6 +3,53 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
+## PARRAINAGE PAR CODE DU LIVE CLUB (05/11/2026, LOCAL, non commite ; migration 20261105120000 ECRITE, NON appliquee)
+
+- Faits (chat « Code promo live club », 22/10) : codes Stripe d'Adil, compte melanie, BARBU17 = Alex (@Alex17310,
+  u2110821350), SAUCISSON = Fab (@Nyfab34), 10kONEDAY = Nadege (@NadegeNQ) ; 99 EUR/mois au lieu de 139 ; MELMOM2 = code
+  de Mel, pas un parrainage. Regles de Brice (05/11) : 20 % du PREMIER paiement du filleul, a verser fin de mois, 30 % a
+  partir du 11e filleul (compte par parrain, tous ses codes) ; message prive au parrain avec le PRENOM du filleul.
+- Code : regles, textes et enchainement PURS dans src/lib/liveclub/parrainage-pur.ts ; serveur src/lib/liveclub/parrainage.ts.
+  Declencheur unique : facture payee, billing_reason subscription_create, montant > 0, remise dont le code promo est un
+  code de parrainage actif (sans la casse), paye a partir de `depuis`, abonnement Live Club. Prenom : customer_name de la
+  facture, puis fiche du cockpit, sinon « un nouveau membre » (prenom strict : lettres, 2 a 24 car.).
+- Idempotence : cockpit_liveclub_filleuls, index unique sur abonnement_id, insertion sous verrou (rang compte dedans),
+  on conflict do nothing ; seule l'insertion previent. Tentative posee AVANT l'envoi (notification_tentee_le) : un rejeu
+  ne renvoie rien. Parrain injoignable (compte inconnu, 403/400) : alerte a l'equipe (alerterEquipeTexte, Agent AOK) avec
+  la phrase a transmettre, aucun email. Alerte non livree : 'a_reprendre' (le filet recommence). Tentative sans resultat
+  depuis 30 min : 'incertain', l'equipe est prevenue, RIEN n'est renvoye au parrain.
+- Chemins : webhook /api/liveclub/stripe (invoice.paid signe, a cote de la reouverture ; table absente = 200, panne = 500)
+  ; filet du passage du matin, etape 'parrainages' avant le resume (factures payees des 7 derniers jours, remises et codes
+  deplies, puis reprises). Le webhook N'EST TOUJOURS PAS BRANCHE chez Stripe : en pratique c'est le passage du matin qui
+  note et previent (le message dit alors « a rejoint le Live Club le 5 novembre »).
+- Agent AOK : carte proposer_code_parrainage (type 'code_parrainage', compte 'cockpit', bouton « Enregistrer le code de
+  parrainage » ; nouveau, modification, desactivation ; carte composee par le serveur, compte Telegram cherche par le
+  pseudo) ; proposer_code_promo prend parrain/parrain_pseudo (compte melanie) et enregistre le code au clic apres Stripe.
+  Prompt : section « LE PARRAINAGE PAR CODE DU LIVE CLUB », schema des deux tables, « vingt outils d'action » ;
+  DESCRIPTIONS_OUTILS (filet sansNomsOutils). Lecture par requete_sql (« combien de filleuls pour Alex », « qui avec BARBU17 »).
+- Visibilite : resume du matin, rubrique « Parrainages (nouveaux filleuls) » (une ligne par filleul) ; API de Tab GET
+  /membres, cle parrainages (codes, filleuls de la periode ; to_regclass avant, la transaction READ ONLY ne casse pas) ;
+  repartition : AVERTISSEMENT « X EUR a verser aux parrains fin <mois> ... pas deduit de ce calcul » (onglet Revenus et
+  repartition_du_mois), aucune ligne du calcul.
+- CHOIX COMMISSION : la ligne a verser vit dans cockpit_liveclub_filleuls (commission figee, mois, statut a_verser) et
+  n'entre PAS dans la repartition. proposer_commission_affiliation compterait un argent RECU (faux sens) ; une depense
+  tout de suite deciderait qui paie. QUESTION A BRICE : qui paie (depense rattachee au Live Club, cote Mel avant le 70/30
+  comme les lives d'Adrien = recommandation ; commune 50/50 ; Mel seule) ; puis une carte « commissions de parrainage
+  versees » (depense + statut versee) reste a faire. Autres questions : rattraper les filleuls du 22/10 au jour du
+  deploiement (le filet ne remonte que 7 jours) ; remboursement ou arret le 1er mois (rien d'automatique, statut annulee
+  sans carte) ; 30 % non retroactif sur les 10 premiers, compte depuis toujours (a confirmer).
+- Migration 20261105120000_cockpit_liveclub_parrainage.sql (sites/Aoknowledgecom) : deux tables, RLS lecture
+  is_cockpit_member, ecriture serveur, MELMOM2 refuse par check, les trois codes amorces (on conflict do nothing).
+  Aucun point-virgule hors fin d'ordre (verifie par le script). Sans elle : rien n'est note, rien ne part, rien ne casse.
+- Cockpit (apps/cockpit, FicheMembre) : PROPOSE, pas code (fiche du filleul : code et parrain ; fiche du parrain : nombre
+  de filleuls, a verser).
+- Verifs : node scripts/verifier-parrainage.mjs (17 blocs, faux Stripe, fausse base) ; tsc --noEmit ; eslint des fichiers
+  touches ; -liveclub (exclusion de la nouvelle rubrique dans le test d'ordre), -annulation-abonnement, -pause-depot,
+  -adresse-contact (20 outils), -depot-perdu, -repartition, -securite-bots, -tab-repondre, -mcp-tache, -reouverture-impaye
+  et voisins : ok. Aucune base, aucun Stripe, aucun envoi, aucune eval.
+- A FAIRE sur GO : migration, commit + push du journal (= prod), decision de Brice sur qui paie ; plus tard, brancher le
+  webhook Stripe (invoice.paid) pour un message dans la minute.
+
 ## ACCUEIL APRES UN RETRAIT, HORAIRES DES LIVES, REPONSES PARTAGEES DANS L'EQUIPE (03/11/2026 soir, commite NON pousse ; aucune migration)
 
 - Bienvenue manquee d'EarvinSaintus (887971980, acces broker, 03/11 16:15) : PAS dc5e25d ni le sujet ferme (bot admin,
