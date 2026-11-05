@@ -79,7 +79,7 @@ async function noter(cle: string, cartes: number, livres: number): Promise<void>
 
 async function lireEquipe(): Promise<Destinataire[]> {
   const lignes = await prisma.$queryRaw<{ telegram_id: bigint; libelle: string | null }[]>`
-    select telegram_id, libelle from public.cockpit_telegram_comptes order by cree_le`
+    select telegram_id, libelle from public.cockpit_telegram_comptes where diffusion = 'equipe' order by cree_le`
   return lignes.map(l => ({ chat: Number(l.telegram_id), court: estMelanie(l.libelle) }))
     .filter(l => Number.isSafeInteger(l.chat) && l.chat > 0)
 }

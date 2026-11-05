@@ -3,7 +3,19 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
-## COCKPIT : CONNEXION PAR LIEN AVEC TOUTE ADRESSE VERIFIEE (05/11/2026, NON commite ; migration 20261105220000 ECRITE, NON appliquee)
+## AGENT AOK : ADIL POUR LE SUPPORT (05/11/2026, EN LIGNE ; migration 20261105230000 appliquee avant le journal, 20261105230100 juste apres)
+
+- Brice, 05/11 : « que Adil puisse parler au bot Agent AOK pour faire la reponse support directement (il a tendance a ne pas
+  regarder ses mails) ». Brice, 15/10, sur le resume du matin : « on ne rajoute pas Adil ».
+- cockpit_telegram_comptes.diffusion : 'equipe' (Brice, Melanie, defaut) recoit tout ; 'support' (Adil) parle a l'agent (memes
+  droits que dans la fenetre du cockpit) et ne recoit que l'alerte du support (alerterEquipeTelegram, a tous) et les reponses de
+  l'equipe a un fil Support (alerterEquipeTexte avec support: true). Les 12 autres envois a l'equipe filtrent sur
+  diffusion = 'equipe' ; les lectures qui reconnaissent l'equipe gardent tous les comptes.
+- scripts/verifier-diffusion-equipe.mjs (6 blocs) relit le code : une nouvelle diffusion sans filtre le fait echouer.
+- Mise en ligne, dans l'ordre : 20261105230000 (colonne), journal, PUIS 20261105230100 (compte d'Adil, Telegram 896144604).
+- verifier-pont-support echoue aussi sur origin/master, sans ce lot : jeton TELEGRAM_BOT_TOKEN_COCKPIT absent en local.
+
+## COCKPIT : CONNEXION PAR LIEN AVEC TOUTE ADRESSE VERIFIEE (05/11/2026, EN LIGNE ; migration 20261105220000 APPLIQUEE le 05/11)
 
 - Cas : Melanie (connexion Yahoo, dans cockpit_allowlist) a son Gmail verifie dans profile_emails. signInWithOtp n'envoie
   qu'a l'email de connexion : avec le Gmail, rien ne partait. Brice : « voire meme tous ses mails » ; le lien = cockpit seul.

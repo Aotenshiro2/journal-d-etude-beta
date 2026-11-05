@@ -22,7 +22,9 @@ import { MAX_FICHIER_AGENT, lireFichierSortant, lirePieceMessage, tracePieceAgen
 // 1. Le secret de webhook (en-tete X-Telegram-Bot-Api-Secret-Token, pose au
 //    setWebhook) : sans lui, la requete n'est pas de Telegram, on repond 401.
 // 2. L'identifiant Telegram de l'EXPEDITEUR doit exister dans
-//    cockpit_telegram_comptes (rempli a la main : Brice, Melanie). Un inconnu
+//    cockpit_telegram_comptes (rempli a la main : Brice, Melanie, et Adil
+//    depuis le 05/11 avec diffusion = 'support' : il parle a l'agent, ne recoit
+//    que le support). Un inconnu
 //    recoit son identifiant en reponse, pour qu'on puisse l'ajouter — et rien
 //    d'autre.
 // 3. Les actions Stripe gardent leur confirmation HUMAINE : boutons inline
@@ -70,7 +72,7 @@ export async function POST(req: NextRequest) {
   const lecture = lireMessageTelegram(message)
   if (lecture.genre === 'vide') return NextResponse.json({ ok: true })
 
-  // Verrou 2 : seuls Brice et Melanie. Un inconnu recoit son identifiant —
+  // Verrou 2 : seuls les comptes de l'equipe (Brice, Melanie, Adil). Un inconnu recoit son identifiant —
   // c'est la seule information qu'on lui donne, et c'est celle qu'il faut
   // pour l'ajouter a cockpit_telegram_comptes.
   const compte = await compteCockpitTelegram(telegramId)

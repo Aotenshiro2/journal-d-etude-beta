@@ -379,7 +379,8 @@ await cas('trace : journal d acces au nom de la cle (proposition, envoi, annulat
 
 await cas('copie a l equipe : la carte part a chaque compte d Agent AOK (Brice et Melanie), sinon rien n est propose', () => {
   const cartes = corpsDe(SERVEUR, 'envoyerCartes')
-  assert.match(cartes, /select telegram_id, libelle from public\.cockpit_telegram_comptes order by cree_le/)
+  // (05/11) Les comptes diffusion = 'equipe' seulement : pas Adil (compte 'support', verifier-diffusion-equipe.mjs).
+  assert.match(cartes, /select telegram_id, libelle from public\.cockpit_telegram_comptes where diffusion = 'equipe' order by cree_le/)
   assert.match(cartes, /reply_markup: \{ inline_keyboard: clavierProposition\(id\) \}/)
   // Le bot Agent AOK, jamais celui des membres.
   assert.match(SERVEUR, /process\.env\.TELEGRAM_BOT_TOKEN_COCKPIT/)

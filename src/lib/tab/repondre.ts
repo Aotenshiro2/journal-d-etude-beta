@@ -171,7 +171,7 @@ function lireCartes(brut: unknown): CarteEnvoyee[] {
 /** La carte a chaque compte de l'equipe (Brice et Melanie), avec ses boutons. Rend celles qui sont parties. */
 async function envoyerCartes(id: string, carte: string): Promise<CarteEnvoyee[]> {
   const equipe = await prisma.$queryRaw<{ telegram_id: bigint; libelle: string | null }[]>`
-    select telegram_id, libelle from public.cockpit_telegram_comptes order by cree_le`
+    select telegram_id, libelle from public.cockpit_telegram_comptes where diffusion = 'equipe' order by cree_le`
   const parties: CarteEnvoyee[] = []
   for (const d of equipe) {
     const chat = Number(d.telegram_id)

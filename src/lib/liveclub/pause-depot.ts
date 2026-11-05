@@ -544,7 +544,7 @@ export async function prevenirEquipeDeclaration(telegramId: number, d: Declarati
       email: d.email ?? emailAbonnement, partenaire: OFFRE_PAUSE_DEPOT.partenaire || 'le broker', d,
     }, {
       equipe: async () => (await prisma.$queryRaw<{ telegram_id: bigint; libelle: string | null }[]>`
-        select telegram_id, libelle from public.cockpit_telegram_comptes order by cree_le`)
+        select telegram_id, libelle from public.cockpit_telegram_comptes where diffusion = 'equipe' order by cree_le`)
         .map(l => ({ chat: Number(l.telegram_id), court: estMelanie(l.libelle) }))
         .filter(l => Number.isSafeInteger(l.chat) && l.chat > 0),
       carte: async () => {
@@ -604,7 +604,7 @@ export async function alerterEquipePauseDepot(texte: string, id: string): Promis
   try {
     const { tgCockpit, ajouterAHistoriqueAgent } = await import('@/lib/agent-cockpit-telegram')
     const equipe = await prisma.$queryRaw<{ telegram_id: bigint }[]>`
-      select telegram_id from public.cockpit_telegram_comptes order by cree_le`
+      select telegram_id from public.cockpit_telegram_comptes where diffusion = 'equipe' order by cree_le`
     let livres = 0
     for (const dest of equipe) {
       const chat = Number(dest.telegram_id)

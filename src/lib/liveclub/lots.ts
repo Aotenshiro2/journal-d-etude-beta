@@ -191,7 +191,7 @@ async function envoyerCarteLots(
       lotsLe: o.lotsLe,
     })
     const equipe = await prisma.$queryRaw<{ telegram_id: bigint }[]>`
-      select telegram_id from public.cockpit_telegram_comptes order by cree_le`
+      select telegram_id from public.cockpit_telegram_comptes where diffusion = 'equipe' order by cree_le`
     let livres = 0
     for (const dest of equipe) {
       const chat = Number(dest.telegram_id)
@@ -486,7 +486,7 @@ export async function fermerRetourLots(
 export async function alerterEquipeDepotPerdu(texte: string, id: string): Promise<number> {
   try {
     const equipe = await prisma.$queryRaw<{ telegram_id: bigint }[]>`
-      select telegram_id from public.cockpit_telegram_comptes order by cree_le`
+      select telegram_id from public.cockpit_telegram_comptes where diffusion = 'equipe' order by cree_le`
     let livres = 0
     for (const dest of equipe) {
       const chat = Number(dest.telegram_id)
