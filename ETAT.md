@@ -5,7 +5,14 @@ reste dans TODO.md.
 
 ## PARRAINAGE : DECLARATION, RATTRAPAGE, REMBOURSEMENT ; LIVES DES INTERVENANTS (05/11/2026 soir, decisions de Brice ; NON commite ; migration 20261105190000 ECRITE, NON appliquee)
 
-- Par-dessus le lot commite (journal 3dd62ee, migration d14c468), modifications NON commitees.
+- Par-dessus le lot commite (journal 3dd62ee, migration d14c468) ; commite f78976b, puis la retouche ci-dessous.
+- RETOUCHE (05/11, rattrapage a blanc : 4 filleuls BARBU17 d'Alex, Tom 23/10, Sebastien 24/10, Flavien 01/11, Raiarii
+  04/11) : le filet et le rattrapage previennent APRES toute la liste, UN message par parrain (notifierGroupe,
+  texteParrainGroupe : « 4 nouveaux membres ont rejoint le Live Club grâce à ton code BARBU17 : Tom et Sébastien en
+  octobre, Flavien et Raiarii en novembre. Tes commissions : 39,60 € comptés avec celles d'octobre, et 39,60 € à la fin
+  de ce mois-ci (20 % de leur premier paiement). »), UNE alerte a l'equipe qui les nomme tous ; la reprise du filet
+  regroupe aussi. Un seul filleul, ou le webhook : le texte habituel. Idempotence par filleul inchangee. Dates : « 1er »
+  (numeroDuJour) partout dans parrainage-pur, lives-reperes-pur et cartes-fin-de-mois. verifier-parrainage.mjs 28 blocs.
 - QUI PAIE (Brice) : « dans les dépenses du Live Club, comme pour les lives d'Adrien ». Au debut du mois suivant, le
   passage (etape 'cartes_fin_de_mois', src/lib/cartes-fin-de-mois.ts, apres 'parrainages', avant le resume) pose chez
   Brice et Mel (courte pour Mel) la carte « Commissions de parrainage d'octobre : Alex 19,80 € (Thomas), ... = 39,60 €.

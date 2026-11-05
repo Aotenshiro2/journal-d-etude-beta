@@ -34,8 +34,8 @@ import { messageErreur, relationAbsente, uuidDeActeur } from './pur'
 import {
   DELAI_INCERTAIN_MIN, FENETRE_FILET_JOURS, OFFRE_LIVE_CLUB,
   alerterPourFilleul, carteCodeParrainage, carteDeclaration, codeApres, codesDesRemises, detailParParrain, etatDeclaration,
-  factureRemboursee, jourParisDe, libelleDepenseParrainage, lireParamsCodeParrainage, lireParamsDeclaration, lireRemboursement,
-  notifierFilleul, phraseAVerser, texteAlerteRemboursement, texteParrain, traiterFactureFilleul, traiterFactures,
+  factureRemboursee, grouperParParrain, jourParisDe, libelleDepenseParrainage, lireParamsCodeParrainage, lireParamsDeclaration, lireRemboursement,
+  notifierGroupe, phraseAVerser, texteAlerteRemboursement, texteParrain, traiterFactureFilleul, traiterFactures,
   type BilanFilet, type CodeParrainage, type EtatDeclaration, type FactureFilleul, type FilleulANotifier, type FilleulDuMois,
   type IssueFilleul, type NotificationFinale, type OutilsParrainage, type ParamsCodeParrainage, type ParrainCodePromo,
 } from './parrainage-pur'
@@ -417,6 +417,8 @@ export async function filetParrainages(
     bilan.erreurs++
   }
   const parId = new Map(codes.map(c => [c.codeId, c]))
+  // (05/11) Les notifications a reprendre : UN message par parrain (notifierGroupe).
+  const aReprendre: FilleulANotifier[] = []
   for (const l of lignes) {
     const code = parId.get(l.code_id)
     if (!code) continue
@@ -426,8 +428,7 @@ export async function filetParrainages(
     }
     try {
       if (l.tentee === null || l.notification === 'a_reprendre') {
-        const r = await notifierFilleul(n, outils)
-        if (r !== 'deja') bilan.reprises++
+        aReprendre.push(n)
       } else if (await reserverIncertain(l.filleul_id)) {
         const contexte = {
           prenom: n.prenom, code: code.code, commission: n.commission, devise: n.devise, tauxPct: n.tauxPct,
@@ -436,6 +437,14 @@ export async function filetParrainages(
         await alerterPourFilleul(n, contexte, texteParrain(contexte), 'incertain', outils)
         bilan.incertains++
       }
+    } catch (err) {
+      console.warn(`[liveclub/parrainage] reprise ratee : ${messageErreur(err).slice(0, 160)}`)
+      bilan.erreurs++
+    }
+  }
+  for (const groupe of grouperParParrain(aReprendre)) {
+    try {
+      if (await notifierGroupe(groupe, outils) !== 'deja') bilan.reprises += groupe.length
     } catch (err) {
       console.warn(`[liveclub/parrainage] reprise ratee : ${messageErreur(err).slice(0, 160)}`)
       bilan.erreurs++

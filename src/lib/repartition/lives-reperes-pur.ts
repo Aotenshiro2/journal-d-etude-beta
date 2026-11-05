@@ -26,6 +26,12 @@ function iso(d: Date): string {
   return d.toISOString().slice(0, 10)
 }
 
+/** '2026-11-03' -> '3', '2026-11-01' -> '1er' (05/11 : jamais « 1 novembre »). */
+export function numeroDuJour(jour: string): string {
+  const n = Number(jour.slice(8, 10))
+  return n === 1 ? '1er' : String(n)
+}
+
 /** 'mardi' pour '2026-10-13'. */
 export function nomJour(jour: string): string {
   return JOURS[utc(jour).getUTCDay()]
@@ -76,7 +82,7 @@ export function ligneLivesSemaine(jours: readonly string[], aujourdhui: string):
   const lundi = lundiDe(aujourdhui)
   const semaine = uniques.filter(j => j >= lundi && j <= aujourdhui)
   const mois = uniques.filter(j => j.slice(0, 7) === aujourdhui.slice(0, 7) && j <= aujourdhui)
-  const liste = semaine.map(j => `${nomJour(j)} ${Number(j.slice(8, 10))}`).join(', ')
+  const liste = semaine.map(j => `${nomJour(j)} ${numeroDuJour(j)}`).join(', ')
   const n = semaine.length
   return `${n} live${n > 1 ? 's' : ''} repéré${n > 1 ? 's' : ''} cette semaine${n ? ` (${liste})` : ''} ; ${mois.length} ce mois-ci`
 }
@@ -91,7 +97,7 @@ export function carteLives(o: {
 }): { carte: string; court: string } {
   const uniques = [...new Set(o.jours)].sort()
   const n = uniques.length
-  const jours = `${uniques.map(j => Number(j.slice(8, 10))).join(', ')}/${o.mois.slice(5, 7)}`
+  const jours = `${uniques.map(numeroDuJour).join(', ')}/${o.mois.slice(5, 7)}`
   const court = `Lives ${deNom(o.intervenant)} en ${nomMoisLives(o.mois)} : ${n} repéré${n > 1 ? 's' : ''} (${jours}), `
     + `${n} x ${eurosCourts(o.prixUnitaire)} = ${eurosCourts(n * o.prixUnitaire)}. Déclarer en dépense du ${o.produit} ?`
   const carte = `${court} Repérés par ses liens Zoom dans le sujet Annonce : un live annulé ou en double se corrige `

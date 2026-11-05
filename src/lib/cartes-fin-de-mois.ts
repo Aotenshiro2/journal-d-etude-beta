@@ -23,7 +23,7 @@
 import { prisma } from '@/lib/db'
 import { validerAction, type ActionAgent } from '@/lib/stripe-actions'
 import { estMelanie, sansNomsOutils } from '@/lib/agent-cockpit-pur'
-import { OFFRE_LIVE_CLUB, TYPE_DECLARATION_PARRAINAGE, carteDeclaration, cleCarteDeclaration, deNom, jourParisDe } from '@/lib/liveclub/parrainage-pur'
+import { OFFRE_LIVE_CLUB, TYPE_DECLARATION_PARRAINAGE, carteDeclaration, cleCarteDeclaration, deNom, jourParisDe, numeroDuJour } from '@/lib/liveclub/parrainage-pur'
 import { bornesMois } from '@/lib/repartition/pur'
 import { moisADeclarer } from '@/lib/liveclub/parrainage'
 import { carteLives, cleCarteLives, moisPrecedent, nomMoisLives } from '@/lib/repartition/lives-reperes-pur'
@@ -203,7 +203,7 @@ export async function cartesFinDeMois(maintenant: Date = new Date()): Promise<Bi
       const cle = cleCarteLives(l.intervenant, l.offreId, mois, l.jours.length)
       if (!await reserver(cle)) continue
       const tete = `Lives ${deNom(l.intervenant)} en ${nomMoisLives(mois)} : ${l.jours.length} repéré${l.jours.length > 1 ? 's' : ''} `
-        + `(${l.jours.map(j => Number(j.slice(8, 10))).join(', ')}/${mois.slice(5, 7)}).`
+        + `(${l.jours.map(numeroDuJour).join(', ')}/${mois.slice(5, 7)}).`
       const action = validerAction({
         type: 'lives_du_mois', compte: 'cockpit',
         params: { intervenant: l.intervenant, mois, nombre: l.jours.length, offre_id: l.offreId },

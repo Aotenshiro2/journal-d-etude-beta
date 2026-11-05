@@ -643,19 +643,27 @@ await bloc('declaration : parametres de la carte, un mois fini seulement ; avert
 
 await bloc('rattrapage : les factures depuis le 22/10, les plus anciennes d abord (rang juste)', async () => {
   const { etat, outils } = monde()
-  const recente = facture({ sub: 'sub_EssaiRecent01', discounts: [remise('BARBU17')], payeSec: Math.floor(Date.parse('2026-11-02T10:00:00Z') / 1000) })
-  const ancienne = facture({ sub: 'sub_EssaiAncien01', discounts: [remise('BARBU17')], payeSec: Math.floor(Date.parse('2026-10-25T10:00:00Z') / 1000) })
+  const recente = facture({ sub: 'sub_EssaiRecent01', nom: 'Flavien R', discounts: [remise('BARBU17')], payeSec: Math.floor(Date.parse('2026-11-02T10:00:00Z') / 1000) })
+  const ancienne = facture({ sub: 'sub_EssaiAncien01', nom: 'Tom D', discounts: [remise('BARBU17')], payeSec: Math.floor(Date.parse('2026-10-25T10:00:00Z') / 1000) })
   // Stripe rend les plus recentes en tete : le rattrapage les remet dans l'ordre des paiements.
   const b = await P.traiterFactures([recente, ancienne], outils)
   assert.equal(b.notees, 2)
+  assert.equal(b.prevenus, 2)
   assert.equal(etat.lignes.get('sub_EssaiAncien01').rang, 1)
   assert.equal(etat.lignes.get('sub_EssaiRecent01').rang, 2)
   assert.equal(etat.lignes.get('sub_EssaiAncien01').entree.mois, '2026-10')
-  // Le message du rattrapage d'octobre : « a rejoint le ... », compte avec octobre.
-  const oct = etat.messages.find(m => /25 octobre/.test(m.texte))
-  assert.equal(oct.texte, 'Bonne nouvelle : Thomas a rejoint le Live Club le 25 octobre grâce à ton code BARBU17. '
+  // (05/11) UN message pour les deux filleuls du meme parrain.
+  assert.equal(etat.messages.length, 1)
+  assert.equal(etat.messages[0].texte, 'Bonne nouvelle : 2 nouveaux membres ont rejoint le Live Club grâce à ton code BARBU17 : '
+    + "Tom en octobre, Flavien en novembre. Tes commissions : 19,80 € comptés avec celles d'octobre, et 19,80 € à la fin de ce mois-ci "
+    + '(20 % de leur premier paiement). Merci à toi !')
+  texteMembre(etat.messages[0].texte, 'message groupe du rattrapage')
+  // Un seul filleul d'un mois fini : le texte habituel, « a rejoint le ... », compte avec octobre.
+  const seul = monde()
+  await P.traiterFactures([facture({ sub: 'sub_EssaiSeul0001', nom: 'Tom D', discounts: [remise('BARBU17')], payeSec: Math.floor(Date.parse('2026-10-25T10:00:00Z') / 1000) })], seul.outils)
+  assert.equal(seul.etat.messages[0].texte, 'Bonne nouvelle : Tom a rejoint le Live Club le 25 octobre grâce à ton code BARBU17. '
     + "Ta commission de 19,80 € (20 % de son premier paiement) sera comptée avec les commissions d'octobre. Merci à toi !")
-  texteMembre(oct.texte, 'message du rattrapage')
+  texteMembre(seul.etat.messages[0].texte, 'message du rattrapage')
   // Le script : a blanc par defaut, fenetre au 22/10, --oui pour de vrai.
   const s = lire('scripts/rattraper-parrainages.mjs')
   assert.match(s, /const EXECUTER = args\.includes\('--oui'\)/)
@@ -702,7 +710,7 @@ await bloc('lives : ligne du dimanche, carte de fin de mois, memoire', () => {
   assert.equal(L.ligneLivesSemaine(['2026-10-28', '2026-11-01', '2026-11-03', '2026-11-05', '2026-11-03'], '2026-11-08'),
     '2 lives repérés cette semaine (mardi 3, jeudi 5) ; 3 ce mois-ci')
   // Semaine a cheval sur deux mois.
-  assert.equal(L.ligneLivesSemaine(['2026-10-28', '2026-11-01'], '2026-11-01'), '2 lives repérés cette semaine (mercredi 28, dimanche 1) ; 1 ce mois-ci')
+  assert.equal(L.ligneLivesSemaine(['2026-10-28', '2026-11-01'], '2026-11-01'), '2 lives repérés cette semaine (mercredi 28, dimanche 1er) ; 1 ce mois-ci')
   assert.equal(L.ligneLivesSemaine(['2026-11-03'], '2026-11-15'), '0 live repéré cette semaine ; 1 ce mois-ci')
   const c = L.carteLives({ intervenant: 'Adrien', mois: '2026-10', jours: ['2026-10-22', '2026-10-14', '2026-10-21'], prixUnitaire: 7500, produit: 'Live Club', complement: 'Live Club est côté Mel.' })
   assert.equal(c.court, "Lives d'Adrien en octobre : 3 repérés (14, 21, 22/10), 3 x 75 € = 225 €. Déclarer en dépense du Live Club ?")
@@ -780,6 +788,127 @@ await bloc('migration de la declaration : colonnes, index d une declaration viva
   for (const o of ordres) {
     const sansCommentaires = o.split('\n').filter(l => !l.trim().startsWith('--')).join('\n').trim()
     assert.ok(!/\n\s*\n\s*(alter|create|comment|revoke|grant|notify|insert|drop)\b/i.test(sansCommentaires), `deux ordres sans point-virgule : ${sansCommentaires.slice(0, 80)}`)
+  }
+})
+
+// ---------------------------------------------------------------------------
+// 12. (05/11, vu au rattrapage a blanc) Un message par parrain, et « 1er »
+// ---------------------------------------------------------------------------
+
+const paye = (jour) => Math.floor(Date.parse(`${jour}T10:00:00Z`) / 1000)
+const quatre = [
+  facture({ sub: 'sub_EssaiRaiarii01', nom: 'Raiarii T', discounts: [remise('BARBU17')], payeSec: paye('2026-11-04') }),
+  facture({ sub: 'sub_EssaiTom000001', nom: 'Tom D', discounts: [remise('BARBU17')], payeSec: paye('2026-10-23') }),
+  facture({ sub: 'sub_EssaiFlavien01', nom: 'flavien m', discounts: [remise('BARBU17')], payeSec: paye('2026-11-01') }),
+  facture({ sub: 'sub_EssaiSebast001', nom: 'Sébastien L', discounts: [remise('BARBU17')], payeSec: paye('2026-10-24') }),
+]
+const MESSAGE_GROUPE = 'Bonne nouvelle : 4 nouveaux membres ont rejoint le Live Club grâce à ton code BARBU17 : '
+  + 'Tom et Sébastien en octobre, Flavien et Raiarii en novembre. '
+  + "Tes commissions : 39,60 € comptés avec celles d'octobre, et 39,60 € à la fin de ce mois-ci (20 % de leur premier paiement). Merci à toi !"
+
+await bloc('rattrapage groupe : 4 filleuls d Alex, UN message (le cas du 05/11), chacun note une fois', async () => {
+  const { etat, outils } = monde()
+  const b = await P.traiterFactures(quatre, outils)
+  assert.equal(b.notees, 4)
+  assert.equal(b.prevenus, 4)
+  assert.equal(etat.messages.length, 1, 'un seul message au parrain')
+  assert.equal(etat.messages[0].tg, 2110821350)
+  assert.equal(etat.messages[0].texte, MESSAGE_GROUPE)
+  texteMembre(etat.messages[0].texte, 'message groupe')
+  assert.deepEqual([...etat.lignes.values()].map(l => `${l.entree.prenom}:${l.rang}`), ['Tom:1', 'Sébastien:2', 'Flavien:3', 'Raiarii:4'])
+  for (const l of etat.lignes.values()) assert.equal(l.notification, 'parrain')
+  // Relance du rattrapage : rien de plus (idempotence par filleul).
+  const b2 = await P.traiterFactures(quatre, outils)
+  assert.equal(b2.deja, 4)
+  assert.equal(etat.messages.length, 1)
+  // Le webhook (un evenement a la fois) garde le message habituel.
+  const w = monde()
+  await P.traiterFactureFilleul(evenement(quatre[0]), 'webhook', w.outils)
+  assert.match(w.etat.messages[0].texte, /^Bonne nouvelle : Raiarii a rejoint le Live Club le 4 novembre grâce à ton code BARBU17\. .* sera comptée à la fin du mois\./)
+})
+
+await bloc('rattrapage groupe : deux parrains = deux messages ; tout dans le mois ; palier ; prenom inconnu', async () => {
+  const { etat, outils } = monde({ resolu: 777000111 })
+  await P.traiterFactures([
+    facture({ sub: 'sub_EssaiAlex00001', nom: 'Tom D', discounts: [remise('BARBU17')], payeSec: paye('2026-11-02') }),
+    facture({ sub: 'sub_EssaiFab000001', nom: 'Inès K', discounts: [remise('SAUCISSON')], payeSec: paye('2026-11-03') }),
+    facture({ sub: 'sub_EssaiAlex00002', nom: null, discounts: [remise('BARBU17')], payeSec: paye('2026-11-04') }),
+  ], outils)
+  assert.equal(etat.messages.length, 2)
+  const alex = etat.messages.find(m => m.tg === 2110821350).texte
+  assert.equal(alex, 'Bonne nouvelle : 2 nouveaux membres ont rejoint le Live Club grâce à ton code BARBU17 : Tom et un nouveau membre. '
+    + 'Tes commissions : 39,60 € à la fin de ce mois-ci (20 % de leur premier paiement). Merci à toi !')
+  const fab = etat.messages.find(m => m.tg === 777000111).texte
+  assert.match(fab, /^Bonne nouvelle : Inès vient de rejoindre|^Bonne nouvelle : Inès a rejoint le Live Club le 3 novembre/)
+  // Le palier franchi dans le groupe : le 10e a 20 %, le 11e a 30 %, une phrase le dit.
+  const palier = monde({ deja: 9 })
+  await P.traiterFactures([
+    facture({ sub: 'sub_EssaiDixieme01', nom: 'Tom D', discounts: [remise('BARBU17')], payeSec: paye('2026-11-02') }),
+    facture({ sub: 'sub_EssaiOnzieme01', nom: 'Lou P', discounts: [remise('BARBU17')], payeSec: paye('2026-11-03') }),
+  ], palier.outils)
+  const t = palier.etat.messages[0].texte
+  assert.match(t, /Tes commissions : 49,50 € à la fin de ce mois-ci \(20 % et 30 % de leur premier paiement\)\. Avec Lou, ton 11e filleul, ta commission passe à 30 %\. Merci à toi !$/)
+  texteMembre(t, 'message groupe au palier')
+})
+
+await bloc('rattrapage groupe : parrain injoignable, UNE alerte qui les nomme tous ; reprise groupee', async () => {
+  const fab = quatre.map(f => ({ ...f, discounts: [remise('SAUCISSON')] }))
+  const { etat, outils } = monde()
+  const b = await P.traiterFactures(fab, outils)
+  assert.equal(b.equipe, 4)
+  assert.equal(etat.messages.length, 0)
+  assert.equal(etat.alertes.length, 1, 'une seule alerte')
+  const a = etat.alertes[0]
+  assert.match(a, /^4 nouveaux filleuls du Live Club avec le code SAUCISSON de Fab \(@Nyfab34\) :\n/)
+  assert.match(a, /- Tom \(thomas\.essai@exemple\.fr\), payé le 23 octobre : 99 €, commission 19,80 € \(20 %, 1er filleul\)\n/)
+  assert.match(a, /- Flavien \(thomas\.essai@exemple\.fr\), payé le 1er novembre : 99 €, commission 19,80 € \(20 %, 3e filleul\)\n/)
+  assert.match(a, /Commissions : 39,60 € comptés avec celles d'octobre et 39,60 € à verser fin novembre\./)
+  assert.match(a, /son compte Telegram n'est pas connu \(@Nyfab34 introuvable dans le groupe\)/)
+  assert.ok(a.includes(`Phrase à lui transmettre (un seul message pour tous) :\n« ${MESSAGE_GROUPE.replace('BARBU17', 'SAUCISSON')} »`))
+  texteClavier(a, 'alerte groupee')
+  for (const l of etat.lignes.values()) assert.equal(l.notification, 'equipe')
+  // Alerte non livree : a reprendre ; la reprise du filet les regroupe encore.
+  const perdu = monde({ alerteLivree: false })
+  await P.traiterFactures(fab, perdu.outils)
+  const lignes = [...perdu.etat.lignes.values()]
+  assert.ok(lignes.every(l => l.notification === 'a_reprendre'))
+  const reprise = monde()
+  reprise.etat.lignes = perdu.etat.lignes
+  const groupe = lignes.map(l => ({
+    filleulId: l.filleulId, rang: l.rang, tauxPct: l.tauxPct, commission: l.commission, code: CODES[1], prenom: l.entree.prenom,
+    montant: 9900, devise: 'eur', payeLe: l.entree.facture.payeLe, email: null,
+  }))
+  assert.equal(P.grouperParParrain(groupe).length, 1)
+  assert.equal(await P.notifierGroupe(groupe, reprise.outils), 'equipe')
+  assert.equal(reprise.etat.alertes.length, 1)
+  assert.equal(await P.notifierGroupe(groupe, reprise.outils), 'deja')
+  // Le serveur : la reprise du filet passe par le groupe.
+  assert.match(lire('src/lib/liveclub/parrainage.ts'), /for \(const groupe of grouperParParrain\(aReprendre\)\)/)
+})
+
+await bloc('dates : « le 1er novembre », jamais « le 1 novembre », partout dans le module', () => {
+  assert.equal(P.jourCourtFr('2026-11-01'), '1er novembre')
+  assert.equal(P.jourCourtFr('2026-11-03'), '3 novembre')
+  assert.equal(P.numeroDuJour('2026-11-01'), '1er')
+  const t = P.texteParrain({
+    prenom: 'Flavien', code: 'BARBU17', commission: 1980, devise: 'eur', tauxPct: 20, rang: 3, palier: 10,
+    payeLe: '2026-11-01T10:00:00.000Z', maintenant: '2026-11-05T07:00:00.000Z',
+  })
+  assert.match(t, /a rejoint le Live Club le 1er novembre grâce/)
+  const a = P.texteAlerteEquipe({
+    prenom: 'Flavien', code: 'BARBU17', commission: 1980, devise: 'eur', tauxPct: 20, rang: 3, palier: 10,
+    payeLe: '2026-11-01T10:00:00.000Z', maintenant: '2026-11-05T07:00:00.000Z',
+    parrain: 'Alex', pseudo: null, montant: 9900, email: null, raison: 'refus', texte: t,
+  })
+  assert.match(a, /abonnement payé le 1er novembre/)
+  assert.equal(L.numeroDuJour('2026-11-01'), '1er')
+  assert.equal(L.ligneLivesSemaine(['2026-10-28', '2026-11-01'], '2026-11-01'), '2 lives repérés cette semaine (mercredi 28, dimanche 1er) ; 1 ce mois-ci')
+  assert.match(L.carteLives({ intervenant: 'Adrien', mois: '2026-11', jours: ['2026-11-01', '2026-11-03'], prixUnitaire: 7500, produit: 'Live Club' }).court,
+    /^Lives d'Adrien en novembre : 2 repérés \(1er, 3\/11\), 2 x 75 € = 150 €\./)
+  // Plus aucun numero de jour forme a la main dans ces modules.
+  for (const f of ['src/lib/liveclub/parrainage-pur.ts', 'src/lib/repartition/lives-reperes-pur.ts', 'src/lib/cartes-fin-de-mois.ts', 'src/lib/liveclub/parrainage.ts']) {
+    const src = lire(f)
+    assert.ok(!/Number\(j(our)?\.slice\(8, 10\)\)\)?\s*\}?`|map\(j => Number\(j\.slice\(8, 10\)\)\)/.test(src), `${f} : numero de jour sans « 1er »`)
   }
 })
 

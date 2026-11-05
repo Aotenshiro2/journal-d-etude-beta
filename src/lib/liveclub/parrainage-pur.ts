@@ -74,9 +74,15 @@ export function deMois(mois: string): string {
   return /^[aeiou]/.test(nom) ? `d'${nom}` : `de ${nom}`
 }
 
-/** '2026-11-03' -> '3 novembre'. */
+/** '2026-11-03' -> '3', '2026-11-01' -> '1er' (05/11 : « le 1er novembre », jamais « le 1 novembre »). */
+export function numeroDuJour(jour: string): string {
+  const n = Number(jour.slice(8, 10))
+  return n === 1 ? '1er' : String(n)
+}
+
+/** '2026-11-03' -> '3 novembre', '2026-11-01' -> '1er novembre'. */
 export function jourCourtFr(jour: string): string {
-  return `${Number(jour.slice(8, 10))} ${nomMois(jour)}`
+  return `${numeroDuJour(jour)} ${nomMois(jour)}`
 }
 
 /** 1980 centimes -> '19,80 €' (toujours deux decimales). */
@@ -646,7 +652,12 @@ export type RaisonIgnore = 'pas_un_premier_paiement' | 'sans_code' | 'hors_parra
 export type IssueFilleul =
   | { etat: 'ignore'; raison: RaisonIgnore }
   | { etat: 'deja' }
-  | { etat: 'note'; filleulId: string; rang: number; tauxPct: number; commission: number; notification: NotificationFinale | 'deja' }
+  | {
+    etat: 'note'; filleulId: string; rang: number; tauxPct: number; commission: number
+    /** 'differee' : notee, la notification part plus tard, groupee par parrain (filet, rattrapage). */
+    notification: NotificationFinale | 'deja' | 'differee'
+    aNotifier?: FilleulANotifier
+  }
 
 export type FilleulANotifier = LigneFilleul & {
   code: CodeParrainage
@@ -665,12 +676,106 @@ export type FilleulANotifier = LigneFilleul & {
  * reste « a_reprendre » pour le filet du lendemain.
  */
 export async function notifierFilleul(n: FilleulANotifier, outils: OutilsParrainage): Promise<NotificationFinale | 'deja'> {
-  if (!await outils.reserverNotification(n.filleulId)) return 'deja'
+  return notifierGroupe([n], outils)
+}
+
+/** Le meme parrain : meme compte Telegram, sinon meme pseudo, sinon meme code. */
+export function cleParrain(c: Pick<CodeParrainage, 'telegramId' | 'pseudo' | 'codeId'>): string {
+  return c.telegramId !== null ? `t${c.telegramId}` : c.pseudo ? `p${c.pseudo.toLowerCase()}` : `c${c.codeId}`
+}
+
+/** « Tom », « Tom et Sébastien », « Tom, Sébastien et Flavien » (virgule avant « et » : des membres de phrase). */
+function liste(mots: readonly string[], virgule = false): string {
+  return mots.length <= 1 ? (mots[0] ?? '') : `${mots.slice(0, -1).join(', ')}${virgule ? ',' : ''} et ${mots[mots.length - 1]}`
+}
+
+type MoisDuGroupe = { mois: string; prenoms: string[]; commission: number }
+
+function parMois(filleuls: readonly FilleulANotifier[]): MoisDuGroupe[] {
+  const m = new Map<string, MoisDuGroupe>()
+  for (const f of [...filleuls].sort((a, b) => a.payeLe.localeCompare(b.payeLe))) {
+    const mois = moisDuJour(jourParisDe(f.payeLe))
+    const g = m.get(mois) ?? { mois, prenoms: [], commission: 0 }
+    g.prenoms.push(f.prenom ?? NOUVEAU_MEMBRE)
+    g.commission += f.commission
+    m.set(mois, g)
+  }
+  return [...m.values()].sort((a, b) => a.mois.localeCompare(b.mois))
+}
+
+/**
+ * (05/11, rattrapage) Le message UNIQUE a un parrain pour plusieurs filleuls
+ * notes d'un coup : « Bonne nouvelle : 4 nouveaux membres ont rejoint le Live
+ * Club grâce à ton code BARBU17 : Tom et Sébastien en octobre, Flavien et
+ * Raiarii en novembre. Tes commissions : 39,60 € comptés avec celles
+ * d'octobre, et 39,60 € à la fin de ce mois-ci (20 % de leur premier
+ * paiement). Merci à toi ! » Un seul filleul : texteParrain.
+ */
+export function texteParrainGroupe(filleuls: readonly FilleulANotifier[], maintenant: string): string {
+  const moisCourant = moisDuJour(jourParisDe(maintenant))
+  const groupes = parMois(filleuls)
+  const devise = filleuls[0]?.devise ?? 'eur'
+  const codes = [...new Set(filleuls.map(f => f.code.code))]
+  const seulMoisCourant = groupes.length === 1 && groupes[0].mois === moisCourant
+  const qui = seulMoisCourant
+    ? liste(groupes[0].prenoms)
+    : groupes.map(g => `${liste(g.prenoms)} en ${nomMois(g.mois)}`).join(', ')
+  const montants = groupes.map(g => g.mois === moisCourant
+    ? `${euros(g.commission, devise)} à la fin de ce mois-ci`
+    : `${euros(g.commission, devise)} comptés avec celles ${deMois(g.mois)}`)
+  const taux = [...new Set(filleuls.map(f => f.tauxPct))].sort((a, b) => a - b)
+  const palier = [...filleuls].sort((a, b) => a.rang - b.rang).find(f => f.rang === f.code.palier + 1)
+  return `Bonne nouvelle : ${filleuls.length} nouveaux membres ont rejoint le Live Club grâce à `
+    + `${codes.length > 1 ? `tes codes ${liste(codes)}` : `ton code ${codes[0]}`} : ${qui}. `
+    + `Tes commissions : ${liste(montants, true)} (${liste(taux.map(pourcent))} de leur premier paiement).`
+    + (palier ? ` Avec ${palier.prenom ?? NOUVEAU_MEMBRE}, ton ${rangLisible(palier.rang)} filleul, ta commission passe à ${pourcent(palier.tauxPct)}.` : '')
+    + ' Merci à toi !'
+}
+
+/** L'alerte a l'equipe pour plusieurs filleuls du meme parrain : chacun, puis la phrase unique. */
+export function texteAlerteEquipeGroupe(filleuls: readonly FilleulANotifier[], o: { raison: RaisonAlerte; texte: string; maintenant: string }): string {
+  const c = filleuls[0].code
+  const moisCourant = moisDuJour(jourParisDe(o.maintenant))
+  const parrain = `${c.parrain}${c.pseudo ? ` (@${c.pseudo})` : ''}`
+  const codes = [...new Set(filleuls.map(f => f.code.code))]
+  const lignes = [...filleuls].sort((a, b) => a.payeLe.localeCompare(b.payeLe)).map(f =>
+    `- ${f.prenom ?? NOUVEAU_MEMBRE}${f.email ? ` (${f.email})` : ''}, payé le ${jourCourtFr(jourParisDe(f.payeLe))} : `
+    + `${montantLisible(f.montant, f.devise)}, commission ${euros(f.commission, f.devise)} (${pourcent(f.tauxPct)}, ${rangLisible(f.rang)} filleul)`)
+  const montants = parMois(filleuls).map(g => g.mois === moisCourant
+    ? `${euros(g.commission)} à verser fin ${nomMois(g.mois)}`
+    : `${euros(g.commission)} comptés avec celles ${deMois(g.mois)}`)
+  const raison = o.raison === 'sans_compte'
+    ? `Je n'ai pas pu prévenir ${c.parrain} : son compte Telegram n'est pas connu${c.pseudo ? ` (@${c.pseudo} introuvable dans le groupe)` : ''}. Pas d'email sans son accord.`
+    : o.raison === 'refus'
+      ? `Je n'ai pas pu prévenir ${c.parrain} en privé : Telegram refuse le message (pas de conversation ouverte avec le bot des membres, ou bot bloqué). Pas d'email sans son accord.`
+      : o.raison === 'echec'
+        ? `Le message à ${c.parrain} n'est pas parti (Telegram ne répond pas). Rien ne sera renvoyé tout seul.`
+        : `Un envoi à ${c.parrain} a été tenté sans confirmation : vérifie avec ${c.parrain} avant de lui renvoyer la phrase.`
+  return [
+    `${filleuls.length} nouveaux filleuls du Live Club avec ${codes.length > 1 ? `les codes ${liste(codes)}` : `le code ${codes[0]}`} ${deNom(parrain)} :\n${lignes.join('\n')}`,
+    `Commissions : ${liste(montants)}.`,
+    raison,
+    `Phrase à lui transmettre (un seul message pour tous) :\n« ${o.texte} »`,
+  ].join('\n\n')
+}
+
+/**
+ * Previent UN parrain pour un ou plusieurs de ses filleuls deja notes, en UN
+ * message. Chaque filleul est reserve avant l'envoi (un rejeu ne renvoie
+ * rien) ; ceux deja tentes ou faits sont laisses de cote. Un seul : le texte
+ * habituel. Echec : UNE alerte a l'equipe qui les nomme tous.
+ */
+export async function notifierGroupe(filleuls: readonly FilleulANotifier[], outils: OutilsParrainage): Promise<NotificationFinale | 'deja'> {
+  const reserves: FilleulANotifier[] = []
+  for (const f of filleuls) if (await outils.reserverNotification(f.filleulId)) reserves.push(f)
+  if (reserves.length === 0) return 'deja'
+  const maintenant = outils.maintenant()
+  const n = reserves[0]
   const contexte: ContexteTexte = {
     prenom: n.prenom, code: n.code.code, commission: n.commission, devise: n.devise, tauxPct: n.tauxPct,
-    rang: n.rang, palier: n.code.palier, payeLe: n.payeLe, maintenant: outils.maintenant(),
+    rang: n.rang, palier: n.code.palier, payeLe: n.payeLe, maintenant,
   }
-  const texte = texteParrain(contexte)
+  const texte = reserves.length === 1 ? texteParrain(contexte) : texteParrainGroupe(reserves, maintenant)
   let raison: RaisonAlerte
   const telegramId = n.code.telegramId ?? await outils.resoudreParrain(n.code)
   if (telegramId === null) {
@@ -678,12 +783,16 @@ export async function notifierFilleul(n: FilleulANotifier, outils: OutilsParrain
   } else {
     const r = await outils.envoyerParrain(telegramId, texte)
     if (r === 'ok') {
-      await outils.marquerNotification(n.filleulId, 'parrain')
+      for (const f of reserves) await outils.marquerNotification(f.filleulId, 'parrain')
       return 'parrain'
     }
     raison = r === 'refus' ? 'refus' : 'echec'
   }
-  return alerterPourFilleul(n, contexte, texte, raison, outils)
+  if (reserves.length === 1) return alerterPourFilleul(n, contexte, texte, raison, outils)
+  const livres = await outils.alerterEquipe(texteAlerteEquipeGroupe(reserves, { raison, texte, maintenant }))
+  const issue: NotificationFinale = livres > 0 ? 'equipe' : 'a_reprendre'
+  for (const f of reserves) await outils.marquerNotification(f.filleulId, issue)
+  return issue
 }
 
 /** L'alerte a l'equipe pour un filleul, puis la marque ('equipe', 'incertain' ou 'a_reprendre'). */
@@ -706,7 +815,9 @@ export async function alerterPourFilleul(
  * seulement pour une facture qui porte une remise. Jette sur une panne de
  * lecture : l'appelant laisse Stripe rejouer (webhook) ou le filet reprendre.
  */
-export async function traiterFactureFilleul(brut: unknown, source: SourceFilleul, outils: OutilsParrainage): Promise<IssueFilleul> {
+export async function traiterFactureFilleul(
+  brut: unknown, source: SourceFilleul, outils: OutilsParrainage, o: { differer?: boolean } = {},
+): Promise<IssueFilleul> {
   const f = lireFactureFilleul(brut)
   if (!f) return { etat: 'ignore', raison: 'pas_un_premier_paiement' }
   const codes = await outils.codesParrainage()
@@ -723,10 +834,21 @@ export async function traiterFactureFilleul(brut: unknown, source: SourceFilleul
   const mois = moisDuJour(jourParisDe(f.payeLe))
   const ligne = await outils.noter({ code, facture: f, prenom, mois, source }, (n) => calculerCommission(n, code, f.montant))
   if (!ligne) return { etat: 'deja' }
-  const notification = await notifierFilleul({
-    ...ligne, code, prenom, montant: f.montant, devise: f.devise, payeLe: f.payeLe, email: f.emailClient,
-  }, outils)
+  const aNotifier: FilleulANotifier = { ...ligne, code, prenom, montant: f.montant, devise: f.devise, payeLe: f.payeLe, email: f.emailClient }
+  // (05/11) Le filet et le rattrapage previennent APRES toute la liste, un message par parrain.
+  if (o.differer) return { etat: 'note', ...ligne, notification: 'differee', aNotifier }
+  const notification = await notifierFilleul(aNotifier, outils)
   return { etat: 'note', ...ligne, notification }
+}
+
+/** Les filleuls par parrain (cleParrain), dans l'ordre d'arrivee. */
+export function grouperParParrain(filleuls: readonly FilleulANotifier[]): FilleulANotifier[][] {
+  const m = new Map<string, FilleulANotifier[]>()
+  for (const f of filleuls) {
+    const cle = cleParrain(f.code)
+    m.set(cle, [...(m.get(cle) ?? []), f])
+  }
+  return [...m.values()]
 }
 
 export type BilanFilet = { lues: number; notees: number; prevenus: number; equipe: number; a_reprendre: number; ignorees: number; deja: number; erreurs: number }
@@ -742,18 +864,29 @@ export async function traiterFactures(factures: readonly unknown[], outils: Outi
     return typeof t === 'number' ? t : 0
   }
   const ordre = [...factures].sort((a, b) => quand(a) - quand(b))
+  const notes: FilleulANotifier[] = []
   for (const brut of ordre) {
     try {
-      const r = await traiterFactureFilleul(brut, 'passage', outils)
+      const r = await traiterFactureFilleul(brut, 'passage', outils, { differer: true })
       if (r.etat === 'ignore') b.ignorees++
       else if (r.etat === 'deja') b.deja++
       else {
         b.notees++
-        if (r.notification === 'parrain') b.prevenus++
-        else if (r.notification === 'equipe' || r.notification === 'incertain') b.equipe++
-        else if (r.notification === 'a_reprendre') b.a_reprendre++
+        if (r.aNotifier) notes.push(r.aNotifier)
       }
     } catch {
+      b.erreurs++
+    }
+  }
+  // (05/11, rattrapage) UN message par parrain, quel que soit le nombre de ses filleuls notes ici.
+  for (const groupe of grouperParParrain(notes)) {
+    try {
+      const issue = await notifierGroupe(groupe, outils)
+      if (issue === 'parrain') b.prevenus += groupe.length
+      else if (issue === 'equipe' || issue === 'incertain') b.equipe += groupe.length
+      else if (issue === 'a_reprendre') b.a_reprendre += groupe.length
+    } catch {
+      // Les filleuls sont notes : le filet du lendemain reprend la notification.
       b.erreurs++
     }
   }
