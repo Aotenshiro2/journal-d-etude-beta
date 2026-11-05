@@ -28,22 +28,27 @@ import { useIsMobile } from '@/hooks/useIsMobile'
 import UserMenu from './UserMenu'
 import SupportBubble from './SupportBubble'
 
-// Les ESPACES — même liste que l'accueil (NoteMapCanvas.MODES).
-const MODES = [
+// Un espace : `label` dans le menu, `titre` (facultatif) sur la pilule quand on y est.
+type Espace = { label: string; titre?: string; href: string; Icon: React.ElementType; match: (p: string) => boolean }
+
+// Les ESPACES : même liste que l'accueil (NoteMapCanvas.MODES). « Documenter mes
+// trades » garde son libellé dans le menu ; sur la pilule, l'écran s'appelle
+// « Mes trades », comme dans le labo (brief J2, 05/11/2026).
+const MODES: Espace[] = [
   { label: 'Étudier mes notes',     href: '/',          Icon: BookOpen,   match: (p: string) => p === '/' || p.startsWith('/study') || p.startsWith('/notes') },
   { label: 'Observer les concepts', href: '/concepts',  Icon: Lightbulb,  match: (p: string) => p === '/concepts' },
   { label: 'Analyser mes données',  href: '/analytics', Icon: BarChart2,  match: (p: string) => p === '/analytics' || p === '/imports' },
   { label: 'Pattern Maps',          href: '/patterns',  Icon: Compass,    match: (p: string) => p === '/patterns' },
   { label: 'Carte A/B/C-game',      href: '/game',      Icon: Layers,     match: (p: string) => p === '/game' },
   { label: 'Rituel de séance',      href: '/session',   Icon: Sunrise,    match: (p: string) => p === '/session' },
-  { label: 'Documenter mes trades', href: '/journal',   Icon: BookMarked, match: (p: string) => p === '/journal' },
+  { label: 'Documenter mes trades', titre: 'Mes trades', href: '/journal', Icon: BookMarked, match: (p: string) => p === '/journal' },
 ]
 
 // Les écrans hors dropdown : Relecture et Guide vivent en bas à droite (choix de
 // Brice), /market est un placeholder orphelin. Ils n'entrent PAS dans la liste
 // des modules, mais le bouton doit quand même dire où tu es : sans ça, /review
 // afficherait « Étudier mes notes » (le mode par défaut), ce qui est faux.
-const OFF_MENU_PAGES = [
+const OFF_MENU_PAGES: Espace[] = [
   { label: 'Relecture',         href: '/review', Icon: History,     match: (p: string) => p.startsWith('/review') },
   { label: 'Guide',             href: '/guide',  Icon: HelpCircle,  match: (p: string) => p.startsWith('/guide') },
   { label: 'Observer le marché', href: '/market', Icon: Search,     match: (p: string) => p === '/market' },
@@ -69,7 +74,7 @@ function SpacesDropdown() {
       >
         <activeMode.Icon size={13} style={{ color: 'var(--node-meta)', flexShrink: 0 }} />
         <span style={{ maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12 }}>
-          {activeMode.label}
+          {activeMode.titre ?? activeMode.label}
         </span>
         <ChevronDown size={11} style={{ color: 'var(--node-meta)', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s', flexShrink: 0 }} />
       </button>

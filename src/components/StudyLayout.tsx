@@ -10,16 +10,19 @@ import DocumentView from './DocumentView'
 import MessagePanel from './MessagePanel'
 import DivergenceBanner from './DivergenceBanner'
 import { MessageData, CanvasData, NoteData, CanvasNodeData, CanvasEdgeData } from '@/types'
+import { ficheDuBadge } from '@/lib/fiche-trade'
 
 interface StudyLayoutProps {
   note: NoteData & { messages: MessageData[] }
   canvas: CanvasData
   isDiverged: boolean
+  /** Les trades de la note qu'un trade du broker porte (brief J2) : leur badge mène à la fiche. */
+  tradesLies?: string[]
 }
 
 // La note explosée — même décor que le canvas d'accueil : on zoome dans la note,
 // on ne change jamais d'espace.
-export default function StudyLayout({ note, canvas: initialCanvas, isDiverged }: StudyLayoutProps) {
+export default function StudyLayout({ note, canvas: initialCanvas, isDiverged, tradesLies }: StudyLayoutProps) {
   const isMobile = useIsMobile()
   // Bloc armé dans le tiroir du bas : état partagé entre le tiroir (qui l'arme)
   // et le canvas (qui le pose). Les deux sont frères, il vit donc ici.
@@ -37,11 +40,15 @@ export default function StudyLayout({ note, canvas: initialCanvas, isDiverged }:
     for (const a of note.annotations ?? []) {
       if (a.tradeRef) gradeByTrade.set(a.tradeRef, a.grade)
     }
+    const lies = new Set(tradesLies ?? [])
     ;(note.trades ?? []).forEach((t, i) => {
-      map[t.id] = { index: i + 1, outcome: t.outcome ?? null, startedAt: t.startedAt ?? null, grade: gradeByTrade.get(t.id) ?? null }
+      map[t.id] = {
+        index: i + 1, outcome: t.outcome ?? null, startedAt: t.startedAt ?? null, grade: gradeByTrade.get(t.id) ?? null,
+        fiche: ficheDuBadge(t.id, t.prix, lies.has(t.id)),
+      }
     })
     return map
-  }, [note.trades, note.annotations])
+  }, [note.trades, note.annotations, tradesLies])
 
   // Messages not yet placed on canvas — les blocs 'meta' (date/titre/URL de
   // capture) sont exclus : une métadonnée ne se travaille pas sur le canvas

@@ -3,7 +3,9 @@ import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/db'
 import CanvasShell from '@/components/CanvasShell'
 import ReviewDeck, { ReviewNote, ReorganizeItem, LibraryItem } from '@/components/ReviewDeck'
-import { MessageData, AnnotationData, CanvasNodeData } from '@/types'
+import { MessageData, AnnotationData, CanvasNodeData, TradePrixData } from '@/types'
+import { ficheDuBadge } from '@/lib/fiche-trade'
+import { segmentsLiesAuBroker } from '@/lib/fiche-trade-serveur'
 
 const mapNode = (n: {
   id: string; canvasId: string; messageId: string | null; noteId: string | null
@@ -26,10 +28,16 @@ type CanvasWithNote = {
     messages: unknown[]; annotations: unknown[]
   } | null
 }
-function buildItem(c: CanvasWithNote): ReviewNote {
+// Les ids des trades d'une note (Note.trades en JSON), pour savoir lesquels un trade du broker porte.
+const idsDesTrades = (trades: unknown): string[] =>
+  Array.isArray(trades) ? trades.map(t => (t && typeof t === 'object' ? (t as { id?: unknown }).id : null)).filter((id): id is string => typeof id === 'string') : []
+
+// `lies` : les trades portés par un trade du broker ; avec des prix tapés, ils
+// font du badge « Trade N » un lien vers la fiche (brief J2, 05/11/2026).
+function buildItem(c: CanvasWithNote, lies: Set<string>): ReviewNote {
   const note = c.note!
   const anns = (note.annotations ?? []) as unknown as AnnotationData[]
-  const tradesRaw = Array.isArray(note.trades) ? (note.trades as { id: string; outcome?: string | null; startedAt?: number | null }[]) : []
+  const tradesRaw = Array.isArray(note.trades) ? (note.trades as { id: string; outcome?: string | null; startedAt?: number | null; prix?: TradePrixData }[]) : []
   const tradeV = anns.some(a => a.tradeRef != null)
   const globalV = anns.some(a => a.tradeRef == null && a.messageRef == null)
   const type: ReviewNote['type'] = (tradesRaw.length > 0 || tradeV) ? 'trade' : globalV ? 'day' : 'course'
@@ -40,7 +48,7 @@ function buildItem(c: CanvasWithNote): ReviewNote {
     nodes: c.nodes.map(mapNode),
     messages: note.messages as unknown as MessageData[],
     verdicts: anns,
-    trades: tradesRaw.map(t => ({ id: t.id, outcome: t.outcome ?? null, startedAt: t.startedAt ?? null })),
+    trades: tradesRaw.map(t => ({ id: t.id, outcome: t.outcome ?? null, startedAt: t.startedAt ?? null, fiche: ficheDuBadge(t.id, t.prix, lies.has(t.id)) })),
   }
 }
 
@@ -64,7 +72,8 @@ export default async function ReviewPage({ searchParams }: { searchParams: Promi
       where: { userId, type: 'note-study', noteId: focusNoteId },
       include: { nodes: true, note: { select: noteSelect } },
     })
-    const items = c && c.note && c.nodes.length > 0 ? [buildItem(c as CanvasWithNote)] : []
+    const lies = c?.note ? await segmentsLiesAuBroker(userId, idsDesTrades(c.note.trades)) : new Set<string>()
+    const items = c && c.note && c.nodes.length > 0 ? [buildItem(c as CanvasWithNote, lies)] : []
     return (
       <CanvasShell user={{ email: user.email ?? '', name: user.user_metadata?.full_name ?? '' }}>
         <ReviewDeck toRelire={items} toReorganize={[]} focus />
@@ -78,15 +87,18 @@ export default async function ReviewPage({ searchParams }: { searchParams: Promi
     include: { nodes: true, note: { select: noteSelect } },
   })
 
-  const toRelireBuilt = canvases
+  const aRelire = canvases
     .filter(c => c.note && c.nodes.length > 0)
     .filter(c => {
       const relue = c.reviewedAt != null
       const reminderDue = c.reviewReminderAt != null && new Date(c.reviewReminderAt).getTime() <= now
       return !relue || reminderDue
     })
+  // Une seule lecture pour tous les trades de la file.
+  const lies = await segmentsLiesAuBroker(userId, aRelire.flatMap(c => idsDesTrades(c.note?.trades)))
+  const toRelireBuilt = aRelire
     .map(c => {
-      const item = buildItem(c as CanvasWithNote)
+      const item = buildItem(c as CanvasWithNote, lies)
       const hasDue = item.verdicts.some(a => !a.reviewedAt && a.reviewDueAt != null && new Date(a.reviewDueAt).getTime() <= now)
       return { item, hasDue }
     })

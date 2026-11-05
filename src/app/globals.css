@@ -83,6 +83,20 @@
   --action-doux-bg: #e2e5e9;
   --action-doux-fg: #1e293b;
 
+  /* Mes trades (brief J2, 05/11/2026) : les teintes du labo LABO-MES-TRADES-V1. */
+  --trade-vert: #16a34a;
+  --trade-ambre: #d97706;
+  --trade-rouge: #dc2626;
+  --trade-bleu: #3b82f6;
+  --trade-violet: #8b5cf6;
+  --trade-gris: #94a3b8;
+  /* Une surface en creux POSÉE SUR un nœud (case du calendrier, ligne d'écart,
+     bloc de la fiche) : en clair le fond du canvas suffit ; en sombre il se
+     confond avec --node-bg, d'où une teinte un peu plus claire. */
+  --case-bg: #f1f3f4;
+  /* La piste du curseur (labo 2) : --action-doux-bg se confondrait avec --node-bg. */
+  --trade-piste: rgba(15, 23, 42, 0.14);
+
   /* Modal and Editor - Compatibility with old system */
   --modal-overlay: rgba(0, 0, 0, 0.5);
   --modal-bg: 0 0% 100%;
@@ -189,6 +203,15 @@
   --action-plein-fg: #0f172a;
   --action-doux-bg: #32343a;
   --action-doux-fg: #e2e8f0;
+
+  --trade-vert: #4ade80;
+  --trade-ambre: #fbbf24;
+  --trade-rouge: #f87171;
+  --trade-bleu: #60a5fa;
+  --trade-violet: #a78bfa;
+  --trade-gris: #64748b;
+  --case-bg: #2a2b30;
+  --trade-piste: rgba(255, 255, 255, 0.16);
 
   /* Modal and Editor - Dark mode */
   --modal-overlay: rgba(0, 0, 0, 0.7);

@@ -18,7 +18,8 @@ export type ReviewNote = {
   nodes: CanvasNodeData[]
   messages: MessageData[]
   verdicts: AnnotationData[]
-  trades: { id: string; outcome: string | null; startedAt: number | null }[]
+  /** `fiche` : le lien vers la fiche du trade (brief J2), null sans prix ni trade du broker. */
+  trades: { id: string; outcome: string | null; startedAt: number | null; fiche?: string | null }[]
 }
 
 // Une note de cours pas encore triée : on rappelle à l'élève de faire ce travail.
@@ -172,7 +173,7 @@ function RelectureCard({ item, onRead, onRemind, onSkip, onJudged, onRework }: {
     const gradeByTrade = new Map<string, string>()
     for (const v of item.verdicts) if (v.tradeRef) gradeByTrade.set(v.tradeRef, v.grade)
     const map: Record<string, TradeMeta> = {}
-    item.trades.forEach((t, i) => { map[t.id] = { index: i + 1, outcome: t.outcome, startedAt: t.startedAt, grade: gradeByTrade.get(t.id) ?? null } })
+    item.trades.forEach((t, i) => { map[t.id] = { index: i + 1, outcome: t.outcome, startedAt: t.startedAt, grade: gradeByTrade.get(t.id) ?? null, fiche: t.fiche ?? null } })
     return map
   }, [item.trades, item.verdicts])
 

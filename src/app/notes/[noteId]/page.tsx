@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect, notFound } from 'next/navigation'
 import { prisma } from '@/lib/db'
 import StudyLayout from '@/components/StudyLayout'
+import { segmentsLiesAuBroker } from '@/lib/fiche-trade-serveur'
 import { MessageData, CanvasData } from '@/types'
 
 export default async function StudyNotePage({ params }: { params: Promise<{ noteId: string }> }) {
@@ -24,9 +25,16 @@ export default async function StudyNotePage({ params }: { params: Promise<{ note
 
   if (!note) notFound()
 
-  const folder = note.folderId
-    ? await prisma.folder.findFirst({ where: { id: note.folderId, userId: user.id }, select: { name: true } })
-    : null
+  // Les trades de la note portés par un trade du broker : leur badge mène à la fiche (brief J2).
+  const idsTrades = Array.isArray(note.trades)
+    ? (note.trades as unknown[]).map(t => (t && typeof t === 'object' ? (t as { id?: unknown }).id : null)).filter((id): id is string => typeof id === 'string')
+    : []
+  const [folder, tradesLies] = await Promise.all([
+    note.folderId
+      ? prisma.folder.findFirst({ where: { id: note.folderId, userId: user.id }, select: { name: true } })
+      : null,
+    segmentsLiesAuBroker(user.id, idsTrades),
+  ])
 
   // Get or create canvas
   let canvas = await prisma.canvas.findUnique({
@@ -100,6 +108,7 @@ export default async function StudyNotePage({ params }: { params: Promise<{ note
       note={noteWithMessages}
       canvas={canvasData}
       isDiverged={isDiverged}
+      tradesLies={[...tradesLies]}
     />
   )
 }

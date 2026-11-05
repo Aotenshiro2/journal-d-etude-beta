@@ -19,7 +19,8 @@ import {
   useViewport,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { FolderPlus, Type, Combine, Pencil, Hash, Maximize2, X, Check } from 'lucide-react'
+import Link from 'next/link'
+import { FolderPlus, Type, Combine, Pencil, Hash, Maximize2, X, Check, ArrowUpRight } from 'lucide-react'
 import { MessageData, CanvasNodeData, CanvasEdgeData } from '@/types'
 import { htmlToText, truncateText, parseBlockContent } from '@/lib/utils'
 import ImageLightbox from './ImageLightbox'
@@ -85,7 +86,9 @@ const COLOR_KEYS = Object.keys(GROUP_COLORS)
 
 // Métadonnées du trade rattaché à un bloc — pour signaler « ceci est un trade » partout
 // (sur le canvas ET dans le panneau des blocs disponibles).
-export type TradeMeta = { index: number; outcome: string | null; startedAt: number | null; grade: string | null }
+// `fiche` (brief J2, 05/11/2026) : le lien vers la fiche du trade dans « Mes trades »
+// (/journal?trade=<id>), posé quand le trade a des prix tapés ou un trade du broker lié.
+export type TradeMeta = { index: number; outcome: string | null; startedAt: number | null; grade: string | null; fiche?: string | null }
 export const OUTCOME_META: Record<string, { label: string; color: string }> = {
   gain: { label: 'Gain', color: '#22c55e' },
   perte: { label: 'Perte', color: '#ef4444' },
@@ -95,13 +98,33 @@ export function TradeBadge({ meta }: { meta: TradeMeta }) {
   const oc = meta.outcome ? OUTCOME_META[meta.outcome] : null
   const time = meta.startedAt ? new Date(meta.startedAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : null
   const full = [`Trade ${meta.index}`, time, oc?.label, meta.grade ? `Note ${meta.grade}` : null].filter(Boolean).join(' · ')
-  return (
-    <span
-      title={full}
-      className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full whitespace-nowrap"
-      style={{ background: 'var(--node-bg)', border: `1px solid ${oc?.color ?? 'var(--node-border)'}`, color: oc?.color ?? 'var(--node-meta)' }}
-    >
+  const style = { background: 'var(--node-bg)', border: `1px solid ${oc?.color ?? 'var(--node-border)'}`, color: oc?.color ?? 'var(--node-meta)' }
+  const contenu = (
+    <>
       ⌖ Trade {meta.index}{oc ? ` · ${oc.label}` : ''}{meta.grade ? ` · ${meta.grade}` : ''}
+    </>
+  )
+  // Lien vers la fiche : le clic ne doit ni armer le bloc, ni lancer un glisser
+  // sur le canvas (nodrag nopan), ni ouvrir l'édition du bloc.
+  const arreter = (e: React.SyntheticEvent) => e.stopPropagation()
+  return meta.fiche ? (
+    <Link
+      href={meta.fiche}
+      title={`${full}. Ouvrir la fiche du trade`}
+      aria-label={`Ouvrir la fiche du trade ${meta.index}`}
+      className="nodrag nopan inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full whitespace-nowrap hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+      style={style}
+      draggable={false}
+      onClick={arreter}
+      onPointerDown={arreter}
+      onMouseDown={arreter}
+      onDoubleClick={arreter}
+    >
+      {contenu}<ArrowUpRight size={10} aria-hidden="true" />
+    </Link>
+  ) : (
+    <span title={full} className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full whitespace-nowrap" style={style}>
+      {contenu}
     </span>
   )
 }

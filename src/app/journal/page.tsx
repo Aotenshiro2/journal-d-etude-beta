@@ -1,10 +1,12 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import CanvasShell from '@/components/CanvasShell'
-import ComingSoon from '@/components/ComingSoon'
+import MesTrades from '@/components/mes-trades/MesTrades'
 
-// Placeholder : le shell donne déjà le canvas et le dropdown pour repartir
-// ailleurs — d'où le retrait du lien « retour à l'accueil » en dur.
+// « Mes trades » (brief J2, 05/11/2026), à la place de « Documenter mes trades » :
+// le prévu du Carnet face à l'effectif du broker. Le shell donne le canvas, la
+// pilule des espaces (titrée « Mes trades ») et les actions du bas ; l'écran
+// charge ses données lui-même (GET /api/trades/synthese), selon la période.
 export default async function JournalPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -12,7 +14,7 @@ export default async function JournalPage() {
 
   return (
     <CanvasShell user={{ email: user.email ?? '', name: user.user_metadata?.full_name ?? '' }}>
-      <ComingSoon title="Journal de trading" icon="📈" description="Trades, émotions, règles respectées ou non." />
+      <MesTrades />
     </CanvasShell>
   )
 }
