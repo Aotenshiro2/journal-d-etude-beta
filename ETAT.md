@@ -3,6 +3,62 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
+## COCKPIT : CONNEXION PAR LIEN AVEC TOUTE ADRESSE VERIFIEE (05/11/2026, NON commite ; migration 20261105220000 ECRITE, NON appliquee)
+
+- Cas : Melanie (connexion Yahoo, dans cockpit_allowlist) a son Gmail verifie dans profile_emails. signInWithOtp n'envoie
+  qu'a l'email de connexion : avec le Gmail, rien ne partait. Brice : « voire meme tous ses mails » ; le lien = cockpit seul.
+- POST /api/cockpit/lien-magique { email } (publique) : sous verrou, cadence (adresse 5/h et 10/j, IP 10/h et 30/j, total
+  60/h), puis le compte. Un lien part a l'ADRESSE TAPEE seulement si elle est l'email de connexion confirme OU une adresse
+  verified = true d'un compte de cockpit_allowlist (deux comptes du cockpit = ambigu, rien). Reponse identique connue ou non
+  (200), sauf 429 de cadence (vaut pour toute adresse). Email par Resend APRES la reponse (after). Rafale (15/h ou une limite
+  atteinte) : alerterEquipeTexte, une fois par heure, sans adresse ni IP.
+- Le lien : cockpit.aoknowledge.com/auth/lien#lien=<jeton opaque 32 octets> (fragment : jamais envoye au serveur), 15 min,
+  une ouverture ; la base ne garde que son HMAC. Au clic « Ouvrir le Cockpit », POST /api/cockpit/lien-magique/ouvrir { lien } : jeton consomme, compte relu
+  (allowlist, adresse toujours verifiee), PUIS generateLink type 'recovery' sur l'email de connexion (ne cree jamais de compte,
+  contrairement au type magiclink) et token_hash rendu ; le cockpit fait verifyOtp({ token_hash, type: 'recovery' }) : marche
+  sur tout appareil (ni PKCE ni code_verifier).
+- Table cockpit_lien_magique_demandes (journal + compteur) : HMAC de l'adresse, de l'IP et du jeton, issue (envoye,
+  envoi_rate, inconnue, non_verifiee, hors_allowlist, ambigu, limite), compte, expire_le, ouvert_le, alerte. RLS forcee,
+  aucun droit navigateur, purgee a 30 jours.
+- Fichiers : src/lib/cockpit-lien-magique-pur.ts (regles, email, deroule a ports injectes), src/lib/cockpit-lien-magique.ts
+  (base, Supabase admin, Resend), src/app/api/cockpit/lien-magique/route.ts et ouvrir/route.ts, middleware (une entree),
+  scripts/verifier-lien-magique-cockpit.mjs (28 blocs, fausse base et faux Supabase). Cockpit : src/lib/lien-magique.ts,
+  src/pages/AuthLienPage.tsx, LoginPage.tsx (filet signInWithOtp si la route rend 503 ou ne repond pas), App.tsx.
+- Mise en ligne, dans l'ordre : migration, journal, cockpit. Aucune variable a poser. Facultatives : COCKPIT_URL (base des
+  liens), COCKPIT_LIEN_MAGIQUE=off (coupe les deux routes, le cockpit retombe sur signInWithOtp).
+
+## CANDIDATS DU CARNET POUR UNE POSITION, bouton « Lier » de Pilotage (05/11/2026, commite NON pousse ; aucune migration)
+
+- Brief : D:\6_Societe\Pilotage\BRIEF-LIER-CARNET-FICHE-COMPTE.md ; compte rendu : COMPTE-RENDU-LIER-CARNET.md (meme dossier).
+- GET /api/pilotage/trades/positions?candidats=<positionId> (meme route, meme jeton, meme CORS) : { positionId, candidats },
+  404 si la position n'est pas au membre. Candidat = SegmentCarnet (segmentRef, noteId, noteTitle, ordre, startedAt,
+  closedAt) + chevauche + lieA (positionId qui le porte deja, ou null). Ceux qui chevauchent d'abord, puis les segments a
+  moins de 24 h de la position, du plus proche au plus loin ; 8 au plus ; jamais celui que la position porte deja.
+  Regle pure : candidatsPourUnePosition (correspondances-carnet.ts) ; lecture : candidatsDuCarnet (trades-serveur.ts).
+  verifier-imports-trades.mjs : 31 blocs.
+- A POUSSER AVANT le deploiement de Pilotage qui porte le bouton : une route d'avant ignore ?candidats= et rend les
+  positions, et le panneau dirait « aucun trade du Carnet ».
+
+## CHARGE SUR SUPABASE : ACCUEIL ET SUIVI DE L'ACADEMIE (05/11/2026, GO de Brice « Oui, lance-les » ; commite NON pousse ; aucune migration)
+
+- Cadre : PLAN-MIGRATION-SUPABASE-VPS.md, section 6 (D:\6_Societe\Pilotage\Data-Performance\).
+- Accueil (NoteMapCanvas.tsx) : router.refresh() passait toutes les 60 s et a chaque focus ; chaque passage relit toutes
+  les notes avec leur contenu, la carte et deux fois la session (middleware + page). Maintenant : au retour sur
+  l'onglet ou la fenetre (focus ou visibilitychange, 30 s d'ecart minimum) et toutes les 5 min onglet visible. Le drop
+  d'une note pas encore listee se resout toujours contre /api/notes.
+- Suivi (route /api/academie/suivi) : le jeton peut venir du corps quand l'en-tete manque (jetonDeLaRequete, pur.ts),
+  pour le signal de fermeture du site (sendBeacon, text/plain) ; chemin ajoute aux publicPaths du middleware, la route
+  verifie le jeton et rend 401 sans lui. Les autres routes de l'academie exigent toujours l'en-tete. Le site v3 envoie
+  toutes les 2 min (30 s avant) et retire credit_s, pas les secondes envoyees. 2 min = le plafond : INTERVALLE_MAX_S
+  (120 s) ; pour 5 min, relever INTERVALLE_MAX_S a 330 s ET deployer le journal avant le site.
+- Mesure : scripts/diag-charge-base.mjs (lecture seule, transaction READ ONLY ; --motif <texte>). Le 05/11 (stats
+  depuis le 02/11 15:49) : 17 rendus de l'accueil, 411 signaux du suivi, 1 ouverture du cockpit ; les gros postes sont
+  ailleurs (pgbouncer.get_auth 4 962 appels, verrou de Realtime, Studio, 6 172 UPDATE de Message a la sync des notes).
+- Verifs : tsc, eslint des fichiers touches, verifier-academie --hors-ligne (47 blocs), verifiers du middleware : ok
+  (verifier-kit-defauts et verifier-pilotage-paliers echouaient deja, sans lien).
+- A FAIRE sur GO : pousser le journal AVANT le site v3 (sinon le signal de fermeture recoit 401, sans perte : les
+  signaux normaux passent toujours).
+
 ## PARRAINAGE : DECLARATION, RATTRAPAGE, REMBOURSEMENT ; LIVES DES INTERVENANTS (05/11/2026 soir, decisions de Brice ; NON commite ; migration 20261105190000 ECRITE, NON appliquee)
 
 - Par-dessus le lot commite (journal 3dd62ee, migration d14c468) ; commite f78976b, puis la retouche ci-dessous.

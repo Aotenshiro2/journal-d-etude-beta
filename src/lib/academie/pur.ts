@@ -391,6 +391,27 @@ function entierBorne(v: unknown, max: number): number | null {
   return Math.min(Math.floor(v), max)
 }
 
+// Un access_token Supabase fait environ 1 ko ; au-dela, ce n'en est pas un.
+export const JETON_MAX = 4096
+
+/**
+ * Le jeton d'une requete de l'academie : l'en-tete Authorization: Bearer ; a
+ * defaut d'en-tete Bearer, et seulement quand la route passe le corps, le
+ * champ `jeton` du corps. Ce second chemin sert au signal de fermeture de page
+ * du suivi (05/11/2026) : navigator.sendBeacon ne porte pas d'en-tete, le
+ * jeton voyage donc dans le corps, jamais dans l'adresse. null : absent, vide,
+ * pas une chaine, ou trop long.
+ */
+export function jetonDeLaRequete(entete: string | null, corps?: unknown): string | null {
+  const e = entete ?? ''
+  let j: unknown = null
+  if (e.startsWith('Bearer ')) j = e.slice(7)
+  else if (corps && typeof corps === 'object') j = (corps as Record<string, unknown>).jeton
+  if (typeof j !== 'string') return null
+  const t = j.trim()
+  return t && t.length <= JETON_MAX ? t : null
+}
+
 /**
  * POST /api/academie/suivi : { lecon, evenement, position_s?, secondes?, vu? }.
  * evenement 'non_vu' = { evenement: 'vu', vu: false } (le decochage).

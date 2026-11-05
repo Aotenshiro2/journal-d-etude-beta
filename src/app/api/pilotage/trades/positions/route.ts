@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db'
 import { getUserId } from '@/lib/api-auth'
 import { corsHeaders, corsPreflight } from '@/lib/support-cors'
 import { liensAHarmoniser, planFusion, planLienMultiple, positionDe, totauxParCompte, vuePositions } from '@/lib/positions'
-import { dansLesPositions, executionsDuMembre, positionsAvecCarnet, segmentsDuMembre } from '@/lib/trades-serveur'
+import { candidatsDuCarnet, dansLesPositions, executionsDuMembre, positionsAvecCarnet, segmentsDuMembre } from '@/lib/trades-serveur'
 
 /**
  * Les positions du membre pour Pilotage (brief A, 29/10/2026). Tout est borné
@@ -26,6 +26,16 @@ import { dansLesPositions, executionsDuMembre, positionsAvecCarnet, segmentsDuMe
  * emotionDepart = le warmup de la note juste avant le segment ; erreur et
  * lecon = son cooldown). `segmentsNonLies` : les segments du Carnet du membre
  * entrés dans la période (tous sans période) qu'aucune position ne porte.
+ *
+ * GET ?candidats=<positionId> (05/11/2026, bouton « Lier » de la fiche de
+ * compte de Pilotage) : les trades du Carnet qui pourraient être cette
+ * position, `{ positionId, candidats }`, 404 si elle n'est pas au membre.
+ * Chaque candidat = un SegmentCarnet (segmentRef, noteId, noteTitle, ordre,
+ * startedAt, closedAt, instants en ms) + `chevauche` + `lieA` (la position qui
+ * le porte déjà, ou null). D'abord ceux qui chevauchent la position, puis ceux
+ * à moins de 24 h d'elle, du plus proche au plus loin ; 8 au plus ; celui
+ * qu'elle porte déjà n'y est pas (candidatsPourUnePosition). Les autres
+ * paramètres sont alors ignorés.
  *
  * PATCH, une action, rend `{ positions }` (les positions concernées après coup) :
  * - { action: 'fusionner', ids: [positionId...] } : toutes au membre, même
@@ -75,6 +85,19 @@ export async function GET(req: NextRequest) {
   if (!userId) return NextResponse.json({ error: 'Non connecté.' }, { status: 401, headers: cors })
 
   const p = req.nextUrl.searchParams
+  if (p.has('candidats')) {
+    const positionId = p.get('candidats')?.trim().slice(0, 200)
+    if (!positionId) return NextResponse.json({ error: 'positionId manquant (candidats).' }, { status: 400, headers: cors })
+    try {
+      const candidats = await candidatsDuCarnet(userId, positionId)
+      if (!candidats) return NextResponse.json({ error: 'Position introuvable.' }, { status: 404, headers: cors })
+      return NextResponse.json({ positionId, candidats }, { headers: cors })
+    } catch (err) {
+      console.error('[pilotage/trades/positions GET candidats]', err)
+      return NextResponse.json({ error: err instanceof Error ? err.message : 'Internal server error' }, { status: 500, headers: cors })
+    }
+  }
+
   const compteId = p.get('compteId')?.trim() || null
   const depuis = lireBorne(p.get('depuis'), false)
   const jusqu = lireBorne(p.get('jusqu'), true)

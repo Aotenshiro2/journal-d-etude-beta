@@ -18,6 +18,8 @@
 // Une position et un segment se correspondent quand leurs fenêtres se
 // chevauchent ; un segment encore ouvert vaut quatre heures. Un seul candidat,
 // libre : on lie. Plusieurs, ou un candidat déjà pris : l'écran choisira.
+// Depuis la fiche de compte de Pilotage (05/11/2026), le membre lie aussi une
+// position à la main : candidatsPourUnePosition élargit alors à 24 h autour.
 
 /** Un segment du Carnet, tel qu'on le propose à l'écran. Instants en ms, comme dans Note.trades. */
 export interface SegmentCarnet {
@@ -105,4 +107,57 @@ export function proposerLiens(
     }
   }
   return { liens, correspondances }
+}
+
+/** Un segment proposé pour UNE position (bouton « Lier » de la fiche de compte de Pilotage, 05/11/2026). */
+export interface CandidatPourPosition extends SegmentCarnet {
+  /** Sa fenêtre chevauche celle de la position. */
+  chevauche: boolean
+  /** La position qui le porte déjà, ou null. */
+  lieA: string | null
+}
+
+/** Au-delà du chevauchement, un Carnet lancé un peu tôt ou un peu tard : fenêtre à moins de 24 h de la position. */
+export const PROCHE_MS = 24 * 3_600_000
+/** Le nombre de candidats rendus pour une position, au plus. */
+export const CANDIDATS_MAX = 8
+
+/**
+ * Les candidats du Carnet pour une position, quand le membre la lie lui-même :
+ * d'abord ceux qui la chevauchent (candidatsPourPosition, du plus ancien au plus
+ * récent), puis ceux dont la fenêtre tombe à moins de 24 h d'elle, du plus proche
+ * au plus loin (à égalité, le plus ancien d'abord) ; CANDIDATS_MAX au plus. Le
+ * segment que CETTE position porte déjà n'y figure pas ; les autres disent qui
+ * les porte (`lieA`), l'écran les marque et le PATCH `lier` répondra 409.
+ * Un segmentRef en double (une note copiée) ne sort qu'une fois.
+ * @param lies segmentRef => positionId qui le porte, pour tout le membre.
+ */
+export function candidatsPourUnePosition(
+  p: PositionARapprocher,
+  segments: SegmentCarnet[],
+  lies: ReadonlyMap<string, string>,
+): CandidatPourPosition[] {
+  const debut = instant(p.entreLe)
+  const fin = p.sortiLe ? Math.max(debut, instant(p.sortiLe)) : debut
+  const vus = new Set<string>()
+  const libres = segments.filter(s => {
+    if (vus.has(s.segmentRef)) return false
+    vus.add(s.segmentRef)
+    return s.segmentRef !== p.segmentRef && lies.get(s.segmentRef) !== p.positionId
+  })
+  const chevauchent = candidatsPourPosition(p, libres)
+  const dedans = new Set(chevauchent.map(s => s.segmentRef))
+  // L'écart entre deux fenêtres qui ne se chevauchent pas : toujours positif.
+  const ecart = (s: SegmentCarnet) => {
+    const [a, b] = fenetreSegment(s)
+    return Math.max(a - fin, debut - b)
+  }
+  const proches = libres
+    .filter(s => !dedans.has(s.segmentRef))
+    .map(s => ({ s, e: ecart(s) }))
+    .filter(x => x.e < PROCHE_MS)
+    .sort((x, y) => x.e - y.e || x.s.startedAt - y.s.startedAt)
+    .map(x => x.s)
+  const candidat = (s: SegmentCarnet, chevauche: boolean): CandidatPourPosition => ({ ...s, chevauche, lieA: lies.get(s.segmentRef) ?? null })
+  return [...chevauchent.map(s => candidat(s, true)), ...proches.map(s => candidat(s, false))].slice(0, CANDIDATS_MAX)
 }

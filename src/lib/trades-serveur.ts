@@ -13,7 +13,7 @@ import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db'
 import type { TradeNormalise } from '@/lib/imports-trades'
 import { liensAHarmoniser, positionDe, positionsRecalculees, vuePositions, type Execution, type VuePosition } from '@/lib/positions'
-import { proposerLiens, segmentsDesNotes, type SegmentCarnet } from '@/lib/correspondances-carnet'
+import { candidatsPourUnePosition, proposerLiens, segmentsDesNotes, type CandidatPourPosition, type SegmentCarnet } from '@/lib/correspondances-carnet'
 import { ajouterCarnet, compterSegmentsNonLies, type PeriodeCarnet } from '@/lib/carnet-sur-positions'
 import { clesConnues, recherchesDoublons } from '@/lib/doublons-compte'
 
@@ -61,6 +61,25 @@ export async function clesDejaConnues(
 export async function segmentsDuMembre(userId: string): Promise<SegmentCarnet[]> {
   const notes = await prisma.note.findMany({ where: { userId, deletedAt: null }, select: { id: true, title: true, trades: true } })
   return segmentsDesNotes(notes)
+}
+
+/**
+ * Les trades du Carnet candidats pour UNE position du membre (bouton « Lier »
+ * de la fiche de compte de Pilotage, 05/11/2026) ; null si la position n'est
+ * pas à lui. Le tri et la coupe sont dans candidatsPourUnePosition (pur) ;
+ * `lieA` se lit sur toutes les exécutions liées du membre.
+ */
+export async function candidatsDuCarnet(userId: string, positionId: string): Promise<CandidatPourPosition[] | null> {
+  const executions = await executionsDuMembre(userId, dansLesPositions([positionId]))
+  const position = vuePositions(executions).find(v => v.positionId === positionId)
+  if (!position) return null
+  const [segments, portees] = await Promise.all([
+    segmentsDuMembre(userId),
+    prisma.tradeImport.findMany({ where: { userId, segmentRef: { not: null } }, select: { id: true, positionId: true, segmentRef: true } }),
+  ])
+  const lies = new Map<string, string>()
+  for (const e of portees) if (e.segmentRef && !lies.has(e.segmentRef)) lies.set(e.segmentRef, positionDe(e))
+  return candidatsPourUnePosition(position, segments, lies)
 }
 
 /**

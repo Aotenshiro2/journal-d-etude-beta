@@ -9,7 +9,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { liensAHarmoniser, planLienMultiple, positionDe, positionsRecalculees, vuePositions } from '../src/lib/positions.ts'
-import { proposerLiens, segmentsDesNotes } from '../src/lib/correspondances-carnet.ts'
+import { candidatsPourUnePosition, proposerLiens, segmentsDesNotes } from '../src/lib/correspondances-carnet.ts'
 import { ajouterCarnet, compterSegmentsNonLies } from '../src/lib/carnet-sur-positions.ts'
 
 let n = 0
@@ -123,6 +123,23 @@ bloc('rapprochement : un segment deja porte par une position n est pas libre, la
   assert.deepEqual(correspondances.map(c => [c.positionId, c.candidats.map(s => s.segmentRef)]), [['b', ['s1']]])
   // Libre : liee d'office, comme avant.
   assert.deepEqual(proposerLiens([copie], segments, []).liens, [{ positionId: 'b', segmentRef: 's1' }])
+})
+
+bloc('candidats d une position (bouton Lier de Pilotage, fusion de master) : un segment qui porte deja plusieurs copies', () => {
+  const segments = segmentsDesNotes(notes)
+  // candidatsDuCarnet garde, par segment, la premiere position lue : ici a, alors que s1 porte a ET b.
+  const lies = new Map([['s1', 'a']])
+  const pos = (positionId, segmentRef) => ({ positionId, entreLe: t('10:00').toISOString(), sortiLe: t('10:10').toISOString(), segmentRef })
+  // Chaque copie deja liee ne se voit jamais proposer son propre segment, qu'elle soit la premiere lue ou non.
+  assert.deepEqual(candidatsPourUnePosition(pos('a', 's1'), segments, lies), [])
+  assert.deepEqual(candidatsPourUnePosition(pos('b', 's1'), segments, lies), [])
+  // Une copie pas encore liee : s1 est propose et marque porte (lieA non nul, l'une des copies) ;
+  // le PATCH lier a positionId seul repondra 409, la forme { positionIds, ajouter } l'ajoute.
+  const [c, ...reste] = candidatsPourUnePosition(pos('d', null), segments, lies)
+  assert.deepEqual(reste, [])
+  assert.equal(c.segmentRef, 's1')
+  assert.equal(c.chevauche, true)
+  assert.equal(c.lieA, 'a')
 })
 
 bloc('jugement du Carnet : chaque copie porte le meme carnet ; le segment n est compte qu une fois parmi les non lies', () => {
