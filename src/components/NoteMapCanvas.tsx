@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react'
+import React, { useState, useCallback, useMemo, useRef, useEffect, useTransition } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
 import {
@@ -24,7 +24,7 @@ import {
 import '@xyflow/react/dist/style.css'
 import {
   Sun, Moon, Map as MapIcon, Grid3x3, ChevronDown, ChevronLeft, ChevronRight,
-  BookOpen, Lightbulb, BookMarked, BarChart2, FileText,
+  BookOpen, Lightbulb, BookMarked, BarChart2, FileText, RefreshCw,
   Pencil, Star, FolderPlus, Compass, Sunrise, Layers, Eye, EyeOff, Hash,
   MoreHorizontal, History, HelpCircle,
 } from 'lucide-react'
@@ -580,9 +580,11 @@ interface RightToolbarProps {
   onToggleFav: () => void
   onAddConcept?: () => void
   onNewGroup?: (e: React.MouseEvent) => void
+  onRefresh: () => void
+  refreshing: boolean
 }
 
-function RightToolbar({ activeTool, setActiveTool, isFav, onToggleFav, onAddConcept, onNewGroup }: RightToolbarProps) {
+function RightToolbar({ activeTool, setActiveTool, isFav, onToggleFav, onAddConcept, onNewGroup, onRefresh, refreshing }: RightToolbarProps) {
   const actions: ActionBarre[] = []
   if (onAddConcept) {
     actions.push({
@@ -619,6 +621,12 @@ function RightToolbar({ activeTool, setActiveTool, isFav, onToggleFav, onAddConc
         actif: isFav,
         couleurActive: '#f59e0b',
         remplirIcone: true,
+      }, {
+        id: 'actualiser',
+        Icon: RefreshCw,
+        label: refreshing ? 'Actualisation en cours...' : 'Actualiser mes notes',
+        onClick: onRefresh,
+        enCours: refreshing,
       }]}
     />
   )
@@ -839,34 +847,17 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
   const canvasRef = useRef<HTMLDivElement>(null)
   const spotlightRef = useRef<HTMLDivElement>(null)
 
-  // Fraîcheur des notes sans recharger la page : une note synchronisée depuis
-  // l'extension (ou modifiée ailleurs) apparaît au retour sur l'onglet ou la
-  // fenêtre, et au plus tard 5 minutes après, onglet visible.
-  // Chaque refresh relit TOUTES les notes avec leur contenu, la carte, et deux
-  // fois la session (middleware + page). Il passait toutes les 60 s et à
-  // chaque focus de la fenêtre (plan de migration Supabase, section 6,
-  // 05/11/2026). Le drop d'une note pas encore listée se résout seul contre
-  // /api/notes (onDrop, plus bas), sans attendre ce refresh.
-  const dernierRefreshRef = useRef(Date.now())
-  useEffect(() => {
-    const PERIODE_MS = 5 * 60_000
-    // focus et visibilitychange arrivent souvent ensemble : un seul refresh.
-    const RETOUR_MIN_MS = 30_000
-    const rafraichir = (ecartMin: number) => {
-      if (document.visibilityState !== 'visible') return
-      if (Date.now() - dernierRefreshRef.current < ecartMin) return
-      dernierRefreshRef.current = Date.now()
-      router.refresh()
-    }
-    const auRetour = () => rafraichir(RETOUR_MIN_MS)
-    window.addEventListener('focus', auRetour)
-    document.addEventListener('visibilitychange', auRetour)
-    const tic = setInterval(() => rafraichir(PERIODE_MS), 60_000)
-    return () => {
-      window.removeEventListener('focus', auRetour)
-      document.removeEventListener('visibilitychange', auRetour)
-      clearInterval(tic)
-    }
+  // Rechargement à la demande, jamais tout seul (consigne de Brice, 05/11/2026) :
+  // pas de minuterie, pas de router.refresh() périodique, pas de relecture au
+  // retour de focus. Chaque refresh relit TOUTES les notes avec leur contenu,
+  // la carte, et deux fois la session. Les gestes (poser, déplacer, lier,
+  // supprimer) mettent l'écran à jour par leur propre réponse ; le drop d'une
+  // note pas encore listée se résout contre /api/notes (onDrop, plus bas).
+  // Pour le reste (une note synchronisée depuis l'extension), le bouton
+  // « Actualiser » de la barre de droite. La transition dit quand c'est fini.
+  const [actualisationEnCours, lancerActualisation] = useTransition()
+  const actualiser = useCallback(() => {
+    lancerActualisation(() => { router.refresh() })
   }, [router])
 
   useEffect(() => {
@@ -1629,6 +1620,8 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
           }}
           onAddConcept={() => setConceptPickerOpen(o => !o)}
           onNewGroup={handleNewGroup}
+          onRefresh={actualiser}
+          refreshing={actualisationEnCours}
         />
 
         {/* ── Picker de concepts (0.1.6) — choisir/créer le concept à poser ──
