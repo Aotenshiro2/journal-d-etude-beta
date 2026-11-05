@@ -7,7 +7,7 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
-## INDICATEUR D'ALEX (05/11/2026, commite NON pousse ; migration 20261105250000 ECRITE, NON appliquee)
+## INDICATEUR D'ALEX (05/11/2026, EN LIGNE ; migration 20261105250000 appliquee le 05/11)
 
 - Brice, 05/11 : « je veux que Alex ait acces aux @ telegram des membres du liveclub pour son indicateur de trading
   [...] il n'a pas de moyen de verifier facilement si un membre s'est desinscrit ». Option choisie : le MEMBRE donne son

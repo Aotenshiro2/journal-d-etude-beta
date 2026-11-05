@@ -270,6 +270,23 @@ export async function executerActionEffacement(a: ActionAgent, acteur: string): 
 
   const sortie = p.niveau === 3 && telegram.length ? await sortirDuGroupe(telegram) : null
 
+  // (05/11) Niveau 3 : la demande d'indicateur d'Alex (prenom, @, pseudo
+  // TradingView ; cockpit_liveclub_indicateur, hors de cockpit_effacer). Alex
+  // recoit d'abord le pseudo a retirer si l'acces lui avait ete transmis, puis
+  // la ligne est supprimee (liveclub/indicateur.ts, effacerDemandesIndicateur).
+  let avertissementIndicateur = ''
+  if (p.niveau === 3) {
+    try {
+      const { effacerDemandesIndicateur } = await import('@/lib/liveclub/indicateur')
+      const r = await effacerDemandesIndicateur(
+        [...new Set([...cible.telegram, ...telegram].map(Number))], cible.membres)
+      if (r.effacees > 0) console.log(`[cockpit/effacement] indicateur d'Alex : ${r.effacees} demande(s) effacee(s), Alex prevenu ${r.alexPrevenu} fois`)
+    } catch (err) {
+      console.error(`[cockpit/effacement] demande d'indicateur non effacee : ${messageErreur(err).slice(0, 160)}`)
+      avertissementIndicateur = " ATTENTION : sa demande d'indicateur d'Alex (pseudo TradingView) n'a pas pu être effacée, à reprendre."
+    }
+  }
+
   if (resultat.effacementId && (stripe || sortie)) {
     try {
       await prisma.$executeRawUnsafe(
@@ -280,5 +297,5 @@ export async function executerActionEffacement(a: ActionAgent, acteur: string): 
     }
   }
   console.log(`[cockpit/effacement] niveau ${p.niveau} fait (${resultat.effacementId ?? '?'})`)
-  return phraseResultat(resultat, { stripe, telegram: sortie, externe })
+  return phraseResultat(resultat, { stripe, telegram: sortie, externe }) + avertissementIndicateur
 }

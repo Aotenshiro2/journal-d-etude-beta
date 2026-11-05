@@ -291,6 +291,43 @@ export async function prevenirDepart(demandeId: number): Promise<IssueEnvoi> {
   }
 }
 
+/**
+ * (05/11) EFFACEMENT DE NIVEAU 3 (« partir et tout effacer », effacement.ts) :
+ * cockpit_effacer ne connait pas cette table (fonction de 800 lignes, non
+ * redefinie pour une table ; membre_id y passe seulement a nul). Ici, APRES
+ * l'effacement en base : chaque demande encore ouverte de ces comptes se
+ * ferme et Alex recoit le message de depart habituel (le pseudo a retirer,
+ * sinon l'acces resterait ouvert chez TradingView), puis les lignes sont
+ * supprimees. Table absente (migration pas appliquee) : rien. Jette sur une
+ * autre panne, pour que l'appelant le dise.
+ */
+export async function effacerDemandesIndicateur(telegramIds: readonly number[], membreIds: readonly string[]): Promise<{ effacees: number; alexPrevenu: number }> {
+  const tg = telegramIds.filter((t) => Number.isSafeInteger(t) && t > 0)
+  const mb = membreIds.filter((m) => /^[0-9a-f-]{36}$/i.test(m))
+  if (tg.length === 0 && mb.length === 0) return { effacees: 0, alexPrevenu: 0 }
+  let lignes: { demande_id: number; transmise: boolean; prevenu: boolean }[]
+  try {
+    lignes = await prisma.$queryRaw<{ demande_id: number; transmise: boolean; prevenu: boolean }[]>`
+      select demande_id::int as demande_id, (pseudo_transmis is not null or statut = 'transmise') as transmise,
+        (prevenu_depart_le is not null) as prevenu
+      from public.cockpit_liveclub_indicateur
+      where telegram_id = any(${tg}::bigint[]) or membre_id = any(${mb}::uuid[])`
+  } catch (err) {
+    if (/42P01|does not exist/i.test(messageErreur(err))) return { effacees: 0, alexPrevenu: 0 }
+    throw err
+  }
+  let alexPrevenu = 0
+  for (const l of lignes) {
+    if (!l.transmise || l.prevenu) continue
+    await marquerDepart(l.demande_id)
+    if ((await prevenirDepart(l.demande_id)) === 'envoye') alexPrevenu++
+  }
+  const ids = lignes.map((l) => l.demande_id)
+  const effacees = ids.length === 0 ? 0 : await prisma.$executeRaw`
+    delete from public.cockpit_liveclub_indicateur where demande_id = any(${ids}::bigint[])`
+  return { effacees, alexPrevenu }
+}
+
 /** Le droit tombe au moment ou le membre ecrit au bot : la demande se ferme et Alex est prevenu. Ne jette pas. */
 async function departDepuisLeBot(demandeId: number): Promise<void> {
   try {
