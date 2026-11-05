@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getUserId } from '@/lib/api-auth'
 import { corsHeaders, corsPreflight } from '@/lib/support-cors'
-import { acteurCockpit, ajoutRetrait, jourParis, lireGeste, noteAccorder } from '@/lib/academie/gestes-cockpit-pur'
-import { SQL_GESTE_ACCORDER, SQL_GESTE_RETIRER } from '@/lib/academie/requetes'
+import { acteurCockpit, jourParis, lireGeste } from '@/lib/academie/gestes-cockpit-pur'
+// (05/11) Les ecritures vivent dans gestes-cockpit.ts : la carte d'Agent AOK
+// fait le meme geste (« que l'agent puisse faire depuis Telegram les gestes du cockpit »).
+import { accorderAccesAcademieServeur, retirerAccesAcademieServeur } from '@/lib/academie/gestes-cockpit'
 
 /**
  * POST /api/cockpit/academie : accorder ou retirer un acces a l'academie a la
@@ -31,10 +33,6 @@ export function OPTIONS(req: NextRequest) {
   return corsPreflight(req)
 }
 
-type LigneAccorder = {
-  offre_connue: number; deja_id: string | null; acces_id: string | null; debut: Date | null; fin: Date | null
-}
-
 export async function POST(req: NextRequest) {
   const headers: Record<string, string> = corsHeaders(req)
   const userId = await getUserId(req)
@@ -55,23 +53,19 @@ export async function POST(req: NextRequest) {
   const acteur = acteurCockpit(userId)
   try {
     if (geste.action === 'accorder') {
-      const [r] = await prisma.$queryRawUnsafe<LigneAccorder[]>(
-        SQL_GESTE_ACCORDER, geste.email, geste.offre, geste.fin, acteur, noteAccorder(geste.raison),
-      )
-      if (!r || r.offre_connue === 0) {
+      const r = await accorderAccesAcademieServeur(geste, acteur)
+      if (r.issue === 'offre_inconnue') {
         return NextResponse.json({ error: 'Offre inconnue.' }, { status: 400, headers })
       }
-      if (r.deja_id) return NextResponse.json({ ok: true, deja: true, acces_id: r.deja_id }, { headers })
-      return NextResponse.json({ ok: true, acces_id: r.acces_id, debut: r.debut, fin: r.fin }, { headers })
+      if (r.issue === 'deja') return NextResponse.json({ ok: true, deja: true, acces_id: r.accesId }, { headers })
+      return NextResponse.json({ ok: true, acces_id: r.accesId, debut: r.debut, fin: r.fin }, { headers })
     }
 
-    const lignes = await prisma.$queryRawUnsafe<{ acces_id: string; retire_le: Date }[]>(
-      SQL_GESTE_RETIRER, geste.accesId, acteur, ajoutRetrait(geste.raison),
-    )
-    if (lignes.length === 0) {
+    const r = await retirerAccesAcademieServeur(geste, acteur)
+    if (r.issue === 'inconnu') {
       return NextResponse.json({ error: 'Accès inconnu ou déjà retiré : relis la liste.' }, { status: 409, headers })
     }
-    return NextResponse.json({ ok: true, acces_id: lignes[0].acces_id, retire_le: lignes[0].retire_le }, { headers })
+    return NextResponse.json({ ok: true, acces_id: r.accesId, retire_le: r.retireLe }, { headers })
   } catch (err) {
     // Jamais le message brut : il peut reprendre la requete (et donc l'email).
     const nom = err instanceof Error ? err.name : 'erreur'

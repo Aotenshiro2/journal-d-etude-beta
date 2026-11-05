@@ -365,9 +365,10 @@ export function lireDemandeLecture(corps: unknown): { lecon: string } | { video:
 }
 
 /**
- * Les signaux de la page. Videos : lecture (toutes les 30 s), pause, fin (la
- * video est arrivee au bout). Textes et PDF : texte (temps visible), texte_fin
- * (lu jusqu'en bas). Toutes : vu (le clic de l'eleve ; vu: false, ou
+ * Les signaux de la page. Videos : lecture (toutes les 2 min), pause, fin (la
+ * video est arrivee au bout). Textes et PDF : texte (temps actif, envoye au
+ * depart de la lecon depuis le 05/11/2026), texte_fin (le bas du texte est
+ * entre dans l'ecran). Toutes : vu (le clic de l'eleve ; vu: false, ou
  * l'evenement 'non_vu' du corps, le retire).
  */
 export type EvenementSignal = 'lecture' | 'pause' | 'fin' | 'texte' | 'texte_fin' | 'vu'
@@ -384,6 +385,11 @@ export type Signal = {
   secondes: number | null
   /** 'vu' : true pose la marque, false la retire (decochage). */
   vu: boolean
+  /**
+   * Lecon ecrite (05/11/2026) : la profondeur la plus basse atteinte dans le
+   * texte pendant cette visite, en % du contenu (0-100). null = non envoyee.
+   */
+  profondeur?: number | null
 }
 
 function entierBorne(v: unknown, max: number): number | null {
@@ -413,7 +419,7 @@ export function jetonDeLaRequete(entete: string | null, corps?: unknown): string
 }
 
 /**
- * POST /api/academie/suivi : { lecon, evenement, position_s?, secondes?, vu? }.
+ * POST /api/academie/suivi : { lecon, evenement, position_s?, secondes?, vu?, profondeur? }.
  * evenement 'non_vu' = { evenement: 'vu', vu: false } (le decochage).
  */
 export function lireSignal(corps: unknown): { lecon: string; signal: Signal } | null {
@@ -429,6 +435,7 @@ export function lireSignal(corps: unknown): { lecon: string; signal: Signal } | 
       positionS: entierBorne(c.position_s, 86400),
       secondes: entierBorne(c.secondes, 86400),
       vu: !decoche && c.vu !== false,
+      profondeur: entierBorne(c.profondeur, 100),
     },
   }
 }
@@ -445,8 +452,54 @@ export const ECART_MIN_S: Readonly<Record<EvenementSignal, number>> = {
 export const VITESSE_MAX = 2
 /** Tolerance (horloges, reseau). */
 export const MARGE_S = 5
-/** Au-dela, l'ecart entre deux signaux ne prouve plus rien (pause, onglet en veille). */
+/**
+ * Videos : au-dela, l'ecart entre deux signaux ne prouve plus rien (pause,
+ * onglet en veille). Le lecteur du site envoie toutes les 2 min.
+ */
 export const INTERVALLE_MAX_S = 120
+/**
+ * Textes et PDF (05/11/2026, Brice : « recharger a l'action ») : la page
+ * n'envoie plus qu'au depart de la lecon (changement de lecon, arriere-plan,
+ * fermeture) et ne compte que le temps ACTIF (page visible et interaction
+ * recente). Un signal peut donc porter une lecture longue : son credit est
+ * borne par le temps reellement ecoule depuis l'ouverture de la lecon ou le
+ * signal precedent (sans INTERVALLE_MAX_S), et par ce plafond.
+ */
+export const PLAFOND_TEXTE_S = 7200
+
+/**
+ * Lecon ecrite « lue » (Brice, 05/11/2026) : « il faut avoir descendu tout
+ * en bas pour pouvoir dire qu'on a lu ». Deux conditions, toutes les deux :
+ * - le bas atteint : profondeur max >= PROFONDEUR_LUE % du contenu, ou
+ *   'texte_fin' (le repere sous le dernier paragraphe est entre dans l'ecran,
+ *   compte 100) ;
+ * - un temps actif minimum, proportionne a la longueur : PART_LECTURE du
+ *   temps de lecture estime a MOTS_PAR_MINUTE (le meme rythme que « Environ
+ *   N min de lecture » sur le site), jamais moins que LECTURE_PLANCHER_S.
+ * Exemples : 300 mots = 30 s (plancher), 1000 mots = 90 s, 3000 mots = 4 min 30.
+ * Seulement quand la colonne profondeur_max existe (migration
+ * 20261105233000) ; sans elle, l'ancienne regle : 'texte_fin' pose « vu ».
+ */
+export const PROFONDEUR_LUE = 90
+export const MOTS_PAR_MINUTE = 200
+export const PART_LECTURE = 0.3
+export const LECTURE_PLANCHER_S = 30
+
+/** Le temps actif minimum d'une lecon ecrite de `mots` mots (s). Mots inconnus = le plancher. */
+export function tempsActifMinimum(mots: number | null | undefined): number {
+  const m = mots && mots > 0 ? mots : 0
+  return Math.max(LECTURE_PLANCHER_S, Math.ceil((m * 60 * PART_LECTURE) / MOTS_PAR_MINUTE))
+}
+
+/** Les deux conditions de la lecon ecrite lue : bas atteint ET temps actif minimum. */
+export function texteLu(profondeurMax: number, secondesVues: number, mots: number | null | undefined): boolean {
+  return profondeurMax >= PROFONDEUR_LUE && secondesVues >= tempsActifMinimum(mots)
+}
+
+/** Une colonne absente (Postgres 42703) : la migration n'est pas encore appliquee. */
+export function colonneAbsente(err: unknown): boolean {
+  return /42703|column .* does not exist/i.test(err instanceof Error ? err.message : String(err))
+}
 /** Un signal n'est accepte que si un lien a ete delivre pour cette lecon depuis moins de 24 h. */
 export const FRAICHEUR_LIEN_H = 24
 /**
@@ -489,6 +542,14 @@ export type EtatSuivi = {
   nbSignaux: number
   /** L'heure de la base, lue avec l'etat. */
   maintenant: Date
+  /**
+   * Profondeur max atteinte dans le texte (0-100). null ou absent : colonne
+   * profondeur_max absente (migration 20261105233000 pas appliquee),
+   * profondeur ignoree et ancienne regle du texte.
+   */
+  profondeurMax?: number | null
+  /** Nombre de mots du contenu (lecon ecrite) ; null sinon. */
+  mots?: number | null
 }
 
 export type MiseAJourSuivi = {
@@ -503,6 +564,8 @@ export type MiseAJourSuivi = {
   /** L'etat « vu » (vu_le, vu_par). null = inchange. */
   vu: 'poser' | 'retirer' | null
   vuPar: VuPar | null
+  /** La profondeur max a ecrire (0-100) ; null = colonne absente, rien a ecrire. */
+  profondeurMax: number | null
   /** Ce qui part dans academie_lectures. */
   journal: { evenement: string; secondes: number | null; positionS: number | null }
 }
@@ -517,12 +580,18 @@ export type IssueSignal =
  * Applique un signal de la page a l'etat d'une progression. Le temps credite
  * est celui que la page declare (secondes), ou a defaut l'avance de la
  * position, BORNE par le temps ecoule depuis le signal precedent (ou depuis
- * le lien) : au plus 2x ce temps pour une video, 1x pour un texte, plus 5 s.
- * Une avance rapide ne compte donc pas comme du visionnage.
+ * le lien) : au plus 2x ce temps pour une video (ecart compte au plus
+ * INTERVALLE_MAX_S), 1x pour un texte (ecart entier, credit au plus
+ * PLAFOND_TEXTE_S), plus 5 s. Une avance rapide ne compte donc pas comme du
+ * visionnage.
  *
  * « vu » se pose tout seul quand une video franchit 60 % de temps reellement
  * regarde (un franchissement : apres un decochage, plus de visionnage ne la
- * recoche pas), sur 'fin' et sur 'texte_fin' ; et par le clic. Le decochage
+ * recoche pas), sur 'fin' ; et par le clic. Lecon ecrite, colonne
+ * profondeur_max presente : quand les deux conditions de texteLu deviennent
+ * vraies (franchissement, comme la video), ou sur un 'texte_fin' qui les
+ * trouve vraies ; la preuve terminee_le est posee la premiere fois. Sans la
+ * colonne, et pour un PDF : sur 'texte_fin', comme avant. Le decochage
  * retire vu et le clic ; terminee_le (preuve) et le journal restent.
  */
 export function appliquerSignal(etat: EtatSuivi, signal: Signal): IssueSignal {
@@ -544,6 +613,9 @@ export function appliquerSignal(etat: EtatSuivi, signal: Signal): IssueSignal {
 
   const duree = etat.dureeS && etat.dureeS > 0 ? etat.dureeS : null
   const positionMaxPossible = duree ?? 86400
+  // La regle de la lecon ecrite (bas atteint ET temps actif) : seulement avec la colonne.
+  const profondeurAvant = typeof etat.profondeurMax === 'number' ? etat.profondeurMax : null
+  const regleTexte = etat.type === 'texte' && profondeurAvant !== null
 
   if (ev === 'vu') {
     return {
@@ -557,13 +629,14 @@ export function appliquerSignal(etat: EtatSuivi, signal: Signal): IssueSignal {
         marque: signal.vu ? 'poser' : 'retirer',
         vu: signal.vu ? (etat.vuLe ? null : 'poser') : 'retirer',
         vuPar: signal.vu && !etat.vuLe ? 'eleve' : null,
+        profondeurMax: profondeurAvant,
         journal: { evenement: signal.vu ? 'vu' : 'non_vu', secondes: null, positionS: null },
       },
     }
   }
 
   const depuis = Math.max(etat.dernierSignalLe?.getTime() ?? 0, etat.derniereVueLe.getTime())
-  const ecoule = Math.min(Math.max(0, (maintenant - depuis) / 1000), INTERVALLE_MAX_S)
+  const ecoule = Math.max(0, (maintenant - depuis) / 1000)
 
   let position: number | null = null
   let credit: number
@@ -571,20 +644,29 @@ export function appliquerSignal(etat: EtatSuivi, signal: Signal): IssueSignal {
     position = signal.positionS === null ? null : Math.min(signal.positionS, positionMaxPossible)
     const declare = signal.secondes
       ?? (position === null ? 0 : Math.max(0, position - etat.dernierePositionS))
-    credit = Math.floor(Math.min(declare, ecoule * VITESSE_MAX + MARGE_S))
+    credit = Math.floor(Math.min(declare, Math.min(ecoule, INTERVALLE_MAX_S) * VITESSE_MAX + MARGE_S))
   } else {
-    credit = Math.floor(Math.min(signal.secondes ?? 0, ecoule + MARGE_S))
+    credit = Math.floor(Math.min(signal.secondes ?? 0, ecoule + MARGE_S, PLAFOND_TEXTE_S))
   }
 
   const secondesVues = etat.secondesVues + credit
   const pourcentage = duree ? Math.min(100, Math.floor((secondesVues * 100) / duree)) : etat.pourcentage
-  // Le seuil mesure, videos seulement : un texte passe vu par texte_fin ou le clic.
+  // Le seuil mesure des videos.
   const seuil = estVideo && duree !== null ? SEUIL_VU * duree : null
   const franchit = seuil !== null && etat.secondesVues < seuil && secondesVues >= seuil
-  const terminer = !etat.termineeLe && seuil !== null && secondesVues >= seuil
+  let terminer = !etat.termineeLe && seuil !== null && secondesVues >= seuil
 
+  // Lecon ecrite : la profondeur ne baisse jamais ; 'texte_fin' = le bas du texte.
+  let profondeurMax = profondeurAvant
   let vuPar: VuPar | null = null
   if (ev === 'fin') vuPar = 'fin'
+  else if (regleTexte && profondeurAvant !== null) {
+    profondeurMax = Math.max(profondeurAvant, signal.profondeur ?? 0, ev === 'texte_fin' ? 100 : 0)
+    const luAvant = texteLu(profondeurAvant, etat.secondesVues, etat.mots)
+    const luApres = texteLu(profondeurMax, secondesVues, etat.mots)
+    if (luApres && (!luAvant || ev === 'texte_fin')) vuPar = 'texte_fin'
+    terminer = !etat.termineeLe && luApres
+  }
   else if (ev === 'texte_fin') vuPar = 'texte_fin'
   else if (franchit) vuPar = 'mesure'
   const poserVu = vuPar !== null && !etat.vuLe
@@ -600,6 +682,7 @@ export function appliquerSignal(etat: EtatSuivi, signal: Signal): IssueSignal {
       marque: null,
       vu: poserVu ? 'poser' : null,
       vuPar: poserVu ? vuPar : null,
+      profondeurMax,
       journal: { evenement: ev, secondes: credit, positionS: position },
     },
   }

@@ -1,6 +1,7 @@
 // Tests de l'ACCUEIL ETALE EN CONSEILS (Brice, 31/10, tips-accueil-pur.ts) et
 // des ADRESSES MULTIPLES dites au bon moment (31/10) :
-// - le calendrier (J+1, J+2, J+4, J+7), un conseil par jour au plus, une fois,
+// - le calendrier (J+1, J+2, J+4, J+5 depuis le 05/11 : l'indicateur d'Alex,
+//   J+7), un conseil par jour au plus, une fois,
 //   decale par une relance des lots, saute s'il en a deja parle ;
 // - les textes (le message court de l'admission, chaque conseil) ;
 // - le cablage : journal de l'entree, passage (etat relu juste avant), bot ;
@@ -35,8 +36,8 @@ function texteSain(t, nom) {
   for (const url of t.match(/https?:\/\/\S+/g) ?? []) assert.match(url, /[A-Za-z0-9/]$/, `${nom} : ponctuation collee au lien ${url}`)
 }
 
-bloc('constantes : J+1, J+2, J+4, J+7, depuis le deploiement, coupure', () => {
-  assert.deepEqual(T.TIPS_ACCUEIL.map(t => [t.cle, t.jours]), [['academie', 1], ['sujets', 2], ['liens', 4], ['abonnement', 7]])
+bloc('constantes : J+1, J+2, J+4, J+5 (indicateur d Alex, 05/11), J+7, depuis le deploiement, coupure', () => {
+  assert.deepEqual(T.TIPS_ACCUEIL.map(t => [t.cle, t.jours]), [['academie', 1], ['sujets', 2], ['liens', 4], ['indicateur', 5], ['abonnement', 7]])
   assert.match(T.TIPS_ACCUEIL_DEPUIS, /^2026-\d{2}-\d{2}$/)
   assert.ok(T.TIPS_FENETRE_JOURS > 7)
   assert.match(lire('src/lib/liveclub/config.ts'), /return process\.env\.LIVECLUB_TIPS_ACCUEIL\?\.trim\(\) !== '0'/)
@@ -57,13 +58,17 @@ bloc('calendrier : un conseil par jour au plus, une fois chacun, dans l ordre', 
   assert.deepEqual(e(2, ['academie']), ['sujets'])
   assert.deepEqual(e(3, ['academie', 'sujets']), [])
   assert.deepEqual(e(4, ['academie', 'sujets']), ['liens'])
-  assert.deepEqual(e(7, ['academie', 'sujets', 'liens']), ['abonnement'])
-  assert.deepEqual(e(8, ['academie', 'sujets', 'liens', 'abonnement']), [])
+  // (05/11) L'indicateur d'Alex a J+5, entre les liens et l'abonnement.
+  assert.deepEqual(e(5, ['academie', 'sujets', 'liens']), ['indicateur'])
+  assert.deepEqual(e(6, ['academie', 'sujets', 'liens', 'indicateur']), [])
+  assert.deepEqual(e(7, ['academie', 'sujets', 'liens', 'indicateur']), ['abonnement'])
+  assert.deepEqual(e(8, ['academie', 'sujets', 'liens', 'indicateur', 'abonnement']), [])
   // En retard (un jour sans passage) : l'ordre est garde ; le passage n'envoie que le premier.
-  assert.deepEqual(e(5, ['academie']), ['sujets', 'liens'])
+  assert.deepEqual(e(5, ['academie']), ['sujets', 'liens', 'indicateur'])
+  assert.deepEqual(e(7, ['academie', 'sujets', 'liens']), ['indicateur', 'abonnement'])
   // Un deja envoye aujourd'hui, ou une relance des lots aujourd'hui : rien, demain.
   assert.deepEqual(e(2, ['academie'], { envoyeAujourdhui: true }), [])
-  assert.deepEqual(e(7, ['academie', 'sujets', 'liens'], { relanceLotsAujourdhui: true }), [])
+  assert.deepEqual(e(7, ['academie', 'sujets', 'liens', 'indicateur'], { relanceLotsAujourdhui: true }), [])
   // Entre avant le deploiement : aucun conseil. Hors fenetre : plus rien.
   assert.deepEqual(T.tipsDus({ entreLe: plus(T.TIPS_ACCUEIL_DEPUIS, -1), aujourdhui: T.TIPS_ACCUEIL_DEPUIS, traites: new Set(), envoyeAujourdhui: false, relanceLotsAujourdhui: false }), [])
   assert.deepEqual(e(T.TIPS_FENETRE_JOURS + 1), [])
@@ -78,6 +83,11 @@ bloc('deja parle : des mots simples dans SES messages, le conseil est saute', ()
   assert.equal(T.dejaParle('abonnement', ["j'ai une autre adresse mail"]), true)
   assert.equal(T.dejaParle('liens', ['merci, tout est bon']), false)
   assert.equal(T.dejaParle('academie', []), false)
+  // (05/11) L'indicateur : une question, ou l'appui sur le bouton (« [bouton] Indicateur d'Alex » au fil Support).
+  assert.equal(T.dejaParle('indicateur', ["je veux l'indicateur d'Alex"]), true)
+  assert.equal(T.dejaParle('indicateur', ["[bouton] Indicateur d'Alex"]), true)
+  assert.equal(T.dejaParle('indicateur', ['mon pseudo TradingView ?']), true)
+  assert.equal(T.dejaParle('indicateur', ['merci, tout est bon']), false)
 })
 
 bloc('les conseils : courts, detendus, une ouverture pour lui repondre', () => {
@@ -117,6 +127,12 @@ bloc('les conseils : courts, detendus, une ouverture pour lui repondre', () => {
   assert.deepEqual(T.boutonsTip('abonnement'), [[{ texte: 'Mon abonnement', data: 'm:abo' }]])
   assert.equal(P.libelleBouton('m:abo'), 'Mon abonnement')
   assert.equal(T.boutonsTip('academie'), undefined)
+  // (05/11) L'indicateur d'Alex : le bouton du menu sous le conseil, la phrase a dire au bot.
+  const indic = T.texteTip('indicateur', { chat: CHAT, accesOffert: false })
+  assert.deepEqual(T.boutonsTip('indicateur'), [[{ texte: "Indicateur d'Alex", data: 'm:indic' }]])
+  assert.equal(P.libelleBouton('m:indic'), "Indicateur d'Alex")
+  assert.match(indic, /appuie sur « Indicateur d'Alex » juste en dessous \(ou écris-moi « je veux l'indicateur d'Alex »\)/)
+  assert.match(indic, /tant que tu es dans le Live Club/)
 })
 
 bloc('J0 : le message de l admission raccourci a l essentiel quand les conseils suivent', () => {

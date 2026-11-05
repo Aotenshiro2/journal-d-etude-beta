@@ -60,6 +60,8 @@ import { declarerLots, etatLotsDuMembre } from './lots'
 // (01/11) La pause de l'abonnement + acces par depot broker (pause-depot.ts).
 import { parcoursPauseDepotMembre, pauseDepotPourAgentMembre } from './pause-depot'
 import { NOM_OUTIL_MEMBRE_PAUSE_DEPOT } from './pause-depot-pur'
+// (05/11) L'indicateur d'Alex : l'outil rend la main au bot (indicateur.ts), qui ouvre l'etape.
+import { NOM_OUTIL_INDICATEUR } from './indicateur-pur'
 
 export { MODELE_LIVECLUB }
 
@@ -114,6 +116,12 @@ export type ReponseAgentMembre = {
    * cockpit : l'agent a appele demander_un_humain, ou il n'a pas abouti.
    */
   veutHumain?: true
+  /**
+   * (05/11) Vrai = le membre veut l'indicateur d'Alex (outil indicateur_alex) :
+   * `texte` est vide, le bot ouvre l'etape du bouton (droit relu, pseudo
+   * demande) avec ses propres textes.
+   */
+  indicateur?: true
 }
 
 /**
@@ -241,6 +249,18 @@ export async function repondreAuMembre(
         || bloc.name === NOM_OUTIL_MEMBRE_PAUSE_DEPOT)) {
         resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify(REFUS_PRUDENCE_MEMBRE) })
         continue
+      }
+      // (05/11) Ni l'indicateur d'Alex (il menerait a un message a un tiers).
+      if (prudence && bloc.name === NOM_OUTIL_INDICATEUR) {
+        resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify(REFUS_PRUDENCE_MEMBRE) })
+        continue
+      }
+
+      // (05/11) L'indicateur d'Alex : le bot reprend la main (indicateur.ts,
+      // etapeIndicateur), comme le bouton « Indicateur d'Alex ». La boucle
+      // s'arrete la, sans texte du modele ; l'agent n'enregistre rien.
+      if (bloc.name === NOM_OUTIL_INDICATEUR) {
+        return { texte: '', indicateur: true, ...drapeau() }
       }
 
       // (01/11) La pause de l'abonnement + acces par depot broker : le serveur

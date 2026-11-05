@@ -10,7 +10,7 @@ import { messageErreur, relationAbsente } from '@/lib/liveclub/pur'
  * regarde ou lit ; le clic « vu » est a part et ne remplace pas la mesure.
  *
  * Appel : Authorization: Bearer <access_token Supabase du site>, corps
- *   { lecon, evenement, position_s?, secondes?, vu? }
+ *   { lecon, evenement, position_s?, secondes?, vu?, profondeur? }
  *   Signal de fermeture de page (05/11/2026) : navigator.sendBeacon ne porte
  *   pas d'en-tete, le jeton vient alors dans le corps ({ ..., jeton }, en
  *   text/plain, sans prevol CORS) ; chemin public dans middleware.ts, le jeton
@@ -21,9 +21,14 @@ import { messageErreur, relationAbsente } from '@/lib/liveclub/pur'
  *     exclus, mesure par la page avec les evenements timeupdate et seeked de
  *     player.js ; la page retire ce que credit_s rend, le reste repart au
  *     signal suivant).
- *   - evenement 'texte' : texte ou pdf ; secondes = temps ou la page etait
- *     visible depuis le dernier signal accepte. 'texte_fin' : le texte a ete
- *     lu jusqu'en bas (memes champs).
+ *   - evenement 'texte' : texte ou pdf ; secondes = temps ACTIF (page visible
+ *     et interaction de moins de 2 min) pas encore credite. Depuis le 05/11,
+ *     envoye seulement au depart de la lecon (changement de lecon,
+ *     arriere-plan, fermeture), plus d'envoi periodique : le credit est borne
+ *     par le temps ecoule depuis l'ouverture ou le signal precedent, sans
+ *     INTERVALLE_MAX_S, et par PLAFOND_TEXTE_S (2 h). profondeur = le point
+ *     le plus bas atteint dans le texte, en % du contenu. 'texte_fin' : le
+ *     bas du texte est entre dans l'ecran (memes champs, profondeur 100).
  *   - evenement 'vu' : le bouton « marquer comme vu » ; vu: false, ou
  *     evenement 'non_vu', le decoche.
  *   La page remet son compteur de secondes a zero seulement sur un 200 : un
@@ -35,9 +40,12 @@ import { messageErreur, relationAbsente } from '@/lib/liveclub/pur'
  *
  * Etat de la lecon (Brice, 15/10) : ouvert (rien de consomme), en_cours (du
  * temps reellement regarde ou lu), vu. « vu » se pose tout seul a 60 % de
- * temps reellement regarde (video), sur 'fin', sur 'texte_fin', et par le
- * clic ; le decochage ramene a en_cours ou ouvert, le journal de preuve
- * garde tout.
+ * temps reellement regarde (video), sur 'fin', et par le clic. Lecon ecrite
+ * (Brice, 05/11) : quand le bas est atteint (90 % ou texte_fin) ET qu'un
+ * temps actif minimum est passe (30 % de la lecture estimee a 200 mots/min,
+ * 30 s au moins), pur.ts texteLu ; tant que la migration 20261105233000
+ * (profondeur_max) n'est pas appliquee, sur 'texte_fin' comme avant. Le
+ * decochage ramene a en_cours ou ouvert, le journal de preuve garde tout.
  *
  * Reponses :
  *   200 { ok: true, credit_s, progression: { derniere_position_s, position_max_s, secondes_vues,

@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getUserId } from '@/lib/api-auth'
 import { corsHeaders, corsPreflight } from '@/lib/support-cors'
+// (05/11) Les ecritures vivent dans mentorat-acces.ts : la carte d'Agent AOK
+// fait le meme geste (« que l'agent puisse faire depuis Telegram les gestes du cockpit »).
+import { accorderMentorat, retirerMentorat } from '@/lib/mentorat-acces'
 
 /**
  * POST /api/cockpit/mentorat : accorder ou retirer le mode mentorat à la main,
@@ -52,19 +55,13 @@ export async function POST(req: NextRequest) {
   }
 
   if (action === 'accorder') {
-    const existant = await prisma.mentoratGrant.findFirst({
-      where: { email, revokedAt: null },
-    })
-    if (existant) {
-      return NextResponse.json({ ok: true, deja: true, grant: existant }, { headers })
+    const { deja, grant } = await accorderMentorat(email, note)
+    if (deja) {
+      return NextResponse.json({ ok: true, deja: true, grant }, { headers })
     }
-    const grant = await prisma.mentoratGrant.create({ data: { email, note } })
     return NextResponse.json({ ok: true, grant }, { headers })
   }
 
-  const { count } = await prisma.mentoratGrant.updateMany({
-    where: { email, revokedAt: null },
-    data: { revokedAt: new Date() },
-  })
+  const count = await retirerMentorat(email)
   return NextResponse.json({ ok: true, retires: count }, { headers })
 }

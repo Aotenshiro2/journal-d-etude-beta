@@ -45,6 +45,7 @@ import {
 import type { ActionMembre } from './conversations'
 import type { Bouton } from './telegram'
 import { BOUTON_LOTS, TEXTES_LOTS_SITUATION } from './lots-pur'
+import { BOUTON_INDICATEUR } from './indicateur-pur'
 // (01/11) La pause de l'abonnement + acces par depot broker.
 import { pauseDepotPourAgentMembre } from './pause-depot'
 import { ligneSituationPauseDepot } from './pause-depot-pur'
@@ -602,6 +603,8 @@ export function clavierMenu(): Bouton[][] {
     [{ texte: 'Mon abonnement', data: 'm:abo' }],
     [{ texte: 'Mettre en pause', data: 'm:pause' }, { texte: 'Arrêter', data: 'm:arret' }],
     [{ texte: 'Annuler un arrêt prévu', data: 'm:annuler' }],
+    // (05/11) L'indicateur TradingView d'Alex (indicateur.ts) : le droit est relu au clic.
+    [{ texte: BOUTON_INDICATEUR.texte, data: BOUTON_INDICATEUR.data }],
     [{ texte: "Contacter l'équipe", data: 'm:equipe' }],
   ]
 }
@@ -642,6 +645,8 @@ export function clavierAccesOffert(o: { lotsEnPause?: boolean } = {}): Bouton[][
     // (31/10) Acces broker en pause pour ses lots : « J'ai tradé mes lots » d'abord.
     ...(o.lotsEnPause ? [[{ texte: BOUTON_LOTS.texte, data: BOUTON_LOTS.data }]] : []),
     [{ texte: 'Mon abonnement', data: 'm:abo' }],
+    // (05/11) L'indicateur d'Alex : un acces offert est membre du Live Club (droit relu au clic).
+    [{ texte: BOUTON_INDICATEUR.texte, data: BOUTON_INDICATEUR.data }],
     [{ texte: "Contacter l'équipe", data: 'm:equipe' }],
   ]
 }

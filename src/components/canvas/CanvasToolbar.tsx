@@ -37,6 +37,9 @@ export type ActionBarre = {
   actif?: boolean
   couleurActive?: string
   remplirIcone?: boolean
+  /** Action en cours (l'actualisation de l'accueil) : l'icône tourne et le
+   *  bouton ne reprend pas de clic tant que ce n'est pas fini. */
+  enCours?: boolean
 }
 
 export const BTN_BASE: React.CSSProperties = {
@@ -56,7 +59,9 @@ function BoutonAction({ a }: { a: ActionBarre }) {
     <button
       onClick={a.onClick}
       title={a.label}
-      style={{ ...BTN_BASE, color: couleurRepos }}
+      disabled={a.enCours}
+      aria-busy={a.enCours || undefined}
+      style={{ ...BTN_BASE, color: couleurRepos, ...(a.enCours ? { cursor: 'progress' } : {}) }}
       onMouseEnter={e => {
         if (!a.actif) e.currentTarget.style.color = '#3b82f6'
         e.currentTarget.style.background = 'var(--canvas-bg)'
@@ -66,7 +71,11 @@ function BoutonAction({ a }: { a: ActionBarre }) {
         e.currentTarget.style.background = 'none'
       }}
     >
-      <a.Icon size={14} fill={a.remplirIcone && a.actif ? (a.couleurActive ?? '#3b82f6') : 'none'} />
+      <a.Icon
+        size={14}
+        fill={a.remplirIcone && a.actif ? (a.couleurActive ?? '#3b82f6') : 'none'}
+        className={a.enCours ? 'animate-spin' : undefined}
+      />
     </button>
   )
 }

@@ -57,6 +57,10 @@
 //       le bot des membres envoie en prive a chaque relais (Alex) les membres
 //       a qui dire un mot (accueil et silence seulement) ; rien de nouveau =
 //       rien ; une fois par jour ; LIVECLUB_RELAIS=0 le coupe.
+//   (u) INDICATEUR D'ALEX (Brice, 05/11, indicateur.ts) : apres les conseils
+//       d'accueil, les demandes qui n'ont pas pu partir chez Alex, le droit des
+//       demandes ouvertes relu (comptes sortis par ce passage d'abord), et les
+//       departs dits a Alex, une fois chacun. LIVECLUB_INDICATEUR=0 le coupe.
 //
 // A CHAQUE SORTIE REELLE (pause, fin d'acces broker, desabonne quand les
 // sorties sont actives, fin d'exemption), le membre recoit un message :
@@ -120,6 +124,7 @@ import { filetParrainages } from './parrainage'
 import { cartesFinDeMois } from '@/lib/cartes-fin-de-mois'
 import { resumeDuMatin } from './resume'
 import { relaisDuMatin } from './relais'
+import { tacheIndicateur } from './indicateur'
 import { recalculerAContacter } from './contact-instantane'
 import { appelTelegram, envoyer, lienDemandeAdhesion } from './telegram'
 import { lireEtatFil, tracerGeste, tracerMessageBot } from './support-pont'
@@ -165,6 +170,8 @@ const BUDGET_RESUME_MS = 265_000
 const BUDGET_RELAIS_MS = 255_000
 /** L'instantane des membres a contacter (02/11) : quelques secondes, il passe jusqu'a 4 min 40. */
 const BUDGET_INSTANTANE_MS = 280_000
+/** (05/11) L'indicateur d'Alex ne relit plus de droit apres 3 min 20 (une lecture Stripe par demande). */
+const BUDGET_INDICATEUR_MS = 200_000
 
 export type SynthesePassage = {
   ok: boolean
@@ -257,6 +264,12 @@ export type SynthesePassage = {
     deja_faits: number; inconnus: number; echecs: number; coupe: boolean
   }
   purge: { conversations: number }
+  /**
+   * (u) Indicateur d'Alex (05/11, indicateur.ts) : demandes parties chez Alex,
+   * departs notes et dits a Alex, droits relus, illisibles, refus de Telegram
+   * (gardes, reessayes demain). etat : ok, coupe, table_absente, panne.
+   */
+  indicateur: { etat: string; transmises: number; departs: number; prevenus: number; verifies: number; inconnus: number; echecs: number }
   /**
    * (l) Tarifs reserves (13/10) : reservations ouvertes rapprochees des
    * abonnements de leur tarif (meme email). payees : marquees payees ce
@@ -3494,6 +3507,7 @@ function nouveauContexte(maintenant: Date): Contexte {
       },
       tips: { envoyes: 0, sautes: 0, decales: 0, absents: 0, sans_droit: 0, equipe: 0, deja_faits: 0, inconnus: 0, echecs: 0, coupe: false },
       purge: { conversations: 0 },
+      indicateur: { etat: 'pas_lance', transmises: 0, departs: 0, prevenus: 0, verifies: 0, inconnus: 0, echecs: 0 },
       tarifs_reserves: { payees: 0, en_attente: 0, illisibles: 0 },
       parrainages: { etat: 'pas_lance', lues: 0, notees: 0, prevenus: 0, equipe: 0, reprises: 0, incertains: 0, annulees: 0, erreurs: 0 },
       cartes_fin_de_mois: { etat: 'pas_lance', parrainage: 0, lives: 0, alertes: 0, erreurs: 0 },
@@ -3641,6 +3655,20 @@ export async function passageQuotidien(maintenant: Date = new Date()): Promise<S
   // (q) L'accueil etale en conseils (31/10), APRES les relances des lots (une
   // relance partie aujourd'hui decale le conseil a demain).
   await etape('tips', () => tacheTipsAccueil(ctx))
+  // (u) L'indicateur d'Alex (05/11, indicateur.ts), APRES toutes les sorties
+  // du jour (ctx.sortis : leur droit se relit d'abord). Ne jette pas ; table
+  // absente (migration 20261105250000) : rien, sans erreur. Un refus de
+  // Telegram (Alex a bloque le bot) laisse la trace « a transmettre » ou « a
+  // prevenir » : le passage suivant reessaie, et le code le dit.
+  await etape('indicateur', async () => {
+    const b = await tacheIndicateur({
+      sortis: ctx.sortis, maintenant: ctx.maintenant,
+      tempsEcoule: () => Date.now() - ctx.debut > BUDGET_INDICATEUR_MS,
+    })
+    ctx.s.indicateur = b
+    if (b.etat === 'panne') erreur(ctx, 'indicateur_panne')
+    else if (b.echecs > 0) erreur(ctx, 'indicateur_refus_telegram')
+  })
   // Le droit s'y relit en direct (droitLiveClub) : la liste Stripe du passage
   // n'est pas necessaire, une panne Stripe donne 'inconnu' et rien ne part.
   await etape('metricgram', () => tacheSortiesMetricgram(ctx, rattaches, abonnements))

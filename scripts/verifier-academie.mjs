@@ -10,7 +10,9 @@
 //    secours de l'essai, acces non transmis faute d'email verifie...), suivi
 //    (avance rapide, debit, texte) et les quatre etats d'une lecon (vu a 59 %
 //    et 60 % reellement regardes, saut sans visionnage, fin, texte_fin, vu
-//    puis non_vu, ouverture sans consommation), signature.
+//    puis non_vu, ouverture sans consommation), le texte envoye au depart
+//    de la lecon (credit long, plafond, plus d'envoi periodique cote site),
+//    la lecon ecrite lue (bas atteint ET temps actif, 05/11/2026), signature.
 // 2. En ligne (sauf --hors-ligne) : signe les videos du module « essai »
 //    (memes guid que la migration 20261015210000) avec la bibliotheque
 //    « formation » du coffre et demande le lecteur Bunny avec le Referer du
@@ -32,6 +34,7 @@ import {
   jetonDeLaRequete, leconVue, lireCsvAcces, lireDemandeLecture, lireDemandeRessource, lireOffresSections, lireSignal, lireUuid, liveClubUtile,
   ouvertureLecon, ouvertureModule, ouvertureSection, preparerDroits, progressionDuModule, ressourcesPropres, trierRaisons,
   ECART_MIN_S, INTERVALLE_MAX_S, JETON_MAX, MARGE_S, MAX_RESSOURCES, SEUIL_VU, VITESSE_MAX,
+  colonneAbsente, tempsActifMinimum, texteLu, LECTURE_PLANCHER_S, MOTS_PAR_MINUTE, PART_LECTURE, PLAFOND_TEXTE_S, PROFONDEUR_LUE,
   autoriserEdition, champsModifies, estAdmin, fusionImport, lireCibleEdition, lireDemandeEdition, planEdition, LIMITES_EDITION,
 } from '../src/lib/academie/pur.ts'
 import { configBibliotheque, configBunny, jetonLecture, lienLecture, signerLecture, DUREE_LIEN_S } from '../src/lib/academie/bunny.ts'
@@ -428,7 +431,9 @@ bloc('fin : la video arrivee au bout passe vue (voie fin)', () => {
   assert.equal(appliquerSignal(etat({ maintenant: plus(65), vuLe: T0 }), signal({ evenement: 'fin', positionS: 1000 })).maj.vu, null)
 })
 
-bloc('texte_fin : un texte lu jusqu en bas passe vu (voie texte_fin), texte et pdf seulement', () => {
+// Sans profondeurMax (colonne profondeur_max absente, migration 20261105233000
+// pas appliquee) : l'ancienne regle, texte_fin pose vu tout de suite.
+bloc('texte_fin sans la colonne profondeur : un texte lu jusqu en bas passe vu (voie texte_fin), texte et pdf seulement', () => {
   const t = etat({ type: 'texte', dureeS: 300, secondesVues: 0, pourcentage: 0, positionMaxS: 0, dernierePositionS: 0 })
   const r = appliquerSignal(t, signal({ evenement: 'texte_fin', secondes: 20 }))
   assert.equal(r.credit, 20)
@@ -496,24 +501,142 @@ bloc('texte : le temps visible, borne au temps ecoule (1x + 5 s)', () => {
   assert.equal(r.maj.journal.positionS, null)
 })
 
-// Le lecteur du site espace ses signaux (05/11/2026, plan de migration Supabase,
-// section 6) : 2 min au lieu de 30 s. Le serveur borne l'ecart compte a
-// INTERVALLE_MAX_S : au-dela, une lecture continue a 2x perdrait du temps.
-bloc('signal toutes les 2 min : 2 min jouees a 2x sont creditees en entier, video et texte', () => {
+// Le lecteur VIDEO du site espace ses signaux (05/11/2026, plan de migration
+// Supabase, section 6) : 2 min au lieu de 30 s. Le serveur borne l'ecart
+// compte a INTERVALLE_MAX_S : au-dela, une lecture continue a 2x perdrait du
+// temps. Les textes n'ont plus d'envoi periodique (bloc suivant).
+const SITE_SUIVI = new URL('../../../sites/Aoknowledgecom/v3/src/academie/suivi.ts', import.meta.url)
+bloc('video : signal toutes les 2 min, 2 min jouees a 2x creditees en entier, l ecart compte reste borne', () => {
   const v = appliquerSignal(etat({ maintenant: plus(60 + 120) }), signal({ positionS: 340, secondes: 240 }))
   assert.equal(v.credit, 240)
-  const t = etat({ type: 'texte', dureeS: 600, secondesVues: 0, pourcentage: 0, positionMaxS: 0, dernierePositionS: 0, maintenant: plus(60 + 120) })
-  assert.equal(appliquerSignal(t, signal({ evenement: 'texte', secondes: 120 })).credit, 120)
   // Au-dela de INTERVALLE_MAX_S, le serveur rogne : la page garde le reste (credit_s) pour le signal suivant.
   assert.equal(appliquerSignal(etat({ maintenant: plus(60 + 300) }), signal({ secondes: 600 })).credit, INTERVALLE_MAX_S * VITESSE_MAX + MARGE_S)
-  const site = new URL('../../../sites/Aoknowledgecom/v3/src/academie/suivi.ts', import.meta.url)
-  if (existsSync(site)) {
-    const m = readFileSync(site, 'utf8').match(/const INTERVALLE_MS = ([\d_]+)/)
-    assert.ok(m, 'INTERVALLE_MS introuvable dans le suivi du site')
+  assert.equal(INTERVALLE_MAX_S, 120)
+  if (existsSync(SITE_SUIVI)) {
+    const m = readFileSync(SITE_SUIVI, 'utf8').match(/const INTERVALLE_MS = ([\d_]+)/)
+    assert.ok(m, 'INTERVALLE_MS (cadence de la video) introuvable dans le suivi du site')
     const intervalleS = Number(m[1].replace(/_/g, '')) / 1000
-    assert.ok(intervalleS <= INTERVALLE_MAX_S, `le site envoie toutes les ${intervalleS} s, le serveur ne compte que ${INTERVALLE_MAX_S} s`)
-    assert.ok(intervalleS >= 60, `le site envoie toutes les ${intervalleS} s : trop souvent pour la base`)
+    assert.ok(intervalleS <= INTERVALLE_MAX_S, `la video envoie toutes les ${intervalleS} s, le serveur ne compte que ${INTERVALLE_MAX_S} s`)
+    assert.ok(intervalleS >= 60, `la video envoie toutes les ${intervalleS} s : trop souvent pour la base`)
   }
+})
+
+// Textes et PDF (Brice, 05/11/2026 : « recharger a l'action ») : la page
+// n'envoie qu'au depart de la lecon (changement de lecon, arriere-plan,
+// fermeture), le temps ACTIF seulement. Un signal porte donc une lecture
+// longue : borne par le temps ecoule depuis l'ouverture ou le signal
+// precedent, sans INTERVALLE_MAX_S, et par PLAFOND_TEXTE_S.
+bloc('texte au depart de la lecon : credit long borne par le temps ecoule et 2 h, debit et video inchanges', () => {
+  assert.equal(PLAFOND_TEXTE_S, 7200)
+  const t = (o = {}) => etat({ type: 'texte', dureeS: null, secondesVues: 0, pourcentage: null, positionMaxS: 0, dernierePositionS: 0, ...o })
+  // 50 min de lecture active envoyees au bout d'1 h : creditees en entier (avant : 125 s au plus).
+  assert.equal(appliquerSignal(t({ maintenant: plus(60 + 3600) }), signal({ evenement: 'texte', secondes: 3000 })).credit, 3000)
+  // Une page qui ment : jamais plus que le temps ecoule (+ 5 s).
+  assert.equal(appliquerSignal(t({ maintenant: plus(60 + 600) }), signal({ evenement: 'texte', secondes: 3000 })).credit, 605)
+  // Depuis l'ouverture (lien) quand il n'y a pas encore de signal.
+  assert.equal(appliquerSignal(t({ dernierSignalLe: null, maintenant: plus(900) }), signal({ evenement: 'texte', secondes: 880 })).credit, 880)
+  // Le plafond : 3 h ouvertes, 3 h declarees = 2 h creditees.
+  assert.equal(appliquerSignal(t({ maintenant: plus(60 + 3 * 3600) }), signal({ evenement: 'texte', secondes: 3 * 3600 })).credit, 7200)
+  // texte_fin suit la meme borne (il porte le temps actif de la page depuis le 05/11).
+  assert.equal(appliquerSignal(t({ maintenant: plus(60 + 1800) }), signal({ evenement: 'texte_fin', secondes: 1500 })).credit, 1500)
+  // Protections gardees : 20 s entre deux signaux, lien de moins de 24 h.
+  assert.equal(appliquerSignal(t({ maintenant: plus(70) }), signal({ evenement: 'texte', secondes: 10 })).refus, 'debit')
+  assert.deepEqual(appliquerSignal(t({ dernierSignalLe: null, maintenant: plus(25 * 3600) }), signal({ evenement: 'texte', secondes: 60 })), { refus: 'lien' })
+  // La video, elle, reste bornee a INTERVALLE_MAX_S : une heure de pause = 245 s au plus.
+  assert.equal(appliquerSignal(etat({ maintenant: plus(3600) }), signal({ secondes: 3000 })).credit, 245)
+  // Le site : plus aucune minuterie dans le suivi du texte (ni compteur a la seconde, ni envoi periodique).
+  if (existsSync(SITE_SUIVI)) {
+    const source = readFileSync(SITE_SUIVI, 'utf8')
+    const debut = source.indexOf('export function useSuiviTexte')
+    assert.ok(debut >= 0, 'useSuiviTexte introuvable dans le suivi du site')
+    const corps = source.slice(debut)
+    assert.ok(!/setInterval/.test(corps), 'le suivi du texte du site a encore un setInterval')
+    assert.ok(!/INTERVALLE_MS/.test(corps), 'le suivi du texte du site envoie encore a cadence fixe')
+    assert.ok(/visibilitychange/.test(corps) && /pagehide/.test(corps), 'le suivi du texte doit envoyer a l arriere-plan et a la fermeture')
+    const plafond = source.match(/const PLAFOND_ENVOI_S = ([\d_]+)/)
+    assert.ok(plafond, 'PLAFOND_ENVOI_S introuvable dans le suivi du site')
+    assert.ok(Number(plafond[1].replace(/_/g, '')) <= PLAFOND_TEXTE_S, 'le site enverrait plus que le plafond du journal')
+  }
+})
+
+// Lecon ecrite lue (Brice, 05/11/2026) : « il faut avoir descendu tout en bas
+// pour pouvoir dire qu'on a lu ». Bas atteint (profondeur >= 90 ou texte_fin)
+// ET temps actif minimum (30 % de la lecture a 200 mots/min, 30 s au moins).
+// La regle ne vaut qu'avec la colonne profondeur_max (profondeurMax numerique).
+bloc('lecon ecrite lue : bas atteint ET temps actif minimum ; sans la colonne, ancienne regle', () => {
+  assert.equal(PROFONDEUR_LUE, 90)
+  assert.equal(MOTS_PAR_MINUTE, 200)
+  assert.equal(PART_LECTURE, 0.3)
+  assert.equal(LECTURE_PLANCHER_S, 30)
+  assert.equal(tempsActifMinimum(300), 30) // 27 s calcules, plancher
+  assert.equal(tempsActifMinimum(1000), 90)
+  assert.equal(tempsActifMinimum(3000), 270)
+  assert.equal(tempsActifMinimum(null), 30)
+  assert.equal(texteLu(90, 90, 1000), true)
+  assert.equal(texteLu(89, 9999, 1000), false)
+  assert.equal(texteLu(100, 89, 1000), false)
+
+  // 1000 mots : 90 s actives au moins.
+  const t = (o = {}) => etat({
+    type: 'texte', dureeS: null, secondesVues: 0, pourcentage: null, positionMaxS: 0, dernierePositionS: 0,
+    profondeurMax: 0, mots: 1000, maintenant: plus(60 + 600), ...o,
+  })
+  // Le bas atteint trop vite (texte_fin, 20 s) : pas vu, la profondeur est gardee.
+  const vite = appliquerSignal(t(), signal({ evenement: 'texte_fin', secondes: 20, profondeur: 100 }))
+  assert.equal(vite.maj.vu, null)
+  assert.equal(vite.maj.terminer, false)
+  assert.equal(vite.maj.profondeurMax, 100)
+  // Temps suffisant mais pas en bas (80 %) : pas vu.
+  const haut = appliquerSignal(t(), signal({ evenement: 'texte', secondes: 300, profondeur: 80 }))
+  assert.equal(haut.maj.vu, null)
+  assert.equal(haut.maj.profondeurMax, 80)
+  // La profondeur ne baisse jamais.
+  assert.equal(appliquerSignal(t({ profondeurMax: 95 }), signal({ evenement: 'texte', secondes: 10, profondeur: 40 })).maj.profondeurMax, 95)
+  // 90 % et 90 s : vu (voie texte_fin) et preuve terminee_le.
+  const lu = appliquerSignal(t(), signal({ evenement: 'texte', secondes: 90, profondeur: 90 }))
+  assert.equal(lu.maj.vu, 'poser')
+  assert.equal(lu.maj.vuPar, 'texte_fin')
+  assert.equal(lu.maj.terminer, true)
+  // Le bas deja atteint (texte_fin plus tot), le temps arrive au depart de la lecon : vu.
+  const ensuite = appliquerSignal(t({ profondeurMax: 100, secondesVues: 20 }), signal({ evenement: 'texte', secondes: 70 }))
+  assert.equal(ensuite.maj.vu, 'poser')
+  // texte_fin qui porte assez de temps actif : vu tout de suite.
+  assert.equal(appliquerSignal(t({ secondesVues: 60 }), signal({ evenement: 'texte_fin', secondes: 40, profondeur: 100 })).maj.vu, 'poser')
+  // Texte court : le plancher de 30 s.
+  const court = (o) => t({ mots: 100, ...o })
+  assert.equal(appliquerSignal(court(), signal({ evenement: 'texte_fin', secondes: 10, profondeur: 100 })).maj.vu, null)
+  assert.equal(appliquerSignal(court({ secondesVues: 10, profondeurMax: 100 }), signal({ evenement: 'texte', secondes: 20 })).maj.vu, 'poser')
+  // Apres un decochage, du temps en plus ne recoche pas (deja franchi) ; revenir en bas (texte_fin), si.
+  const decoche = { profondeurMax: 100, secondesVues: 400, termineeLe: T0, vuLe: null }
+  assert.equal(appliquerSignal(t(decoche), signal({ evenement: 'texte', secondes: 30, profondeur: 100 })).maj.vu, null)
+  assert.equal(appliquerSignal(t(decoche), signal({ evenement: 'texte_fin', secondes: 0, profondeur: 100 })).maj.vu, 'poser')
+  // Deja vue : rien a reposer, pas de seconde preuve.
+  const deja = appliquerSignal(t({ vuLe: T0, termineeLe: T0, profondeurMax: 100, secondesVues: 400 }), signal({ evenement: 'texte', secondes: 30 }))
+  assert.equal(deja.maj.vu, null)
+  assert.equal(deja.maj.terminer, false)
+  // Le clic « vu » reste a part et garde la profondeur.
+  const clic = appliquerSignal(t({ profondeurMax: 40 }), signal({ evenement: 'vu', vu: true }))
+  assert.equal(clic.maj.vu, 'poser')
+  assert.equal(clic.maj.vuPar, 'eleve')
+  assert.equal(clic.maj.profondeurMax, 40)
+  // Un PDF garde l'ancienne regle (rien a faire defiler dans la page) ; une video ignore la profondeur.
+  assert.equal(appliquerSignal(t({ type: 'pdf' }), signal({ evenement: 'texte_fin', secondes: 5 })).maj.vu, 'poser')
+  assert.equal(appliquerSignal(etat({ profondeurMax: 0 }), signal({ positionS: 130, secondes: 30, profondeur: 100 })).maj.profondeurMax, 0)
+  // Sans la colonne (profondeurMax null ou absent) : ancienne regle, rien a ecrire.
+  const ancien = appliquerSignal(t({ profondeurMax: null }), signal({ evenement: 'texte_fin', secondes: 5, profondeur: 100 }))
+  assert.equal(ancien.maj.vu, 'poser')
+  assert.equal(ancien.maj.profondeurMax, null)
+  assert.equal(appliquerSignal(t({ profondeurMax: null }), signal({ evenement: 'texte', secondes: 300, profondeur: 100 })).maj.vu, null)
+  // Le repli de suivi.ts reconnait l'erreur de colonne absente, et rien d'autre.
+  assert.equal(colonneAbsente(new Error('Raw query failed. Code: `42703`. Message: `column p.profondeur_max does not exist`')), true)
+  assert.equal(colonneAbsente(new Error('Raw query failed. Code: `42P01`. Message: `relation "public.academie_progression" does not exist`')), false)
+  assert.equal(colonneAbsente(new Error('connection refused')), false)
+  // Le corps : profondeur 0-100, entiere ; absente = null.
+  const id = 'B03789D3-F998-44EC-8C3C-5D8C5977008C'
+  assert.equal(lireSignal({ lecon: id, evenement: 'texte', secondes: 30, profondeur: 87.9 }).signal.profondeur, 87)
+  assert.equal(lireSignal({ lecon: id, evenement: 'texte', secondes: 30, profondeur: 250 }).signal.profondeur, 100)
+  assert.equal(lireSignal({ lecon: id, evenement: 'texte', secondes: 30, profondeur: -1 }).signal.profondeur, null)
+  assert.equal(lireSignal({ lecon: id, evenement: 'texte', secondes: 30 }).signal.profondeur, null)
 })
 
 // ---------------------------------------------------------------------------
@@ -529,7 +652,7 @@ bloc('corps de requete : lecon, video, signal', () => {
   assert.equal(lireDemandeLecture(null), null)
   assert.equal(lireUuid(42), null)
   assert.deepEqual(lireSignal({ lecon: id, evenement: 'lecture', position_s: 12.7, secondes: 30 }), {
-    lecon: id.toLowerCase(), signal: { evenement: 'lecture', positionS: 12, secondes: 30, vu: true },
+    lecon: id.toLowerCase(), signal: { evenement: 'lecture', positionS: 12, secondes: 30, vu: true, profondeur: null },
   })
   assert.equal(lireSignal({ lecon: id, evenement: 'avance' }), null)
   assert.equal(lireSignal({ lecon: id, evenement: 'lecture', position_s: -5 }).signal.positionS, null)
@@ -537,7 +660,7 @@ bloc('corps de requete : lecon, video, signal', () => {
   assert.equal(lireSignal({ lecon: id, evenement: 'lecture', position_s: 1e9 }).signal.positionS, 86400)
   assert.equal(lireSignal({ lecon: id, evenement: 'vu', vu: false }).signal.vu, false)
   // 'non_vu' (decochage) = vu: false ; 'texte_fin' accepte.
-  assert.deepEqual(lireSignal({ lecon: id, evenement: 'non_vu' }).signal, { evenement: 'vu', positionS: null, secondes: null, vu: false })
+  assert.deepEqual(lireSignal({ lecon: id, evenement: 'non_vu' }).signal, { evenement: 'vu', positionS: null, secondes: null, vu: false, profondeur: null })
   assert.equal(lireSignal({ lecon: id, evenement: 'texte_fin', secondes: 12 }).signal.evenement, 'texte_fin')
 })
 

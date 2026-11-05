@@ -104,6 +104,14 @@
 //   `lots`) recoit sa situation et le bouton « J'ai tradé mes lots » partout
 //   ou un impaye recoit sa facture (demande d'adhesion, /start, /menu, lien) ;
 //   le bouton (m:lots) transmet la declaration a l'equipe, une seule fois.
+// - (05/11, Brice : « je veux que Alex ait acces aux @ telegram des membres
+//   du liveclub pour son indicateur de trading ») L'INDICATEUR D'ALEX
+//   (indicateur.ts, indicateur-pur.ts) : le bouton « Indicateur d'Alex »
+//   (m:indic, menu et conseil d'accueil) ou l'agent (outil indicateur_alex,
+//   il oriente vers la meme etape, il n'agit pas seul) ouvrent l'etape ; le
+//   pseudo ecrit pendant l'etape est lu AVANT tout le reste (l'equipe, l'IA),
+//   une phrase garde le parcours habituel ; la carte ic:/ix: est l'accord.
+//   L'identite est ce compte Telegram, rattache ou non ; le droit est relu.
 
 import { journaliserGesteLiveClub } from '@/lib/stripe-actions'
 import { prisma } from '@/lib/db'
@@ -160,6 +168,10 @@ import { CODE_ENVOIS_HEURE, CODE_VALIDITE_MINUTES, intentionNonRattache, masquer
 import { noterNomTelegram } from './noms'
 import { traiterBoutonRelais } from './relais'
 import { estBoutonRelais } from './relais-pur'
+import {
+  annulerIndicateur, confirmerIndicateur, etapeIndicateur, reponseTexteIndicateur, type ReponseIndicateur,
+} from './indicateur'
+import { BOUTON_INDICATEUR, lireBoutonIndicateur } from './indicateur-pur'
 import {
   REGLE_RAISON_SORTIE, jetonBienForme, libelleBouton, messageErreur, normaliserEmail, pauseDejaProposee, relationAbsente,
   sortieAExpliquer, texteDette, texteTarifReserve, type GesteDate,
@@ -1592,6 +1604,20 @@ async function converserAvecAgent(
     return
   }
 
+  // (05/11) L'indicateur d'Alex : l'agent oriente vers la MEME etape que le
+  // bouton (droit relu, pseudo demande), il n'agit pas seul. Le texte est
+  // celui du serveur, pas celui du modele.
+  if (reponse.indicateur) {
+    const etape = await etapeIndicateur(u)
+    await repondre(etape.texte, etape.equipe ? avecEquipe(etape.boutons) : etape.boutons, reponse.veutHumain === true)
+    try {
+      await ajouterEchange(u.id, texte, etape.texte)
+    } catch (err) {
+      console.warn(`[liveclub/bot] historique non ecrit : ${messageErreur(err)}`)
+    }
+    return
+  }
+
   // Le texte vient de l'agent (« IA » au cockpit), sauf son repli fixe (TEXTE_SANS_REPONSE, « Bot »).
   const auteur = reponse.repli ? 'bot' : 'ia'
   if (reponse.action) {
@@ -1686,6 +1712,11 @@ export async function traiterMessagePrive(message: MessageTg, updateId: number):
     await envoyerMenu(chat, u.id, entete, r, profil)
     return
   }
+
+  // (05/11) L'indicateur d'Alex : pendant l'etape (ou la carte), le message
+  // est lu ici d'abord, meme d'un compte de l'equipe ou si l'equipe a la main
+  // (c'est la reponse a une question du bot). Une phrase : le parcours habituel.
+  if (await repondreEtapeIndicateur(chat, u, texte.slice(0, 2000))) return
 
   // (08/10) Le texte libre d'un compte de l'equipe va a l'agent du Cockpit.
   if (await transmettreSiEquipe(chat, u, message)) return
@@ -1880,6 +1911,30 @@ async function boutonEquipe(
   await envoyer(chat, texteEquipe(etat?.messages ?? [], Date.now()), undefined, identite)
 }
 
+// ---------------------------------------------------------------------------
+// (05/11) L'indicateur d'Alex (indicateur.ts) : le bot envoie et trace ici
+// ---------------------------------------------------------------------------
+
+/** La reponse du parcours de l'indicateur, envoyee et tracee au fil Support. */
+async function envoyerReponseIndicateur(chat: number, rep: ReponseIndicateur, identite: IdentiteFil | null): Promise<void> {
+  await envoyer(chat, rep.texte, rep.equipe ? avecEquipe(rep.boutons) : rep.boutons, identite)
+}
+
+/**
+ * Un message ecrit pendant l'etape de l'indicateur (pseudo attendu) ou sa
+ * carte (clic attendu). false = pas d'etape, ou une phrase : le parcours
+ * habituel. Le message du membre entre au fil Support, comme tout message.
+ */
+async function repondreEtapeIndicateur(chat: number, u: Utilisateur, texte: string): Promise<boolean> {
+  const rep = await reponseTexteIndicateur(u, texte)
+  if (!rep) return false
+  const r = await rattachementOuNull(u.id)
+  const identite = r && r !== 'illisible' ? r : null
+  await versSupport(u.id, identite, 'membre', identite ? texte : masquerCodes(texte))
+  await envoyerReponseIndicateur(chat, rep, identite)
+  return true
+}
+
 /** Un clic sur un bouton. Toujours answerCallbackQuery, quoi qu'il arrive. */
 export async function traiterBouton(bouton: BoutonTg, updateId: number): Promise<void> {
   const u = bouton.from
@@ -1930,6 +1985,24 @@ export async function traiterBouton(bouton: BoutonTg, updateId: number): Promise
     await repondreBouton(bouton.id)
     const d = await declarerLots(u.id, { origine: 'bouton' })
     await envoyer(chat, d.texte, d.issue === 'panne' ? clavierEquipe() : undefined, identite)
+    return
+  }
+
+  // (05/11) « Indicateur d'Alex » : l'etape (droit relu en direct, pseudo
+  // demande). Rattache ou non : l'identite est ce compte Telegram.
+  if (data === BOUTON_INDICATEUR.data) {
+    await repondreBouton(bouton.id)
+    await envoyerReponseIndicateur(chat, await etapeIndicateur(u), identite)
+    return
+  }
+  // (05/11) « Oui, envoie à Alex » (ic:) et « Laisser tomber » (ix:) : le
+  // nonce de CE compte, consomme une fois. Le bouton a servi : il s'enleve.
+  const indicateur = lireBoutonIndicateur(data)
+  if (indicateur) {
+    await repondreBouton(bouton.id)
+    const rep = indicateur.geste === 'oui' ? await confirmerIndicateur(u, indicateur.nonce) : await annulerIndicateur(u.id, indicateur.nonce)
+    await retirerBoutons(chat, message.message_id)
+    await envoyerReponseIndicateur(chat, rep, identite)
     return
   }
 

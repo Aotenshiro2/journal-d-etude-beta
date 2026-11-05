@@ -151,6 +151,7 @@ est dans la dernière colonne.
 | Codes de vérification et compteurs | `cockpit_liveclub_codes`, `cockpit_liveclub_codes_adresses` | telegram_id, email | . | . | E | |
 | Liens personnels (jetons) | `cockpit_liveclub_jetons` | telegram_id, email | . | . | E | |
 | Tarifs réservés | `cockpit_liveclub_tarifs_reserves` | email, telegram_id | . | . | E | une réservation en attente de paiement bloque le niveau 3 (lien encore actif chez Stripe) |
+| Indicateur d'Alex (05/11/2026) | `cockpit_liveclub_indicateur` | telegram_id, membre_id | . | . | E | hors de `cockpit_effacer` : effacé par le serveur juste après (`effacerDemandesIndicateur`, liveclub/indicateur.ts) ; une demande transmise à Alex lui vaut d'abord le message de départ (pseudo TradingView à retirer) |
 | Accès broker | `cockpit_liveclub_acces` | email, telegram_id | . | . | E ou A | lié à une commission : gardé (pièce de la recette), sans compte Telegram ni note, clos |
 | Commissions du broker | `cockpit_commissions` | acces_id, email, client | . | . | G | recette de la société : pièce comptable |
 

@@ -48,6 +48,9 @@ import {
   paramsPourLogParrainage, resumeCodeParrainage,
 } from '@/lib/liveclub/parrainage-pur'
 import {
+  estTypeGesteCockpit, lireParamsGesteCockpit, paramsPourLogGesteCockpit, resumeGesteCockpit, type TypeGesteCockpit,
+} from '@/lib/agent-gestes-cockpit-pur'
+import {
   lireParamsAnnulation, lireAbonnementStripe, produitsDeAbonnement, choisirAbonnement, refusAnnulation,
   avertissementAnnulation, paramsDepuisAbonnement, carteAnnulation, requeteAnnulation, phraseAnnulationFaite,
   phraseEchecAnnulation, phraseLectureRefusee, normaliserEmailAnnulation,
@@ -193,6 +196,11 @@ export type ActionAgent = {
     // reponse-membre.ts et reponse-membre-pur.ts, envoi par support-reponse.ts.
     // Compte 'cockpit' (Telegram par le bot des membres, ou le chat du site).
     | 'reponse_membre'
+    // (05/11, LOT 1) Les gestes du cockpit depuis Agent AOK (Brice : « que
+    // l'agent puisse faire depuis Telegram les gestes du cockpit ») : acces et
+    // rangement de l'academie, acces aux apps, clips. Compte 'cockpit'.
+    // agent-gestes-cockpit.ts et agent-gestes-cockpit-pur.ts.
+    | TypeGesteCockpit
   // 'telegram' pour les actions du groupe Live Club (retrait, reintegration,
   // acces broker, exemption) : pas un compte Stripe, mais la carte de
   // confirmation affiche d'ou vient le pouvoir. 'cockpit' pour la
@@ -216,6 +224,8 @@ export function paramsPourLog(a: ActionAgent): Record<string, unknown> {
   // (05/11) Code de parrainage : ni pseudo, ni email, ni nom.
   if (a.type === 'code_parrainage') return paramsPourLogParrainage(a.params)
   if (a.type === 'declaration_parrainage') return { mois: a.params.mois, du: a.params.du, remplace: a.params.remplace ? 'oui' : 'non' }
+  // (05/11) Gestes du cockpit : ni email, ni raison, ni note, ni lien.
+  if (estTypeGesteCockpit(a.type)) return paramsPourLogGesteCockpit(a.type, a.params)
   // Code promo (05/11, parrain possible) : sans le nom ni le pseudo du parrain.
   if (a.type === 'code_promo') {
     const p = a.params
@@ -728,6 +738,16 @@ export function validerAction(brut: unknown): ActionAgent | string {
     return { type: 'declaration_parrainage', compte: 'cockpit', params: { ...lu } }
   }
 
+  // (05/11, LOT 1) Les gestes du cockpit depuis Agent AOK (academie, acces aux
+  // apps, clips). Ce que seul le controle avant la carte pose (empreinte du
+  // rangement, replay des clips, plage et credits d'un envoi a Opus) est relu
+  // ici et exige au clic par l'executeur (agent-gestes-cockpit.ts).
+  if (estTypeGesteCockpit(a.type)) {
+    const lu = lireParamsGesteCockpit(a.type, p, { aujourdhui: jourParis(new Date()) })
+    if (typeof lu === 'string') return lu
+    return { type: a.type, compte: 'cockpit', params: lu }
+  }
+
   // Les actions du groupe Telegram n'ont pas de compte Stripe.
   if (a.type === 'retirer_telegram' || a.type === 'reintegrer_telegram') {
     const telegramId = lireTelegramId(p.telegram_id)
@@ -946,6 +966,8 @@ export function resumeAction(a: ActionAgent): string {
   // (05/11) Code de parrainage : la carte detaillee vient du controle (carteCodeParrainage).
   if (a.type === 'code_parrainage') return resumeCodeParrainage(p)
   if (a.type === 'declaration_parrainage') return `Déclarer en dépense du Live Club les ${libelleDepenseParrainage(String(p.mois)).toLowerCase()}.`
+  // (05/11) Gestes du cockpit : la carte detaillee vient du controle (agent-gestes-cockpit.ts).
+  if (estTypeGesteCockpit(a.type)) return resumeGesteCockpit(a.type, p)
   if (a.type === 'code_promo') {
     const reduc = p.pourcentage != null
       ? `${p.pourcentage} %`
@@ -1400,6 +1422,15 @@ export async function executerAction(a: ActionAgent, acteur = 'agent'): Promise<
   if (a.type === 'declaration_parrainage') {
     const { executerDeclarationParrainage } = await import('@/lib/liveclub/parrainage')
     return executerDeclarationParrainage(a, acteur)
+  }
+
+  // -- Gestes du cockpit depuis Agent AOK (05/11, LOT 1) ---------------------
+  // Academie (acces, rangement), acces aux apps, clips : la meme ecriture que
+  // l'ecran du cockpit, colonnes d'acteur posees a partir de `acteur`. Import
+  // dynamique : agent-gestes-cockpit.ts importe ce fichier (RefusAction).
+  if (estTypeGesteCockpit(a.type)) {
+    const { executerGesteCockpit } = await import('@/lib/agent-gestes-cockpit')
+    return executerGesteCockpit(a, acteur)
   }
 
   // ── Groupe Telegram ───────────────────────────────────────────────────────

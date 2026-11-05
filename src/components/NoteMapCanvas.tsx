@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react'
+import React, { useState, useCallback, useMemo, useRef, useEffect, useTransition } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
 import {
@@ -24,7 +24,7 @@ import {
 import '@xyflow/react/dist/style.css'
 import {
   Sun, Moon, Map as MapIcon, Grid3x3, ChevronDown, ChevronLeft, ChevronRight,
-  BookOpen, Lightbulb, BookMarked, BarChart2, FileText,
+  BookOpen, Lightbulb, BookMarked, BarChart2, FileText, RefreshCw,
   Pencil, Star, FolderPlus, Compass, Sunrise, Layers, Eye, EyeOff, Hash,
   MoreHorizontal, History, HelpCircle,
 } from 'lucide-react'
@@ -228,6 +228,13 @@ const NoteMapNode = React.memo(function NoteMapNode({ id, data }: NodeProps) {
 // `canvas/ConceptNode.tsx` pour servir aussi au canvas d'une note.
 const nodeTypes = { noteMap: NoteMapNode, group: GroupNode, concept: ConceptNode }
 const GROUP_COLOR_KEYS = Object.keys(GROUP_COLORS)
+
+// Ce que la carte d'une note affiche (titre, aperçu, date, favicon, badge de
+// source) : identique = la carte garde son objet après une actualisation.
+function memeNote(a: NoteData, b: NoteData): boolean {
+  return a.title === b.title && a.content === b.content && a.favicon === b.favicon && a.sourceUrl === b.sourceUrl
+    && new Date(a.lastModifiedAt).getTime() === new Date(b.lastModifiedAt).getTime()
+}
 
 function autoPosition(index: number): { x: number; y: number } {
   const cols = 4
@@ -580,9 +587,11 @@ interface RightToolbarProps {
   onToggleFav: () => void
   onAddConcept?: () => void
   onNewGroup?: (e: React.MouseEvent) => void
+  onRefresh: () => void
+  refreshing: boolean
 }
 
-function RightToolbar({ activeTool, setActiveTool, isFav, onToggleFav, onAddConcept, onNewGroup }: RightToolbarProps) {
+function RightToolbar({ activeTool, setActiveTool, isFav, onToggleFav, onAddConcept, onNewGroup, onRefresh, refreshing }: RightToolbarProps) {
   const actions: ActionBarre[] = []
   if (onAddConcept) {
     actions.push({
@@ -619,6 +628,12 @@ function RightToolbar({ activeTool, setActiveTool, isFav, onToggleFav, onAddConc
         actif: isFav,
         couleurActive: '#f59e0b',
         remplirIcone: true,
+      }, {
+        id: 'actualiser',
+        Icon: RefreshCw,
+        label: refreshing ? 'Actualisation en cours...' : 'Actualiser mes notes',
+        onClick: onRefresh,
+        enCours: refreshing,
       }]}
     />
   )
@@ -825,7 +840,7 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
   // ── Picker de concepts (0.1.6) ──────────────────────────────────────────────
   const [conceptPickerOpen, setConceptPickerOpen] = useState(false)
   const dragEnterCounterRef = useRef(0)
-  const { setCenter, screenToFlowPosition, getNode, getInternalNode } = useReactFlow()
+  const { setCenter, screenToFlowPosition, getNode, getNodes, getInternalNode } = useReactFlow()
   const { x: vpX, y: vpY, zoom } = useViewport()
 
   const dotSize = 22 * zoom
@@ -839,34 +854,17 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
   const canvasRef = useRef<HTMLDivElement>(null)
   const spotlightRef = useRef<HTMLDivElement>(null)
 
-  // Fraîcheur des notes sans recharger la page : une note synchronisée depuis
-  // l'extension (ou modifiée ailleurs) apparaît au retour sur l'onglet ou la
-  // fenêtre, et au plus tard 5 minutes après, onglet visible.
-  // Chaque refresh relit TOUTES les notes avec leur contenu, la carte, et deux
-  // fois la session (middleware + page). Il passait toutes les 60 s et à
-  // chaque focus de la fenêtre (plan de migration Supabase, section 6,
-  // 05/11/2026). Le drop d'une note pas encore listée se résout seul contre
-  // /api/notes (onDrop, plus bas), sans attendre ce refresh.
-  const dernierRefreshRef = useRef(Date.now())
-  useEffect(() => {
-    const PERIODE_MS = 5 * 60_000
-    // focus et visibilitychange arrivent souvent ensemble : un seul refresh.
-    const RETOUR_MIN_MS = 30_000
-    const rafraichir = (ecartMin: number) => {
-      if (document.visibilityState !== 'visible') return
-      if (Date.now() - dernierRefreshRef.current < ecartMin) return
-      dernierRefreshRef.current = Date.now()
-      router.refresh()
-    }
-    const auRetour = () => rafraichir(RETOUR_MIN_MS)
-    window.addEventListener('focus', auRetour)
-    document.addEventListener('visibilitychange', auRetour)
-    const tic = setInterval(() => rafraichir(PERIODE_MS), 60_000)
-    return () => {
-      window.removeEventListener('focus', auRetour)
-      document.removeEventListener('visibilitychange', auRetour)
-      clearInterval(tic)
-    }
+  // Rechargement à la demande, jamais tout seul (consigne de Brice, 05/11/2026) :
+  // pas de minuterie, pas de router.refresh() périodique, pas de relecture au
+  // retour de focus. Chaque refresh relit TOUTES les notes avec leur contenu,
+  // la carte, et deux fois la session. Les gestes (poser, déplacer, lier,
+  // supprimer) mettent l'écran à jour par leur propre réponse ; le drop d'une
+  // note pas encore listée se résout contre /api/notes (onDrop, plus bas).
+  // Pour le reste (une note synchronisée depuis l'extension), le bouton
+  // « Actualiser » de la barre de droite. La transition dit quand c'est fini.
+  const [actualisationEnCours, lancerActualisation] = useTransition()
+  const actualiser = useCallback(() => {
+    lancerActualisation(() => { router.refresh() })
   }, [router])
 
   useEffect(() => {
@@ -1000,6 +998,40 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
+
+  // « Actualiser » (router.refresh) rend une nouvelle liste de notes, mais les
+  // cartes déjà posées gardaient la note du montage (initialNodes n'est
+  // calculé qu'une fois). Quand la liste reçue change, chaque carte reprend sa
+  // note (titre, aperçu, date, favicon, source) sans perdre sa position, sa
+  // sélection ni ses liens : seul `data.note` change, et une carte inchangée
+  // garde le même objet (pas de re-rendu). Une carte dont la note n'est plus
+  // dans la liste (supprimée ailleurs) est retirée de la carte affichée, avec
+  // ses traits, comme au montage ; rien n'est effacé en base. Pas de
+  // minuterie : rien ne se passe sans le bouton ou un geste.
+  const notesSynchronisees = useRef(notes)
+  useEffect(() => {
+    if (notesSynchronisees.current === notes) return
+    notesSynchronisees.current = notes
+    const parId = new Map(notes.map(n => [n.id, n]))
+    const retirees = new Set(getNodes().filter(n => n.type === 'noteMap' && !parId.has(n.id)).map(n => n.id))
+    setNodes(nds => {
+      let change = false
+      const suite = nds.flatMap(n => {
+        if (n.type !== 'noteMap') return [n]
+        const recue = parId.get(n.id)
+        if (!recue) { change = true; return [] }
+        const actuelle = (n.data as { note: NoteData }).note
+        if (memeNote(actuelle, recue)) return [n]
+        change = true
+        return [{ ...n, data: { ...n.data, note: recue } }]
+      })
+      return change ? suite : nds
+    })
+    if (retirees.size > 0) {
+      setEdges(eds => eds.filter(e => !retirees.has(e.source) && !retirees.has(e.target)))
+      setLinkSourceId(id => (id && retirees.has(id) ? null : id))
+    }
+  }, [notes, getNodes, setNodes, setEdges])
 
   // 0.1.7 — le trait s'anime au survol de sa carte, et seulement là (variante 3
   // du labo). `avecSurvol` renvoie `edges` inchangé tant que rien n'est survolé,
@@ -1629,6 +1661,8 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
           }}
           onAddConcept={() => setConceptPickerOpen(o => !o)}
           onNewGroup={handleNewGroup}
+          onRefresh={actualiser}
+          refreshing={actualisationEnCours}
         />
 
         {/* ── Picker de concepts (0.1.6) — choisir/créer le concept à poser ──

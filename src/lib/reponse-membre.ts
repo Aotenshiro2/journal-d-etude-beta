@@ -27,7 +27,7 @@ import { referenceFil } from '@/lib/alerte-equipe-telegram-pur'
 import { repondreAuFil, type FichierReponse } from '@/lib/support-reponse'
 import { telechargerFichierTelegram } from '@/lib/liveclub/telegram'
 import {
-  MAX_FICHIER_AGENT, descriptionFichier, formaterTaille, legendeFichier, lireFichierSortant, phraseMainRendue, refusLegende,
+  MAX_FICHIER_AGENT, descriptionFichier, formaterTaille, legendeFichier, lireFichierSortant, phraseFilTraite, phraseMainRendue, refusLegende,
   type FichierLu, type PieceAgent,
 } from '@/lib/liveclub/support-pont-pur'
 import {
@@ -309,6 +309,38 @@ export async function rendreLaMainPourAgent(entree: unknown, resoudre: Resolveur
   } catch (err) {
     console.error(`[cockpit/reponse-membre] main non rendue : ${premiereLigne(err)}`)
     return JSON.stringify({ erreur: "Base illisible : la main n'a pas été rendue au bot. Réessaie dans un instant." })
+  }
+}
+
+/**
+ * (05/11, LOT 1) « Deja traite » dit a l'agent (Brice, 05/11 : « que l'agent
+ * puisse faire depuis Telegram les gestes du cockpit ») : « c'est regle pour
+ * Arthur », « marque traite le fil 1a2b3c4d ». Le fil se designe comme pour
+ * rendre la main (reference d'alerte, identifiant, personne), puis le MEME
+ * geste que le bouton « Deja traite » (traiterFilHorsBot, support-traite.ts) :
+ * le fil sort de l'attente, la ligne « Traite hors du bot par <prenom> », le
+ * reste de l'equipe prevenu, rien au membre. `userId` = le compte qui parle
+ * dans ce tour. Sans carte ; l'ordre du titulaire est verifie par l'appelant
+ * (ordreFilTraiteExplicite). Rend la phrase pour le modele. Ne jette pas.
+ */
+export async function marquerFilTraitePourAgent(entree: unknown, resoudre: Resolveur, userId: string): Promise<string> {
+  const fil = entree && typeof entree === 'object' ? (entree as { fil?: unknown }).fil : null
+  if (typeof fil !== 'string' || !fil.trim()) {
+    return JSON.stringify({ erreur: "fil manquant : la référence de l'alerte (« fil 1a2b3c4d ») ou la personne." })
+  }
+  try {
+    const r = await resoudreFil(fil.slice(0, 120), resoudre)
+    if ('erreur' in r) return JSON.stringify({ erreur: r.erreur.replace(RIEN, "Rien n'a changé.") })
+    const { traiterFilHorsBot } = await import('@/lib/support-traite')
+    const issue = await traiterFilHorsBot(r.choix.fil.id, userId, '[cockpit/agent/traite]')
+    return JSON.stringify({
+      fait: issue.ok && !issue.dejaTraite,
+      resultat: phraseFilTraite(issue, r.choix.fil.reference),
+      qui: libelleDestinataire(r.choix.fil),
+    })
+  } catch (err) {
+    console.error(`[cockpit/reponse-membre] fil non marque traite : ${premiereLigne(err)}`)
+    return JSON.stringify({ erreur: "Base illisible : la demande n'a pas été marquée traitée. Réessaie dans un instant." })
   }
 }
 

@@ -14,10 +14,12 @@
 
 import { prisma } from '@/lib/db'
 import {
-  appliquerSignal, etatLecon, type EtatLecon, type EtatSuivi, type IssueSignal, type Signal, type TypeLecon, type VuPar,
+  appliquerSignal, colonneAbsente, etatLecon, type EtatLecon, type EtatSuivi, type IssueSignal, type Signal, type TypeLecon,
+  type VuPar,
 } from './pur'
 import {
-  SQL_APPLIQUER_SIGNAL, SQL_ETAT_SIGNAL, SQL_NOTER_CONNEXION, SQL_NOTER_LIEN, SQL_NOTER_RESSOURCE, SQL_PROGRESSION_COMPTE,
+  SQL_APPLIQUER_SIGNAL, SQL_APPLIQUER_SIGNAL_PROFONDEUR, SQL_ETAT_SIGNAL, SQL_ETAT_SIGNAL_PROFONDEUR, SQL_NOTER_CONNEXION,
+  SQL_NOTER_LIEN, SQL_NOTER_RESSOURCE, SQL_PROGRESSION_COMPTE,
 } from './requetes'
 
 export type Progression = {
@@ -92,6 +94,31 @@ type LigneEtat = {
   position_max_s: number; derniere_position_s: number; secondes_vues: number; pourcentage: number | null
   terminee_le: Date | null; marquee_vue_le: Date | null; vu_le: Date | null; derniere_vue_le: Date; dernier_signal_le: Date | null
   nb_signaux: number; type: TypeLecon; duree_s: number | null; statut: string; maintenant: Date
+  /** SQL_ETAT_SIGNAL_PROFONDEUR seulement. */
+  profondeur_max?: number; mots?: number | null
+}
+
+// Lecon ecrite lue = bas atteint ET temps actif (05/11/2026) : la colonne
+// profondeur_max vient de la migration 20261105233000. Tant qu'elle n'est pas
+// appliquee, Postgres repond 42703 : on lit et on ecrit sans elle (profondeur
+// ignoree, ancienne regle du texte) et on ne la redemande pas avant 10 min,
+// pour ne pas payer une requete en echec a chaque signal.
+const REESSAI_PROFONDEUR_MS = 10 * 60_000
+let sansProfondeurJusqua = 0
+
+async function lireEtatSignal(userId: string, leconId: string): Promise<{ ligne: LigneEtat | undefined; profondeur: boolean }> {
+  if (Date.now() >= sansProfondeurJusqua) {
+    try {
+      const lignes = await prisma.$queryRawUnsafe<LigneEtat[]>(SQL_ETAT_SIGNAL_PROFONDEUR, userId, leconId)
+      return { ligne: lignes[0], profondeur: true }
+    } catch (err) {
+      if (!colonneAbsente(err)) throw err
+      sansProfondeurJusqua = Date.now() + REESSAI_PROFONDEUR_MS
+      console.warn('[academie/suivi] colonne profondeur_max absente (migration 20261105233000 pas appliquee) : ancienne regle du texte')
+    }
+  }
+  const lignes = await prisma.$queryRawUnsafe<LigneEtat[]>(SQL_ETAT_SIGNAL, userId, leconId)
+  return { ligne: lignes[0], profondeur: false }
 }
 
 /**
@@ -104,8 +131,7 @@ type LigneEtat = {
 export async function enregistrerSignal(
   userId: string, leconId: string, signal: Signal, o: { ip: string | null; appareil: string | null },
 ): Promise<IssueEnregistrement> {
-  const lignes = await prisma.$queryRawUnsafe<LigneEtat[]>(SQL_ETAT_SIGNAL, userId, leconId)
-  const e = lignes[0]
+  const { ligne: e, profondeur } = await lireEtatSignal(userId, leconId)
   if (!e) return { issue: 'sans_lien' }
   const etat: EtatSuivi = {
     type: e.type,
@@ -120,19 +146,23 @@ export async function enregistrerSignal(
     dernierSignalLe: e.dernier_signal_le,
     nbSignaux: e.nb_signaux,
     maintenant: e.maintenant,
+    profondeurMax: profondeur ? e.profondeur_max ?? 0 : null,
+    mots: profondeur ? e.mots ?? null : null,
   }
   const issue = appliquerSignal(etat, signal)
   if (!('maj' in issue)) return { issue: 'refus', detail: issue }
 
   const m = issue.maj
-  const ecrites = await prisma.$queryRawUnsafe<LigneProgression[]>(
-    SQL_APPLIQUER_SIGNAL,
+  const parametres: unknown[] = [
     userId, leconId, etat.nbSignaux,
     m.positionMaxS, m.dernierePositionS, m.secondesVues, m.pourcentage, m.terminer, m.marque,
     m.journal.evenement, m.journal.secondes, m.journal.positionS,
     o.ip, o.appareil,
     m.vu, m.vuPar,
-  )
+  ]
+  const ecrites = profondeur
+    ? await prisma.$queryRawUnsafe<LigneProgression[]>(SQL_APPLIQUER_SIGNAL_PROFONDEUR, ...parametres, m.profondeurMax ?? 0)
+    : await prisma.$queryRawUnsafe<LigneProgression[]>(SQL_APPLIQUER_SIGNAL, ...parametres)
   if (!ecrites[0]) return { issue: 'course' }
   return { issue: 'ok', credit: issue.credit, progression: progressionDeLigne(ecrites[0]) }
 }

@@ -20,7 +20,11 @@ import { validerAction, executerAction, RefusAction, paramsPourLog } from '@/lib
 
 // 120 s comme /api/cockpit/liveclub/acces : une carte « acces broker » peut
 // porter 50 adresses, chacune avec Stripe, la base et Resend.
-export const maxDuration = 120
+// (05/11, LOT 2 des gestes du cockpit, Brice : « que l'agent puisse faire
+// depuis Telegram les gestes du cockpit ») 300 s : la carte d'enquete en
+// ligne (proposer_enquete_fonds) dure une a trois minutes, comme
+// /api/cockpit/enquete (300 s) ; la route Telegram de l'agent a deja 300 s.
+export const maxDuration = 300
 
 export function OPTIONS(req: NextRequest) {
   return corsPreflight(req)

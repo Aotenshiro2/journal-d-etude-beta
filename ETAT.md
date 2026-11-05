@@ -1,9 +1,13 @@
 # ETAT du journal d etudes
 
+## 05/11/2026 : charge sur Supabase, suite (lot de l'Orchestrateur, regle de Brice « recharger a l'action »)
+- Accueil : plus aucun router.refresh() automatique (ni minuterie, ni focus) ; bouton « Actualiser mes notes » en bas de la barre de droite (NoteMapCanvas, ActionBarre.enCours de CanvasToolbar) ; Actualiser met aussi a jour les cartes deja posees (memeNote), une carte dont la note est supprimee ailleurs est retiree de l'affichage.
+- Academie, lecons ecrites : credit envoye au depart de la lecon, en arriere-plan et a la fermeture (plus d'envoi periodique), borne par le temps ecoule et un plafond de 2 h (PLAFOND_TEXTE_S) ; « lue » = profondeur >= 90 % (colonne academie_progression.profondeur_max, migration 20261105233000 appliquee le 05/11) ou texte_fin, ET temps actif >= 30 % d'une lecture a 200 mots/min (plancher 30 s). Videos inchangees.
+
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
-## TRADES : IMPORT DANS LE CARNET, MES TRADES, FICHE, TUTORIEL (05/11/2026, branche trades-carnet-journal, commite NON pousse ; aucune migration)
+## TRADES : IMPORT DANS LE CARNET, MES TRADES, FICHE, TUTORIEL (05/11/2026, EN LIGNE sur GO de Brice ; aucune migration ; Carnet 1.8.13 envoye au Store)
 
 - Decide par Brice le 05/11 (suite des retours de Flow du 02/11). Briefs : D:\6_Societe\Pilotage\BRIEF-TRADES-J1-JOURNAL.md et
   BRIEF-TRADES-J2-JOURNAL.md ; labos LABO-MES-TRADES-V1.html et V2.html (meme dossier). Choix : vues 4, curseur 2, fiche 1,
@@ -22,6 +26,143 @@ reste dans TODO.md.
 - Verifier : verifier-doublons-compte, -liens-multiples, -synthese-trades, -mes-trades (+ imports-trades, documents).
 - A pousser AVANT la publication du Carnet 1.8.13, qui appelle ces routes. Pas verifie contre la vraie base : essai reel
   apres la mise en ligne (import par le Carnet, Lier, fiche).
+## INDICATEUR D'ALEX (05/11/2026, EN LIGNE ; migration 20261105250000 appliquee le 05/11)
+
+- Brice, 05/11 : « je veux que Alex ait acces aux @ telegram des membres du liveclub pour son indicateur de trading
+  [...] il n'a pas de moyen de verifier facilement si un membre s'est desinscrit ». Option choisie : le MEMBRE donne son
+  pseudo TradingView au bot des membres (son clic vaut accord), le bot l'ecrit a Alex dans LEUR conversation, le pseudo
+  est garde chez nous (fiche membre du cockpit), et l'assistant IA d'Alex a une porte MCP a lui.
+- Parcours (bot-membre.ts, indicateur.ts, indicateur-pur.ts) : bouton « Indicateur d'Alex » (m:indic, menu, menu d'un
+  acces offert, conseil d'accueil) ou texte libre (outil indicateur_alex de l'agent : il oriente vers la MEME etape, sans
+  texte du modele, refuse sous prudence). Droit relu en direct (droitLiveClub, la regle du groupe) : non-membre = reponse
+  courte, rien de garde ; inconnu = « reessaie ». Etape = cockpit_liveclub_conversations.action_en_attente (types
+  indicateur_pseudo puis indicateur, nonce, 30 min), lue AVANT l'equipe et l'IA dans traiterMessagePrive ; une phrase
+  garde le parcours habituel, un mot courant fait redemander, « annule » ferme. Pseudo STRICT (lettres, chiffres, . - _,
+  3 a 40, @ de tete retire, aucun lien ni texte libre), puis la CARTE « Ton prenom (..), ton @ (..) et ton pseudo
+  TradingView (..) partent chez Alex, qui gere l'indicateur. Je les envoie ? » [Oui, envoie a Alex ic:] [Laisser tomber
+  ix:]. Clic : droit relu, demande notee sous verrou (meme pseudo = rien, autre = pseudo change), message a Alex tout de
+  suite.
+- Trace : cockpit_liveclub_indicateur (une ligne par demande, une ouverte par compte Telegram, pseudo_transmis = ce
+  qu'Alex a, envoi_reserve_le pose AVANT l'envoi, statut a_transmettre | transmise | partie, depart_le,
+  prevenu_depart_le), lecture allowlist, RLS forcee, aucune ecriture navigateur. cockpit_liveclub_relais.indicateur (Alex
+  par la migration, nom = 'Alex') + actif : le destinataire, relu a chaque envoi, jamais en dur.
+- Messages a Alex (HTML, bot des membres) : presentation une fois en tete du premier ; « Indicateur : nouvelle demande »
+  (prenom, @ ou lien de profil, pseudo, date) ; « pseudo change » ; « X (@x) a quitte le Live Club : retire l'acces de
+  <pseudo> a l'indicateur. » Chacun finit par une ligne machine « #indicateur demande|changement|depart tv=.. [ancien=..]
+  tg=@..|id:.. prenom=".." le=AAAA-MM-JJ ». Refus Telegram : reservation liberee, le passage reessaie, sans doublon.
+- Passage (tache u, apres les conseils, avant Metricgram) : (1) demandes en attente, droit relu juste avant, envoi ;
+  (2) droit des demandes ouvertes, 50 au plus, comptes sortis par CE passage d'abord, puis absents du groupe, puis les
+  plus anciennement relus (pas avant 20 h), non = depart ; (3) departs a dire a Alex. Budget 200 s. Synthese
+  `indicateur` (etat ok | coupe | table_absente | panne | sans_destinataire). LIVECLUB_INDICATEUR=0 coupe les messages a
+  Alex et la tache. Le bouton note aussi le depart si le droit est tombe.
+- MCP de l'assistant d'Alex : POST /api/mcp-alex/<amcp_...> (route publique du middleware, masquee pour Sentry), portee
+  alex_indicateur seule (empreinte « mcp-alex-indicateur: »), 30 appels/min, journal cockpit_tab_acces (route
+  mcp-alex/<outil>), 404 neutre sans le bon secret, 503 sans la migration. Outils en lecture seule : aide,
+  membres_indicateur (depuis facultatif), departs_indicateur (depuis, defaut 30 jours, un an au plus). 1 000 / 500
+  lignes au plus. Jamais l'identifiant Telegram, un email ni un paiement.
+- Cle : scripts/creer-cle-alex-mcp.mjs (modele de creer-cle-tache-mcp.mjs, --essai d'abord), ecrit l'URL dans
+  /mnt/d/6_Societe/Pilotage/Data-Performance/credentials.local/alex-indicateur-mcp.local.json, jamais affichee. PAS LANCE.
+- Cockpit (workspace) : AccesTab portee alex_indicateur (bloc a l'Accueil, is_cockpit_perso seulement, « Couper la cle »),
+  le bloc de ChatGPT ecarte mcp-alex ; fiche membre : RubriqueIndicateur (pseudo, demandee le, transmise le, depart, Alex
+  prevenu), lue a l'ouverture, aucune minuterie.
+- Faire connaitre : conseil d'accueil J+5 « indicateur » (bouton sous le conseil) ; annonce aux membres actuels =
+  texteAnnonceIndicateur(jour de l'annonce) dans indicateur-pur.ts, delai +21 jours, NON envoyee (Brice valide).
+- Verifs : scripts/verifier-indicateur-alex.mjs (17 blocs) ; tsc journal et cockpit ; eslint des fichiers touches ;
+  -liveclub, -relais-accueil, -tips-accueil (calendrier mis a jour), -accueil-groupe, -securite-bots, -mcp-tache, -mcp-gpt,
+  -tab-repondre, -reconnaissance, -pause-depot, -effacement, -parrainage, -diffusion-equipe, -agent-outils-cockpit,
+  -attente-equipe, -pieces-support, -suivi-lots, -depot-perdu, -reouverture-impaye : ok. Aucune base ecrite, aucun envoi,
+  aucune eval, SQL non joue (table absente en prod).
+- MISE EN LIGNE, dans l'ordre : (1) migration 20261105250000 (elle reprend la portee tache_mcp : 20261101200000, toujours
+  NON appliquee en prod au 05/11, ne doit plus passer APRES elle, sinon elle retire alex_indicateur) ; (2) push du journal ;
+  (3) deploiement du cockpit ; (4) node scripts/creer-cle-alex-mcp.mjs --essai puis sans --essai, et l'URL du coffre a
+  Alex ; (5) Brice valide l'annonce et la poste.
+- Limites : l'effacement d'une personne (cockpit_effacer) ne connait pas encore cette table (membre_id passe a nul, la
+  ligne reste) ; un depart se voit au plus tard en 2 a 3 jours pour un membre encore dans le groupe (rotation de 50) ; une
+  pause d'abonnement ou un impaye de plus de 5 jours = depart (la regle du groupe), le membre refait sa demande a son retour.
+
+## AGENT AOK : LES GESTES DU COCKPIT DEPUIS TELEGRAM, LOT 2 (05/11/2026, EN LIGNE ; aucune migration)
+
+- Brice, 05/11 : « que l'agent puisse faire depuis Telegram les gestes du cockpit ». LOT 2, sur le modele du LOT 1 (memes
+  fichiers, memes branchements : les huit types entrent dans TYPES_GESTES_COCKPIT, donc dans validerAction, resumeAction,
+  paramsPourLog et executerAction sans toucher stripe-actions.ts). Huit cartes, communes a Telegram et a la fenetre du cockpit.
+- Charges (Revenus > Charges et marge, cockpit_charges) : proposer_charge_fixe, ajouter | modifier (seulement ce qui change,
+  « aucun » vide un champ) | retirer (retire_le, jamais de delete). Regles de l'ecran (au >= du, unique = sa date, l'equivalent
+  en euros tombe en EUR) ; a_confirmer vrai par defaut (defaut de la table). Carte : outil, montant et periodicite, payeur,
+  depuis quand, poids dans la marge (coutMensuel de l'ecran, « a convertir », « montant inconnu »), doublon qui court deja.
+  Modifier et retirer : empreinte de la ligne (maj_le compris) comparee au clic sous verrou.
+- Abonnements IA (Depense IA, cockpit_depenses_ia_fixes) : proposer_abonnement_ia, ajouter (debut = 1er du mois par defaut,
+  comme l'ecran) | arreter (fin = aujourd'hui par defaut, comme le bouton) | retirer (saisie fausse). Pas de « modifier » :
+  la table n'ouvre que fin, retire_le, retire_par (un prix = arreter puis ajouter). Carte : prix, poids mensuel en euros
+  (USD a 0,92 comme l'ecran), mois ou il cesse de compter.
+- Objectif d'une publication Instagram (cockpit_social_objectifs, upsert) : proposer_objectif_publication. Carte : date, type,
+  debut de legende (en caracteres clavier), objectif d'avant, phrase de lecture de la grille de l'ecran (verifiee contre
+  InstagramLecture.tsx quand le depot est la ; alignee sur 1535dc7). L'objectif lu est compare au clic. Pas une story.
+- Le fonds (Les personnes), reserve a cockpit_allowlist.acces_fonds, verifie a la carte (compte qui parle) ET au clic
+  (compte qui confirme) : proposer_note_fonds (personne_id, ou sujet libre ; texte entier dans la carte, 3 000 caracteres
+  au plus, caracteres invisibles retires ; ecrit_par pose), proposer_decision_fonds (acceptee | refusee | proposee, 20 au
+  plus d'une meme personne ; decide_par ET decide_le poses : le trigger ne pose decide_le que pour authenticated ; la carte
+  montre la valeur et le DOMAINE de la source, jamais l'adresse), proposer_enquete_fonds (PAYANTE : la carte dit le cout
+  MESURE des 20 dernieres enquetes dans AiUsage, poste enquete, ou « pas encore de mesure » ; bouton « Lancer l'enquete
+  (payant) » ; sans ANTHROPIC_API_KEY_COCKPIT, carte sans bouton). Le coeur de POST /api/cockpit/enquete est sorti dans
+  src/lib/fonds-enquete.ts (preparerEnquete, menerEnquete), la route garde ses reponses (401, 403, 400, 404, 502, 200).
+  La phrase du clic ne reprend ni le resume ni les homonymes du modele (texte venu du web) : des chiffres seulement.
+- Relais d'accueil (cockpit_liveclub_relais.actif) : proposer_relais_accueil, couper | rallumer. coupe_par pose par un
+  second update (le trigger le remet a auth.uid(), nul cote serveur). Carte : ce qu'il ne recoit plus, ses boutons
+  « C'est fait » (ne marchent plus coupe), membres transmis en attente. Rien n'est envoye au relais.
+- Adresse secondaire d'un membre (cockpit_membre_emails) : proposer_retrait_adresse, delete seulement principal = false et
+  la fiche lue par la carte. Carte : le membre, l'adresse, la principale qui reste, les autres, ce que ca change (droits lus
+  par adresse, compte du site qui la porte verifiee), la collecte qui peut la remettre.
+- Fichiers : agent-gestes-cockpit-pur.ts (sections F a K), agent-gestes-cockpit.ts (controlerLot2, executerLot2, colonnes
+  d'acteur en tete), fonds-enquete.ts (nouveau), api/cockpit/enquete/route.ts, api/cockpit/agent/action/route.ts
+  (maxDuration 120 -> 300 : une enquete dure une a trois minutes), agent-cockpit.ts (8 outils, TYPE_PAR_OUTIL, prompt :
+  « quinze pour les gestes du cockpit » et six lignes dans « LES GESTES DU COCKPIT, D'ICI »), agent-cockpit-pur.ts.
+- Verifs : scripts/verifier-agent-outils-cockpit.mjs (27 blocs, dont 10 du LOT 2) ; tsc ; eslint des fichiers touches ;
+  -securite-bots, -agent-equipe, -fil-traite, -diffusion-equipe, -reponse-membre, -annulation-abonnement, -adresse-contact,
+  -pause-depot, -effacement, -depot-perdu, -suivi-lots, -academie --hors-ligne, -gestes-academie --hors-ligne,
+  -repartition, -liveclub, -tab-repondre, -relais-accueil, -reconnaissance : ok. verifier-parrainage ECHOUE sans lien
+  avec ce lot : sa ligne 768 attend select('intervenant,lives') dans apps/cockpit/src/views/revenus/DetailMois.tsx, que
+  3ca122d (autre conversation, 05/11 18:37) a passe en select('*'). Aucune base, aucun envoi, aucune eval.
+- Limites : un abonnement IA ne se modifie pas (la table ne l'ouvre pas) ; rattacher une adresse n'est pas outille (seul
+  le retrait l'etait dans le brief) ; deux enquetes simultanees sur la meme personne ne sont pas bloquees (comme le
+  bouton). Mise en ligne : push du journal seul, aucune migration ; la table cockpit_social_objectifs
+  (20261105200000) doit etre en base pour l'objectif (sinon refus clair).
+
+## AGENT AOK : LES GESTES DU COCKPIT DEPUIS TELEGRAM, LOT 1 (05/11/2026, EN LIGNE ; aucune migration)
+
+- Brice, 05/11 : « que l'agent puisse faire depuis Telegram les gestes du cockpit ». LOT 1 seulement (un lot 2 suivra).
+  Sept cartes (communes a Telegram et a la fenetre du cockpit, revalidees au clic par validerAction) et un geste sans carte.
+- Academie : proposer_acces_academie (email, offre = slug, fin incluse, raison obligatoire ; carte : la personne, l'offre et ce
+  qu'elle ouvre, la fin, compte verifie ou non) et proposer_retrait_acces_academie (acces_id, raison ; carte : source, dates,
+  « un achat n'est pas rembourse »). Meme ecriture que POST /api/cockpit/academie : le coeur de la route est sorti dans
+  src/lib/academie/gestes-cockpit.ts (route inchangee dans ses reponses), pose_par / retire_par = 'agent:<uuid>'.
+- Rangement : proposer_rangement_academie (deplacer_lecons, deplacer_section, deplacer_module, statut publie|brouillon,
+  creer_section), reserve aux admins du site (profiles.role, comme /api/academie/arbre, verifie a la carte ET au clic). La carte
+  nomme par le titre, dit ou ca va, « VISIBLE AUX ELEVES » pour publier, les lecons non publiables et les slugs renommes ; une
+  empreinte des elements nommes est comparee au clic sous le verrou de l'arbre (catalogue change = refus). executerGeste avec
+  par = uuid du compte (academie_editions), cache du catalogue vide.
+- Acces aux apps : proposer_acces_mentorat (accorder | retirer, email de connexion, note). Coeur de /api/cockpit/mentorat sorti
+  dans src/lib/mentorat-acces.ts (route inchangee). MentoratGrant n'a pas de colonne d'auteur.
+- Clips : proposer_decision_clip (garder | ecarter | annuler, clips opus d'UN replay ; decide_le, decide_par, decide_label poses
+  a la main : le trigger ne les pose que si auth.uid() n'est pas nul), proposer_clips_replay (proposer_telegram avec le
+  message_id, ou proposer_youtube avec un lien youtube.com/youtu.be ; pose_par pose a la main, pose_label par le trigger ; aucun
+  credit) et proposer_envoi_opus (envoyer_opus, ref = replay_id comme le cockpit ; la carte dit la plage en m:ss et les credits
+  = max(10, minutes commencees), comme clips.py ; la plage est relue et comparee au clic). Bouton « Envoyer à Opus (payant) ».
+- « Deja traite » par la phrase : marquer_fil_traite, SANS carte (GESTES_SANS_CARTE, refuse sous prudence), seulement si le
+  message du titulaire de ce tour le dit (ordreFilTraiteExplicite : traite, regle, gere, repondu, c'est bon... ou un « oui » a
+  une proposition de l'agent). Le fil se resout comme pour rendre la main ; traiterFilHorsBot(fil, userId du tour) ;
+  phraseFilTraite rendue au modele.
+- Fichiers : src/lib/agent-gestes-cockpit-pur.ts (regles, cartes, phrases), src/lib/agent-gestes-cockpit.ts (controle et
+  execution), src/lib/academie/gestes-cockpit.ts, src/lib/mentorat-acces.ts, les deux routes, stripe-actions.ts (type, validation,
+  resume, log, execution), agent-cockpit.ts (outils, TYPE_PAR_OUTIL, prompt : section « LES GESTES DU COCKPIT, D'ICI » et
+  « DÉJÀ TRAITÉ »), agent-cockpit-pur.ts (boutons, descriptions), reponse-membre.ts (marquerFilTraitePourAgent).
+- Cockpit (apps/cockpit) non touche : la carte s'affiche et se confirme (resume + carte_id), l'entete LIBELLE_ACTION reste vide
+  pour ces types (deja le cas pour adresse_contact, pause_depot, code_parrainage). Acces.tsx affiche « posé par agent:<uuid> ».
+- Verifs : scripts/verifier-agent-outils-cockpit.mjs (17 blocs, hors ligne) ; tsc ; eslint des fichiers touches ;
+  verifier-securite-bots (regex GESTES_SANS_CARTE mise a jour), -agent-equipe, -fil-traite, -diffusion-equipe, -reponse-membre,
+  -annulation-abonnement, -adresse-contact, -pause-depot, -effacement, -depot-perdu, -suivi-lots, -academie --hors-ligne,
+  -parrainage, -repartition, -liveclub, -tab-repondre, -gestes-academie --hors-ligne : ok. Aucune base, aucun envoi, aucune eval.
+- Limite : une plage d'envoi autre que plage_proposee n'est pas possible d'ici (la demande envoyer_opus ne porte que le
+  replay_id ; clips.py prend toujours la plage proposee). Mise en ligne : push du journal seul, aucune migration.
 
 ## SUPPORT : BOUTON « DÉJÀ TRAITÉ » (05/11/2026, EN LIGNE ; aucune migration)
 

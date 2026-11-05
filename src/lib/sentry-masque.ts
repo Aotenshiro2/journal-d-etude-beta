@@ -4,10 +4,11 @@
 // secret partirait chez Sentry. Toute chaine de l'evenement (url, nom de
 // transaction, fil d'Ariane, spans) est masquee avant l'envoi.
 // Depuis le 01/11/2026, aussi le connecteur MCP du cockpit pour Tache
-// (/api/mcp-cockpit/<secret>).
+// (/api/mcp-cockpit/<secret>). Depuis le 05/11/2026, aussi le connecteur de
+// l'assistant d'Alex pour son indicateur (/api/mcp-alex/<secret>).
 // Sans import : charge par sentry.server.config.ts et sentry.edge.config.ts.
 
-const CHEMIN_MCP = /\/api\/(mcp|mcp-cockpit)\/[^/?#\s"'<>]+/g
+const CHEMIN_MCP = /\/api\/(mcp|mcp-cockpit|mcp-alex)\/[^/?#\s"'<>]+/g
 
 export function masquerSecretMcp<T>(valeur: T, profondeur = 0): T {
   if (typeof valeur === 'string') return valeur.replace(CHEMIN_MCP, '/api/$1/[masque]') as T
