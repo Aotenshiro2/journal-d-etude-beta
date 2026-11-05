@@ -3,6 +3,18 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
+## CANDIDATS DU CARNET POUR UNE POSITION, bouton « Lier » de Pilotage (05/11/2026, commite NON pousse ; aucune migration)
+
+- Brief : D:\6_Societe\Pilotage\BRIEF-LIER-CARNET-FICHE-COMPTE.md ; compte rendu : COMPTE-RENDU-LIER-CARNET.md (meme dossier).
+- GET /api/pilotage/trades/positions?candidats=<positionId> (meme route, meme jeton, meme CORS) : { positionId, candidats },
+  404 si la position n'est pas au membre. Candidat = SegmentCarnet (segmentRef, noteId, noteTitle, ordre, startedAt,
+  closedAt) + chevauche + lieA (positionId qui le porte deja, ou null). Ceux qui chevauchent d'abord, puis les segments a
+  moins de 24 h de la position, du plus proche au plus loin ; 8 au plus ; jamais celui que la position porte deja.
+  Regle pure : candidatsPourUnePosition (correspondances-carnet.ts) ; lecture : candidatsDuCarnet (trades-serveur.ts).
+  verifier-imports-trades.mjs : 31 blocs.
+- A POUSSER AVANT le deploiement de Pilotage qui porte le bouton : une route d'avant ignore ?candidats= et rend les
+  positions, et le panneau dirait « aucun trade du Carnet ».
+
 ## CHARGE SUR SUPABASE : ACCUEIL ET SUIVI DE L'ACADEMIE (05/11/2026, GO de Brice « Oui, lance-les » ; commite NON pousse ; aucune migration)
 
 - Cadre : PLAN-MIGRATION-SUPABASE-VPS.md, section 6 (D:\6_Societe\Pilotage\Data-Performance\).

@@ -1,6 +1,7 @@
 // Les trades qui restent (brief A, 29/10/2026) : les lecteurs (Tradovate,
 // TopstepX, CSV generique, Quantower refuse), le regroupement des executions
-// en positions, le rapprochement avec les segments du Carnet, le jugement du
+// en positions, le rapprochement avec les segments du Carnet (et les candidats
+// d'une position pour le bouton Lier de Pilotage, 05/11/2026), le jugement du
 // Carnet sur chaque position (brief A2, 30/10/2026), et le bornage des routes
 // au membre. Fonctions pures, aucune base, aucun reseau ; fixtures
 // SYNTHETIQUES (memes en-tetes que les vrais exports, valeurs inventees).
@@ -9,7 +10,7 @@ import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import { parserFichierTrades, proposerColonnes, separerNouveaux, lireColonnes } from '../src/lib/imports-trades.ts'
 import { liensAHarmoniser, planFusion, positionsRecalculees, regrouperEnPositions, totauxParCompte, vuePositions } from '../src/lib/positions.ts'
-import { candidatsPourPosition, proposerLiens, segmentsDesNotes, FENETRE_OUVERTE_MS } from '../src/lib/correspondances-carnet.ts'
+import { candidatsPourPosition, candidatsPourUnePosition, proposerLiens, segmentsDesNotes, CANDIDATS_MAX, FENETRE_OUVERTE_MS, PROCHE_MS } from '../src/lib/correspondances-carnet.ts'
 import { appliquerFuseau, decalageMs, fuseauDemande, instantDepuisHeureLocale, nomFuseau } from '../src/lib/fuseau.ts'
 import { ajouterCarnet, compterSegmentsNonLies, derniersJugements, emotionAuDepart } from '../src/lib/carnet-sur-positions.ts'
 
@@ -409,6 +410,45 @@ bloc('un candidat = lie ; deux = proposes ; aucun = rien ; deja pris = propose',
   assert.deepEqual(r.correspondances.map(c => c.positionId), ['b'])
 })
 
+// Le bouton « Lier » de la fiche de compte de Pilotage (05/11/2026) : les candidats d'UNE position.
+const quand = (jj, hm) => Date.parse(`2026-10-${jj}T${hm}:00.000Z`)
+const seg = (segmentRef, debut, fin, noteId = 'n1') => ({ segmentRef, noteId, noteTitle: `Note ${noteId}`, ordre: 1, startedAt: debut, closedAt: fin })
+
+bloc('candidats d une position : chevauchants d abord, puis a moins de 24 h du plus proche au plus loin, 8 au plus', () => {
+  const p = { positionId: 'P', entreLe: new Date(quand('05', '10:00')).toISOString(), sortiLe: new Date(quand('05', '10:30')).toISOString(), segmentRef: 'mien' }
+  const segments = [
+    seg('a', quand('05', '10:10'), quand('05', '10:20')),
+    seg('b', quand('05', '09:50'), quand('05', '10:05')),
+    seg('mien', quand('05', '10:00'), quand('05', '10:30')), // porte par cette position : absent
+    seg('porte-ici', quand('05', '10:15'), null), // lie a P par une autre execution : absent
+    seg('ailleurs', quand('05', '10:05'), quand('05', '10:25')), // chevauche, porte par Q
+    seg('avant2h', quand('05', '07:00'), quand('05', '08:00')), // 2 h avant
+    seg('apres30', quand('05', '11:00'), quand('05', '11:10')), // 30 min apres
+    seg('avant30', quand('05', '09:00'), quand('05', '09:30')), // 30 min avant : a egalite, le plus ancien d abord
+    seg('ouvert', quand('05', '15:00'), null), // encore ouvert : 4 h 30 apres la sortie
+    seg('veille', quand('04', '10:31'), quand('04', '10:40')), // 23 h 20 : coupe par le maximum
+    seg('lendemain', quand('06', '09:00'), quand('06', '09:05')), // 22 h 30
+    seg('loin', quand('04', '10:00'), quand('04', '10:00')), // 24 h tout juste : dehors
+    seg('a', quand('05', '10:10'), quand('05', '10:20'), 'n-copie'), // une note copiee : une seule fois
+  ]
+  const lies = new Map([['ailleurs', 'Q'], ['porte-ici', 'P'], ['mien', 'P']])
+  const c = candidatsPourUnePosition(p, segments, lies)
+  assert.equal(CANDIDATS_MAX, 8)
+  assert.equal(PROCHE_MS, 24 * 3600 * 1000)
+  assert.deepEqual(c.map(x => x.segmentRef), ['b', 'ailleurs', 'a', 'avant30', 'apres30', 'avant2h', 'ouvert', 'lendemain'])
+  assert.deepEqual(c.map(x => x.chevauche), [true, true, true, false, false, false, false, false])
+  assert.deepEqual(c.map(x => x.lieA), [null, 'Q', null, null, null, null, null, null])
+  assert.equal(c[2].noteId, 'n1') // la premiere occurrence gagne
+  assert.deepEqual(Object.keys(c[0]).sort(), ['chevauche', 'closedAt', 'lieA', 'noteId', 'noteTitle', 'ordre', 'segmentRef', 'startedAt'])
+  // Sans la coupe : la veille entre (23 h 20), 24 h tout juste reste dehors.
+  const sansCoupe = candidatsPourUnePosition(p, segments.filter(s => !['a', 'b', 'ailleurs'].includes(s.segmentRef)), lies)
+  assert.deepEqual(sansCoupe.map(x => x.segmentRef), ['avant30', 'apres30', 'avant2h', 'ouvert', 'lendemain', 'veille'])
+  // Sans sortie : la position vaut son instant d'entree ; sans lien, rien n'est retire ; aucun candidat = liste vide.
+  const ouverte = { positionId: 'R', entreLe: new Date(quand('05', '10:12')).toISOString(), sortiLe: null, segmentRef: null }
+  assert.deepEqual(candidatsPourUnePosition(ouverte, segments.slice(0, 3), new Map()).map(x => [x.segmentRef, x.chevauche]), [['mien', true], ['a', true], ['b', false]])
+  assert.deepEqual(candidatsPourUnePosition(ouverte, [], new Map()), [])
+})
+
 // ── Le Carnet sur les positions (brief A2) ──────────────────────────────────
 
 const instantDu = (jj, hm) => new Date(`2026-10-${jj}T${hm}:00.000Z`)
@@ -597,6 +637,9 @@ bloc('chaque acces a TradeImport est borne au userId ; CORS et jeton comme relev
   assert.match(lire(fichiers[2]), /const METHODES = 'GET, PATCH, OPTIONS'/)
   // Un segment deja lie ailleurs : 409 avec la position qui le porte ; un corps illisible ne vide jamais tout.
   assert.match(lire(fichiers[2]), /where: \{ userId, segmentRef, id: \{ notIn: ids \} \}[\s\S]{0,300}positionId: positionDe\(ailleurs\) \},\s*\{ status: 409/)
+  // Les candidats d'une position (05/11) : apres le jeton, 404 quand elle n'est pas au membre, lue par ses executions a lui.
+  assert.match(lire(fichiers[2]), /if \(!userId\) return[^\n]*\n[\s\S]{0,120}if \(p\.has\('candidats'\)\) \{[\s\S]{0,300}await candidatsDuCarnet\(userId, positionId\)\s*if \(!candidats\) return NextResponse\.json\(\{ error: 'Position introuvable\.' \}, \{ status: 404/)
+  assert.match(lire(fichiers[0]), /export async function candidatsDuCarnet\(userId: string, positionId: string\)[^\n]*\n\s*const executions = await executionsDuMembre\(userId, dansLesPositions\(\[positionId\]\)\)\s*const position = vuePositions\(executions\)\.find\(v => v\.positionId === positionId\)\s*if \(!position\) return null/)
   assert.match(lire(fichiers[1]), /if \(!body \|\| typeof body !== 'object' \|\| Array\.isArray\(body\)\) \{\s*return NextResponse\.json\(\{ error: "Requête illisible : rien n'a été retiré\." \}, \{ status: 400/)
   // L'insertion et la reecriture des positions partent dans une transaction.
   assert.match(lire(fichiers[0]), /prisma\.\$transaction\(\[\s*prisma\.tradeImport\.createMany\(\{[\s\S]*?skipDuplicates: true,\s*\}\),\s*\.\.\.ecrituresDesChangements/)
