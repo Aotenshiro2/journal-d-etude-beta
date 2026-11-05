@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getUserId } from '@/lib/api-auth'
 import { corsHeaders, corsPreflight } from '@/lib/support-cors'
+import { messagesPourLeMembre } from '@/lib/liveclub/support-pont-pur'
 
 /**
  * GET /api/support/thread — le dernier fil de support de l'utilisateur.
@@ -31,9 +32,12 @@ export async function GET(req: NextRequest) {
   })
   if (!thread) return NextResponse.json({ threadId: null, messages: [] }, { headers: cors })
 
+  // (05/11) Sans les lignes « [système] » (« Traité hors du bot par... ») :
+  // reservees a l'equipe, ces ecrans les montreraient comme une reponse de
+  // l'assistant (messagesPourLeMembre).
   return NextResponse.json({
     threadId: thread.id,
-    messages: Array.isArray(thread.messages) ? thread.messages : [],
+    messages: messagesPourLeMembre(thread.messages),
     escalatedAt: thread.escalatedAt,
   }, { headers: cors })
 }

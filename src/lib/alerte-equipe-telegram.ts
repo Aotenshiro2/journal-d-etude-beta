@@ -22,7 +22,7 @@
 
 import { prisma } from '@/lib/db'
 import {
-  LIBELLE_RENDRE_LA_MAIN, destinataireInfoEquipe, donneeRendreLaMain, entreesHistoriqueDemandeHumain, entreesHistoriqueInfoEquipe,
+  clavierAlerte, destinataireInfoEquipe, entreesHistoriqueDemandeHumain, entreesHistoriqueInfoEquipe,
   referenceFil, texteDemandeHumain,
   type DemandeHumain,
 } from '@/lib/alerte-equipe-telegram-pur'
@@ -86,7 +86,8 @@ export async function alerterEquipeTelegram(d: DemandeHumain, o: OptionsAlerte =
       }
       : d
     const texte = texteDemandeHumain({ ...sure, image: o.image ? (image ? 'jointe' : 'onglet') : null })
-    const bouton = o.rendreLaMain && d.fil ? donneeRendreLaMain(d.fil) : null
+    // (05/11) « Rendre la main au bot » (fils du bot, si demande) et « Déjà traité » (toute demande d'un humain).
+    const clavier = clavierAlerte(d, !!o.rendreLaMain)
     const reference = referenceFil(d.fil)
 
     const id = `humain-${Date.now().toString(36)}`
@@ -96,7 +97,7 @@ export async function alerterEquipeTelegram(d: DemandeHumain, o: OptionsAlerte =
       if (!Number.isSafeInteger(chat) || chat <= 0) continue
       if (!await tgCockpit('sendMessage', {
         chat_id: chat, text: texte.slice(0, 4000), link_preview_options: { is_disabled: true },
-        ...(bouton ? { reply_markup: { inline_keyboard: [[{ text: LIBELLE_RENDRE_LA_MAIN, callback_data: bouton }]] } } : {}),
+        ...(clavier.length > 0 ? { reply_markup: { inline_keyboard: clavier } } : {}),
       })) continue
       livres++
       if (image) {

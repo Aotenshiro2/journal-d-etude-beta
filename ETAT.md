@@ -3,6 +3,20 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
+## SUPPORT : BOUTON « DÉJÀ TRAITÉ » (05/11/2026, EN LIGNE ; aucune migration)
+
+- Brice : un fil regle hors du bot gardait « veut un humain » pour rien (« Rendre la main au bot » n'apparait que si
+  l'equipe a repondu depuis le cockpit, et seulement pour Telegram). Son choix : option 3, le bouton dans le fil du cockpit
+  ET sous l'alerte d'Agent AOK.
+- POST /api/cockpit/support/traite { threadId } (allowlist) et le bouton tr:<fil> sous l'alerte (apres le verrou du compte) :
+  traiterFilHorsBot (support-traite.ts) -> marquerFilTraite (support-pont.ts) : escalatedAt a null, ligne « [système] Traité
+  hors du bot par <prenom> : le membre a eu sa réponse. », ecriture conditionnee a l'attente (deux clics = une ligne).
+  La ligne rend la main au bot (periodeEquipe) et vaut « humain passé » au cockpit. Le reste de l'equipe le sait
+  (alerterEquipeTexte, support: true, sauf celui qui clique). Rien n'est dit au membre.
+- GET /api/support/thread ne rend plus les lignes « [système] » au membre (messagesPourLeMembre) : le site, la Masterclass
+  et l'extension affichent tout role inconnu comme une reponse de l'assistant.
+- scripts/verifier-fil-traite.mjs (10 blocs). Mise en ligne : journal d'abord, puis le cockpit.
+
 ## AGENT AOK : ADIL POUR LE SUPPORT (05/11/2026, EN LIGNE ; migration 20261105230000 appliquee avant le journal, 20261105230100 juste apres)
 
 - Brice, 05/11 : « que Adil puisse parler au bot Agent AOK pour faire la reponse support directement (il a tendance a ne pas

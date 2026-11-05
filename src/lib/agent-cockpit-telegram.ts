@@ -19,8 +19,8 @@ import type { RelanceEquipe } from '@/lib/agent-equipe'
 import { analyserTexte, combinerAnalyses, rendreVisible } from '@/lib/securite/injection-pur'
 import { alerterBriceSecurite } from '@/lib/securite/alerte'
 import { telechargerFichierTelegram, type BotTelegram } from '@/lib/liveclub/telegram'
-import { dernierePieceHistorique, phraseMainRendue, type PieceAgent } from '@/lib/liveclub/support-pont-pur'
-import { lireDonneeRendreLaMain, referenceFil } from '@/lib/alerte-equipe-telegram-pur'
+import { dernierePieceHistorique, phraseFilTraite, phraseMainRendue, type PieceAgent } from '@/lib/liveclub/support-pont-pur'
+import { lireDonneeFilTraite, lireDonneeRendreLaMain, referenceFil } from '@/lib/alerte-equipe-telegram-pur'
 import { lireBoutonCorrection } from '@/lib/liveclub/relais-pur'
 import { lireBoutonLots } from '@/lib/liveclub/lots-pur'
 import { lireBoutonProposition } from '@/lib/tab/repondre-pur'
@@ -321,6 +321,32 @@ async function rendreLaMainDepuisAlerte(cq: ClicAgentTelegram, chatId: number, f
   await ajouterReponseSeule(chatId, texte)
 }
 
+/**
+ * (05/11, Brice) Le bouton « Déjà traité » sous une alerte du support : la
+ * demande a ete reglee hors du bot. Le fil sort de l'attente (ligne au fil,
+ * au nom du compte qui clique), rien n'est dit au membre, le reste de
+ * l'equipe le sait (support-traite.ts). Memes verrous que les cartes (compte
+ * de l'equipe verifie par l'appelant). Les boutons de l'alerte sont retires,
+ * une ligne le dit dans Agent AOK et entre a l'historique.
+ */
+async function filTraiteDepuisAlerte(cq: ClicAgentTelegram, chatId: number, fil: string, compte: CompteCockpitTelegram): Promise<void> {
+  const { traiterFilHorsBot } = await import('@/lib/support-traite')
+  let texte: string
+  try {
+    texte = phraseFilTraite(await traiterFilHorsBot(fil, compte.user_id, '[cockpit/telegram] deja traite'), referenceFil(fil))
+  } catch (err) {
+    console.error('[cockpit/telegram] deja traite impossible', err instanceof Error ? err.message.split('\n')[0].slice(0, 160) : '?')
+    texte = 'Impossible de marquer cette demande traitée (base illisible) : réessaie dans un instant.'
+  }
+  await tgCockpit('answerCallbackQuery', { callback_query_id: cq.id })
+  const messageId = Number(cq.message?.message_id)
+  if (Number.isSafeInteger(messageId) && messageId > 0) {
+    await tgCockpit('editMessageReplyMarkup', { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [] } })
+  }
+  await tgCockpit('sendMessage', { chat_id: chatId, text: texte })
+  await ajouterReponseSeule(chatId, texte)
+}
+
 /** Un clic sur Confirmer / Annuler d'une carte d'Agent AOK. */
 export async function traiterClicAgentTelegram(cq: ClicAgentTelegram): Promise<void> {
   const chatId = Number(cq.message?.chat?.id)
@@ -374,6 +400,13 @@ export async function traiterClicAgentTelegram(cq: ClicAgentTelegram): Promise<v
   const filRendu = lireDonneeRendreLaMain(donnee)
   if (filRendu) {
     await rendreLaMainDepuisAlerte(cq, chatId, filRendu)
+    return
+  }
+
+  // (05/11) « Déjà traité », sous une alerte du support.
+  const filTraite = lireDonneeFilTraite(donnee)
+  if (filTraite) {
+    await filTraiteDepuisAlerte(cq, chatId, filTraite, compte)
     return
   }
 

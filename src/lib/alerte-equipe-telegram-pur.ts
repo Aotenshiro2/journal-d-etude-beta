@@ -49,6 +49,47 @@ export function lireDonneeRendreLaMain(data: unknown): string | null {
 
 export const LIBELLE_RENDRE_LA_MAIN = 'Rendre la main au bot'
 
+/** (05/11) Le bouton « Déjà traité » sous l'alerte : callback_data tr:<id du fil> (64 octets au plus). */
+export function donneeFilTraite(fil: string): string | null {
+  const id = typeof fil === 'string' ? fil.trim().toLowerCase() : ''
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id) ? `tr:${id}` : null
+}
+
+/** L'identifiant du fil d'un clic « Déjà traité », ou null. */
+export function lireDonneeFilTraite(data: unknown): string | null {
+  const m = typeof data === 'string' ? /^tr:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/.exec(data) : null
+  return m ? m[1] : null
+}
+
+export const LIBELLE_FIL_TRAITE = 'Déjà traité'
+
+/**
+ * (05/11, Brice) Les boutons sous une alerte du support, sur une ligne :
+ * « Rendre la main au bot » (fils du bot des membres, quand l'appelant le
+ * demande) et « Déjà traité » (toute DEMANDE d'un humain : bot, site,
+ * extension ; pas une reponse ni une annulation). Vide = pas de clavier.
+ */
+export function clavierAlerte(d: Pick<DemandeHumain, 'fil' | 'genre'>, rendreLaMain: boolean): { text: string; callback_data: string }[][] {
+  const fil = d.fil ?? ''
+  const ligne: { text: string; callback_data: string }[] = []
+  const rendre = rendreLaMain ? donneeRendreLaMain(fil) : null
+  if (rendre) ligne.push({ text: LIBELLE_RENDRE_LA_MAIN, callback_data: rendre })
+  const traite = (d.genre ?? 'demande') === 'demande' ? donneeFilTraite(fil) : null
+  if (traite) ligne.push({ text: LIBELLE_FIL_TRAITE, callback_data: traite })
+  return ligne.length > 0 ? [ligne] : []
+}
+
+/** (05/11) L'equipe au courant : une demande marquee traitee hors du bot, par un autre compte. */
+export function texteFilTraiteEquipe(r: { auteur: string | null; qui: string | null; fil: string | null }): string {
+  const auteur = r.auteur?.trim() || "Quelqu'un de l'équipe"
+  const deQui = r.qui?.trim() ? `de ${r.qui.trim()}` : "d'un membre"
+  const reference = referenceFil(r.fil)
+  return [
+    `${auteur} a marqué traitée la demande ${deQui} : réglée hors du bot, le membre a eu sa réponse. Inutile de lui répondre.`,
+    reference ? `Le fil est dans l'onglet Support (${reference}) : ${LIEN_SUPPORT}` : `Le fil est dans l'onglet Support : ${LIEN_SUPPORT}`,
+  ].join('\n')
+}
+
 /**
  * La reference courte d'un fil Support : « fil » suivi des 8 premiers
  * caracteres de son identifiant (un uuid). Lue par lireFil
@@ -118,7 +159,7 @@ export function entreesHistoriqueDemandeHumain(texte: string, id: string): { rol
 // d'Agent AOK, sauf celui qui vient d'agir (alerterEquipeTexte)
 // ---------------------------------------------------------------------------
 
-export const MARQUEUR_INFO_EQUIPE = "[système] Information de l'équipe (une réponse envoyée à un membre par un autre compte, ou un accueil du Live Club non publié), envoyée automatiquement par Agent AOK (ce n'est pas une question de l'équipe)."
+export const MARQUEUR_INFO_EQUIPE = "[système] Information de l'équipe (une réponse envoyée à un membre par un autre compte, une demande marquée traitée hors du bot, ou un accueil du Live Club non publié), envoyée automatiquement par Agent AOK (ce n'est pas une question de l'équipe)."
 
 export function entreesHistoriqueInfoEquipe(texte: string, id: string): { role: 'user' | 'assistant'; content: string; id: string }[] {
   return [
