@@ -61,6 +61,10 @@ import { jourParis } from './passage-regles'
 import { phraseAdresse } from './adresses-pur'
 import { idsDuDetail, libelleCourt, phraseCompteResume } from './comptes-telegram-pur'
 import { estRegleRebond, phraseRebondResume } from './rebonds-pur'
+import { lireFilleulsFenetre } from './parrainage'
+import { detailResumeParrainage } from './parrainage-pur'
+import { joursLivesReperes } from '@/lib/cartes-fin-de-mois'
+import { estDimanche, ligneLivesSemaine, lundiDe } from '@/lib/repartition/lives-reperes-pur'
 
 /** Une liste d'identifiants (texte) d'un champ de details, ou rien. */
 function idsListe(v: unknown): string[] {
@@ -614,6 +618,27 @@ export async function resumeDuMatin(o: { maintenant?: Date; apercu?: boolean } =
       }
       if (r.paye_le && r.paye_le > depuis && r.paye_le <= jusqua) {
         ajouter({ rubrique: 'acces', qui: `e${r.email}`, quand: r.paye_le.toISOString(), detail: detailTarifReserve({ tarif, paye: true }) }, p)
+      }
+    }
+
+    // (05/11) Les nouveaux filleuls (parrainage.ts) : une ligne chacun, la
+    // personne par son abonnement (nom, email, @ resolus plus bas), le code,
+    // le parrain, la commission et s'il a ete prevenu. Table absente : rien.
+    const filleuls = await facultatif('parrainages', erreurs, () => lireFilleulsFenetre(depuis, jusqua))
+    for (const x of filleuls) {
+      ajouter({ rubrique: 'parrainages', qui: `s${x.abonnementId}`, quand: x.creeLe, detail: detailResumeParrainage(x) })
+    }
+
+    // (05/11, GO de Brice) Chaque DIMANCHE : les lives reperes de chaque
+    // intervenant qui a un compte Telegram (liens Zoom dans Annonce), cette
+    // semaine (lundi a dimanche) et ce mois-ci. La carte de fin de mois suit.
+    if (estDimanche(jour)) {
+      const du = [lundiDe(jour), `${jour.slice(0, 7)}-01`].sort()[0]
+      const reperes = await facultatif('lives_reperes', erreurs, () => joursLivesReperes(du, jour))
+      const parIntervenant = new Map<string, string[]>()
+      for (const r of reperes) parIntervenant.set(r.intervenant, [...(parIntervenant.get(r.intervenant) ?? []), ...r.jours])
+      for (const [intervenant, jours] of parIntervenant) {
+        ajouter({ rubrique: 'lives', qui: `i${intervenant}`, quand: jusqua.toISOString(), detail: ligneLivesSemaine(jours, jour) }, { nom: intervenant })
       }
     }
 

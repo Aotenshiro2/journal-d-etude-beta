@@ -261,11 +261,11 @@ bloc('cablage : outil, prompt (dix-sept outils, regles), validation, controle, e
   assert.match(outil.slice(0, 3000), /enum: \['fin-de-periode', 'immediatement'\]/)
   assert.match(agent, /^\s+proposer_annulation_abonnement: 'annulation_abonnement',$/m)
   // Le prompt : ses outils d'action, nommes un par un (dix-huit depuis l'adresse de contact, 31/10 ;
-  // dix-neuf depuis la pause par depot broker, 01/11).
-  const phrase = /Tu disposes de dix-neuf outils d'action : ([^(]+) \(décrits plus bas\)/.exec(agent)
+  // dix-neuf depuis la pause par depot broker, 01/11 ; vingt et un depuis la declaration des parrainages, 05/11).
+  const phrase = /Tu disposes de vingt et un outils d'action : ([^(]+) \(décrits plus bas\)/.exec(agent)
   assert.ok(phrase, 'la phrase des outils d action')
   const noms = phrase[1].split(/, | et /).map(s => s.trim())
-  assert.equal(noms.length, 19, noms.join(' | '))
+  assert.equal(noms.length, 21, noms.join(' | '))
   assert.ok(noms.includes('proposer_annulation_abonnement'))
   assert.ok(!agent.includes('seize outils') && !agent.includes('dix-sept outils') && !agent.includes('dix-huit outils'))
   assert.match(agent, /ANNULER N'EST PAS REMBOURSER : aucune des deux cartes ne fait l'autre\. Si on te demande les deux, propose deux cartes, le remboursement d'abord/)

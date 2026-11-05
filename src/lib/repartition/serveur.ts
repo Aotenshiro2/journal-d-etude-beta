@@ -20,6 +20,7 @@ import { accorderAccesBroker, prerequisAccesBroker } from '@/lib/liveclub/acces'
 import { fermetureDepotPerduActive, nomBot } from '@/lib/liveclub/config'
 import { ALERTE_CARTE_PERTE_FERME, PHRASE_CARTE_PERTE_FERME, PHRASE_CARTE_REGULARISATION } from '@/lib/liveclub/lots-pur'
 import { relationAbsente, uuidDeActeur } from '@/lib/liveclub/pur'
+import { phraseParrainagesDuMois } from '@/lib/liveclub/parrainage'
 import {
   type Commission, type Cote, type Depense, type DepenseLives, type Litige, type NatureReglement, type Reglement, type Repartition,
   litigeDeLigne, phraseReglement,
@@ -455,7 +456,7 @@ async function chargerMois(mois: string, moisCourant: string) {
     }
   }
 
-  const repartition = repartitionDuMois({
+  const calcul = repartitionDuMois({
     mois,
     moisCourant,
     ventes,
@@ -467,6 +468,13 @@ async function chargerMois(mois: string, moisCourant: string) {
     horsStripe,
     nomsOffres,
   })
+  // (05/11) Les commissions de parrainage du Live Club (liveclub/parrainage.ts).
+  // Brice, 05/11 : « dans les dépenses du Live Club, comme pour les lives
+  // d'Adrien ». Elles entrent dans le calcul par leur DEPENSE, posee par la
+  // carte de fin de mois ; tant que la declaration n'est pas a jour, un
+  // avertissement le dit, puis il disparait. Tables absentes : rien.
+  const phraseParrains = await phraseParrainagesDuMois(mois, moisCourant)
+  const repartition = phraseParrains ? { ...calcul, avertissements: [...calcul.avertissements, phraseParrains] } : calcul
   const cotes = await cotesDesProduits([...new Set(intervenants.map(i => i.offre_id))])
     .catch(() => ({} as Record<string, Cote>))
   const tarifs = tarifsDuMois(intervenants, depenses, mois, nomsOffres, cotes)
@@ -758,14 +766,14 @@ function accordAvant(avant: TauxPartenaire | null, note: string | null, nature: 
   ].filter(Boolean).join(' ; ')
 }
 
-async function nomOffre(offreId: string): Promise<string | null> {
+export async function nomOffre(offreId: string): Promise<string | null> {
   const lignes = await prisma.$queryRaw<{ nom: string }[]>`
     select nom from public.cockpit_offres where offre_id = ${offreId}`
   return lignes[0]?.nom ?? null
 }
 
 /** Le cote d'un produit d'apres ses ventes Stripe (le compte le plus frequent), ou null. */
-async function coteDuProduit(offreId: string): Promise<Cote | null> {
+export async function coteDuProduit(offreId: string): Promise<Cote | null> {
   const lignes = await prisma.$queryRaw<{ compte: string }[]>`
     select compte from public.cockpit_paiements
     where offre_id = ${offreId} and compte is not null
@@ -809,7 +817,7 @@ async function tauxPourDepot(
 }
 
 /** Le solde d'un mois en une phrase, ou null si la lecture echoue (jamais bloquant). */
-async function phraseSoldeDuMois(mois: string): Promise<string | null> {
+export async function phraseSoldeDuMois(mois: string): Promise<string | null> {
   try {
     const { moisCourant } = contexteParis()
     const m = await chargerMois(mois, moisCourant)

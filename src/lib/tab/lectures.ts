@@ -257,6 +257,34 @@ export async function membres(c: Ctx): Promise<Sortie> {
     select tm.pseudo, tm.nom_affiche, ${H('tm.sorti_le')} as sorti_le, tm.par_qui, tm.statut_tg
     from public.cockpit_telegram_membres tm where not tm.present and ${JP('tm.sorti_le')} between $1::date and $2::date
     order by tm.sorti_le desc limit $3`, p.du, p.au, lim)
+  // (05/11) Le parrainage par code (liveclub/parrainage.ts) : les codes, leurs
+  // filleuls et ce qui reste a verser ; les filleuls de la periode. Tables
+  // absentes (migration 20261105120000) : to_regclass d'abord, une requete
+  // ratee casserait la transaction READ ONLY et tout /membres avec elle.
+  const [tablesParrainage] = await q<{ ok: boolean }>(tx, `select (to_regclass('public.cockpit_liveclub_parrains') is not null
+    and to_regclass('public.cockpit_liveclub_filleuls') is not null) as ok`)
+  let codesParrainage: Record<string, unknown>[] = []
+  let filleuls: Record<string, unknown>[] = []
+  if (tablesParrainage?.ok) {
+    codesParrainage = await q(tx, `
+      select p.code, p.parrain, p.parrain_pseudo as pseudo, p.actif, ${D('p.depuis')} as depuis,
+        p.taux_pct::float8 as taux_pct, p.taux_palier_pct::float8 as taux_palier_pct, p.palier,
+        (select count(*)::int from public.cockpit_liveclub_filleuls f where f.code_id = p.code_id and f.statut <> 'annulee') as filleuls,
+        (select coalesce(sum(f.commission), 0)::float8 from public.cockpit_liveclub_filleuls f where f.code_id = p.code_id and f.statut = 'a_verser') as a_verser
+      from public.cockpit_liveclub_parrains p order by p.pose_le limit $1`, lim)
+    filleuls = await q(tx, `
+      select f.prenom, ${NOM_MEMBRE} as nom, f.code, p.parrain, ${H('f.paye_le')} as paye_le,
+        f.montant_paye::float8 as montant_paye, f.devise, f.rang, f.taux_pct::float8 as taux_pct,
+        f.commission::float8 as commission, f.mois as a_verser_fin, f.statut, f.notification as parrain_prevenu
+      from public.cockpit_liveclub_filleuls f
+      join public.cockpit_liveclub_parrains p on p.code_id = f.code_id
+      left join public.cockpit_abonnements a on a.abonnement_id = 'stripe:' || f.abonnement_id
+      left join public.cockpit_membres_etat me on me.membre_id = a.membre_id
+      where ${JP('f.paye_le')} between $1::date and $2::date
+      order by f.paye_le desc limit $3`, p.du, p.au, lim)
+  } else {
+    notes.push('parrainages : migration 20261105120000 pas encore appliquée, rien à lire.')
+  }
 
   const parGeste = (g: string) => gestes.filter((x) => (x as { geste: string }).geste === g)
   return {
@@ -288,6 +316,11 @@ export async function membres(c: Ctx): Promise<Sortie> {
       pauses_par_depot_broker: {
         regle: "Abonnés dont l'abonnement est en pause grâce à un dépôt chez un broker partenaire : ils GARDENT le groupe par un accès broker qui court jusqu'à la reprise (acces_jusquau = reprise_le). Reprise automatique ce jour-là.",
         membres: pausesDepot,
+      },
+      parrainages: {
+        regle: "Parrainage par code (05/11) : un membre a un code promo Stripe à lui ; un nouveau qui s'abonne avec ce code paie 99 € par mois au lieu de 139, et le parrain touche 20 % du PREMIER paiement de son filleul (30 % à partir du 11e), à verser à la fin du mois. MELMOM2 (le code de Mélanie) n'est pas un parrainage. Le parrain est prévenu en privé par le bot avec le prénom du filleul ; parrain_prevenu : parrain (prévenu), equipe (phrase envoyée à Brice et Mélanie), a_reprendre, incertain.",
+        codes: codesParrainage,
+        filleuls_de_la_periode: filleuls,
       },
     },
     lignes: entrees.length + resiliations.length + gestes.length + arrivees.length + departs.length,

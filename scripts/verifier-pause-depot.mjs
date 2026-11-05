@@ -540,10 +540,10 @@ await bloc('Agent AOK : outil, consigne, controle, bouton, filet sansNomsOutils 
   assert.ok(noms.includes('proposer_pause_depot'))
   assert.equal(AP.sansNomsOutils('Je te propose proposer_pause_depot pour Arthur.'), "Je te propose la carte « dépôt broker d'un abonné : pause et accès » pour Arthur.")
   assert.equal(AP.sansNomsOutils('Voici la carte `proposer_pause_depot`.'), "Voici la carte « dépôt broker d'un abonné : pause et accès ».")
-  // Le prompt compte ses outils d'action : dix-neuf.
-  const phrase = /Tu disposes de dix-neuf outils d'action : ([^(]+) \(décrits plus bas\)/.exec(src)
+  // Le prompt compte ses outils d'action : vingt et un depuis la declaration des parrainages (05/11).
+  const phrase = /Tu disposes de vingt et un outils d'action : ([^(]+) \(décrits plus bas\)/.exec(src)
   assert.ok(phrase)
-  assert.equal(phrase[1].split(/, | et /).length, 19)
+  assert.equal(phrase[1].split(/, | et /).length, 21)
   assert.ok(phrase[1].includes('proposer_pause_depot'))
   // Validation, resume, execution, log.
   const stripe = lire('src/lib/stripe-actions.ts')

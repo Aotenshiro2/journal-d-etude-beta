@@ -74,6 +74,9 @@ const LIBELLES_BOUTON: Record<string, string> = {
   adresse_contact: "Changer l'adresse de contact",
   // (01/11) Le depot broker d'un abonne : les trois gestes en un clic (pause-depot-pur.ts).
   pause_depot: 'Pause + accès broker',
+  // (05/11) Le parrainage par code (liveclub/parrainage-pur.ts) : nouveau code, modification ou desactivation.
+  code_parrainage: 'Enregistrer le code de parrainage',
+  declaration_parrainage: 'Déclarer en dépense du Live Club',
   exemption: "Poser l'exemption",
   lien_paiement: 'Créer le lien de paiement',
   marquer_live_club: 'Marquer produit Live Club',
@@ -157,6 +160,8 @@ export const DESCRIPTIONS_OUTILS: Readonly<Record<string, string>> = {
   proposer_acces_broker: "la carte d'accès broker",
   proposer_adresse_contact_acces: "la carte d'adresse de contact",
   proposer_pause_depot: "la carte « dépôt broker d'un abonné : pause et accès »",
+  proposer_code_parrainage: 'la carte du code de parrainage',
+  proposer_parrainages_du_mois: 'la carte des commissions de parrainage du mois',
   proposer_exemption: "la carte d'accès offert",
   proposer_depot_broker: 'la carte de dépôt broker',
   proposer_commission_affiliation: "la carte de commission d'affiliation",
