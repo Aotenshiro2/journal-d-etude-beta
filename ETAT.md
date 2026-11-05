@@ -23,7 +23,6 @@ reste dans TODO.md.
 - A pousser AVANT la publication du Carnet 1.8.13, qui appelle ces routes. Pas verifie contre la vraie base : essai reel
   apres la mise en ligne (import par le Carnet, Lier, fiche).
 
-## COCKPIT : CONNEXION PAR LIEN AVEC TOUTE ADRESSE VERIFIEE (05/11/2026, NON commite ; migration 20261105220000 ECRITE, NON appliquee)
 ## SUPPORT : BOUTON « DÉJÀ TRAITÉ » (05/11/2026, EN LIGNE ; aucune migration)
 
 - Brice : un fil regle hors du bot gardait « veut un humain » pour rien (« Rendre la main au bot » n'apparait que si
