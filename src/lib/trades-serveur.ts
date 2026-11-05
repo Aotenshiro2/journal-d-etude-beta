@@ -15,9 +15,10 @@ import type { TradeNormalise } from '@/lib/imports-trades'
 import { liensAHarmoniser, positionDe, positionsRecalculees, vuePositions, type Execution, type VuePosition } from '@/lib/positions'
 import { proposerLiens, segmentsDesNotes, type SegmentCarnet } from '@/lib/correspondances-carnet'
 import { ajouterCarnet, compterSegmentsNonLies, type PeriodeCarnet } from '@/lib/carnet-sur-positions'
+import { clesConnues, recherchesDoublons } from '@/lib/doublons-compte'
 
 const CHAMPS_EXECUTION = {
-  id: true, compteId: true, symbole: true, direction: true, devise: true, entreLe: true, sortiLe: true,
+  id: true, compteId: true, compte: true, symbole: true, direction: true, devise: true, entreLe: true, sortiLe: true,
   quantite: true, pnl: true, frais: true, prixEntree: true, prixSortie: true, stopPrix: true,
   positionId: true, positionManuelle: true, segmentRef: true, fuseau: true,
 } satisfies Prisma.TradeImportSelect
@@ -31,6 +32,30 @@ export function executionsDuMembre(userId: string, filtre: Prisma.TradeImportWhe
 export const dansLesPositions = (ids: string[]): Prisma.TradeImportWhereInput => ({
   OR: [{ positionId: { in: ids } }, { id: { in: ids }, positionId: null }],
 })
+
+/**
+ * Les clés d'un import déjà en base (brief J1, 05/11/2026) : avec un compteId,
+ * le même document sur CE compte (clé sous ses deux formes, puis empreinte) ;
+ * sans, tous comptes confondus comme avant. Les filtres viennent de
+ * doublons-compte.ts (pur), le userId passe après : il ne se contourne pas.
+ * @param empreinte false pour l'écran /imports, qui ne cherchait que la clé.
+ */
+export async function clesDejaConnues(
+  userId: string,
+  compteId: string | null,
+  trades: TradeNormalise[],
+  { empreinte = true }: { empreinte?: boolean } = {},
+): Promise<Set<string>> {
+  if (trades.length === 0) return new Set()
+  const { parCle, parEntree } = recherchesDoublons(compteId, trades)
+  const [cle, entree] = await Promise.all([
+    prisma.tradeImport.findMany({ where: { ...parCle, userId }, select: { idExterne: true } }),
+    empreinte
+      ? prisma.tradeImport.findMany({ where: { ...parEntree, userId }, select: { idExterne: true, symbole: true, entreLe: true, quantite: true, pnl: true } })
+      : [],
+  ])
+  return clesConnues(trades, compteId, cle, entree)
+}
 
 /** Les segments du Carnet du membre (notes non supprimées). */
 export async function segmentsDuMembre(userId: string): Promise<SegmentCarnet[]> {
@@ -79,6 +104,9 @@ interface Changements { positions: Map<string, string>; liens: Map<string, strin
  */
 function regrouperEnMemoire(executions: Execution[], pasEnBase: Set<string>): Changements {
   const parId = new Map(executions.map(e => [e.id, e]))
+  // Les positions d'avant : un segment lié à plusieurs positions (copies) ne se perd
+  // qu'entre les morceaux d'une même position coupée (liensAHarmoniser, 05/11/2026).
+  const avant = new Map(executions.map(e => [e.id, positionDe(e)]))
   const cible = positionsRecalculees(executions)
   const positions = new Map<string, string>()
   for (const e of executions) {
@@ -88,7 +116,7 @@ function regrouperEnMemoire(executions: Execution[], pasEnBase: Set<string>): Ch
     if (!pasEnBase.has(e.id)) positions.set(e.id, p)
   }
   const liens = new Map<string, string | null>()
-  for (const [id, ref] of liensAHarmoniser(executions)) {
+  for (const [id, ref] of liensAHarmoniser(executions, avant)) {
     parId.get(id)!.segmentRef = ref
     if (!pasEnBase.has(id)) liens.set(id, ref)
   }
@@ -137,7 +165,7 @@ async function insererExecutions(userId: string, compteId: string | null, trades
   const symboles = [...new Set(trades.map(t => t.symbole))]
   const existantes = await executionsDuMembre(userId, { compteId, symbole: { in: symboles } })
   const neuves: Execution[] = trades.map(t => ({
-    id: randomUUID(), compteId, symbole: t.symbole, direction: t.direction, devise: t.devise,
+    id: randomUUID(), compteId, compte: t.compte, symbole: t.symbole, direction: t.direction, devise: t.devise,
     entreLe: t.entreLe, sortiLe: t.sortiLe, quantite: t.quantite, pnl: t.pnl, frais: t.frais,
     prixEntree: t.prixEntree, prixSortie: t.prixSortie, stopPrix: t.stopPrix ?? null,
     positionId: null, positionManuelle: false, segmentRef: null, fuseau: t.fuseau ?? null,

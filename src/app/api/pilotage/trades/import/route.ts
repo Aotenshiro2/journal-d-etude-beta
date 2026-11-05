@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/db'
 import { getUserId } from '@/lib/api-auth'
 import { corsHeaders, corsPreflight } from '@/lib/support-cors'
 import { lireColonnes, parserFichierTrades, separerNouveaux } from '@/lib/imports-trades'
 import { appliquerFuseau, fuseauDemande } from '@/lib/fuseau'
-import { confirmerImport, supprimerExecutions } from '@/lib/trades-serveur'
-import { connusParEmpreinte, lireTradesEnvoyes } from '@/lib/trades-envoyes'
+import { clesDejaConnues, confirmerImport, supprimerExecutions } from '@/lib/trades-serveur'
+import { lireTradesEnvoyes } from '@/lib/trades-envoyes'
+import { rangerSurCompte } from '@/lib/doublons-compte'
 
 // Un gros export (5 Mo) se lit, se dédoublonne et se regroupe en quelques
 // secondes : plus que les 10 s par défaut d'une fonction Vercel par prudence.
@@ -49,6 +49,13 @@ export const maxDuration = 60
  * l'empreinte (symbole, instant d'entrée, quantité, P&L) parmi les exécutions
  * de la même source : le CSV et le PDF d'un même rapport Performance (ids de
  * fills dans l'un, pas dans l'autre) donnent 0 nouveau dans les deux sens.
+ * Depuis le brief J1 (05/11/2026, copy trading) : un doublon = le même document
+ * sur le MÊME compte. Avec un compteId, la clé des sources qui ne disent pas le
+ * compte du broker le porte (« <idExterne>|compte:<compteId> », Quantower
+ * inchangé), et clé comme empreinte se cherchent sur ce compte seulement (une
+ * ligne d'avant, clé sans compte, s'y reconnaît encore) : le même trade sur
+ * deux comptes copiés est rangé deux fois. Sans compteId (aperçu) : tous
+ * comptes confondus, comme avant. Voir doublons-compte.ts.
  *
  * DELETE { compteId?, source? } : retire les exécutions du membre (fausse
  * manip, fichier de test). Sans filtre : toutes. Corps illisible : 400, rien
@@ -90,7 +97,8 @@ export async function POST(req: NextRequest) {
 
     const lu = envoyes ?? parserFichierTrades(csv, fichier ?? undefined, colonnes)
     const { format, erreurs, entetes, proposition } = lu
-    const trades = fuseau.fuseau ? appliquerFuseau(lu.trades, fuseau.fuseau) : lu.trades
+    // Les clés rangées sur le compte de l'import (J1) : le même trade sur un autre compte n'est pas un doublon.
+    const trades = rangerSurCompte(fuseau.fuseau ? appliquerFuseau(lu.trades, fuseau.fuseau) : lu.trades, compteId)
     const lecture = { format, erreurs, ...(entetes ? { entetes } : {}), ...(proposition ? { proposition } : {}) }
     if (trades.length === 0) {
       return NextResponse.json(
@@ -99,19 +107,11 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // Qui est déjà en base ? (clé de dédup, bornée à ce membre, tous comptes
-    // confondus : un trade n'appartient qu'à un compte)
-    const existants = await prisma.tradeImport.findMany({
-      where: { userId, source: trades[0].source, idExterne: { in: trades.map(t => t.idExterne) } },
-      select: { idExterne: true },
-    })
-    // Le même trade sous une autre clé de la même source (le CSV d'un rapport
-    // Performance porte les ids de fills, son PDF non) : reconnu à l'empreinte.
-    const memeEntree = await prisma.tradeImport.findMany({
-      where: { userId, source: trades[0].source, entreLe: { in: [...new Set(trades.map(t => t.entreLe.getTime()))].map(ms => new Date(ms)) } },
-      select: { idExterne: true, symbole: true, entreLe: true, quantite: true, pnl: true },
-    })
-    const connus = connusParEmpreinte(trades, new Set(existants.map(e => e.idExterne)), memeEntree)
+    // Qui est déjà en base ? La clé de dédup, puis le même trade sous une autre
+    // clé de la même source (le CSV d'un rapport Performance porte les ids de
+    // fills, son PDF non) reconnu à l'empreinte ; sur le compte de l'import
+    // quand il est donné (J1), tous comptes confondus sinon. Borné au membre.
+    const connus = await clesDejaConnues(userId, compteId, trades)
     const nouveaux = separerNouveaux(trades, connus)
     const comptes = { ...lecture, lus: trades.length, nouveaux: nouveaux.length, dejaConnus: trades.length - nouveaux.length }
 

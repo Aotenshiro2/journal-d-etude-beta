@@ -12,6 +12,8 @@
 export interface Execution {
   id: string
   compteId: string | null
+  /** Le numéro de compte du broker lu dans le fichier (TradeImport.compte), null s'il n'y est pas. */
+  compte: string | null
   symbole: string
   direction: string | null
   devise: string
@@ -33,6 +35,9 @@ export interface Execution {
 export interface VuePosition {
   positionId: string
   compteId: string | null
+  /** Le numéro de compte du broker (05/11/2026, copy trading) : le premier non nul des
+   *  exécutions, dans l'ordre d'entrée ; null quand le fichier ne le dit pas. */
+  compte: string | null
   symbole: string
   direction: string | null
   devise: string
@@ -108,15 +113,25 @@ export function positionsRecalculees(
 }
 
 /**
- * Un lien au Carnet vaut pour toute la position, et un segment ne se lie qu'à
- * UNE position. L'exécution qui rejoint une position liée hérite du lien ; si
- * deux positions liées se rejoignent, le lien de la plus ancienne exécution
- * l'emporte ; si une position liée se coupe en deux (séparation, exécution
- * retirée), la partie la plus ancienne garde le lien et les autres le perdent.
+ * Un lien au Carnet vaut pour toute la position. L'exécution qui rejoint une
+ * position liée hérite du lien ; si deux positions liées se rejoignent, le lien
+ * de la plus ancienne exécution l'emporte ; si une position liée se coupe en
+ * deux (séparation, exécution retirée), la partie la plus ancienne garde le
+ * lien et les autres le perdent.
  * id -> segmentRef (null = délier), pour les exécutions qui changent.
+ *
+ * Liens multiples (05/11/2026, copy trading) : un segment peut porter plusieurs
+ * positions (les copies d'un trade sur plusieurs comptes), une position porte
+ * au plus un segment. Pour ne pas défaire ces copies, on donne `avant` (id ->
+ * position d'avant le recalcul) : deux positions qui portent le même segment ne
+ * se le disputent que si elles viennent d'une MÊME position d'avant (une
+ * coupure). Sans `avant`, toutes les exécutions données sont vues comme une
+ * seule position d'avant : un segment n'y garde qu'une position (la règle
+ * d'avant le multi-lien, celle de « séparer », qui ne voit qu'une position).
  */
 export function liensAHarmoniser(
   executions: Pick<Execution, 'id' | 'entreLe' | 'positionId' | 'segmentRef'>[],
+  avant?: ReadonlyMap<string, string>,
 ): Map<string, string | null> {
   const groupes = new Map<string, typeof executions>()
   for (const e of executions) {
@@ -124,19 +139,54 @@ export function liensAHarmoniser(
     if (g) g.push(e)
     else groupes.set(positionDe(e), [e])
   }
+  const origine = (e: Pick<Execution, 'id' | 'positionId'>) => (avant ? avant.get(e.id) ?? e.id : '*')
   const positions = [...groupes.values()].map(g => {
     const triees = [...g].sort(parEntree)
-    return { g, premiere: triees[0], ref: triees.find(e => e.segmentRef)?.segmentRef ?? null }
+    return { g, premiere: triees[0], ref: triees.find(e => e.segmentRef)?.segmentRef ?? null, origines: new Set(g.map(origine)) }
   }).sort((a, b) => parEntree(a.premiere, b.premiere))
 
-  const pris = new Set<string>()
+  // Pour chaque segment, les positions d'avant dont une partie le garde déjà.
+  const pris = new Map<string, Set<string>>()
   const resultat = new Map<string, string | null>()
   for (const p of positions) {
-    const ref = p.ref && !pris.has(p.ref) ? p.ref : null
-    if (ref) pris.add(ref)
+    const deja = p.ref ? pris.get(p.ref) : undefined
+    const ref = p.ref && !(deja && [...p.origines].some(o => deja.has(o))) ? p.ref : null
+    if (ref) {
+      const s = pris.get(ref) ?? new Set<string>()
+      for (const o of p.origines) s.add(o)
+      pris.set(ref, s)
+    }
     for (const e of p.g) if ((e.segmentRef ?? null) !== ref) resultat.set(e.id, ref)
   }
   return resultat
+}
+
+/** Le lien de plusieurs positions à un même segment (PATCH `lier` avec `positionIds`, 05/11/2026). */
+export type PlanLien =
+  | { ids: string[] }
+  | { erreur: string; status: 400 | 404 | 409; positionId?: string }
+
+/**
+ * Lier des positions (les copies d'un trade sur plusieurs comptes) à UN segment
+ * du Carnet, en plus de celles qui le portent déjà. Rend les exécutions à
+ * écrire, ou le refus : position introuvable (404), position déjà liée à un
+ * AUTRE segment (409 avec son positionId : la délier d'abord). Une position
+ * déjà liée à ce segment n'est pas une erreur.
+ * @param executions les exécutions de ces positions (dansLesPositions).
+ */
+export function planLienMultiple(
+  executions: Pick<Execution, 'id' | 'positionId' | 'segmentRef'>[],
+  positionIds: string[],
+  segmentRef: string,
+): PlanLien {
+  const trouvees = new Set(executions.map(positionDe))
+  const absente = positionIds.find(id => !trouvees.has(id))
+  if (absente !== undefined) return { erreur: 'Position introuvable.', status: 404, positionId: absente }
+  const autre = executions.find(e => e.segmentRef && e.segmentRef !== segmentRef)
+  if (autre) {
+    return { erreur: "Cette position est déjà liée à un autre trade du Carnet : délie-la d'abord.", status: 409, positionId: positionDe(autre) }
+  }
+  return { ids: executions.map(e => e.id) }
 }
 
 /** Moyenne pondérée par la quantité, sur les exécutions qui ont ce prix. */
@@ -169,6 +219,7 @@ export function vuePositions(executions: Execution[]): VuePosition[] {
     vues.push({
       positionId,
       compteId: premiere.compteId,
+      compte: g.find(e => e.compte)?.compte ?? null,
       symbole: premiere.symbole,
       direction: premiere.direction,
       devise: premiere.devise,

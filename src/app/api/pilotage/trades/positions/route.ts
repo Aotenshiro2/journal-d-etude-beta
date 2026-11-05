@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getUserId } from '@/lib/api-auth'
 import { corsHeaders, corsPreflight } from '@/lib/support-cors'
-import { liensAHarmoniser, planFusion, positionDe, totauxParCompte, vuePositions } from '@/lib/positions'
+import { liensAHarmoniser, planFusion, planLienMultiple, positionDe, totauxParCompte, vuePositions } from '@/lib/positions'
 import { dansLesPositions, executionsDuMembre, positionsAvecCarnet, segmentsDuMembre } from '@/lib/trades-serveur'
 
 /**
@@ -37,6 +37,19 @@ import { dansLesPositions, executionsDuMembre, positionsAvecCarnet, segmentsDuMe
  *   position : 409 avec son `positionId` ;
  * - { action: 'delier', positionId }.
  * Fusionner et séparer posent positionManuelle : un réimport ne les défait pas.
+ *
+ * Liens multiples (brief J1, 05/11/2026, copy trading) : un segment du Carnet
+ * peut porter plusieurs positions (les copies d'un trade sur plusieurs
+ * comptes), une position porte au plus un segment. Chaque position porte aussi
+ * `compte` (numéro de compte du broker lu dans le fichier, null sinon).
+ * - { action: 'lier', positionIds: [positionId...], segmentRef, ajouter: true } :
+ *   lie TOUTES ces positions (1 à 100) au segment, en plus de celles qui le
+ *   portent déjà ; segment introuvable ou position introuvable : 404 ; l'une
+ *   d'elles déjà liée à un AUTRE segment : 409 `{ error, positionId }`, rien
+ *   n'est écrit. Rend toutes les positions qui portent le segment après coup.
+ * - { action: 'delier', segmentRef } (sans positionId) : délie toutes les
+ *   positions de ce segment ; rend ces positions (vide s'il n'y en avait pas).
+ * Les formes à positionId seul ci-dessus ne changent pas (Pilotage, Carnet 1.8.12).
  */
 
 const METHODES = 'GET, PATCH, OPTIONS'
@@ -113,6 +126,35 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ positions: vuePositions(apres) }, { headers: cors })
     }
 
+    // Liens multiples (J1, 05/11/2026) : les copies d'un trade sur plusieurs comptes.
+    if (action === 'lier' && Array.isArray(body.positionIds)) {
+      const positionIds = [...new Set(body.positionIds.map(texte).filter(Boolean) as string[])]
+      if (positionIds.length < 1 || positionIds.length > 100) return refus('Il faut entre 1 et 100 positions à lier (positionIds).', 400)
+      const segmentRef = texte(body.segmentRef)
+      if (!segmentRef) return refus('segmentRef manquant.', 400)
+      const segments = await segmentsDuMembre(userId)
+      if (!segments.some(s => s.segmentRef === segmentRef)) return refus('Segment du Carnet introuvable.', 404)
+      const executions = await executionsDuMembre(userId, dansLesPositions(positionIds))
+      const plan = planLienMultiple(executions, positionIds, segmentRef)
+      if ('erreur' in plan) {
+        return NextResponse.json(
+          plan.status === 409 ? { error: plan.erreur, positionId: plan.positionId } : { error: plan.erreur },
+          { status: plan.status, headers: cors },
+        )
+      }
+      await prisma.tradeImport.updateMany({ where: { userId, id: { in: plan.ids } }, data: { segmentRef } })
+      const apres = await executionsDuMembre(userId, { segmentRef })
+      return NextResponse.json({ positions: vuePositions(apres) }, { headers: cors })
+    }
+    const segmentADelier = action === 'delier' && !texte(body.positionId) ? texte(body.segmentRef) : null
+    if (segmentADelier) {
+      const segmentRef = segmentADelier
+      const portees = await executionsDuMembre(userId, { segmentRef })
+      if (portees.length > 0) await prisma.tradeImport.updateMany({ where: { userId, segmentRef }, data: { segmentRef: null } })
+      const apres = portees.length > 0 ? await executionsDuMembre(userId, { id: { in: portees.map(e => e.id) } }) : []
+      return NextResponse.json({ positions: vuePositions(apres) }, { headers: cors })
+    }
+
     const positionId = texte(body.positionId)
     if (!positionId) return refus('positionId manquant.', 400)
     if (!['separer', 'lier', 'delier'].includes(action)) return refus('Action inconnue : fusionner, separer, lier ou delier.', 400)
@@ -121,7 +163,8 @@ export async function PATCH(req: NextRequest) {
     const ids = executions.map(e => e.id)
 
     if (action === 'separer') {
-      // Un segment ne se lie qu'à une position : la plus ancienne exécution le garde.
+      // Une position coupée ne garde son lien que sur une partie : la plus ancienne exécution
+      // (liensAHarmoniser sans `avant` : ses copies sur d'autres comptes ne sont pas touchées).
       for (const e of executions) e.positionId = e.id
       const liens = liensAHarmoniser(executions)
       await prisma.$transaction(executions.map(e => prisma.tradeImport.updateMany({

@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db'
 import { getUserId } from '@/lib/api-auth'
 import { parserFichierTrades, separerNouveaux } from '@/lib/imports-trades'
 import { appliquerFuseau, fuseauDemande } from '@/lib/fuseau'
-import { confirmerImport, supprimerExecutions } from '@/lib/trades-serveur'
+import { clesDejaConnues, confirmerImport, supprimerExecutions } from '@/lib/trades-serveur'
 
 /**
  * POST /api/imports-trades — analyse puis import d'un fichier de trades.
@@ -40,12 +40,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ format, lus: 0, nouveaux: 0, dejaConnus: 0, importes: 0, erreurs, apercu: [] })
     }
 
-    // Qui est déjà en base ? (clé de dédup, bornée à ce membre)
-    const existants = await prisma.tradeImport.findMany({
-      where: { userId, source: trades[0].source, idExterne: { in: trades.map(t => t.idExterne) } },
-      select: { idExterne: true },
-    })
-    const connus = new Set(existants.map(e => e.idExterne))
+    // Qui est déjà en base ? (clé de dédup, bornée à ce membre, tous comptes
+    // confondus comme avant ; une clé rangée sur un compte de Pilotage depuis
+    // le brief J1 du 05/11/2026 s'y reconnaît par sa forme de base)
+    const connus = await clesDejaConnues(userId, null, trades, { empreinte: false })
     const nouveaux = separerNouveaux(trades, connus)
 
     let importes = 0

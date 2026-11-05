@@ -9,6 +9,11 @@
 // un historique : le dernier fait foi, comme dans le brief du mentor),
 // l'émotion au départ de la séance (le warmup de la note) et le cooldown du
 // segment. Rien ne part vers l'IA : c'est l'écran du membre.
+// Liens multiples (05/11/2026, copy trading) : les copies d'un trade sur
+// plusieurs comptes portent le même segment, donc chacune le même `carnet` ; un
+// segment porté par une seule d'entre elles n'est pas « non lié ». Compter les
+// jugements une fois par trade du Carnet (et non par copie) est l'affaire du
+// lecteur (Pilotage, « tous mes comptes ») : rien n'est dédoublé ici.
 //
 // Les segments se lisent comme dans correspondances-carnet.ts (id non vide,
 // startedAt fini, ordre = place dans Note.trades à partir de 1) : un segment
@@ -73,7 +78,7 @@ const estIssue = (o: unknown): o is IssueCarnet => o === 'gain' || o === 'perte'
 const estGrade = (g: unknown): g is string => typeof g === 'string' && /^[ABCD]/.test(g)
 
 /** Un segment lu dans Note.trades, avec ce qu'il faut de sa note. */
-interface SegmentLu {
+export interface SegmentLu {
   segmentRef: string
   noteId: string
   noteTitle: string | null
@@ -83,8 +88,11 @@ interface SegmentLu {
   warmups: unknown
 }
 
-/** Les segments des notes, par segmentRef (le premier lu l'emporte : un id est unique entre les notes). */
-function segmentsLus(notes: NoteDuCarnet[]): Map<string, SegmentLu> {
+/**
+ * Les segments des notes, par segmentRef (le premier lu l'emporte : un id est
+ * unique entre les notes). Exporté pour la synthèse des trades (05/11/2026).
+ */
+export function segmentsLus(notes: NoteDuCarnet[]): Map<string, SegmentLu> {
   const segments = new Map<string, SegmentLu>()
   for (const n of notes) {
     if (!Array.isArray(n.trades)) continue

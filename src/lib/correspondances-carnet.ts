@@ -9,7 +9,12 @@
 // La position importée est la vérité (montants, heures, compte) ; le segment
 // du Carnet, matière d'apprentissage, s'y greffe par `segmentRef` = son id,
 // un UUID unique entre toutes les notes (jamais un numéro d'ordre : « Trade 1 »
-// n'est qu'un affichage). Un segment se lie à UNE position au plus.
+// n'est qu'un affichage). Une position porte un segment au plus ; depuis le
+// 05/11/2026 (copy trading), un segment peut porter plusieurs positions, liées
+// à la main (PATCH `lier` avec `positionIds`). Le rapprochement automatique ne
+// change pas : un segment déjà porté par une position n'est pas « libre », la
+// copie importée ensuite sur un autre compte est PROPOSÉE (correspondances),
+// jamais liée d'office.
 // Une position et un segment se correspondent quand leurs fenêtres se
 // chevauchent ; un segment encore ouvert vaut quatre heures. Un seul candidat,
 // libre : on lie. Plusieurs, ou un candidat déjà pris : l'écran choisira.

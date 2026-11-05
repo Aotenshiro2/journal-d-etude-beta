@@ -268,7 +268,7 @@ bloc('lireColonnes : seuls les champs connus, en chaines', () => {
 
 const t = hm => new Date(`2026-10-05T${hm}:00.000Z`)
 const ex = (id, entree, sortie, extra = {}) => ({
-  id, compteId: 'c1', symbole: 'NQZ6', direction: 'long', devise: 'USD', entreLe: t(entree), sortiLe: sortie ? t(sortie) : null,
+  id, compteId: 'c1', compte: null, symbole: 'NQZ6', direction: 'long', devise: 'USD', entreLe: t(entree), sortiLe: sortie ? t(sortie) : null,
   quantite: 1, pnl: 10, frais: null, prixEntree: null, prixSortie: null, stopPrix: null,
   positionId: null, positionManuelle: false, segmentRef: null, fuseau: null, ...extra,
 })
@@ -309,7 +309,7 @@ bloc('vue agregee : sommes, moyennes ponderees, premier stop, bornes', () => {
     ex('b', '10:05', '10:20', { positionId: 'a', quantite: 3, prixEntree: 104, prixSortie: 112, pnl: 0.2, stopPrix: 95, segmentRef: 's1' }),
   ])
   assert.deepEqual(v, {
-    positionId: 'a', compteId: 'c1', symbole: 'NQZ6', direction: 'long', devise: 'USD',
+    positionId: 'a', compteId: 'c1', compte: null, symbole: 'NQZ6', direction: 'long', devise: 'USD',
     entreLe: '2026-10-05T10:00:00.000Z', sortiLe: '2026-10-05T10:20:00.000Z',
     quantite: 4, pnl: 0.3, frais: 1.2, prixEntree: 103, prixSortie: 111.5, stopPrix: 95,
     executions: 2, segmentRef: 's1', fuseau: '+02:00', manuelle: false,
@@ -591,7 +591,8 @@ bloc('chaque acces a TradeImport est borne au userId ; CORS et jeton comme relev
   for (const f of [fichiers[1], fichiers[3]]) {
     const source = lire(f)
     assert.match(source, /const fuseau = fuseauDemande\(body\.fuseau\)\s*if \('erreur' in fuseau\) return NextResponse\.json\(\{ error: fuseau\.erreur \}, \{ status: 400/)
-    assert.match(source, /const trades = fuseau\.fuseau \? appliquerFuseau\(lu\.trades, fuseau\.fuseau\) : lu\.trades/)
+    // Pilotage range ensuite les cles sur le compte de l'import (brief J1, 05/11/2026, verifier-doublons-compte.mjs).
+    assert.match(source, /const trades = (rangerSurCompte\()?fuseau\.fuseau \? appliquerFuseau\(lu\.trades, fuseau\.fuseau\) : lu\.trades/)
   }
   assert.match(lire(fichiers[1]), /const METHODES = 'POST, DELETE, OPTIONS'/)
   assert.match(lire(fichiers[2]), /const METHODES = 'GET, PATCH, OPTIONS'/)

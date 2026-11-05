@@ -689,11 +689,14 @@ bloc('controle statique : chaque acces a DocumentPilotage et au coffre est borne
   const imp = lire('../src/app/api/pilotage/trades/import/route.ts')
   assert.match(imp, /const envoyes = Array\.isArray\(body\.trades\) \? lireTradesEnvoyes\(body\.trades, body\.source\) : null/)
   assert.match(imp, /const lu = envoyes \?\? parserFichierTrades\(csv, fichier \?\? undefined, colonnes\)/)
-  assert.match(imp, /where: \{ userId, source: trades\[0\]\.source, idExterne: \{ in: trades\.map\(t => t\.idExterne\) \} \}/)
   assert.match(imp, /const resultat = await confirmerImport\(userId, compteId, nouveaux, fichier\)/)
-  // Puis l'empreinte, parmi les executions du membre de la meme source.
-  assert.match(imp, /prisma\.tradeImport\.findMany\(\{\s*where: \{ userId, source: trades\[0\]\.source, entreLe: \{ in: /)
-  assert.match(imp, /const connus = connusParEmpreinte\(trades, new Set\(existants\.map\(e => e\.idExterne\)\), memeEntree\)\s*const nouveaux = separerNouveaux\(trades, connus\)/)
+  // La cle, puis l'empreinte, parmi les executions du membre de la meme source, sur le compte de
+  // l'import (brief J1, 05/11/2026 : doublons-compte.ts, scripts/verifier-doublons-compte.mjs).
+  assert.match(imp, /const connus = await clesDejaConnues\(userId, compteId, trades\)\s*const nouveaux = separerNouveaux\(trades, connus\)/)
+  const serveurTrades = lire('../src/lib/trades-serveur.ts')
+  assert.match(serveurTrades, /prisma\.tradeImport\.findMany\(\{ where: \{ \.\.\.parCle, userId \}, select: \{ idExterne: true \} \}\)/)
+  assert.match(serveurTrades, /prisma\.tradeImport\.findMany\(\{ where: \{ \.\.\.parEntree, userId \}, select: \{ idExterne: true, symbole: true, entreLe: true, quantite: true, pnl: true \} \}\)/)
+  assert.match(lire('../src/lib/doublons-compte.ts'), /return connusParEmpreinte\(trades, connues, parEntree\.map/)
   // La lecture rendue : compte rapproche et empreintes.
   assert.match(route, /const fin = finaliserLecture\(lecture, comptes\)/)
   assert.match(route, /lecture: fin\.lecture,\s*empreintes: fin\.empreintes,/)
