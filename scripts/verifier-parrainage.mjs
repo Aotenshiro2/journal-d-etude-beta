@@ -765,7 +765,9 @@ await bloc('cartes de fin de mois : proposees par le passage, jamais ecrites san
   assert.match(lire('src/lib/repartition/serveur.ts'), /await phraseParrainagesDuMois\(mois, moisCourant\)/)
   // L'ecran du cockpit : les lives reperes a cote de « Aucun live déclaré ».
   const cockpit = lire('../cockpit/src/views/revenus/DetailMois.tsx')
-  assert.match(cockpit, /supabase\.from\('cockpit_lives_detectes'\)\.select\('intervenant,lives'\)\.eq\('mois', d\.mois\)/)
+  // (05/11) select('*') : la colonne annonces (migration 20261105240000) donne la liste des lives, une ligne chacun.
+  assert.match(cockpit, /supabase\.from\('cockpit_lives_detectes'\)\.select\('\*'\)\.eq\('mois', d\.mois\)/)
+  assert.match(cockpit, /Lives repérés dans Annonce/)
   assert.match(cockpit, /vide=\{`Aucun live déclaré ce mois-ci\.\$\{phraseReperes\}`\}/)
 })
 

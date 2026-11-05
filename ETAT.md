@@ -7,7 +7,7 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
-## AGENT AOK : LES GESTES DU COCKPIT DEPUIS TELEGRAM, LOT 2 (05/11/2026, commite NON pousse ; aucune migration)
+## AGENT AOK : LES GESTES DU COCKPIT DEPUIS TELEGRAM, LOT 2 (05/11/2026, EN LIGNE ; aucune migration)
 
 - Brice, 05/11 : « que l'agent puisse faire depuis Telegram les gestes du cockpit ». LOT 2, sur le modele du LOT 1 (memes
   fichiers, memes branchements : les huit types entrent dans TYPES_GESTES_COCKPIT, donc dans validerAction, resumeAction,
@@ -54,7 +54,7 @@ reste dans TODO.md.
   bouton). Mise en ligne : push du journal seul, aucune migration ; la table cockpit_social_objectifs
   (20261105200000) doit etre en base pour l'objectif (sinon refus clair).
 
-## AGENT AOK : LES GESTES DU COCKPIT DEPUIS TELEGRAM, LOT 1 (05/11/2026, commite NON pousse ; aucune migration)
+## AGENT AOK : LES GESTES DU COCKPIT DEPUIS TELEGRAM, LOT 1 (05/11/2026, EN LIGNE ; aucune migration)
 
 - Brice, 05/11 : « que l'agent puisse faire depuis Telegram les gestes du cockpit ». LOT 1 seulement (un lot 2 suivra).
   Sept cartes (communes a Telegram et a la fenetre du cockpit, revalidees au clic par validerAction) et un geste sans carte.
