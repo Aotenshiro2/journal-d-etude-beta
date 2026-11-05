@@ -1,9 +1,9 @@
 'use client'
 
-// La vignette d'une étape du guide (brief J2) : public/guide/etape-N.png. Tant
-// que l'image manque (les vraies captures viendront après le labo 2), un cadre
-// neutre affiche sa légende, comme dans le labo. L'image ne se montre qu'une
-// fois chargée : jamais d'icône d'image cassée.
+// La vignette d'une étape du guide (brief J2) : public/guide/etape-N.webp, une
+// vraie capture en 16/9, dans le carrousel comme dans le pas à pas. Si l'image
+// manque, un cadre neutre affiche sa légende, comme dans le labo. L'image ne se
+// montre qu'une fois chargée : jamais d'icône d'image cassée.
 
 import { useEffect, useRef, useState } from 'react'
 import type { EtapeGuide } from '@/lib/guide-journal'
@@ -20,7 +20,7 @@ export default function Vignette({ etape, grande = false }: { etape: EtapeGuide;
 
   return (
     <div
-      className={`relative w-full overflow-hidden rounded-[10px] ${grande ? 'aspect-video' : 'aspect-[4/3]'}`}
+      className={'relative aspect-video w-full overflow-hidden rounded-[10px]'}
       style={{ background: 'var(--case-bg)', border: chargee ? '1px solid var(--node-border)' : '1px dashed var(--float-border)' }}
     >
       {!chargee && (

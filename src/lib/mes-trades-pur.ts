@@ -143,7 +143,7 @@ export function pastilleDuTrade(t: TradeSynthese): Pastille {
   if (e.sortie === null) return { texte: 'Encore ouvert', ton: 'neutre' }
   const stop = t.prevu.stop ?? e.stop
   switch (t.ecarts?.sortieVsPlan ?? null) {
-    case 'tp': return { texte: 'Comme prévu', ton: 'vert' }
+    case 'tp': return { texte: 'Au TP, comme prévu', ton: 'vert' }
     case 'avant-tp': return { texte: 'Sortie avant ton TP', ton: 'ambre' }
     case 'stop': return { texte: 'Au stop, comme prévu', ton: 'neutre' }
     case 'avant-stop': return { texte: 'Coupé avant ton stop', ton: 'ambre' }
@@ -372,13 +372,34 @@ export function qualite(ecartBrut: number, sens: Sens | null, cote: 'entree' | '
   return oriente > 0 ? 'mieux' : 'moins'
 }
 
+/**
+ * UNE convention pour tous les écarts de prix montrés (celle du panneau « Ton
+ * entrée » et de la synthèse) : orientés par le sens du trade, POSITIF = moins
+ * bien. « +0,25 pt, moins bien que prévu », « -0,50 pt, mieux que prévu »,
+ * « au prix prévu » ; `suite` remplace les mots quand le plan dit mieux
+ * (« +9 pts, avant ton TP »).
+ */
+export function texteEcart(oriente: number, suite?: string | null): string {
+  const x = Math.round(oriente * 1e8) / 1e8
+  if (x === 0) return 'au prix prévu'
+  return `${formatPtsSigne(x)}, ${suite ?? (x > 0 ? 'moins bien que prévu' : 'mieux que prévu')}`
+}
+
+/** Une sortie (ou un stop) face au prévu, orientée : (prévu - effectif) x sens, positif = moins bien. */
+export const orienteSortie = (prevu: number, effectif: number, sens: Sens | null): number | null =>
+  sens === null ? null : Math.round((prevu - effectif) * sens * 1e8) / 1e8
+
+const majuscule = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
+
 export interface LigneSortie {
   libelle: string
   /** La sortie prévue en face ; `estStop` quand le trade est sorti au stop ou au-delà. */
   prevu: (SortiePrevue & { estStop?: boolean }) | null
   effectif: number | null
-  /** Effectif - prévu, en prix (le signe brut ; la qualité dit si c'est mieux). */
+  /** Effectif - prévu, en prix (le signe brut). */
   ecart: number | null
+  /** L'écart orienté par le sens, POSITIF = moins bien (la convention affichée, voir texteEcart). */
+  oriente: number | null
   qualite: Qualite | null
   /** L'écart tient dans un dixième du risque : rien à signaler. */
   proche: boolean
@@ -419,6 +440,7 @@ export function lignesDeSortie(t: TradeSynthese, sens: Sens | null): LigneSortie
     lignes.push({
       libelle: n === 1 ? 'Sortie' : `${ordinal(i + 1)} sortie`,
       prevu: p, effectif: f, ecart,
+      oriente: p && f !== null ? orienteSortie(p.prix, f, sens) : null,
       qualite: ecart === null ? null : qualite(ecart, sens, 'sortie'),
       proche,
       suite: derniere && ecart !== null && !proche && vs ? SUITE[vs] ?? null : null,
@@ -430,10 +452,9 @@ export function lignesDeSortie(t: TradeSynthese, sens: Sens | null): LigneSortie
 // -- Les quatre écarts de la fiche, en une ligne chacun -----------------------
 
 /**
- * L'entrée : « +0,25 pt, comme prévu » (à un dixième du risque ; le signe est
- * celui du prix, effectif moins prévu, comme dans le tableau du détail),
- * « 3 pts plus loin que prévu », « 1 pt mieux que prévu » (sans signe : les mots
- * disent le sens, long comme short).
+ * L'entrée, orientée comme le panneau « Ton entrée » (positif = moins bien,
+ * long payé plus cher ou short vendu plus bas) : « +0,25 pt, moins bien que
+ * prévu », « -0,50 pt, mieux que prévu », « Au prix prévu ».
  */
 export function texteEntree(t: TradeSynthese): string | null {
   const e = t.ecarts?.entree ?? null
@@ -443,10 +464,7 @@ export function texteEntree(t: TradeSynthese): string | null {
     if (faite !== null) return prevue === null ? `${formatPrix(faite)}, pas de prix prévu` : null
     return prevue !== null ? `${formatPrix(prevue)} prévu` : null
   }
-  const risque = t.ecarts?.risque ?? null
-  if (Math.abs(e) < 1e-9) return 'Pile à ton prix'
-  if (risque !== null && Math.abs(e) <= risque / 10 + 1e-9) return `${formatPtsSigne(faite - prevue)}, comme prévu`
-  return e > 0 ? `${formatPts(e)} plus loin que prévu` : `${formatPts(e)} mieux que prévu`
+  return majuscule(texteEcart(e))
 }
 
 /** La sortie, d'après sortieVsPlan et la dernière sortie du broker. */
@@ -556,6 +574,24 @@ export function geometrieCurseur(o: {
     deborde: fin < -1 ? { de: x, a: s } : null,
     val: Math.max(7, Math.min(93, x)),
   }
+}
+
+/**
+ * Pourquoi la piste du curseur est vide, en une courte légende sous les
+ * pointillés : un trade du broker sans note (« Pas de plan noté »), un plan sans
+ * stop ou sans TP. Sans sortie du broker, rien : la pastille dit déjà « Pas de
+ * trade du broker » (ou « Encore ouvert »).
+ */
+export function raisonPisteVide(o: {
+  entree: number | null; stop: number | null; tp: number | null; sorties: number[]; sansNote?: boolean
+}): string | null {
+  if (o.sansNote) return 'Pas de plan noté'
+  if (o.sorties.length === 0) return null
+  if (o.stop === null && o.tp === null) return 'Pas de stop ni de TP notés'
+  if (o.stop === null) return 'Pas de stop noté'
+  if (o.tp === null) return 'Pas de TP noté'
+  if (o.entree === null) return "Pas d'entrée notée"
+  return 'Plan incomplet'
 }
 
 // -- L'échelle des prix -------------------------------------------------------

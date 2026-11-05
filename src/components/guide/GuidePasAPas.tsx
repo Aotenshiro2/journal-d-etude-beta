@@ -60,7 +60,7 @@ export default function GuidePasAPas({ onRevoir }: { onRevoir: () => void }) {
           return (
             <li key={e.image} className="grid gap-3">
               {piste}
-              <div className="grid items-center gap-3.5 rounded-2xl p-3 min-[761px]:grid-cols-[150px_minmax(0,1fr)]" style={SURFACE}>
+              <div className="grid items-center gap-3.5 rounded-2xl p-3 min-[761px]:grid-cols-[200px_minmax(0,1fr)]" style={SURFACE}>
                 <div className="max-w-[260px] min-[761px]:max-w-none"><Vignette etape={e} /></div>
                 <div className="min-w-0">
                   <h3 className="flex items-center gap-2 text-sm font-semibold" style={{ color: 'var(--node-title)' }}>

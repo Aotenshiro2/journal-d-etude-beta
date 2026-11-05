@@ -8,7 +8,7 @@
 // node scripts/verifier-mes-trades.mjs
 process.env.TZ = 'Europe/Paris'
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import './resoudre-ts.mjs'
 
 const M = await import('../src/lib/mes-trades-pur.ts')
@@ -71,9 +71,9 @@ bloc('periode : Ce mois = le 1er a minuit local, 3 mois = le 1er d il y a deux m
 
 // -- Les pastilles et les elements -------------------------------------------
 
-bloc('pastilles : comme prevu, sortie avant ton TP, stop depasse de 2 pts, pas de trade du broker, pas de note', () => {
+bloc('pastilles (mots du labo 2) : au TP comme prevu, sortie avant ton TP, stop depasse de 2 pts, pas de trade du broker, pas de note', () => {
   assert.deepEqual(M.pastilleDuTrade(nqLong), { texte: 'Sortie avant ton TP', ton: 'ambre' })
-  assert.deepEqual(M.pastilleDuTrade(trade('seg-nq-short')), { texte: 'Comme prévu', ton: 'vert' })
+  assert.deepEqual(M.pastilleDuTrade(trade('seg-nq-short')), { texte: 'Au TP, comme prévu', ton: 'vert' })
   assert.deepEqual(M.pastilleDuTrade(trade('seg-es-stop')), { texte: 'Stop dépassé de 2 pts', ton: 'rouge' })
   assert.deepEqual(M.pastilleDuTrade(trade('seg-nq-sans')), { texte: 'Pas de trade du broker', ton: 'gris' })
   assert.deepEqual(M.pastilleDuTrade(trade('seg-mnq')), { texte: 'Sortie avant ton TP', ton: 'ambre' })
@@ -168,18 +168,18 @@ bloc('fiche : sorties prevues face aux sorties du broker d un compte (partiels, 
 })
 
 bloc('fiche : les quatre ecarts en une ligne (entree, sortie, taille, R) sur les cas du labo', () => {
-  assert.equal(M.texteEntree(nqLong), '+0,25 pt, comme prévu')
+  assert.equal(M.texteEntree(nqLong), '+0,25 pt, moins bien que prévu')
   assert.equal(M.texteSortie(nqLong), '2e partiel 9 pts avant ton TP')
   assert.equal(M.texteTaille(nqLong), '2, comme prévu (x3 comptes)')
   assert.equal(M.texteR(nqLong), '2,0 prévu, 1,3 réel')
   assert.equal(M.texteSortie(trade('seg-es-stop')), 'Stop dépassé de 2 pts')
-  assert.equal(M.texteEntree(trade('seg-oct')), 'Pile à ton prix')
+  assert.equal(M.texteEntree(trade('seg-oct')), 'Au prix prévu')
   assert.equal(M.texteSortie(trade('seg-oct')), 'Au TP, comme prévu')
-  assert.equal(M.texteEntree(trade('seg-mnq')), '1 pt plus loin que prévu') // sans stop : pas de tolerance
+  assert.equal(M.texteEntree(trade('seg-mnq')), '+1 pt, moins bien que prévu')
   assert.equal(M.texteSortie(trade('seg-mnq')), '12 pts avant ton TP')
   assert.equal(M.texteR(trade('seg-mnq')), 'Pas de stop, donc pas de R')
-  // Short : le signe est celui du prix (vendu 0,25 sous le prevu), comme dans le tableau du detail.
-  assert.equal(M.texteEntree(trade('seg-nq-short')), '-0,25 pt, comme prévu')
+  // Short vendu 0,25 sous le prevu : moins bien, donc positif (convention du panneau « Ton entree »).
+  assert.equal(M.texteEntree(trade('seg-nq-short')), '+0,25 pt, moins bien que prévu')
   assert.equal(M.texteSortie(trade('seg-nq-sans')), 'Pas de trade du broker')
   assert.equal(M.texteEntree(trade('seg-nq-sans')), '20 210 prévu')
   assert.equal(M.texteTaille(trade('seg-nq-sans')), '1 prévu')
@@ -198,13 +198,49 @@ bloc('echelle : domaine avec marge, libelles etales sans chevauchement et dans l
   assert.deepEqual(M.etalerLibelles([50, 200], 14, 0, 400), [50, 200]) // assez ecartes : rien ne bouge
 })
 
+bloc('UNE convention de signe (celle du panneau Ton entree) : positif = moins bien, entree et sorties, long comme short ; piste vide expliquee', () => {
+  assert.equal(M.texteEcart(0.25), '+0,25 pt, moins bien que prévu')
+  assert.equal(M.texteEcart(-0.5), '-0,50 pt, mieux que prévu')
+  assert.equal(M.texteEcart(0), 'au prix prévu')
+  assert.equal(M.texteEcart(9, 'avant ton TP'), '+9 pts, avant ton TP')
+  // Sorties : (prevu - effectif) x sens. Le long vend 0,50 au-dessus de sa 1re sortie (mieux), 9 pts sous le TP (moins bien).
+  assert.deepEqual(M.lignesDeSortie(nqLong, 1).map(x => x.oriente), [-0.5, 9])
+  // Le short rachete 1 pt au-dessus de son TP : moins bien, positif.
+  assert.deepEqual(M.lignesDeSortie(trade('seg-nq-short'), -1).map(x => x.oriente), [1])
+  // Stop depasse : 2 pts sous le stop d'un long, moins bien.
+  assert.deepEqual(M.lignesDeSortie(trade('seg-es-stop'), 1).map(x => [x.oriente, M.texteEcart(x.oriente, x.suite)]), [[2, '+2 pts, stop dépassé']])
+  assert.equal(M.orienteSortie(20160, 20159.75, -1), -0.25)
+  // Le tableau et la tuile Entree passent par texteEcart (plus de signe brut).
+  const detail = lire('../src/components/mes-trades/FicheDetail.tsx')
+  assert.match(detail, /const \[chiffre, \.\.\.mots\] = texteEcart\(oriente, suite\)\.split\(', '\)/)
+  assert.ok(!/formatPtsSigne/.test(detail), 'signe brut dans le tableau')
+  // Piste vide : pourquoi, sauf quand la pastille le dit deja.
+  const piste = t => M.raisonPisteVide({ entree: t.prevu.entree ?? t.effectif?.entree ?? null, stop: t.prevu.stop ?? t.effectif?.stop ?? null, tp: t.prevu.tp, sorties: M.sortiesEffectives(t).map(s => s.prix) })
+  assert.equal(piste(trade('seg-mnq')), 'Pas de stop noté')
+  assert.equal(piste(trade('seg-nq-sans')), null)
+  assert.equal(M.raisonPisteVide({ entree: 1, stop: 0.9, tp: null, sorties: [1.1] }), 'Pas de TP noté')
+  assert.equal(M.raisonPisteVide({ entree: null, stop: null, tp: null, sorties: [], sansNote: true }), 'Pas de plan noté')
+  assert.match(lire('../src/components/mes-trades/VueFile.tsx'), /sortieVsPlan=\{null\} sansNote \/>/)
+  // « Ouvrir la note » dans l'en-tete de la fiche, toujours visible.
+  const fiche = lire('../src/components/mes-trades/FicheEchelle.tsx')
+  const entete = fiche.slice(fiche.indexOf('<header'), fiche.indexOf('</header>'))
+  assert.match(entete, /Ouvrir la note/)
+  assert.equal((fiche.match(/Ouvrir la note<\/Link>|>Ouvrir la note/g) ?? []).length, 1)
+})
+
 // -- Le guide ----------------------------------------------------------------
 
-bloc('guide : 9 etapes en trois temps dans un seul module, etape 7 par le menu de la roue, vignettes public/guide/etape-N.png', () => {
+bloc('guide : 9 etapes en trois temps dans un seul module, etape 7 par le menu de la roue, vignettes public/guide/etape-N.webp presentes et legeres', () => {
   assert.equal(G.ETAPES_GUIDE.length, 9)
   assert.deepEqual(G.ETAPES_GUIDE.map(e => e.temps), ['noter', 'etudier', 'etudier', 'etudier', 'etudier', 'etudier', 'verifier', 'verifier', 'verifier'])
   assert.deepEqual(Object.keys(G.TEMPS), ['noter', 'etudier', 'verifier'])
-  assert.deepEqual(G.ETAPES_GUIDE.map(e => e.image), G.ETAPES_GUIDE.map((_, i) => `/guide/etape-${i + 1}.png`))
+  assert.deepEqual(G.ETAPES_GUIDE.map(e => e.image), G.ETAPES_GUIDE.map((_, i) => `/guide/etape-${i + 1}.webp`))
+  for (const e of G.ETAPES_GUIDE) {
+    const fichier = new URL(`../public${e.image}`, import.meta.url)
+    assert.ok(existsSync(fichier), e.image)
+    assert.ok(statSync(fichier).size < 80 * 1024, `${e.image} trop lourde`)
+    assert.equal(readFileSync(fichier).subarray(8, 12).toString('latin1'), 'WEBP', e.image)
+  }
   const sept = G.ETAPES_GUIDE[6]
   assert.match(sept.texte, /menu de la roue/)
   assert.match(sept.texte, /« Importer mes trades »/)

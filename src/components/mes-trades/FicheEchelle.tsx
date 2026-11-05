@@ -1,11 +1,12 @@
 'use client'
 
 // La fiche d'un trade, en échelle (fiche 2 du labo, brief J2) : l'en-tête
-// (instrument, sens, date et heure, note de séance, note A/B/C, comptes copiés),
-// l'échelle des prix (niveaux prévus en pointillés, exécutions du broker en
-// points pleins, zones de risque et de gain, l'écart de sortie fléché), quatre
-// écarts en une ligne chacun, puis le ressenti, le jugement, la capture et la
-// note, repliés. « Simple, on est quand même dans le journal » (Brice, 05/11).
+// (instrument, sens, date et heure, note de séance, note A/B/C, comptes copiés,
+// « Ouvrir la note » toujours visible), l'échelle des prix (niveaux prévus en
+// pointillés, exécutions du broker en points pleins, zones de risque et de gain,
+// l'écart de sortie fléché), quatre écarts en une ligne chacun, puis le
+// ressenti, le jugement et la capture, repliés. « Simple, on est quand même
+// dans le journal » (Brice, 05/11).
 
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import Link from 'next/link'
@@ -253,7 +254,18 @@ export default function FicheEchelle({ trade, sansRepli = false, children }: { t
             </p>
           )}
         </div>
-        {trade.jugement && <Note grade={trade.jugement.grade} />}
+        {/* « Ouvrir la note » vit dans l'en-tête, près du grade : il reste là quand le détail est déplié. */}
+        <div className="flex items-center gap-2">
+          {trade.jugement && <Note grade={trade.jugement.grade} />}
+          <Link
+            href={`/notes/${encodeURIComponent(trade.noteId)}`}
+            className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium hover:text-[var(--node-title)] ${FOCUS}`}
+            style={{ background: 'var(--case-bg)', color: 'var(--node-meta)' }}
+            title={trade.noteTitle ?? undefined}
+          >
+            <FileText className="size-3.5 shrink-0" aria-hidden="true" />Ouvrir la note
+          </Link>
+        </div>
       </header>
 
       <div className="grid items-start gap-4 min-[761px]:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
@@ -270,14 +282,6 @@ export default function FicheEchelle({ trade, sansRepli = false, children }: { t
         {pli('ressenti', <Heart className="size-3.5 shrink-0" aria-hidden="true" />, resumeRessenti ? `Ressenti : ${resumeRessenti}` : 'Ressenti')}
         {pli('jugement', <PenLine className="size-3.5 shrink-0" aria-hidden="true" />, trade.jugement ? `Jugement ${trade.jugement.grade}` : 'Jugement')}
         {pli('capture', <ImageIcon className="size-3.5 shrink-0" aria-hidden="true" />, trade.captures.length > 1 ? `Captures (${trade.captures.length})` : 'Capture')}
-        <Link
-          href={`/notes/${encodeURIComponent(trade.noteId)}`}
-          className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs hover:text-[var(--node-title)] ${FOCUS}`}
-          style={{ background: 'var(--case-bg)', color: 'var(--node-meta)' }}
-          title={trade.noteTitle ?? undefined}
-        >
-          <FileText className="size-3.5 shrink-0" aria-hidden="true" />Ouvrir la note
-        </Link>
       </div>}
       {ouvert && (
         <div id={`pli-${ouvert}`} className="rounded-xl p-3" style={{ background: 'var(--case-bg)' }}>

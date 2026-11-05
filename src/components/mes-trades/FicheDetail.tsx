@@ -3,15 +3,15 @@
 // Le détail d'un trade (fiche 1 du labo, brief J2) : le tableau Prévu (toi) /
 // Effectif (broker) / Écart, comme le panneau du Carnet, pour entrée, stop, TP,
 // taille, chaque sortie et R ; puis le ressenti, le jugement et la capture en
-// blocs. L'écart est brut (effectif moins prévu) ; sa couleur dit si c'est
-// mieux (vert) ou moins bien (ambre) dans le sens du trade.
+// blocs. Les écarts de prix suivent UNE convention, celle du panneau « Ton
+// entrée » : orientés par le sens, positif = moins bien (texteEcart) ; vert
+// quand c'est mieux, ambre quand c'est moins bien au-delà d'un dixième du
+// risque, rouge pour un stop dépassé.
 
 import type { ReactNode } from 'react'
 import { Heart, Image as ImageIcon, PenLine } from 'lucide-react'
 import type { TradeSynthese } from '@/lib/synthese-trades-pur'
-import {
-  formatNombre, formatPrix, formatPtsSigne, formatR, lignesDeSortie, qualite, sensDe, type Qualite,
-} from '@/lib/mes-trades-pur'
+import { formatNombre, formatPrix, formatR, lignesDeSortie, orienteSortie, sensDe, texteEcart } from '@/lib/mes-trades-pur'
 import { SURFACE, TEINTES, TeteBloc } from './commun'
 import { ContenuCaptures, ContenuJugement, ContenuRessenti } from './fiche-commun'
 
@@ -21,16 +21,12 @@ const absent = (texte = '-') => <span style={{ color: 'var(--node-meta)' }}>{tex
 // Un nombre ne se coupe jamais en deux (l'espace des milliers est une espace simple).
 const Nb = ({ children }: { children: ReactNode }) => <span className="whitespace-nowrap">{children}</span>
 
-/**
- * Un écart de prix : « = » à égalité, sinon signé, suivi de ce qu'il dit du
- * plan. Vert quand c'est mieux ; moins bien : neutre dans le dixième du
- * risque, ambre au-delà, rouge pour un stop dépassé.
- */
-function ecartPrix(ecart: number | null, q: Qualite | null, proche: boolean, suite?: string | null): { ecart: ReactNode; couleur?: string } {
-  if (ecart === null) return { ecart: '' }
-  if (q === 'egal') return { ecart: '=' }
-  const couleur = q === 'mieux' ? TEINTES.vert : q === 'moins' && !proche ? (suite === 'stop dépassé' ? TEINTES.rouge : TEINTES.ambre) : undefined
-  return { ecart: <><Nb>{formatPtsSigne(ecart)}</Nb>{suite ? `, ${suite}` : ''}</>, couleur }
+/** L'écart orienté (positif = moins bien) en mots : « +0,25 pt, moins bien que prévu », « au prix prévu ». */
+function ecartOriente(oriente: number | null, proche: boolean, suite?: string | null): { ecart: ReactNode; couleur?: string } {
+  if (oriente === null) return { ecart: '' }
+  const [chiffre, ...mots] = texteEcart(oriente, suite).split(', ')
+  const couleur = oriente < 0 ? TEINTES.vert : oriente > 0 && !proche ? (suite === 'stop dépassé' ? TEINTES.rouge : TEINTES.ambre) : undefined
+  return { ecart: mots.length > 0 ? <><Nb>{chiffre}</Nb>, {mots.join(', ')}</> : chiffre, couleur }
 }
 
 /** @param integre déplié dans la carte de la fiche (FicheTrade) : sans carte à lui. */
@@ -41,21 +37,22 @@ export default function FicheDetail({ trade, integre = false }: { trade: TradeSy
   const risque = trade.ecarts?.risque ?? null
   const lignes: Ligne[] = []
 
-  // Entrée : un écart d'un dixième du risque au plus reste neutre (« comme prévu » sur l'échelle).
+  // Un écart d'un dixième du risque au plus reste neutre.
   const proche = (x: number) => risque !== null && Math.abs(x) <= risque / 10 + 1e-9
   {
-    const brut = p.entree !== null && e?.entree != null ? Math.round((e.entree - p.entree) * 1e8) / 1e8 : null
+    const oriente = trade.ecarts?.entree ?? (p.entree !== null && e?.entree != null ? orienteSortie(e.entree, p.entree, sens) : null)
     lignes.push({
       libelle: 'Entrée', prevu: p.entree !== null ? <Nb>{formatPrix(p.entree)}</Nb> : absent(), effectif: e?.entree != null ? <Nb>{formatPrix(e.entree)}</Nb> : absent(),
-      ...ecartPrix(brut, brut === null ? null : qualite(brut, sens, 'entree'), brut !== null && proche(brut)),
+      ...ecartOriente(oriente, oriente !== null && proche(oriente)),
     })
   }
   {
-    const brut = p.stop !== null && e?.stop != null ? Math.round((e.stop - p.stop) * 1e8) / 1e8 : null
+    // Un stop plus loin que prévu (plus de risque) est moins bien.
+    const oriente = p.stop !== null && e?.stop != null ? orienteSortie(p.stop, e.stop, sens) : null
     lignes.push({
       libelle: 'Stop', prevu: p.stop !== null ? <Nb>{formatPrix(p.stop)}</Nb> : absent(),
       effectif: e ? (e.stop !== null ? <Nb>{formatPrix(e.stop)}</Nb> : absent('non exporté')) : absent(),
-      ...ecartPrix(brut, brut === null ? null : qualite(brut, sens, 'sortie'), brut !== null && proche(brut)),
+      ...ecartOriente(oriente, oriente !== null && proche(oriente)),
     })
   }
   lignes.push({ libelle: 'TP', prevu: p.tp !== null ? <Nb>{formatPrix(p.tp)}</Nb> : absent(), effectif: e ? absent('non exporté') : absent(), ecart: '' })
@@ -78,7 +75,7 @@ export default function FicheDetail({ trade, integre = false }: { trade: TradeSy
       libelle: s.libelle,
       prevu: s.prevu ? <><Nb>{formatPrix(s.prevu.prix)}</Nb>{s.prevu.estTp ? ' (TP)' : s.prevu.estStop ? ' (stop)' : ''}</> : absent(),
       effectif: s.effectif !== null ? <Nb>{formatPrix(s.effectif)}</Nb> : absent(),
-      ...ecartPrix(s.ecart, s.qualite, s.proche, s.suite),
+      ...ecartOriente(s.oriente, s.proche, s.suite),
     })
   }
   {

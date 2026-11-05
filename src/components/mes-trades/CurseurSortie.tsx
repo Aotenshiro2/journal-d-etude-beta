@@ -7,10 +7,12 @@
 // pointillés, les repères « Stop », « Entrée », « TP » sous la piste et le R
 // obtenu au-dessus de la dernière sortie. Un stop dépassé sort de la piste à
 // gauche en pointillés rouges. Sans broker ou sans plan : une piste vide en
-// pointillés. La géométrie vit dans geometrieCurseur (mes-trades-pur.ts).
+// pointillés, avec dessous pourquoi (« Pas de stop noté », « Pas de TP noté »,
+// « Pas de plan noté » ; rien sans broker, la pastille le dit). La géométrie vit
+// dans geometrieCurseur et raisonPisteVide (mes-trades-pur.ts).
 
 import type { Sens, SortieVsPlan } from '@/lib/synthese-trades-pur'
-import { formatRSigne, geometrieCurseur } from '@/lib/mes-trades-pur'
+import { formatRSigne, geometrieCurseur, raisonPisteVide } from '@/lib/mes-trades-pur'
 import { TEINTES } from './commun'
 
 export interface CurseurSortieProps {
@@ -25,6 +27,8 @@ export interface CurseurSortieProps {
   sortieVsPlan: SortieVsPlan | null
   /** Le R du trade (sorties moyennes) ; à défaut, celui de la dernière sortie. */
   rReel?: number | null
+  /** Un trade du broker sans note : la piste vide dit « Pas de plan noté ». */
+  sansNote?: boolean
 }
 
 const MOTS: Record<SortieVsPlan, string> = {
@@ -38,7 +42,14 @@ const MOTS: Record<SortieVsPlan, string> = {
 export default function CurseurSortie(props: CurseurSortieProps) {
   const g = geometrieCurseur(props)
   if (!g) {
-    return <span className="col-span-full mb-1.5 mt-3 block h-0 border-t-2 border-dashed" style={{ borderColor: 'var(--trade-piste)' }} aria-hidden="true" />
+    // La piste vide, et sous elle pourquoi (rien quand la pastille le dit déjà).
+    const raison = raisonPisteVide(props)
+    return (
+      <span className="col-span-full mt-3 mb-1.5 block">
+        <span className="block h-0 border-t-2 border-dashed" style={{ borderColor: 'var(--trade-piste)' }} aria-hidden="true" />
+        {raison && <span className="mt-1 block text-[10.5px]" style={{ color: 'var(--node-meta)' }}>{raison}</span>}
+      </span>
+    )
   }
   const couleur = g.gain ? TEINTES.vert : TEINTES.rouge
   const repere = (x: number, fond: string, texte: string) => (

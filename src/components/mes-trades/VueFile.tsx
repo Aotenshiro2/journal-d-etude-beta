@@ -74,7 +74,7 @@ export function CartePosition({ position }: { position: VuePosition }) {
         </div>
       </div>
       <PastilleEcart pastille={PASTILLE_SANS_NOTE} />
-      <CurseurSortie sens={null} entree={null} stop={null} tp={null} sorties={[]} partiels={[]} sortieVsPlan={null} />
+      <CurseurSortie sens={null} entree={null} stop={null} tp={null} sorties={[]} partiels={[]} sortieVsPlan={null} sansNote />
     </div>
   )
 }

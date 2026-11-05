@@ -5,9 +5,10 @@
 // Puis « Aller plus loin » : ce que les neuf étapes ne couvrent pas (concepts,
 // analyse, mental game, l'extension), repris de l'ancienne page « Le parcours ».
 //
-// Vignettes : public/guide/etape-N.png. Tant que l'image manque, la vignette
-// affiche sa légende dans un cadre neutre (les vraies captures viendront après
-// le labo 2).
+// Vignettes : public/guide/etape-N.webp, de vraies captures en 16/9 (1200 x 675,
+// légères) : le Carnet pour les étapes 1, 7 et 8, le Journal pour les autres,
+// rendues sans la base de prod. Si une image manque, la vignette affiche sa
+// légende dans un cadre neutre.
 
 export type Temps = 'noter' | 'etudier' | 'verifier'
 
@@ -26,7 +27,7 @@ export interface EtapeGuide {
   texte: string
   /** La légende de la vignette, affichée tant que l'image manque. */
   vignette: string
-  /** public/guide/etape-N.png */
+  /** public/guide/etape-N.webp */
   image: string
   /** L'étape des blocs montre chaque sorte de bloc. */
   blocs?: boolean
@@ -87,7 +88,7 @@ const etapes: Omit<EtapeGuide, 'image'>[] = [
   },
 ]
 
-export const ETAPES_GUIDE: EtapeGuide[] = etapes.map((e, i) => ({ ...e, image: `/guide/etape-${i + 1}.png` }))
+export const ETAPES_GUIDE: EtapeGuide[] = etapes.map((e, i) => ({ ...e, image: `/guide/etape-${i + 1}.webp` }))
 
 const CWS = 'https://chromewebstore.google.com/detail/trading-notes-by-aoknowle/phajegonlmgnjkkfdooedoddnmgpheic'
 const PAGE_EXTENSION = 'https://aoknowledge.com/library/extension'
