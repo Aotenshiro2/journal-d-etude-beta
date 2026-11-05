@@ -81,6 +81,43 @@ bloc('publication : taux pour 100 comptes, niveaux, part vue', () => {
   assert.equal(l.temps_moyen_vu_s, 14.5)
   assert.equal(l.comment_lire.regarder_d_abord, 'les enregistrements')
   assert.equal(I.lirePublication(p, null).niveaux.comptes_touches, null)
+  // reel peu vu (part vue faible face aux reperes) : l'action parle de l'ouverture
+  const R2 = { seuils: { ...R.seuils, part_vue: { n: 100, p25: 0.6, mediane: 0.7, p75: 0.8, p90: 0.9 } } }
+  assert.match(I.lirePublication(p, R2, 'valeur').action_proposee, /décrochent tôt/)
+  assert.match(l.action_proposee, /Peu enregistré/)
+})
+
+bloc('post : visites en taux, clics sur le lien du profil, action selon l\'objectif', () => {
+  const p = { publication_id: '2', publie_le: '2026-05-27 10:00', type: 'FEED', legende: 'x', lien: null, j_aime: 10, commentaires: 2, partages: 0, enregistrements: 0, couverture: 200, vues: 300, metriques: { profile_visits: 4, follows: 1, clics_lien_profil: 1 } }
+  const l = I.lirePublication(p, null, 'vente')
+  assert.equal(l.visites_profil_pour_100_comptes, 2)
+  assert.equal(l.clics_lien_profil, 1)
+  assert.match(l.action_proposee, /un seul appel à l'action clair/)
+  assert.equal(I.lirePublication(p, null, 'communaute').comment_lire.regarder_d_abord, 'les commentaires')
+  assert.match(I.lirePublication(p, null).action_proposee, /Rien qui sorte du lot/)
+})
+
+bloc('textes de Tab (section 4) : tous les indicateurs, clavier seulement', () => {
+  for (const k of ['comptes_touches', 'part_non_abonnes', 'part_vue', 'partages', 'enregistrements', 'visites_profil', 'abonnements_et_clics', 'likes_et_commentaires']) {
+    assert.ok(I.COMMENT_LIRE[k]?.ce_que_c_est && I.COMMENT_LIRE[k]?.comment_lire, k)
+  }
+  for (const o of I.OBJECTIFS) assert.ok(!/à écrire/.test(I.GRILLE_LECTURE[o].regarder_d_abord), `grille ${o} remplie`)
+  const tout = JSON.stringify([I.COMMENT_LIRE, I.GRILLE_LECTURE, I.PAS_DANS_L_API])
+  assert.ok(!/[–—…“”‘’]/.test(tout), 'pas de tiret long, de points de suspension ni de guillemets courbes')
+})
+
+bloc('niveaux du bilan face aux periodes de meme duree du compte', () => {
+  const q = (p25, mediane, p75, p90) => ({ n: 59, p25, mediane, p75, p90 })
+  const R = { compte: { fenetres: { 7: { abonnes_net: q(-4, -3, -1, 0), part_non_abonnes: q(0.034, 0.048, 0.074, 0.115), comptes_touches: q(190, 228, 278.5, 308.8), visites_profil: q(22, 27, 37, 44.4) } } } }
+  const b = { abonnes_net: -5, comptes_touches_uniques: 168, part_non_abonnes_touches_pct: 4.8, part_non_abonnes_mode: 'comptes_uniques', visites_profil: 20, jours_mesures: 7 }
+  const n = I.niveauxBilan(b, R, 7)
+  assert.deepEqual(n, { abonnes_net: 'faible', part_non_abonnes: 'normal', comptes_touches: 'faible', visites_profil: 'faible' })
+  assert.equal(I.niveauxBilan(b, R, 30), null, 'pas de reperes 30 jours dans ce cas')
+  assert.equal(I.niveauxBilan(b, null, 7), null)
+  assert.equal(I.niveauxBilan({ ...b, jours_mesures: 6 }, R, 7).visites_profil, null, 'semaine incomplete : pas de niveau des visites')
+  const lisibles = I.reperesLisibles({ seuils: {}, compte: { base: { jours: 65 }, fenetres: R.compte.fenetres } })
+  assert.equal(lisibles.compte.sur_7_jours.part_non_abonnes_pct.mediane, 4.8)
+  assert.equal(lisibles.compte.sur_30_jours, null)
 })
 
 bloc('en bref : cinq lignes', () => {
@@ -93,6 +130,12 @@ bloc('en bref : cinq lignes', () => {
   assert.match(l[4], /9 story/)
   // texte clavier seulement (regle de l'organisation)
   for (const x of l) assert.ok(!/[–—…“”‘’]/.test(x), x)
+  // avec les niveaux du compte : le mot suit le chiffre
+  const n = I.enBref(a, b, 0, null, { abonnes_net: 'faible', part_non_abonnes: 'bon', comptes_touches: 'normal', visites_profil: null }, 7)
+  assert.match(n[0], /solde -6 .*, faible pour une semaine\.$/)
+  assert.match(n[1], /dans la moyenne pour une semaine/)
+  assert.match(n[2], /bon pour une semaine/)
+  assert.ok(!/pour une semaine/.test(n[3]), 'pas de niveau sans repere')
 })
 
 bloc('cablage : instagram.ts lit la collecte, reseaux() le branche', () => {
@@ -102,6 +145,8 @@ bloc('cablage : instagram.ts lit la collecte, reseaux() le branche', () => {
   assert.ok(!/sum\(couverture\)/.test(srv), 'jamais la somme des couvertures pour Instagram')
   assert.match(srv, /cockpit_social_objectifs/)
   assert.match(srv, /to_regclass/, 'table des objectifs testee avant lecture (transaction READ ONLY)')
+  assert.match(srv, /comment_lire_chaque_indicateur: COMMENT_LIRE/)
+  assert.match(srv, /niveauxBilan\(actuelle, compte\.reperes, n\)/)
   const lec = readFileSync(new URL('../src/lib/tab/lectures.ts', import.meta.url), 'utf8')
   assert.match(lec, /lectureInstagram\(c, notes\)/)
   assert.match(lec, /plateforme = 'facebook' and jour between/, 'le resume par somme ne vaut plus que pour Facebook')

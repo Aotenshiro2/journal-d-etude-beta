@@ -5,8 +5,8 @@
 import type { Ctx } from '@/lib/tab/lectures'
 import { decalerJour, jourLisible } from '@/lib/tab/pur'
 import {
-  bilanPeriode, dernierJourComplet, enBref, GRILLE_LECTURE, lirePublication, nbJours, nombre, PAS_DANS_L_API,
-  periodeMesuree, reperesLisibles, type JourIG, type Objectif, type PubIG, type Reperes,
+  bilanPeriode, COMMENT_LIRE, dernierJourComplet, enBref, GRILLE_LECTURE, lirePublication, nbJours, niveauxBilan,
+  nombre, PAS_DANS_L_API, periodeMesuree, reperesLisibles, type JourIG, type Objectif, type PubIG, type Reperes,
 } from '@/lib/tab/instagram-pur'
 
 const H = (col: string) => `to_char(${col} at time zone 'Europe/Paris', 'YYYY-MM-DD HH24:MI')`
@@ -73,17 +73,23 @@ export async function lectureInstagram(c: Ctx, notes: string[]): Promise<Record<
     from public.cockpit_social_publications
     where plateforme = 'instagram' and type = 'STORY' and ${JP('publie_le')} between $1::date and $2::date`, p.du, p.au)
 
+  // Le niveau du bilan face aux periodes de meme duree (reperes du compte, 7 ou 30 jours).
+  const niveaux = niveauxBilan(actuelle, compte.reperes, n)
+
   return {
     compte: { pseudo: compte.pseudo, abonnes: nombre(compte.abonnes), releve_le: compte.releve_le },
-    en_bref: enBref(actuelle, precedente, pubs.length, stories ?? null),
+    en_bref: enBref(actuelle, precedente, pubs.length, stories ?? null, niveaux, n),
     periode_mesuree: { du: lu.du, au: lu.au, dernier_jour_complet: complet },
     bilan: actuelle,
+    niveaux_du_bilan: niveaux,
+    niveaux_du_bilan_se_lisent: 'face aux périodes de même durée du compte (reperes.compte) : bon = mieux que 3 périodes sur 4, faible = moins bien que 3 sur 4 ; seulement sur 7 ou 30 jours',
     periode_precedente_meme_duree: precedente,
     publications_de_la_periode: pubs.map(lire),
     dernieres_publications: avant.length ? avant.map(lire) : undefined,
     stories_de_la_periode: stories ?? null,
     reperes: reperesLisibles(compte.reperes),
     grille_de_lecture_par_objectif: GRILLE_LECTURE,
+    comment_lire_chaque_indicateur: COMMENT_LIRE,
     objectif_des_publications: 'choisi à la main dans le cockpit (fiche d\'une publication) ; null = pas encore choisi, lis alors la grille complète',
     pas_dans_l_api: PAS_DANS_L_API,
   }
