@@ -1,5 +1,29 @@
 # ETAT du journal d etudes
 
+## BESOINS DES MEMBRES, SIGNAUX ET LIMITES DES AGENTS (06/11/2026 apres-midi, commite NON pousse, branche besoins-signaux au-dessus de besoins-finitions ; migration 20261106200000 ECRITE, NON appliquee)
+
+- Brice, 06/11 : pistes A a E sans labo, signaux « Refus + impasses », limites des agents avec son tri. Contrat :
+  besoins-contrat-api.md, « Suite du 06/11 apres-midi » et ses Ecarts (fin du fichier). Les outils (site, academie,
+  Masterclass, Pilotage, Carnet) sont codes par une autre conversation sur le meme contrat.
+- Signaux : liste fermee des cles et du contexte par cle, SEULE source (besoins/signaux-pur.ts). POST /api/besoins/signal
+  (session facultative, chemin exact public dans middleware.ts ; personne = HMAC c/t/a, visiteur = empreinte du jour,
+  jamais l IP ; secret BESOINS_SIGNAL_SEL, sinon la cle de service), cadence sous verrou (1 par heure et par cle, 30 par
+  jour), seuil a l arrivee (3 personnes en 7 jours = carte a_trier de la cle, cree_par signal ; carte deja la, meme
+  refusee : jamais touchee). Serveur : besoins/signaux.ts. Table besoin_signal + vue cockpit_besoin_signaux.
+- Ligne C : signaler accepte `signal` (carte de la cle, sans IA). D : GET /api/besoins/livres. E : conseil du bot J+6.
+  Journal : « Aide et idees », bulle une fois, ligne C et signal journal.import_echec dans ImportsTrades. Textes A VALIDER
+  PAR BRICE (besoins/decouverte.ts, tips-accueil-pur.ts).
+- Limites des agents : noter_limite dans les deux bots, signaux bot.* et site.info_absente au serveur, TRI DE BRICE par le
+  serveur (triLimites : sensible d un non-admin = rien ; admin = cockpit_telegram_comptes ; ignorance = a_trier ;
+  prudence = rien), deux filets a sujet fixe (Haiku ne note pas quand il refuse ou transmet : evals T2, T3).
+- Verifs : verifier-besoins 47 blocs ; 22 verificateurs hors ligne ok (dont -securite-bots, -effacement, -tips-accueil,
+  -diffusion-equipe mis a jour) ; tsc ; eslint ; next build. eval-limites.mjs T1 a T4 ok (Haiku, environ 0,07 EUR).
+  PAS rejoue : eval-fuites.mjs (prompt-membre.ts et support-prompt.ts changes : a rejouer avant la mise en ligne).
+- MISE EN LIGNE, dans l ordre : migrations 20261106150000 (si pas fait), 20261106180000, 20261106200000 ; eval-fuites ;
+  push du journal (besoins-finitions puis besoins-signaux sur master) ; cockpit (commit bf6d3e4 du workspace).
+- Limites : la personne d un signal n est pas connue de l effacement (HMAC, aucun lien en clair) ; un visiteur compte comme
+  une personne nouvelle chaque jour ; aucune purge des vieux signaux.
+
 ## BESOINS DES MEMBRES, FINITIONS (06/11/2026, commite NON pousse, branche besoins-finitions ; migration 20261106180000 ECRITE, NON appliquee)
 
 - Brice, 06/11 : « Option 1 partout » (labos retires du cockpit et du site, hors de ce depot). Ici : l'effacement d'une
