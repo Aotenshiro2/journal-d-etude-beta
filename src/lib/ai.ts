@@ -86,6 +86,9 @@ export type PosteIA =
   // ligne = une lecture, comptée pour la limite de 5 par membre et par jour.
   | 'document'
   | 'liveclub_membre'
+  // (06/11) Besoins des membres, lot 1 (src/lib/besoins/) : la passe de reperage des fils et le
+  // regroupement en cartes, Haiku sur la cle du support (produit 'support').
+  | 'besoins_reperage' | 'besoins_regroupement'
   // (31/10) Les vocaux d'Agent AOK transcrits (Groq, src/lib/transcription.ts) : produit 'cockpit',
   // aucun jeton, cout a la duree d'audio. Ligne ecrite directement par tracerTranscription.
   | 'transcription'

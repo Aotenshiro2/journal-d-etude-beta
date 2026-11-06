@@ -85,6 +85,8 @@ const configLiveClub = await import('../src/lib/liveclub/config.ts')
 const pur = await import('../src/lib/liveclub/pur.ts')
 const effacement = await import('../src/lib/effacement-pur.ts')
 const connaissances = await import('../src/lib/connaissances.generated.ts')
+// (06/11) noter_besoin (besoins des membres, lot 1) : le meme resultat qu'en prod, rien n'est enregistre ici.
+const besoins = await import('../src/lib/besoins/pur.ts')
 // (19/10) trouver_cours lit la base : importe au premier appel seulement,
 // pour que les autres cas tournent sans DATABASE_URL.
 let moduleTrouverCours = null
@@ -502,6 +504,13 @@ async function jouerLiveClub(question, fil = [], variante = 'normal') {
         const contenu = await trouverCoursReel(b.input, 'liveclub')
         donnees.push({ outil: b.name, resultat: contenu })
         resultats.push({ type: 'tool_result', tool_use_id: b.id, content: JSON.stringify(contenu) })
+        continue
+      }
+      // (06/11) noter_besoin : le resultat pur de la prod (agent-membre.ts), aucune ecriture.
+      if (b.name === besoins.NOM_OUTIL_NOTER_BESOIN) {
+        const res = besoins.resultatNoterBesoin(b.input)
+        donnees.push({ outil: b.name, resultat: JSON.parse(res.contenu) })
+        resultats.push({ type: 'tool_result', tool_use_id: b.id, content: res.contenu, ...(res.erreur ? { is_error: true } : {}) })
         continue
       }
       if (b.name === 'mon_abonnement' || b.name === 'mes_montants') {

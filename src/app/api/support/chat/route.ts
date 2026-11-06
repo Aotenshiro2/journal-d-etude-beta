@@ -8,6 +8,8 @@ import { filtrerSortie } from '@/lib/politique-information'
 import type Anthropic from '@anthropic-ai/sdk'
 import { MAX_TOURS_SUPPORT, requeteSupport, resultatOutilSupport, versMessagesSupport } from '@/lib/support-prompt'
 import { trouverCours } from '@/lib/trouver-cours'
+import { texteAvecPhrase, type BesoinPropose } from '@/lib/besoins/pur'
+import { noterBesoinsDuChat } from '@/lib/besoins/serveur'
 
 // L'appel Claude peut dépasser les 10 s par défaut des fonctions Vercel
 export const maxDuration = 60
@@ -72,6 +74,9 @@ export async function POST(req: NextRequest) {
     let texte = ''
     // Un message du membre = un echange, quel que soit le nombre de tours d'outils.
     const echange = randomUUID()
+    // (06/11) Besoins des membres, lot 1 : les besoins notes par noter_besoin,
+    // gardes en memoire et enregistres APRES la sauvegarde du fil.
+    const besoins: BesoinPropose[] = []
     for (let tour = 0; tour < MAX_TOURS_SUPPORT; tour++) {
       const response = await client.messages.create(requeteSupport(model, app, messages))
       await logAiUsage(userId, 'support', model, response.usage, null, { usage: 'support_chat', echange })
@@ -84,6 +89,7 @@ export async function POST(req: NextRequest) {
       for (const bloc of response.content) {
         if (bloc.type !== 'tool_use') continue
         const r = await resultatOutilSupport(bloc.name, bloc.input, e => trouverCours(e, 'support', { userId }))
+        if (r.besoin) besoins.push(r.besoin)
         resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: r.contenu, ...(r.erreur ? { is_error: true } : {}) })
       }
       messages.push({ role: 'user', content: resultats })
@@ -110,7 +116,27 @@ export async function POST(req: NextRequest) {
           data: { userId, app, messages: updated as object[] },
         })
 
-    return NextResponse.json({ threadId: saved.id, reply }, { headers: cors })
+    // (06/11) Les besoins notes : enregistres maintenant que le fil existe (le
+    // texte garde est le message du membre tel qu'au fil). Enregistre et non
+    // suspect : la phrase du serveur s'ajoute a la reponse, une fois, et le fil
+    // est reecrit avec elle. Un echec : rien, la reponse part comme avant.
+    let replyFinale = reply
+    if (besoins.length) {
+      const note = await noterBesoinsDuChat({ userId, app, filId: saved.id, texte: message, besoins, peutDire: !!filtre.texte })
+      if (note.phrase) {
+        replyFinale = texteAvecPhrase(reply, true)
+        try {
+          await prisma.supportThread.update({
+            where: { id: saved.id },
+            data: { messages: [...updated.slice(0, -1), { role: 'assistant', content: replyFinale, at: now }] as object[] },
+          })
+        } catch (err) {
+          console.warn('[support/chat] phrase du besoin non ecrite au fil', err instanceof Error ? err.message.split('\n')[0].slice(0, 160) : '?')
+        }
+      }
+    }
+
+    return NextResponse.json({ threadId: saved.id, reply: replyFinale }, { headers: cors })
   } catch (err) {
     console.error('[support/chat]', err)
     return NextResponse.json({ error: aiErrorMessage(err, 'ANTHROPIC_API_KEY_SUPPORT') }, { status: 502, headers: cors })

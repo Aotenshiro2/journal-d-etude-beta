@@ -62,6 +62,10 @@ import { parcoursPauseDepotMembre, pauseDepotPourAgentMembre } from './pause-dep
 import { NOM_OUTIL_MEMBRE_PAUSE_DEPOT } from './pause-depot-pur'
 // (05/11) L'indicateur d'Alex : l'outil rend la main au bot (indicateur.ts), qui ouvre l'etape.
 import { NOM_OUTIL_INDICATEUR } from './indicateur-pur'
+// (06/11) Besoins des membres, lot 1 : noter_besoin (classement du modele, enregistre par le serveur).
+import { NOM_OUTIL_NOTER_BESOIN, resultatNoterBesoin, texteAvecPhrase, type BesoinPropose } from '@/lib/besoins/pur'
+import { noterBesoinsTelegram } from '@/lib/besoins/serveur'
+import { nettoyerPourSupport } from './support-pont'
 
 export { MODELE_LIVECLUB }
 
@@ -177,9 +181,16 @@ async function tracerUsage(telegramId: number, usage: Anthropic.Usage, echange: 
 }
 
 /**
- * La boucle question -> outils -> reponse, pour le membre `telegramId` (deja
- * verifie RATTACHE, ou a acces offert sans rattachement, par la route). Jette sur une erreur d'API ou une cle
- * absente : la route bascule alors sur le menu a boutons.
+ * La reponse de l'agent au membre `telegramId` (deja verifie RATTACHE, ou a
+ * acces offert sans rattachement, par la route). Jette sur une erreur d'API ou
+ * une cle absente : la route bascule alors sur le menu a boutons.
+ *
+ * (06/11) Besoins des membres, lot 1 : les besoins notes par noter_besoin
+ * pendant la boucle sont enregistres a la fin (le fil Telegram porte deja le
+ * message du membre, recopie tel qu'il y est). Enregistre et non suspect : la
+ * phrase du serveur (PHRASE_BESOIN_NOTE) finit une reponse en texte libre, une
+ * fois, jamais une proposition, un repli ni l'etape de l'indicateur. Un echec :
+ * la reponse part comme avant (noterBesoinsTelegram ne jette pas).
  */
 export async function repondreAuMembre(
   telegramId: number,
@@ -187,6 +198,22 @@ export async function repondreAuMembre(
   question: string,
   /** (06/10) Acces offert sans rattachement : contexteAccesOffert (prompt-membre.ts). */
   o: { contexte?: string } = {},
+): Promise<ReponseAgentMembre> {
+  const besoins: BesoinPropose[] = []
+  const reponse = await boucleAgentMembre(telegramId, historique, question, o, besoins)
+  if (!besoins.length) return reponse
+  const peutDire = !!reponse.texte && !reponse.repli && !reponse.action && !reponse.pauseAvantArret && !reponse.indicateur
+  const note = await noterBesoinsTelegram({ telegramId, texteFil: nettoyerPourSupport(question.trim()).slice(0, 4000), besoins, peutDire })
+  return note.phrase && peutDire ? { ...reponse, texte: texteAvecPhrase(reponse.texte, true) } : reponse
+}
+
+/** La boucle question -> outils -> reponse ; `besoins` recoit les besoins notes (noter_besoin). */
+async function boucleAgentMembre(
+  telegramId: number,
+  historique: MessageConserve[],
+  question: string,
+  o: { contexte?: string },
+  besoins: BesoinPropose[],
 ): Promise<ReponseAgentMembre> {
   const client = clientAgent()
   // (29/10) SECURITE DES BOTS : le message du membre (niveau 'injection' :
@@ -253,6 +280,20 @@ export async function repondreAuMembre(
       // (05/11) Ni l'indicateur d'Alex (il menerait a un message a un tiers).
       if (prudence && bloc.name === NOM_OUTIL_INDICATEUR) {
         resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify(REFUS_PRUDENCE_MEMBRE) })
+        continue
+      }
+      // (06/11) Ni la note d'un besoin : la passe de reperage le reprendra, marque suspect.
+      if (prudence && bloc.name === NOM_OUTIL_NOTER_BESOIN) {
+        resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify(REFUS_PRUDENCE_MEMBRE) })
+        continue
+      }
+
+      // (06/11) Besoins des membres, lot 1 : un classement garde en memoire,
+      // enregistre par repondreAuMembre a la fin de l'echange.
+      if (bloc.name === NOM_OUTIL_NOTER_BESOIN) {
+        const r = resultatNoterBesoin(bloc.input)
+        if (r.besoin) besoins.push(r.besoin)
+        resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: r.contenu, ...(r.erreur ? { is_error: true } : {}) })
         continue
       }
 

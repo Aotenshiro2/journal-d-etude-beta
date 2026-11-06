@@ -138,6 +138,9 @@ est dans la dernière colonne.
 | Donnée | Table | Clé | N1 | N2 | N3 | Pourquoi |
 |---|---|---|---|---|---|---|
 | Fils de conversation (membre, IA, équipe, gestes) | `"SupportThread"` | telegramId, userId (compte AOK ou `telegram:<id>`), contactEmail, membreId | . | E | E | |
+| Besoins notés (ses mots recopiés du fil, en entier) (06/11/2026) | `besoin_demande` | fil_id, membre_ref (compte AOK ou `telegram:<id>`), membre_id | . | E | E | effacés avec le fil (clé étrangère en cascade, migration 20261106120000). Une demande sans fil (bouton, lot 2) n'est pas encore connue de `cockpit_effacer` |
+| Votes sur les besoins (lot 2) | `besoin_vote` | membre_ref | . | . | . | à ajouter à `cockpit_effacer` avec le lot 2 (table vide au lot 1) |
+| Où la passe de repérage en est dans ses fils | `besoin_curseur_fil` | fil_id | . | E | E | effacé avec le fil (cascade) |
 | Mémoire de l'agent du bot (historique, action en attente) | `cockpit_liveclub_conversations` | telegram_id | . | E | E | |
 | Coût de l'IA de ses échanges | `"AiUsage"` | userId (`liveclub:u<id>`, compte AOK) | . | A | A | dépense de la société : le coût reste, `userId` devient `efface` |
 
