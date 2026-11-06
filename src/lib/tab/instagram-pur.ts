@@ -16,6 +16,9 @@
 //   p90, faible = sous le p25. Sous `compte` : les memes quartiles pour le compte, sur des
 //   periodes de 7 et 30 jours (fenetres glissantes : abonnes net, part de non-abonnes,
 //   comptes touches, visites du profil).
+// Messages recus (06/11, option B choisie par Brice) : metriques.messages_recus,
+// conversations_messages_recus et nouvelles_conversations du jour (jour de Paris), des
+// COMPTES pour tout le compte : ni texte ni expediteur ; Meta ne relie pas un message a un post.
 // Les textes « comment lire » (COMMENT_LIRE) sont la section 4 du plan de Tab (« Plan
 // Instagram insights Cockpit », 03/11, note 5141f90b) ; ses reperes chiffres du 03/11 sont
 // remplaces par ceux que la collecte recalcule chaque matin.
@@ -29,6 +32,7 @@ export type FenetreCompte = {
   part_non_abonnes?: Seuil | null
   comptes_touches?: Seuil | null
   visites_profil?: Seuil | null
+  messages_recus?: Seuil | null
 }
 export type Reperes = {
   base?: { regle?: string; nombre?: number; du?: string; au?: string }
@@ -79,7 +83,7 @@ export const GRILLE_LECTURE: Record<Objectif, { nom: string; regarder_d_abord: s
 }
 
 /** Ce que Meta ne donne pas par l'API (seulement dans l'appli Instagram). */
-export const PAS_DANS_L_API = 'Courbe de rétention d\'un reel, part de non-abonnés, abonnements gagnés et clics PAR REEL, messages reçus : seulement dans l\'appli Instagram (« Qui a vu ton post »). Un relevé par capture du meilleur reel de la semaine est prévu quand les reels reprendront.'
+export const PAS_DANS_L_API = 'Courbe de rétention d\'un reel, part de non-abonnés, abonnements gagnés et clics PAR REEL : seulement dans l\'appli Instagram (« Qui a vu ton post »). Un relevé par capture du meilleur reel de la semaine est prévu quand les reels reprendront. Les messages reçus sont comptés pour tout le compte, jamais par publication : Meta ne relie pas un message au post qui l\'a déclenché.'
 
 /** Comment lire chaque indicateur : la section 4 du plan de Tab (03/11). */
 export const COMMENT_LIRE: Record<string, { ce_que_c_est: string; calcul?: string; comment_lire: string; action?: string }> = {
@@ -125,6 +129,34 @@ export const COMMENT_LIRE: Record<string, { ce_que_c_est: string; calcul?: strin
     ce_que_c_est: 'De la réaction, pas un objectif en soi.',
     comment_lire: 'Utiles pour les posts « communauté » (questions, débats). Pour le reste, ils ne disent pas si le post a rempli son rôle.',
   },
+  // Absent du plan de Tab en tant qu'indicateur detaille ; cite comme indicateur principal des posts « vente ».
+  messages_recus: {
+    ce_que_c_est: 'Les messages privés reçus sur Instagram, comptés par jour pour tout le compte (jamais leur contenu ni qui écrit).',
+    comment_lire: 'Avec les clics vers le site, c\'est le chiffre des posts « vente ». Meta ne relie pas un message au post qui l\'a déclenché : pour un post « vente », compare les messages des 3 jours qui suivent à ta moyenne.',
+  },
+}
+
+/**
+ * Les messages recus par tout le compte le jour d'une publication et les 2 jours suivants,
+ * face a la moyenne de 3 jours sur les jours comptes. `publieLe` : « AAAA-MM-JJ ... » a Paris.
+ * null si aucun jour n'est compte.
+ */
+export function messagesApres(publieLe: string | null, jours: JourIG[]) {
+  if (!publieLe) return null
+  const val = (j: JourIG) => nombre((j.metriques ?? {}).messages_recus)
+  const comptes = jours.filter((j) => val(j) !== null)
+  if (!comptes.length) return null
+  const d0 = publieLe.slice(0, 10)
+  const fen = [d0, decaler(d0, 1), decaler(d0, 2)]
+  const dans = comptes.filter((j) => fen.includes(j.jour))
+  const moyenne = (comptes.reduce((s, j) => s + (val(j) ?? 0), 0) / comptes.length) * 3
+  return {
+    // Les 3 jours doivent etre comptes : un post trop recent ou d'avant le comptage n'a pas de chiffre.
+    du: fen[0], au: fen[2], jours_comptes: dans.length,
+    messages_recus: dans.length === 3 ? dans.reduce((s, j) => s + (val(j) ?? 0), 0) : null,
+    moyenne_sur_3_jours: arrondi(moyenne, 1),
+    se_lit: 'messages reçus par tout le compte ces 3 jours-là, face à la moyenne de 3 jours (Meta ne relie pas un message à un post)',
+  }
 }
 
 const HAUT = (x: Niveau | null | undefined) => x === 'bon' || x === 'tres_bon'
@@ -208,6 +240,8 @@ export type Bilan = {
   part_non_abonnes_mode: 'comptes_uniques' | 'somme_des_jours' | null
   visites_profil: number | null
   clics_vers_le_site: number | null
+  messages_recus: number | null
+  nouvelles_conversations: number | null
   vues: number | null
   interactions: number | null
 }
@@ -256,6 +290,8 @@ export function bilanPeriode(jours: JourIG[], du: string, au: string): Bilan {
     part_non_abonnes_mode: mode,
     visites_profil: somme((j) => j.visites_profil),
     clics_vers_le_site: somme((j) => m(j).website_clicks),
+    messages_recus: somme((j) => m(j).messages_recus),
+    nouvelles_conversations: somme((j) => m(j).nouvelles_conversations),
     vues: somme((j) => j.vues),
     interactions: somme((j) => j.interactions),
   }
@@ -275,6 +311,7 @@ export function niveauxBilan(b: Bilan, r: Reperes | null, duree: number) {
     part_non_abonnes: niveau(part, f.part_non_abonnes),
     comptes_touches: niveau(b.comptes_touches_uniques, f.comptes_touches),
     visites_profil: b.jours_mesures === duree ? niveau(b.visites_profil, f.visites_profil) : null,
+    messages_recus: b.jours_mesures === duree ? niveau(b.messages_recus, f.messages_recus) : null,
   }
 }
 
@@ -367,13 +404,14 @@ function reperesCompteLisibles(c: NonNullable<Reperes['compte']>) {
       part_non_abonnes_pct: en(x.part_non_abonnes, 100, 1),
       comptes_touches_uniques: en(x.comptes_touches, 1, 0),
       visites_profil: en(x.visites_profil, 1, 0),
+      messages_recus: en(x.messages_recus, 1, 0),
     } : null
   }
   return { base: c.base ?? null, sur_7_jours: fen('7'), sur_30_jours: fen('30') }
 }
 
-function ecart(a: number | null, b: number | null): string {
-  if (a === null || b === null) return ''
+function ecart(a: number | null | undefined, b: number | null | undefined): string {
+  if (a === null || a === undefined || b === null || b === undefined) return ''
   const d = a - b
   return d === 0 ? ' (comme la période d\'avant)' : ` (période d'avant : ${b.toLocaleString('fr-FR')})`
 }
@@ -396,7 +434,7 @@ export function enBref(
     a.part_non_abonnes_touches_pct !== null
       ? `Hors abonnés : ${a.part_non_abonnes_touches_pct.toLocaleString('fr-FR')} % des comptes touchés ne te suivent pas${b.part_non_abonnes_touches_pct !== null ? ` (avant : ${b.part_non_abonnes_touches_pct.toLocaleString('fr-FR')} %)` : ''}${qual(niveaux?.part_non_abonnes)}.`
       : 'Hors abonnés : pas mesuré sur la période.',
-    `Profil : ${a.visites_profil ?? 0} visites${qual(niveaux?.visites_profil)}, ${a.clics_vers_le_site ?? 0} clics vers le site${ecart(a.clics_vers_le_site, b.clics_vers_le_site)}.`,
+    `Profil : ${a.visites_profil ?? 0} visites${qual(niveaux?.visites_profil)}, ${a.clics_vers_le_site ?? 0} clics vers le site${ecart(a.clics_vers_le_site, b.clics_vers_le_site)}${a.messages_recus !== null ? `, ${a.messages_recus} messages reçus${ecart(a.messages_recus, b.messages_recus)}${qual(niveaux?.messages_recus)}` : ''}.`,
     `Publications : ${publications} reel(s) ou post(s)${stories ? `, ${stories.nombre} story(s)${stories.couverture_moyenne !== null ? `, ${stories.couverture_moyenne} comptes touchés en moyenne par story` : ''}` : ''}.`,
   ]
   return lignes

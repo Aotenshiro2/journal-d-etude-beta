@@ -111,7 +111,7 @@ bloc('niveaux du bilan face aux periodes de meme duree du compte', () => {
   const R = { compte: { fenetres: { 7: { abonnes_net: q(-4, -3, -1, 0), part_non_abonnes: q(0.034, 0.048, 0.074, 0.115), comptes_touches: q(190, 228, 278.5, 308.8), visites_profil: q(22, 27, 37, 44.4) } } } }
   const b = { abonnes_net: -5, comptes_touches_uniques: 168, part_non_abonnes_touches_pct: 4.8, part_non_abonnes_mode: 'comptes_uniques', visites_profil: 20, jours_mesures: 7 }
   const n = I.niveauxBilan(b, R, 7)
-  assert.deepEqual(n, { abonnes_net: 'faible', part_non_abonnes: 'normal', comptes_touches: 'faible', visites_profil: 'faible' })
+  assert.deepEqual(n, { abonnes_net: 'faible', part_non_abonnes: 'normal', comptes_touches: 'faible', visites_profil: 'faible', messages_recus: null })
   assert.equal(I.niveauxBilan(b, R, 30), null, 'pas de reperes 30 jours dans ce cas')
   assert.equal(I.niveauxBilan(b, null, 7), null)
   assert.equal(I.niveauxBilan({ ...b, jours_mesures: 6 }, R, 7).visites_profil, null, 'semaine incomplete : pas de niveau des visites')
@@ -138,6 +138,28 @@ bloc('en bref : cinq lignes', () => {
   assert.ok(!/pour une semaine/.test(n[3]), 'pas de niveau sans repere')
 })
 
+bloc('messages recus : comptes du compte, bilan, en bref, 3 jours apres un post « vente »', () => {
+  const js = []
+  for (let d = 1; d <= 9; d++) js.push(jour(`2026-11-0${d}`, { metriques: d <= 2 ? {} : { messages_recus: d, nouvelles_conversations: d === 5 ? 1 : 0 } }))
+  const b = I.bilanPeriode(js, '2026-11-03', '2026-11-09')
+  assert.equal(b.messages_recus, 3 + 4 + 5 + 6 + 7 + 8 + 9)
+  assert.equal(b.nouvelles_conversations, 1)
+  assert.equal(I.bilanPeriode(js, '2026-11-01', '2026-11-02').messages_recus, null, 'jours pas comptes : null, pas 0')
+  const m = I.messagesApres('2026-11-04 18:30', js)
+  assert.equal(m.messages_recus, 4 + 5 + 6)
+  assert.equal(m.jours_comptes, 3)
+  assert.equal(m.moyenne_sur_3_jours, 18)
+  assert.equal(I.messagesApres('2026-11-01 10:00', js).messages_recus, null, '1 jour compte sur 3 : pas de chiffre')
+  assert.equal(I.messagesApres('2026-11-01 10:00', js).jours_comptes, 1)
+  assert.equal(I.messagesApres('2026-11-08 10:00', js).messages_recus, null, 'post trop recent : pas encore 3 jours')
+  assert.equal(I.messagesApres(null, js), null)
+  const a = { abonnements_gagnes: 1, desabonnements: 0, abonnes_net: 1, comptes_touches_uniques: 100, part_non_abonnes_touches_pct: 5, visites_profil: 10, clics_vers_le_site: 2, messages_recus: 42 }
+  const l = I.enBref(a, { ...a, messages_recus: 30 }, 0, null, { messages_recus: 'bon' }, 7)
+  assert.match(l[3], /42 messages reçus \(période d'avant : 30\), bon pour une semaine\.$/)
+  assert.ok(!/messages/.test(I.enBref({ ...a, messages_recus: null }, a, 0, null)[3]), 'sans comptage, pas de messages dans la ligne')
+  assert.ok(I.COMMENT_LIRE.messages_recus.ce_que_c_est.includes('jamais leur contenu'))
+})
+
 bloc('cablage : instagram.ts lit la collecte, reseaux() le branche', () => {
   const srv = readFileSync(new URL('../src/lib/tab/instagram.ts', import.meta.url), 'utf8')
   assert.match(srv, /details -> 'reperes'/)
@@ -147,6 +169,7 @@ bloc('cablage : instagram.ts lit la collecte, reseaux() le branche', () => {
   assert.match(srv, /to_regclass/, 'table des objectifs testee avant lecture (transaction READ ONLY)')
   assert.match(srv, /comment_lire_chaque_indicateur: COMMENT_LIRE/)
   assert.match(srv, /niveauxBilan\(actuelle, compte\.reperes, n\)/)
+  assert.match(srv, /messages_recus_du_compte_3_jours: messagesApres\(x\.publie_le, jours\)/)
   const lec = readFileSync(new URL('../src/lib/tab/lectures.ts', import.meta.url), 'utf8')
   assert.match(lec, /lectureInstagram\(c, notes\)/)
   assert.match(lec, /plateforme = 'facebook' and jour between/, 'le resume par somme ne vaut plus que pour Facebook')

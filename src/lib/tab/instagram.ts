@@ -5,8 +5,8 @@
 import type { Ctx } from '@/lib/tab/lectures'
 import { decalerJour, jourLisible } from '@/lib/tab/pur'
 import {
-  bilanPeriode, COMMENT_LIRE, dernierJourComplet, enBref, GRILLE_LECTURE, lirePublication, nbJours, niveauxBilan,
-  nombre, PAS_DANS_L_API, periodeMesuree, reperesLisibles, type JourIG, type Objectif, type PubIG, type Reperes,
+  bilanPeriode, COMMENT_LIRE, dernierJourComplet, enBref, GRILLE_LECTURE, lirePublication, messagesApres, nbJours,
+  niveauxBilan, nombre, PAS_DANS_L_API, periodeMesuree, reperesLisibles, type JourIG, type Objectif, type PubIG, type Reperes,
 } from '@/lib/tab/instagram-pur'
 
 const H = (col: string) => `to_char(${col} at time zone 'Europe/Paris', 'YYYY-MM-DD HH24:MI')`
@@ -66,7 +66,13 @@ export async function lectureInstagram(c: Ctx, notes: string[]): Promise<Record<
   } else {
     notes.push('cockpit_social_objectifs absente : publications lues sans leur objectif.')
   }
-  const lire = (x: PubIG) => lirePublication(x, compte.reperes, objectifs[x.publication_id] ?? null)
+  // Un post « vente » porte les messages recus par le compte les 3 jours qui suivent (Meta ne
+  // relie pas un message a un post : c'est tout le compte, face a sa moyenne de 3 jours).
+  const lire = (x: PubIG) => {
+    const o = objectifs[x.publication_id] ?? null
+    const l = lirePublication(x, compte.reperes, o)
+    return o === 'vente' ? { ...l, messages_recus_du_compte_3_jours: messagesApres(x.publie_le, jours) } : l
+  }
   const [stories] = await q<{ nombre: number; couverture_moyenne: number | null; vues: number | null; reponses: number | null }>(c, `
     select count(*)::int as nombre, round(avg(couverture))::int as couverture_moyenne, sum(vues)::int as vues,
       sum(commentaires)::int as reponses
