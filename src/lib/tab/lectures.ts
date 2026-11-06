@@ -5,7 +5,8 @@
 // - Revenus (components/coque/briques.tsx, chiffres()) : encaisse = somme des
 //   montants des paiements NON rembourses du mois (date_paiement), les deux
 //   comptes Stripe et les autres sources ; le recurrent mensuel (MRR) =
-//   abonnements active ou trialing, annuel / 12, trimestriel / 3 ; l'ecart au
+//   abonnements active ou trialing, au prix paye (montant_paye, coupon deduit,
+//   06/11/2026, sinon montant), annuel / 12, trimestriel / 3 ; l'ecart au
 //   mois dernier = encaisse du mois / (mois dernier x part du mois ecoulee).
 // - Depense IA (views/DepenseIAView.tsx) : vue cockpit_ia_depense_jour,
 //   cout_micros / 1 000 000 en euros, abonnements fixes au prorata du mois,
@@ -130,7 +131,7 @@ export async function encaissements(c: Ctx): Promise<Sortie> {
     const auMemeStade = moisDernier.total * part
     const ecart = auMemeStade > 0 ? ((actuel.total - auMemeStade) / auMemeStade) * 100 : null
     const [mrr] = await q<{ mrr: string | null }>(tx, `
-      select coalesce(sum(case periodicite when 'year' then montant / 12 when 'quarter' then montant / 3 else montant end), 0)::text as mrr
+      select coalesce(sum(case periodicite when 'year' then coalesce(montant_paye, montant) / 12 when 'quarter' then coalesce(montant_paye, montant) / 3 else coalesce(montant_paye, montant) end), 0)::text as mrr
       from public.cockpit_abonnements where statut in ('active', 'trialing')`)
     rythme = {
       mois_dernier_complet: { montant: moisDernier.total, affiche: eurosTuile(moisDernier.total), paiements: moisDernier.nb, mois: moisLisible(mp) },
@@ -222,7 +223,7 @@ const ABO_FROM = `public.cockpit_abonnements a
 async function etatAbonnements(tx: Tx, aujourdhui: string) {
   const [r] = await q<Record<string, unknown>>(tx, `
     select count(*) filter (where statut in ('active', 'trialing'))::int as actifs,
-      coalesce(sum(case periodicite when 'year' then montant / 12 when 'quarter' then montant / 3 else montant end)
+      coalesce(sum(case periodicite when 'year' then coalesce(montant_paye, montant) / 12 when 'quarter' then coalesce(montant_paye, montant) / 3 else coalesce(montant_paye, montant) end)
         filter (where statut in ('active', 'trialing')), 0)::float as mrr,
       count(*) filter (where statut in ('active', 'trialing') and pause_jusquau >= $1::date)::int as en_pause,
       count(*) filter (where statut in ('active', 'trialing') and annule_a_la_fin)::int as arret_programme,
@@ -305,7 +306,7 @@ export async function membres(c: Ctx): Promise<Sortie> {
     donnees: {
       aujourdhui: {
         abonnements_actifs: etat.actifs,
-        revenu_mensuel_recurrent_mrr: { montant: centimes(num(etat.mrr)), affiche: eurosTuile(num(etat.mrr)), regle: 'Abonnements actifs ou en essai, annuel divisé par 12, trimestriel par 3 (comme le cockpit).' },
+        revenu_mensuel_recurrent_mrr: { montant: centimes(num(etat.mrr)), affiche: eurosTuile(num(etat.mrr)), regle: 'Abonnements actifs ou en essai, au prix payé (coupon déduit), annuel divisé par 12, trimestriel par 3 (comme le cockpit).' },
         dont_en_pause: etat.en_pause,
         dont_arret_programme_a_la_fin_de_la_periode: etat.arret_programme,
         abonnements_en_echec_de_paiement: etat.en_echec,
