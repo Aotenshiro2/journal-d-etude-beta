@@ -20,6 +20,7 @@
 // celles de Tab (prevenirBrice, auteur tache).
 
 import { Resend } from 'resend'
+import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db'
 import { tgCockpit } from '@/lib/agent-cockpit-telegram'
 import { BASE } from '@/lib/tab/aide'
@@ -59,8 +60,13 @@ function instanceDe(sens: Sens, auteur: Auteur, i: Instance | null): Instance | 
   return i === 'umi' || i === 'sekai' ? i : 'sora'
 }
 
-export async function creerNote(sens: Sens, auteur: Auteur, n: NoteEntrante): Promise<NotePerso> {
-  const lignes = await prisma.$queryRawUnsafe<Ligne[]>(
+/**
+ * (06/11) `db` : une transaction en cours (le brief d'un besoin, envoye sous verrou) ; par
+ * defaut le client global. Jamais le client global DANS une transaction : le pool du journal
+ * n'a qu'une connexion (connection_limit), il attendrait la transaction elle-meme.
+ */
+export async function creerNote(sens: Sens, auteur: Auteur, n: NoteEntrante, db: Pick<Prisma.TransactionClient, '$queryRawUnsafe'> = prisma): Promise<NotePerso> {
+  const lignes = await db.$queryRawUnsafe<Ligne[]>(
     `insert into public.cockpit_perso_notes (sens, auteur, sujet, texte, projet, liens, instance)
      values ($1, $2, $3, $4, $5, $6::text[], $7) returning ${COLONNES}`,
     sens, auteur, n.sujet, n.texte, n.projet, n.liens, instanceDe(sens, auteur, n.instance),

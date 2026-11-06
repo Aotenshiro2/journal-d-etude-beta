@@ -1724,6 +1724,8 @@ const LIBELLES_BOUTONS: Record<string, string> = {
   'm:lots': "J'ai tradé mes lots",
   // (05/11) = BOUTON_INDICATEUR (indicateur-pur.ts ; verifier-indicateur-alex.mjs compare).
   'm:indic': "Indicateur d'Alex",
+  // (06/11) = BOUTON_BESOIN (besoin-etape-pur.ts ; verifier-besoins.mjs compare).
+  'm:besoin': 'Il me manque quelque chose',
   [BOUTON_REGLE.data]: BOUTON_REGLE.texte,
 }
 
@@ -1741,6 +1743,8 @@ export function libelleBouton(data: string): string {
   // (05/11) La carte de l'indicateur d'Alex (= LIBELLE_OUI, LIBELLE_NON d'indicateur-pur.ts), jamais le nonce.
   if (/^ic:/.test(data)) return 'Oui, envoie à Alex'
   if (/^ix:/.test(data)) return 'Laisser tomber'
+  // (06/11) « Laisser tomber » sous la question « Il me manque quelque chose » (besoin-etape-pur.ts), jamais le nonce.
+  if (/^bx:/.test(data)) return 'Laisser tomber'
   return 'bouton inconnu'
 }
 

@@ -89,6 +89,8 @@ export type PosteIA =
   // (06/11) Besoins des membres, lot 1 (src/lib/besoins/) : la passe de reperage des fils et le
   // regroupement en cartes, Haiku sur la cle du support (produit 'support').
   | 'besoins_reperage' | 'besoins_regroupement'
+  // (06/11) Lots 2 a 4 : le classement d'un signalement (bouton des outils, bot des membres, saisie de l'equipe).
+  | 'besoins_classement'
   // (31/10) Les vocaux d'Agent AOK transcrits (Groq, src/lib/transcription.ts) : produit 'cockpit',
   // aucun jeton, cout a la duree d'audio. Ligne ecrite directement par tracerTranscription.
   | 'transcription'

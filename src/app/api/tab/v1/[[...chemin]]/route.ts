@@ -17,6 +17,7 @@ import { alerterBriceSecurite } from '@/lib/securite/alerte'
 import { lireImage as lireImageBelrive, listerImages as listerImagesBelrive, type Executeur } from '@/lib/mcp-gpt/requetes'
 import { urlSigneeImage } from '@/lib/mcp-gpt/stockage-images'
 import { listerPropositions, proposerReponseTab } from '@/lib/tab/repondre'
+import { besoinsTab } from '@/lib/besoins/tab'
 
 /**
  * L'API DE TAB (20/10/2026) : /api/tab/v1/... , JSON, LECTURE SEULE.
@@ -72,6 +73,8 @@ const LECTURES: Record<string, Lecture> = {
   avatars: { f: avatars, defaut: 'tout' },
   connaissances: { f: connaissances, defaut: 'tout' },
   schema: { f: schema, defaut: 'tout' },
+  // (06/11/2026) Les besoins des membres (cartes, compteurs ; ?id= : les demandes), lecture seule.
+  besoins: { f: besoinsTab, defaut: 'tout' },
 }
 
 const ENTETES = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }

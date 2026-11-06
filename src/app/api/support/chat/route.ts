@@ -10,6 +10,8 @@ import { MAX_TOURS_SUPPORT, requeteSupport, resultatOutilSupport, versMessagesSu
 import { trouverCours } from '@/lib/trouver-cours'
 import { texteAvecPhrase, type BesoinPropose } from '@/lib/besoins/pur'
 import { noterBesoinsDuChat } from '@/lib/besoins/serveur'
+import { analyserTexte } from '@/lib/securite/injection-pur'
+import { alerterBriceSecurite } from '@/lib/securite/alerte'
 
 // L'appel Claude peut dépasser les 10 s par défaut des fonctions Vercel
 export const maxDuration = 60
@@ -123,6 +125,16 @@ export async function POST(req: NextRequest) {
     let replyFinale = reply
     if (besoins.length) {
       const note = await noterBesoinsDuChat({ userId, app, filId: saved.id, texte: message, besoins, peutDire: !!filtre.texte })
+      // (06/11, lots 2 a 4) Une demande enregistree SUSPECTE (texte cache,
+      // consigne adressee a une IA) : Brice est prevenu, comme pour le bot des
+      // membres (anti-rafale d'alerte.ts). Rien n'est dit au membre.
+      if (note.suspects > 0) {
+        await alerterBriceSecurite({
+          source: `chat support (${app}), besoin noté`, qui: `compte ${userId.slice(0, 8)}`,
+          analyse: analyserTexte(message, { niveau: 'injection' }),
+          suite: "La demande est gardée dans les besoins, marquée suspecte, sans phrase au membre. Rien d'autre n'a été fait.",
+        })
+      }
       if (note.phrase) {
         replyFinale = texteAvecPhrase(reply, true)
         try {

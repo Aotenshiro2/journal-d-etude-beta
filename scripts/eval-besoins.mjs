@@ -20,6 +20,10 @@
 //      jamais suivie (aucun besoin, ou un besoin marque suspect par le serveur)
 //   R1 regroupement : meme besoin qu'une carte -> sa cle
 //   R2 regroupement : besoin different -> nouveau
+//   (06/11, lots 2 a 4) Le CLASSEMENT d'un signalement (requeteClassement, Haiku, poste besoins_classement) :
+//   C1 bouton du Journal, fonction : outil journal garde, nature fonction, cle journal.*
+//   C2 bouton de Pilotage, bug : pilotage, bug
+//   C3 entree du bot (outil au choix du modele), fonction du Carnet : carnet, fonction
 // Cles : ANTHROPIC_API_KEY_SUPPORT et ANTHROPIC_API_KEY_LIVECLUB, sinon le coffre
 // (anthropic-support-chatbot.local.json, anthropic-liveclub-bot.local.json). Jamais affichees.
 // Lancement (Node 22, depuis apps/journal-d-etude) : node scripts/eval-besoins.mjs P1
@@ -28,7 +32,7 @@ import './resoudre-ts.mjs'
 import { readFileSync, existsSync } from 'node:fs'
 import path from 'node:path'
 
-const CAS = ['D1', 'D2', 'L1', 'L2', 'L3', 'L4', 'L5', 'L6', 'P1', 'P2', 'P3', 'R1', 'R2']
+const CAS = ['D1', 'D2', 'L1', 'L2', 'L3', 'L4', 'L5', 'L6', 'P1', 'P2', 'P3', 'R1', 'R2', 'C1', 'C2', 'C3']
 const cas = (process.argv[2] ?? '').toUpperCase()
 if (!CAS.includes(cas) || process.argv.length > 3) {
   console.error(`Un seul cas par lancement : ${CAS.join(', ')}.`)
@@ -288,6 +292,36 @@ async function r2() {
   return verifier('R2', [['nouveau', cle === null]])
 }
 
+// ---------------------------------------------------------------------------
+// Le classement d'un signalement (lots 2 a 4)
+// ---------------------------------------------------------------------------
+
+const B = await import('../src/lib/besoins/bouton-pur.ts')
+
+async function classement(code, texte, outil) {
+  const req = B.requeteClassement(texte, { outil, page: outil ? '/' : null })
+  const r = await clientSupport.messages.create(req)
+  compter(req.model, r.usage)
+  const brut = texteDe(r)
+  console.log(`\n===== ${code} (classement, outil ${outil ?? 'libre'}) -> ${brut}`)
+  return B.lireReponseClassement(brut, outil)
+}
+
+async function c1() {
+  const b = await classement('C1', 'Je voudrais pouvoir exporter tout mon canvas en image PNG pour le partager avec mon mentor.', 'journal')
+  return verifier('C1', [['lu', !!b], ['journal', b?.outil === 'journal'], ['fonction', b?.nature === 'fonction'], ['cle journal.*', /^journal\./.test(b?.cle ?? '')]])
+}
+
+async function c2() {
+  const b = await classement('C2', "Quand j'importe mon relevé FTMO, la page devient blanche et rien ne s'affiche. J'ai réessayé trois fois.", 'pilotage')
+  return verifier('C2', [['lu', !!b], ['pilotage', b?.outil === 'pilotage'], ['bug', b?.nature === 'bug']])
+}
+
+async function c3() {
+  const b = await classement('C3', 'Le Carnet devrait pouvoir exporter mes notes en PDF, pour les relire hors ligne.', null)
+  return verifier('C3', [['lu', !!b], ['carnet', b?.outil === 'carnet'], ['fonction', b?.nature === 'fonction']])
+}
+
 let ok = false
 try {
   ok = await {
@@ -296,7 +330,7 @@ try {
     L3: () => lNegatif('L3', 'pause de l abonnement', 'Je voudrais mettre mon abonnement en pause pendant 2 mois.'),
     L4: () => lNegatif('L4', 'merci', 'Merci beaucoup pour ton aide, c est super clair !'),
     L5: () => lNegatif('L5', 'question couverte par une fiche', 'Le Carnet du Trader, c est gratuit ?'),
-    L6: l6, P1: p1, P2: p2, P3: p3, R1: r1, R2: r2,
+    L6: l6, P1: p1, P2: p2, P3: p3, R1: r1, R2: r2, C1: c1, C2: c2, C3: c3,
   }[cas]()
 } catch (err) {
   console.log(`KO  ${cas} : ${err instanceof Error ? err.message.split('\n')[0].slice(0, 300) : err}`)

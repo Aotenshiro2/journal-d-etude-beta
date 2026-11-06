@@ -72,7 +72,8 @@ export type BilanPasse = {
   erreur: string | null
 }
 
-export type UsageBesoins = 'besoins_reperage' | 'besoins_regroupement'
+/** (06/11, lots 2 a 4) besoins_classement : le classement d'un signalement (bouton, bot, saisie de l'equipe). */
+export type UsageBesoins = 'besoins_reperage' | 'besoins_regroupement' | 'besoins_classement'
 
 /** Tout ce que le moteur lit, ecrit et demande au modele. */
 export type Depots = {

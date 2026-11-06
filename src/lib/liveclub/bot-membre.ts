@@ -150,7 +150,7 @@ import { repondreAuMembre } from './agent-membre'
 import { contexteAccesOffert } from './prompt-membre'
 import {
   annulerDemandeEquipe, direAttenteUneFois, enregistrerEchangeSupport, estEnAttenteHumain, lireEtatFil, lireMessagesFil,
-  texteAvecBoutons, tracerEtape, tracerMessageBot, type EtatFil,
+  nettoyerPourSupport, texteAvecBoutons, tracerEtape, tracerMessageBot, type EtatFil,
 } from './support-pont'
 import {
   TEXTE_IMAGE_NON_TRANSMISE, TEXTE_IMAGE_TRANSMISE, lirePieceImageMembre,
@@ -172,6 +172,11 @@ import {
   annulerIndicateur, confirmerIndicateur, etapeIndicateur, reponseTexteIndicateur, type ReponseIndicateur,
 } from './indicateur'
 import { BOUTON_INDICATEUR, lireBoutonIndicateur } from './indicateur-pur'
+import {
+  annulerEtapeBesoin, enregistrerBesoinDuBot, lireMessageEtapeBesoin, oublierEtapeBesoin, ouvrirEtapeBesoin, type ReponseBesoin,
+} from './besoin-etape'
+import { BOUTON_BESOIN, lireBoutonBesoin } from './besoin-etape-pur'
+import { TEXTE_BOUTON_MAX } from '@/lib/besoins/bouton-pur'
 import {
   REGLE_RAISON_SORTIE, jetonBienForme, libelleBouton, messageErreur, normaliserEmail, pauseDejaProposee, relationAbsente,
   sortieAExpliquer, texteDette, texteTarifReserve, type GesteDate,
@@ -1672,6 +1677,9 @@ export async function traiterMessagePrive(message: MessageTg, updateId: number):
   // /start <param> (deep link), /start, /menu. « @nom_du_bot » est tolere.
   const commande = COMMANDE_BOT_MEMBRE.exec(texte)
   if (commande) {
+    // (06/11) Une commande ferme l'etape « Il me manque quelque chose » : le
+    // message suivant n'est plus pris pour un besoin.
+    await oublierEtapeBesoin(u.id)
     const param = commande[2]
     // Au fil Support : la commande, jamais le jeton du lien personnel.
     await versSupport(u.id, null, 'membre', `/${commande[1].toLowerCase()}${param ? ' [jeton]' : ''}`)
@@ -1717,6 +1725,11 @@ export async function traiterMessagePrive(message: MessageTg, updateId: number):
   // est lu ici d'abord, meme d'un compte de l'equipe ou si l'equipe a la main
   // (c'est la reponse a une question du bot). Une phrase : le parcours habituel.
   if (await repondreEtapeIndicateur(chat, u, texte.slice(0, 2000))) return
+
+  // (06/11) « Il me manque quelque chose » (besoin-etape.ts) : pendant l'etape,
+  // le message est lu ici d'abord, comme pour l'indicateur (c'est la reponse a
+  // une question du bot). Pas d'etape, ou elle vient d'etre prise : la suite.
+  if (await repondreEtapeBesoin(chat, u, texte.slice(0, TEXTE_BOUTON_MAX))) return
 
   // (08/10) Le texte libre d'un compte de l'equipe va a l'agent du Cockpit.
   if (await transmettreSiEquipe(chat, u, message)) return
@@ -1935,6 +1948,42 @@ async function repondreEtapeIndicateur(chat: number, u: Utilisateur, texte: stri
   return true
 }
 
+// ---------------------------------------------------------------------------
+// (06/11) « Il me manque quelque chose » (besoin-etape.ts, besoins des membres lot 2)
+// ---------------------------------------------------------------------------
+
+/** La reponse de l'etape, envoyee et tracee au fil Support. */
+async function envoyerReponseBesoin(chat: number, rep: ReponseBesoin, identite: IdentiteFil | null): Promise<void> {
+  await envoyer(chat, rep.texte, rep.equipe ? avecEquipe(rep.boutons) : rep.boutons, identite)
+}
+
+/**
+ * Un message ecrit pendant l'etape « Il me manque quelque chose ». false = pas
+ * d'etape (le parcours habituel). Le message du membre entre au fil Support
+ * (comme tout message) AVANT d'etre enregistre : la demande garde le texte tel
+ * qu'il est au fil, et son fil (la passe de reperage ne le recompte pas).
+ */
+async function repondreEtapeBesoin(chat: number, u: Utilisateur, texte: string): Promise<boolean> {
+  const lu = await lireMessageEtapeBesoin(u.id, texte)
+  if (!lu) return false
+  const r = await rattachementOuNull(u.id)
+  const identite = r && r !== 'illisible' ? r : null
+  const ecrit = identite ? texte : masquerCodes(texte)
+  const trace = await enregistrerEchangeSupport({
+    telegramId: u.id, membreId: identite?.membre_id ?? null, email: identite?.email ?? null, role: 'membre', texte: ecrit,
+  })
+  if (lu.genre !== 'texte') {
+    await envoyerReponseBesoin(chat, lu.reponse, identite)
+    return true
+  }
+  const rep = await enregistrerBesoinDuBot({
+    telegramId: u.id, qui: u.username ? `@${u.username}` : null, filId: trace?.filId ?? null, membreId: identite?.membre_id ?? null,
+    texteFil: nettoyerPourSupport(ecrit.trim()).slice(0, TEXTE_BOUTON_MAX),
+  })
+  await envoyerReponseBesoin(chat, rep, identite)
+  return true
+}
+
 /** Un clic sur un bouton. Toujours answerCallbackQuery, quoi qu'il arrive. */
 export async function traiterBouton(bouton: BoutonTg, updateId: number): Promise<void> {
   const u = bouton.from
@@ -1970,6 +2019,25 @@ export async function traiterBouton(bouton: BoutonTg, updateId: number): Promise
   let profilLu: Promise<ProfilSansRattachement> | null = null
   const profil = (): Promise<ProfilSansRattachement> =>
     (profilLu ??= profilSansRattachement(u.id, r === 'illisible' ? 'illisible' : null))
+
+  // (06/11) « Il me manque quelque chose » : l'etape (la question, 10 minutes).
+  // Rattache ou non : l'identite est ce compte Telegram.
+  if (data === BOUTON_BESOIN.data) {
+    await repondreBouton(bouton.id)
+    await envoyerReponseBesoin(chat, await ouvrirEtapeBesoin(u.id), identite)
+    return
+  }
+  // (06/11) « Laisser tomber » sous la question : SON nonce, consomme une fois.
+  const besoinBouton = lireBoutonBesoin(data)
+  if (besoinBouton) {
+    await repondreBouton(bouton.id)
+    const rep = await annulerEtapeBesoin(u.id, besoinBouton.nonce)
+    await retirerBoutons(chat, message.message_id)
+    await envoyerReponseBesoin(chat, rep, identite)
+    return
+  }
+  // (06/11) Tout autre bouton ferme l'etape « Il me manque quelque chose ».
+  await oublierEtapeBesoin(u.id)
 
   // « Contacter l'equipe » : le fil passe en « veut un humain » (decision 5),
   // la reponse de l'equipe arrivera ici par le bot. (22/10) Selon l'etat du fil.

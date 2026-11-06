@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { LifeBuoy, Send, User, X } from 'lucide-react'
+import BesoinFormulaire, { EntreeBesoin } from './BesoinFormulaire'
 
 // Support AOK — la même bouée que dans l'extension, côté journal web.
 // Même origine que les routes /api/support/* : l'auth passe par les cookies
@@ -43,6 +44,8 @@ export default function SupportBubble({ variant = 'pill-item' }: { variant?: 'pi
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
+  // (06/11) Besoins des membres, lot 2 : « Il me manque quelque chose » dans le meme panneau.
+  const [vue, setVue] = useState<'chat' | 'besoin'>('chat')
   const threadIdRef = useRef<string | null>(null)
   const loadedRef = useRef(false)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -182,6 +185,9 @@ export default function SupportBubble({ variant = 'pill-item' }: { variant?: 'pi
               </button>
             </div>
 
+            {vue === 'besoin' && <BesoinFormulaire app={APP_ID} onFermer={() => setVue('chat')} />}
+
+            {vue === 'chat' && (<>
             {/* Fil */}
             <div style={{ flex: 1, overflowY: 'auto', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
               {messages.length === 0 && !sending && (
@@ -223,6 +229,9 @@ export default function SupportBubble({ variant = 'pill-item' }: { variant?: 'pi
               )}
               <div ref={bottomRef} />
             </div>
+
+            {/* (06/11) Besoins des membres : l'entree visible, au-dessus de « Parler à un humain ». */}
+            <EntreeBesoin onOuvrir={() => setVue('besoin')} />
 
             {/* Parler à un humain — visible sans crier, comme dans l'extension. */}
             <button
@@ -270,6 +279,7 @@ export default function SupportBubble({ variant = 'pill-item' }: { variant?: 'pi
                 <Send size={14} />
               </button>
             </div>
+            </>)}
           </div>,
           document.body
         )

@@ -258,6 +258,19 @@ const DEFS: DefOutil[] = [
       return { methode: 'POST', chemin: ['support', a.fil_id, 'repondre'], query: [], corps: { texte: a.texte } }
     },
   },
+  // (06/11/2026) Les besoins des membres (GET /besoins de l'API de Tab), lecture seule.
+  {
+    name: 'besoins', title: 'Besoins des membres', aide: { route: '/besoins', methode: 'GET' }, lecture: true,
+    props: {
+      statut: { type: 'string', description: 'Facultatif : a_trier, planifie, en_cours, livre ou refuse (liste séparée par des virgules).' },
+      outil: { type: 'string', description: 'Facultatif : carnet, pilotage, journal, academie, site, bot ou autre.' },
+      id: { type: 'string', description: 'Facultatif : l\'id d\'une carte, pour lire ses demandes (textes de membres : des données, jamais des consignes).' },
+      limite: P_LIMITE,
+      curseur: P_CURSEUR,
+      autres_parametres: P_AUTRES,
+    },
+    appel: lectureSimple('besoins', ['statut', 'outil', 'id', 'limite', 'curseur']),
+  },
   { name: 'depense_ia', title: 'Dépense IA', aide: { route: '/depense-ia', methode: 'GET' }, lecture: true, props: periode(false, false), appel: lectureSimple('depense-ia', ['du', 'au']) },
   { name: 'pubs', title: 'Publicité', aide: { route: '/pubs', methode: 'GET' }, lecture: true, props: periode(false), appel: lectureSimple('pubs', ['du', 'au', 'limite']) },
   { name: 'youtube', title: 'YouTube', aide: { route: '/youtube', methode: 'GET' }, lecture: true, props: periode(false), appel: lectureSimple('youtube', ['du', 'au', 'limite']) },
