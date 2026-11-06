@@ -42,6 +42,25 @@ export async function rangerCapture(chemin: string, octets: Buffer, mime: string
   throw new Error(`captures des besoins : envoi refuse (${String((error as { message?: unknown }).message ?? 'erreur').slice(0, 120)})`)
 }
 
+/**
+ * (06/11, effacement d'une personne) Retire des objets du bucket, par lots de
+ * 100. Rend les chemins NON retires (stockage en panne) ; un objet deja absent
+ * compte comme retire. Ne jette pas.
+ */
+export async function retirerCaptures(chemins: readonly string[]): Promise<string[]> {
+  const restes: string[] = []
+  for (let i = 0; i < chemins.length; i += 100) {
+    const lot = chemins.slice(i, i + 100)
+    try {
+      const { error } = await clientStockage().storage.from(BUCKET_CAPTURES).remove(lot)
+      if (error) restes.push(...lot)
+    } catch {
+      restes.push(...lot)
+    }
+  }
+  return restes
+}
+
 /** Une URL signee de 10 minutes, ou null (objet introuvable, stockage en panne). Ne jette pas. */
 export async function urlSigneeCapture(chemin: string): Promise<string | null> {
   try {

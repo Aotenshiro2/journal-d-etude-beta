@@ -1076,4 +1076,121 @@ await bloc('migration 20261106150000 : colonnes, contraintes, bucket prive, vues
   assert.match(sql, /capture_url \~ '\^\[0-9\]\{4\}-\[0-9\]\{2\}\/\[0-9a-f\]\{64\}\[\.\]\(jpg\|png\|webp\)\$'/)
 })
 
+// ---------------------------------------------------------------------------
+// (06/11, FINITIONS) L'effacement d'une personne : besoins_effacer (migration
+// 20261106180000), appelee par le serveur juste apres cockpit_effacer.
+// ---------------------------------------------------------------------------
+
+const EB = await import('../src/lib/besoins/effacer-pur.ts')
+const EFP = await import('../src/lib/effacement-pur.ts')
+
+await bloc('migration 20261106180000 : besoins_effacer en UN seul ordre SQL, aucun point-virgule dans le corps, droits fermes', () => {
+  const dossier = [path.resolve(RACINE, '../../sites/Aoknowledgecom/supabase/migrations'),
+    path.join(process.env.AOK_WORKSPACE ?? path.join(os.homedir(), 'Projects/Aoknowledge'), 'sites/Aoknowledgecom/supabase/migrations')].find(existsSync)
+  const sql = readFileSync(path.join(dossier, EB.MIGRATION_BESOINS_EFFACEMENT), 'utf8')
+  for (const [i, ligne] of sql.split('\n').entries()) {
+    if (ligne.trim().startsWith('--')) {
+      assert.ok(!ligne.includes(';'), `point-virgule dans un commentaire, ligne ${i + 1}`)
+      assert.ok(!ligne.includes("'"), `apostrophe dans un commentaire, ligne ${i + 1}`)
+    } else if (ligne.includes(';')) {
+      assert.ok(ligne.indexOf(';') === ligne.trimEnd().length - 1, `point-virgule hors fin d ordre, ligne ${i + 1}`)
+    }
+  }
+  // Coupee comme le script d application : exactement trois ordres (la fonction, son commentaire, ses droits).
+  const ordres = sql.split(';').map(s => s.replace(/^\s*--.*$/gm, '').trim()).filter(Boolean)
+  assert.equal(ordres.length, 3)
+  assert.match(ordres[0], /^create or replace function public\.besoins_effacer\(\n\s+p_telegram_ids bigint\[\], p_comptes uuid\[\], p_emails text\[\], p_membre_ids uuid\[\]\)\nreturns jsonb\nlanguage sql\nvolatile\nsecurity definer\nset search_path = public, pg_temp\nas \$besoins_effacer\$/)
+  assert.match(ordres[1], /^comment on function public\.besoins_effacer\(bigint\[\], uuid\[\], text\[\], uuid\[\]\) is/)
+  assert.equal(ordres[2], 'revoke all on function public.besoins_effacer(bigint[], uuid[], text[], uuid[]) from public, anon, authenticated, service_role')
+  assert.ok(!/plpgsql|\bgrant\b|\$\$/i.test(sql.replace(/^\s*--.*$/gm, '')), 'ni plpgsql, ni grant, ni corps anonyme (hors commentaires)')
+  const debut = sql.indexOf('as $besoins_effacer$') + 'as $besoins_effacer$'.length
+  const corps = sql.slice(debut, sql.indexOf('$besoins_effacer$', debut))
+  assert.ok(!corps.includes(';'), 'un seul ordre : aucun point-virgule dans le corps')
+  assert.match(corps.trim(), /^with\n/)
+  assert.equal((corps.match(/\bdelete from public\.besoin_demande x\b/g) ?? []).length, 1)
+  assert.equal((corps.match(/\bdelete from public\.besoin_vote x\b/g) ?? []).length, 1)
+  assert.ok(!/\b(update|insert)\b|delete from public\.besoin\b(?!_)/.test(corps), 'les cartes restent, rien d autre ne bouge')
+  assert.match(corps, /returning x\.id, x\.capture_url/)
+  // Jamais par le nom ni par un pseudo.
+  assert.ok(!/contact_nom|'tg:|'contact:/.test(corps), 'jamais un lien par le nom ou le pseudo')
+  for (const cle of ["'telegram:' || x", "'email:' || lower(btrim(x))", 'lower(x.contact_email) = any(k.emails)', 'x.membre_id = any(k.fiches)',
+    "case when x.contact_telegram ~* '^@?u?[0-9]{5,15}$'"]) assert.ok(corps.includes(cle), cle)
+  // Une capture ne part que si plus aucune demande ne la nomme (chemin partage par empreinte).
+  assert.match(corps, /not exists \(\n\s+select 1 from public\.besoin_demande y\n\s+where y\.capture_url = d\.capture_url\n\s+and y\.id not in \(select d2\.id from d as d2\)\)/)
+  assert.match(corps, /'demandes', \(select count\(\*\) from d\),\n\s+'votes', \(select count\(\*\) from v\),\n\s+'captures', coalesce\(/)
+})
+
+await bloc('effacement : cibles lues AVANT cockpit_effacer, besoins_effacer juste APRES (niveaux 2 et 3), captures retirees, ni nom ni email au log', async () => {
+  const eff = lire('src/lib/effacement.ts')
+  const i = (s) => { const k = eff.indexOf(s); assert.ok(k > 0, s); return k }
+  const cibles3 = i('ciblesDesBesoins = ciblesBesoins(cible, completes)')
+  const cibles2 = i('ciblesDesBesoins = await lireCiblesCompletes(cible).then((c) => ciblesBesoins(cible, c)).catch(() => null)')
+  const stripe = i('stripe = await arreterAbonnements(completes)')
+  const effacer = i("'select public.cockpit_effacer(")
+  const besoins = i('besoins = await effacerBesoinsDeLaPersonne(ciblesDesBesoins)')
+  assert.ok(cibles3 < stripe && stripe < effacer && cibles2 < effacer && effacer < besoins, 'ordre : cibles, Stripe, cockpit_effacer, besoins')
+  assert.ok(eff.includes("comptes: liste('user_ids').map(String)"), 'les comptes AOK des cibles completes')
+  assert.ok(eff.includes('if (p.niveau >= 2) {') && eff.includes("import('@/lib/besoins/effacer')"))
+  assert.ok(eff.includes('besoins: lignesBesoins(besoins)'))
+  // Seul besoins/effacer.ts appelle la fonction, et il retire les captures APRES elle.
+  const { readdirSync, statSync } = await import('node:fs')
+  const tous = []
+  const marcher = (d) => { for (const e of readdirSync(d)) { const p = path.join(d, e); if (statSync(p).isDirectory()) marcher(p); else if (/\.(ts|tsx)$/.test(e)) tous.push(p) } }
+  marcher(path.join(RACINE, 'src'))
+  const appelants = tous.filter(p => readFileSync(p, 'utf8').includes('besoins_effacer(')).map(p => path.relative(RACINE, p).split(path.sep).join('/'))
+  assert.deepEqual(appelants, ['src/lib/besoins/effacer.ts'])
+  const srv = lire('src/lib/besoins/effacer.ts')
+  assert.ok(srv.indexOf('besoins_effacer(') < srv.indexOf('await retirerCaptures(r.captures)'))
+  for (const ligne of srv.split('\n').filter(l => /console\./.test(l))) {
+    assert.ok(!/emails|comptes|telegram\b|membres|captures\.join|restees\.join|\bc\./.test(ligne), `log nominatif : ${ligne.trim()}`)
+  }
+  const cap = lire('src/lib/besoins/captures.ts')
+  assert.match(cap, /export async function retirerCaptures\(chemins: readonly string\[\]\): Promise<string\[\]>/)
+  assert.match(cap, /storage\.from\(BUCKET_CAPTURES\)\.remove\(lot\)/)
+  for (const f of ['src/lib/effacement.ts', 'src/lib/besoins/effacer.ts', 'src/lib/besoins/effacer-pur.ts', 'src/lib/besoins/captures.ts']) {
+    assert.ok(!/setInterval|setTimeout|cron/i.test(lire(f)), f)
+  }
+})
+
+await bloc('effacement, regles pures : cibles nettoyees, JSON de la base, chemins du bucket seulement, lignes pour l equipe avant le recapitulatif', () => {
+  const U = '11111111-1111-4111-8111-111111111111'
+  const M = '33333333-3333-4333-8333-333333333333'
+  const c = EB.ciblesBesoins(
+    { telegram: [111111], membres: [M], emails: [' A@X.fr '] },
+    { telegram: [111111, 222222, 0, -3], membres: [M, 'pas-un-uuid'], emails: ['a@x.fr', 'b@x.fr', 'sans-arobase'], comptes: [U.toUpperCase(), 'x'] })
+  assert.deepEqual(c, { telegram: [111111, 222222], comptes: [U], emails: ['a@x.fr', 'b@x.fr'], membres: [M] })
+  assert.equal(EB.cibleBesoinsVide(c), false)
+  assert.equal(EB.cibleBesoinsVide(EB.ciblesBesoins({ telegram: [], membres: [], emails: [] }, { telegram: [], membres: [], emails: [], comptes: [] })), true)
+
+  const ok = `2026-11/${'b'.repeat(64)}.png`
+  assert.deepEqual(EB.lireBesoinsEffaces(JSON.stringify({ demandes: 3, votes: 1, captures: [ok, ok, '../autre/objet.png', `public-asset/${'c'.repeat(64)}.png`, 12] })),
+    { demandes: 3, votes: 1, captures: [ok] })
+  for (const mauvais of [null, '', 'pas du json', '[]', '{"demandes":-1,"votes":0,"captures":[]}', '{"demandes":1,"votes":0}', '{"demandes":1.5,"votes":0,"captures":[]}']) {
+    assert.equal(EB.lireBesoinsEffaces(mauvais), null, String(mauvais))
+  }
+  // Prisma met le code sur une ligne plus bas.
+  assert.ok(EB.fonctionBesoinsAbsente('Invalid `prisma.$queryRawUnsafe()` invocation:\n\n\nRaw query failed. Code: `42883`. Message: `ERROR: function public.besoins_effacer(bigint[], uuid[], text[], uuid[]) does not exist`'))
+  assert.ok(!EB.fonctionBesoinsAbsente('Raw query failed. Code: `57014`. Message: `canceling statement due to statement timeout`'))
+
+  assert.deepEqual(EB.lignesBesoins(null), [])
+  assert.deepEqual(EB.lignesBesoins({ etat: 'fait', demandes: 0, votes: 0, captures: 0, capturesRestees: [] }), [])
+  const fait = EB.lignesBesoins({ etat: 'fait', demandes: 2, votes: 1, captures: 1, capturesRestees: [ok] })
+  assert.equal(fait[0], 'Besoins notés : 2 demande(s) et 1 vote(s) effacés, 1 capture(s) retirée(s) du stockage.')
+  assert.match(fait[1], /^ATTENTION : 1 capture\(s\) pas retirée\(s\) du bucket privé besoins-captures \(stockage en panne\), à retirer à la main : 2026-11\/b{64}\.png\.$/)
+  assert.match(EB.lignesBesoins({ etat: 'absente' })[0], /^ATTENTION : la migration 20261106180000_besoins_effacement\.sql n'est pas appliquée/)
+  assert.match(EB.lignesBesoins({ etat: 'panne' })[0], /^ATTENTION : ses besoins notés .* n'ont pas pu être effacés : à reprendre à la main\.$/)
+  for (const t of [...fait, ...EB.lignesBesoins({ etat: 'absente' }), ...EB.lignesBesoins({ etat: 'panne' })]) {
+    sansTiretsLongs(t)
+    assert.ok(!/@|u\d{5,}|[0-9a-f]{8}-[0-9a-f]{4}/.test(t), `ni email ni identifiant : ${t}`)
+  }
+
+  // Les lignes des besoins tombent AVANT le recapitulatif a transmettre a la personne, aux niveaux 2 et 3.
+  for (const niveau of [2, 3]) {
+    const r = EFP.lireResultat({ niveau, efface: { bot_fils: 2 }, anonymise: {}, garde: {} })
+    const t = EFP.phraseResultat(r, { besoins: fait })
+    assert.ok(t.indexOf(fait[0]) > 0 && t.indexOf(fait[0]) < t.indexOf('À transmettre à la personne'), `niveau ${niveau}`)
+    assert.equal(EFP.phraseResultat(r, { besoins: [] }), EFP.phraseResultat(r), 'rien a dire = resultat inchange')
+  }
+})
+
 console.log(`\n${n} blocs ok`)

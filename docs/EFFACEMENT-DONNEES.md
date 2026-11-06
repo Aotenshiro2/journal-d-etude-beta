@@ -7,8 +7,11 @@ divergent, c'est le code qu'on corrige, ou ce fichier, jamais en silence.
 Code : `src/lib/effacement-pur.ts` (règles, carte, textes), `src/lib/effacement.ts` (serveur),
 `sites/Aoknowledgecom/supabase/migrations/20261016090000_cockpit_effacement.sql` (fonctions et filtres),
 `D:\6_Societe\Pilotage\Data-Performance\automations\push_membres_supabase.py` (la collecte ne recrée pas).
+Besoins des membres (06/11/2026) : `src/lib/besoins/effacer-pur.ts`, `src/lib/besoins/effacer.ts`,
+migration `20261106180000_besoins_effacement.sql` (`besoins_effacer`, section 5.3).
 Vérifications : `scripts/verifier-effacement.mjs` (hors ligne), `scripts/apercu-effacement.mjs "<qui>"`
-(lecture seule sur la vraie base), `tester_oublis_membres.py` (pipeline).
+(lecture seule sur la vraie base), `tester_oublis_membres.py` (pipeline), `scripts/verifier-besoins.mjs`
+(l'étape des besoins).
 
 ## 1. Les règles de Brice
 
@@ -46,6 +49,9 @@ Vérifications : `scripts/verifier-effacement.mjs` (hors ligne), `scripts/apercu
    et l'irréversible.
 5. Au clic, niveau 3 : Stripe d'abord (une panne Stripe arrête tout, rien n'est effacé), puis
    `cockpit_effacer` en une transaction (le payeur est figé en premier), puis la sortie du groupe.
+   Niveaux 2 et 3, juste après `cockpit_effacer` : les besoins des membres qu'il ne connaît pas
+   (`besoins_effacer`, section 5.3), avec les cibles complètes lues AVANT lui (au niveau 3 il supprime
+   les comptes AOK et ce qui les retrouve), puis leurs captures retirées du bucket privé.
 6. Le résultat donne à l'équipe ce qui a été fait, ce qui reste à faire à la main et le récapitulatif à
    transmettre à la personne. Le geste est journalisé dans `cockpit_effacements` : des comptes, jamais
    un nom, un email ni un identifiant. La carte consommée est vidée (seul le niveau reste).
@@ -138,9 +144,9 @@ est dans la dernière colonne.
 | Donnée | Table | Clé | N1 | N2 | N3 | Pourquoi |
 |---|---|---|---|---|---|---|
 | Fils de conversation (membre, IA, équipe, gestes) | `"SupportThread"` | telegramId, userId (compte AOK ou `telegram:<id>`), contactEmail, membreId | . | E | E | |
-| Besoins notés (ses mots recopiés du fil, en entier) (06/11/2026) | `besoin_demande` | fil_id, membre_ref (compte AOK, `telegram:<id>`, ou pour une saisie de l'équipe `email:<adresse>`, `tg:<pseudo>`, `contact:<nom>`), membre_id, contact_nom, contact_email, contact_telegram | . | E | E | effacés avec le fil (clé étrangère en cascade, migration 20261106120000). RESTE À FAIRE : une demande SANS fil (bouton des outils, saisie de l'équipe, lots 2 et 3, migration 20261106150000) n'est pas connue de `cockpit_effacer` (fonction plpgsql de plusieurs ordres, que le script d'application ne sait pas redéfinir). À ajouter, au niveau 2 et 3 : `delete from besoin_demande where fil_id is null and (membre_ref = any(comptes AOK) or membre_ref = any('telegram:' + ids) or lower(contact_email) = any(emails))`, par la fonction elle-même (application à la main) ou par le serveur juste après, comme `effacerDemandesIndicateur` |
-| Captures jointes aux besoins (lot 2) | bucket privé `besoins-captures` (chemin dans `besoin_demande.capture_url`) | la demande | . | . | . | RESTE À FAIRE : l'objet n'est pas effacé avec sa demande ; à retirer par le serveur (clé de service) avant d'effacer la demande |
-| Votes sur les besoins (« Moi aussi », lot 2) | `besoin_vote` | membre_ref (compte AOK) | . | . | . | RESTE À FAIRE : pas connu de `cockpit_effacer` (même raison) ; à ajouter au niveau 2 et 3 : `delete from besoin_vote where membre_ref = any(comptes AOK)` |
+| Besoins notés (ses mots recopiés du fil, en entier) (06/11/2026) | `besoin_demande` | fil_id, membre_ref (compte AOK, `telegram:<id>`, ou pour une saisie de l'équipe `email:<adresse>`, `tg:<pseudo>`, `contact:<nom>`), membre_id, contact_nom, contact_email, contact_telegram | . | E | E | avec un fil : effacés avec lui (clé étrangère en cascade, migration 20261106120000). Sans fil (bouton des outils, saisie de l'équipe) : `besoins_effacer` (migration 20261106180000), appelée par le serveur juste après `cockpit_effacer` (`cockpit_effacer` est un plpgsql de plusieurs ordres que le script d'application, qui coupe à chaque point-virgule, ne sait pas redéfinir : d'où une fonction SQL à part, en UN seul ordre). Une demande est à elle si `membre_ref` est un de ses comptes AOK, `telegram:<id>` d'un de ses comptes Telegram ou `email:<adresse>` d'un de ses emails, si `contact_email` est un de ses emails, si `contact_telegram` est le numéro d'un de ses comptes Telegram, ou si `membre_id` est une de ses fiches. Jamais par le nom ni par un pseudo (section 8). La carte reste, même vide |
+| Captures jointes aux besoins (lot 2) | bucket privé `besoins-captures` (chemin dans `besoin_demande.capture_url`) | la demande | . | E | E | `besoins_effacer` rend les chemins que plus aucune demande ne nomme (le chemin dérive des octets : deux demandes peuvent partager un objet), le serveur les retire par la clé de service (`retirerCaptures`). Stockage en panne : les demandes sont déjà effacées, le résultat donne à l'équipe les chemins à retirer à la main (dérivés de l'image, pas de la personne). Seul le bouton des outils joint une capture, toujours sans fil |
+| Votes sur les besoins (« Moi aussi », lot 2) | `besoin_vote` | membre_ref (compte AOK ou `telegram:<id>`) | . | E | E | `besoins_effacer`, même appel |
 | Où la passe de repérage en est dans ses fils | `besoin_curseur_fil` | fil_id | . | E | E | effacé avec le fil (cascade) |
 | Mémoire de l'agent du bot (historique, action en attente) | `cockpit_liveclub_conversations` | telegram_id | . | E | E | |
 | Coût de l'IA de ses échanges | `"AiUsage"` | userId (`liveclub:u<id>`, compte AOK) | . | A | A | dépense de la société : le coût reste, `userId` devient `efface` |
@@ -233,7 +239,8 @@ Lu en lecture seule le 15/10/2026 (`pg_constraint`), à relire si une table s'aj
 - SANS clé étrangère (effacées une par une, sinon elles resteraient) : toutes les tables Prisma du Journal
   et de l'IA (`userId` texte), `academie_*`, `"SupportThread"`.
 - Stockage Supabase : aucun objet n'a de propriétaire (`public-asset` 318, `extension-images` 1 494, lu le
-  15/10) : rien à faire.
+  15/10) : rien à faire. Le bucket privé `besoins-captures` (06/11) se retrouve par les demandes, pas par
+  un propriétaire : section 5.3.
 - Suppression par SQL (rôle postgres, droit DELETE sur `auth.users` vérifié) : sessions et jetons de
   rafraîchissement disparaissent, un jeton d'accès déjà émis reste valable jusqu'à son expiration (une
   heure environ).
@@ -273,6 +280,19 @@ supprimée, quel que soit le chemin (effacement, `cockpit_oublier_membre`, fusio
 - Les résumés du matin déjà envoyés à l'équipe dans Agent AOK.
 - Les listes d'oubli (numéros Telegram, fiches d'archive, emails hachés) : gardées exprès, sinon
   l'effacement serait défait par la collecte suivante.
+- Besoins des membres (06/11/2026) :
+  - une saisie de l'équipe qui ne la connaît que par son nom (`contact:<nom>`) ou son pseudo Telegram
+    (`tg:<pseudo>`) : jamais retrouvée (pas de lien par le nom), à effacer à la main si la demande le
+    couvre ;
+  - le brief d'une carte planifiée (`besoin.brief`) et la note Perso déposée pour Sora recopient les
+    demandes en entier et les messages du membre de ses fils : texte de travail, non fouillé ;
+  - les cartes (`besoin` : titre, clé, note de l'équipe) restent, même vides : écrites par l'IA ou
+    l'équipe, sans mot du membre ;
+  - l'étape « à reprendre » (migration 20261106180000 pas appliquée, panne) : rejouer en SQL, rôle
+    postgres, `select public.besoins_effacer(array[<numéros Telegram>]::bigint[], array[<comptes AOK>]::uuid[],
+    array['<emails>']::text[], array[<fiches>]::uuid[])` avec ce que l'équipe sait encore. Au niveau 3,
+    ses comptes AOK sont déjà supprimés : les demandes du bouton (`membre_ref` = uuid du compte) ne se
+    retrouvent plus que par cet uuid. D'où l'ordre de mise en ligne : la migration AVANT le journal.
 
 ## 9. Empêcher le retour (filtres en base, quel que soit l'écrivain)
 
@@ -300,6 +320,13 @@ effacement : la personne est peut-être revenue.
   `cockpit_effacements`, rend des comptes.
 - `cockpit_figer_payeur(membres, comptes)`, `cockpit_oublier_membre(membre)` (corrigée : elle détachait
   les paiements sans nom), `cockpit_hash_email(email)`.
+- `besoins_effacer(tg, comptes, emails, membres)` (06/11/2026, migration 20261106180000) : SQL en UN seul
+  ordre (des CTE qui suppriment, aucun point-virgule dans le corps), SECURITY DEFINER, `search_path` fixé,
+  aucun droit pour public, anon, authenticated ni service_role. Prend les cibles COMPLÈTES lues avant
+  `cockpit_effacer`, efface ses demandes de besoin restantes et ses votes, rend `{ demandes, votes,
+  captures }` (des nombres, et les chemins des captures orphelines). Appelée aux niveaux 2 et 3 juste
+  après `cockpit_effacer` ; un échec ne défait rien, le résultat dit à l'équipe ce qui est à reprendre.
+  Pas dans l'aperçu : la carte de confirmation ne compte pas encore les besoins.
 
 ## 11. Aperçu sur une vraie personne (lecture seule, 15/10/2026)
 

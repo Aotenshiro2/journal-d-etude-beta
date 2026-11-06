@@ -524,7 +524,7 @@ export function externePourJournal(s: IssueStripe | null, t: IssueTelegram | nul
  */
 export function phraseResultat(
   r: ResultatEffacement,
-  o: { stripe?: IssueStripe | null; telegram?: IssueTelegram | null; externe?: Comptes } = {},
+  o: { stripe?: IssueStripe | null; telegram?: IssueTelegram | null; externe?: Comptes; besoins?: readonly string[] } = {},
 ): string {
   const l: string[] = [`Effacement de niveau ${r.niveau} fait (${NOMS_NIVEAUX[r.niveau]}), journalisé sans nom ni email.`]
   const efface = lignesParApp(r.efface, 5)
@@ -554,6 +554,8 @@ export function phraseResultat(
     }
     if (manuel.length) l.push('À faire à la main :', ...[...new Set(manuel)].map((m) => `- ${m}`))
   }
+  // (06/11) Les besoins des membres, hors de cockpit_effacer (besoins/effacer-pur.ts, lignesBesoins).
+  if (o.besoins?.length) l.push(...o.besoins)
   l.push(`À transmettre à la personne :\n« ${recapitulatifPersonne(r.niveau, o)} »`)
   return l.join('\n')
 }

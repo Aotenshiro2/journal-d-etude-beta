@@ -33,6 +33,7 @@ import {
   externePourJournal, phraseResultat,
   type ApercuEffacement, type CibleEffacement, type Comptes, type IssueStripe, type IssueTelegram, type Niveau,
 } from '@/lib/effacement-pur'
+import { ciblesBesoins, lignesBesoins, type CiblesBesoins, type IssueBesoins } from '@/lib/besoins/effacer-pur'
 
 export const MIGRATION_EFFACEMENT = '20261016090000_cockpit_effacement.sql'
 
@@ -67,7 +68,7 @@ export async function lireApercuEffacement(niveau: Niveau, c: CibleEffacement): 
 }
 
 /** Les cibles completes (comptes Telegram, fiches, emails, comptes AOK), en lecture seule. */
-async function lireCiblesCompletes(c: CibleEffacement): Promise<{ telegram: number[]; membres: string[]; emails: string[] }> {
+async function lireCiblesCompletes(c: CibleEffacement): Promise<{ telegram: number[]; membres: string[]; emails: string[]; comptes: string[] }> {
   const lignes = await prisma.$transaction(async (tx) => {
     await tx.$executeRawUnsafe('set transaction read only')
     return tx.$queryRawUnsafe<{ c: string }[]>(
@@ -80,6 +81,8 @@ async function lireCiblesCompletes(c: CibleEffacement): Promise<{ telegram: numb
     telegram: liste('telegram_ids').map(Number).filter((x) => Number.isSafeInteger(x) && x > 0),
     membres: liste('membre_ids').map(String),
     emails: liste('emails').map(String),
+    // (06/11) Les comptes AOK, pour les besoins des membres (membre_ref = uuid du compte).
+    comptes: liste('user_ids').map(String),
   }
 }
 
@@ -232,6 +235,12 @@ export async function executerActionEffacement(a: ActionAgent, acteur: string): 
   let stripe: IssueStripe | null = null
   let externe: Comptes = {}
   let telegram: number[] = cible.telegram
+  // (06/11) Les besoins des membres (niveaux 2 et 3) : leurs cibles sont lues
+  // AVANT cockpit_effacer, qui supprime au niveau 3 les comptes AOK et ce qui
+  // les retrouve ; elles servent juste apres lui (besoins/effacer.ts).
+  // Lecture ratee au niveau 2 : l'effacement se fait, l'etape des besoins est
+  // dite a reprendre.
+  let ciblesDesBesoins: CiblesBesoins | null = null
   if (p.niveau === 3) {
     let completes: Awaited<ReturnType<typeof lireCiblesCompletes>>
     let apercu: ApercuEffacement
@@ -246,7 +255,10 @@ export async function executerActionEffacement(a: ActionAgent, acteur: string): 
     if (refus) throw new RefusAction(refus)
     externe = apercu.externe
     telegram = completes.telegram
+    ciblesDesBesoins = ciblesBesoins(cible, completes)
     stripe = await arreterAbonnements(completes)
+  } else if (p.niveau === 2) {
+    ciblesDesBesoins = await lireCiblesCompletes(cible).then((c) => ciblesBesoins(cible, c)).catch(() => null)
   }
 
   let brut: string | undefined
@@ -287,6 +299,24 @@ export async function executerActionEffacement(a: ActionAgent, acteur: string): 
     }
   }
 
+  // (06/11) Niveaux 2 et 3, juste apres cockpit_effacer : les besoins des
+  // membres qu'il ne connait pas (demandes sans fil, saisies de l'equipe,
+  // votes, captures du bucket prive besoins-captures). Migration
+  // 20261106180000 (besoins_effacer), besoins/effacer.ts. Ne jette pas.
+  let besoins: IssueBesoins | null = null
+  if (p.niveau >= 2) {
+    if (!ciblesDesBesoins) besoins = { etat: 'panne' }
+    else {
+      try {
+        const { effacerBesoinsDeLaPersonne } = await import('@/lib/besoins/effacer')
+        besoins = await effacerBesoinsDeLaPersonne(ciblesDesBesoins)
+      } catch (err) {
+        console.error(`[cockpit/effacement] besoins non effaces : ${messageErreur(err).slice(0, 160)}`)
+        besoins = { etat: 'panne' }
+      }
+    }
+  }
+
   if (resultat.effacementId && (stripe || sortie)) {
     try {
       await prisma.$executeRawUnsafe(
@@ -297,5 +327,5 @@ export async function executerActionEffacement(a: ActionAgent, acteur: string): 
     }
   }
   console.log(`[cockpit/effacement] niveau ${p.niveau} fait (${resultat.effacementId ?? '?'})`)
-  return phraseResultat(resultat, { stripe, telegram: sortie, externe }) + avertissementIndicateur
+  return phraseResultat(resultat, { stripe, telegram: sortie, externe, besoins: lignesBesoins(besoins) }) + avertissementIndicateur
 }
