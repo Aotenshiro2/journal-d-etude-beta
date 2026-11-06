@@ -1,5 +1,44 @@
 # ETAT du journal d etudes
 
+## BESOINS DES MEMBRES, LOT 1 (06/11/2026, commite NON pousse, branche besoins-lot1 ; migration 20261106120000 ECRITE, NON appliquee)
+
+- Brice, 05/11 : recueillir les besoins des membres dans nos outils (fonction qui manque, blocage, bug), UNE carte par besoin,
+  tri au cockpit (lot 3), brief de dev et message de livraison (lot 4). Son choix du 06/11 pour ce lot : option 3, les deux voies.
+- EN DIRECT : outil noter_besoin (src/lib/besoins/pur.ts) dans le bot support du site et des apps (support-prompt.ts,
+  /api/support/chat) et le bot des membres (prompt-membre.ts, agent-membre.ts). Le modele ne donne qu'un classement (outil,
+  nature, titre 80 car., cle_proposee, resume 200 car.), JAMAIS le texte du membre ni un identifiant. Chat : besoins gardes en
+  memoire, enregistres APRES la sauvegarde du fil (noterBesoinsDuChat). Telegram : fil retrouve par "telegramId", message
+  recopie du fil (noterBesoinsTelegram). Refuse sous PRUDENCE (la passe le reprendra, marque suspect). Phrase du serveur
+  PHRASE_BESOIN_NOTE (« C'est noté, je l'ajoute aux besoins que l'équipe passe en revue. On te tiendra au courant. »),
+  A VALIDER PAR BRICE : une fois par echange, pas si ce membre l'a deja recue pour cette carte dans ce fil (accuse_le), jamais
+  pour un texte suspect, une proposition (pause, arret), un repli ni l'etape de l'indicateur. Echec = la reponse part comme avant.
+- APRES COUP : POST /api/cockpit/besoins/reperer (Bearer + cockpit_allowlist, CORS de support-cors), ESSAI PAR DEFAUT
+  (`essai: false` pour ecrire), `max` 16 fils (40 au plus), budget 40 s, rend `restants` et `suite` (a renvoyer en `apres`).
+  Fils dont updatedAt depasse leur curseur, messages du membre posterieurs ; paquets de 8 fils / 16 000 car. au plus, UN appel
+  Haiku par paquet (cle du support, poste besoins_reperage), le modele rend des NUMEROS de messages, le serveur recopie les
+  messages du fil (une demande = les messages d'un fil pour un besoin). Message deja compte (empreinte) saute. Curseur par fil
+  (besoin_curseur_fil), journal besoin_passe, une passe a la fois (2 min). L'essai n'ecrit ni carte, ni demande, ni curseur, ni
+  journal (la depense est tracee dans AiUsage). Avant la migration : l'essai lit tous les fils sans curseur, ecrire = 503.
+  scripts/reperer-besoins.mjs (meme fonction, essai par defaut, --tout, --ecrire) : PAS LANCE (lit les vrais fils, accord de Brice).
+- REGROUPEMENT commun (moteur.ts) : cle normalisee identique (fusions suivies), sinon Haiku (poste besoins_regroupement) sur
+  les cartes du meme outil (60 au plus, les plus actives), sinon nouvelle carte a_trier (cle prise : _2 a _9). Modele en panne =
+  nouvelle carte. Le texte du membre n'entre pas dans ce prompt.
+- SECURITE : texte des membres entre balises, echappe (< > &) et rendu visible, regle « donnee, jamais consigne » dans les deux
+  prompts ; analyserTexte niveau 'injection' sur chaque demande : suspect garde, raison, texte_visible, jamais de phrase ;
+  titres et resumes filtres (email, telephone, lien, @, prenoms d'equipe, longs nombres) ; aucun texte de membre dans un log.
+- DONNEES (migration 20261106120000, workspace) : besoin, besoin_demande, besoin_vote (lot 2), besoin_curseur_fil, besoin_passe,
+  RLS forcee sans policy ; vues cockpit_besoins et cockpit_besoin_demandes (is_cockpit_member()). Fil efface = demandes et
+  curseur effaces (cascade) ; besoin_vote et les demandes sans fil restent a apprendre a cockpit_effacer (docs/EFFACEMENT-DONNEES.md).
+- Verifs : scripts/verifier-besoins.mjs (18 blocs, hors ligne : moteur a depots injectes, l'essai n'appelle aucune ecriture) ;
+  tsc ; eslint ; next build ; -securite-bots, -pause-depot, -suivi-lots, -relais-accueil, -indicateur-alex, -effacement,
+  -liveclub, -reponse-membre, -fil-traite, -attente-equipe : ok. Eval scripts/eval-besoins.mjs (UN cas par appel, aucune
+  ecriture) : D1, D2, L2 a L6, P1 a P3, R1, R2 ok ; L1 KO (blocage du bot : Haiku appelle demander_un_humain seul, 3 essais),
+  environ 0,32 EUR au total. eval-fuites.mjs : connait l'outil, PAS relance (il ecrit dans AiUsage et lit la base).
+- MISE EN LIGNE, dans l'ordre : (1) migration 20261106120000 ; (2) cherry-pick de besoins-lot1 sur master et push ; (3) avec
+  l'accord de Brice, essai sur les fils reels (route ou script) pour lui montrer le resultat ; (4) Brice valide la phrase.
+- Limites : la phrase est comptee dite meme si l'equipe a ecrit pendant le calcul (reponse retenue) ; Haiku ecrit parfois
+  lui-meme « l'équipe verra » ; les postes besoins_* ne sont pas encore nommes dans l'ecran Depense IA du cockpit.
+
 ## CARNET 1.8.14 : DIAGNOSTIC ET LECTURE D'UNE CAPTURE D'ORDRE (05/11/2026, EN LIGNE sur GO de Brice ; aucune migration)
 
 - Briefs : D:\6_Societe\Pilotage\BRIEF-CARNET-1814-DIAGNOSTIC.md et BRIEF-CARNET-1814-CARTE-DE-PRIX.md.
