@@ -430,7 +430,7 @@ test('lecture seule : la fiche et requete_sql tournent en transaction READ ONLY'
   assert.ok(ro > 0 && ro < sql.indexOf('statement_timeout'), 'READ ONLY doit etre le premier ordre de la transaction')
   // L'outil est declare, et traite avant le repli SQL.
   assert.match(agent, /name: 'fiche_personne'/)
-  assert.ok(agent.indexOf("bloc.name === 'fiche_personne'") < agent.indexOf('const resultat = await executerSql(sql)'))
+  assert.ok(agent.indexOf("bloc.name === 'fiche_personne'") < agent.indexOf('const resultat = await executerSql(sql, accesFonds)'))
   // Les deux tables sont au catalogue de requete_sql.
   assert.match(agent, /- cockpit_telegram_messages : /)
   assert.match(agent, /- cockpit_telegram_noms : /)

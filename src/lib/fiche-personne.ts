@@ -17,8 +17,8 @@
 import { prisma } from '@/lib/db'
 import type { Prisma } from '@prisma/client'
 import {
-  ACCENTS, SANS_ACCENTS, BUDGET_FICHE,
-  lireQui, grouper, idsDuGroupe, phrasesTrouvePar, phraseLien,
+  ACCENTS, SANS_ACCENTS, BUDGET_FICHE, REPONSE_HORS_FONDS,
+  lireQui, grouper, horsFonds, idsDuGroupe, phrasesTrouvePar, phraseLien,
   fichePourAgent, ficheVide, lireMessagesJson, reponseAucun, reponseCandidats,
   type DonneesFiche, type FilSupport, type Groupe, type Ligne, type LienLu, type NomLu, type QuiLu,
   type StatsCandidats, type Touche,
@@ -535,9 +535,15 @@ export type ResolutionPersonne =
  * rendues avec leurs groupes seulement, sans la reponse des candidats (ni
  * ses statistiques) : l'appelant ne garde que celles qui ont un fil Support.
  */
-export async function resoudrePersonne(tx: Tx, qui: QuiLu, o: { candidats?: boolean } = {}): Promise<ResolutionPersonne> {
+export async function resoudrePersonne(tx: Tx, qui: QuiLu, o: { candidats?: boolean; fonds?: boolean } = {}): Promise<ResolutionPersonne> {
   const libelle = qui.genre === 'texte' ? qui.brut : qui.genre === 'email' ? qui.email : qui.genre === 'telegram' ? `u${qui.id}` : qui.id
-  const { touches, indices } = await trouver(tx, qui)
+  // (06/11) fonds: false = un compte sans acces au fonds d'archive : aucun noeud
+  // d'archive (horsFonds). Par defaut (Tab, effacement), le fonds est lu.
+  const fonds = o.fonds !== false
+  if (!fonds && qui.genre === 'archive') return { statut: 'aucun', reponse: REPONSE_HORS_FONDS, libelle }
+  const trouve = await trouver(tx, qui)
+  const touches = fonds ? trouve.touches : horsFonds(trouve.touches, []).touches
+  const indices = trouve.indices
   if (touches.length === 0) return { statut: 'aucun', reponse: reponseAucun(libelle, indices), libelle }
 
   // Elargir par les liens CERTAINS (un compte -> sa fiche -> son autre compte).
@@ -545,6 +551,7 @@ export async function resoudrePersonne(tx: Tx, qui: QuiLu, o: { candidats?: bool
   let liens: LienLu[] = []
   for (let tour = 0; tour < TOURS_LIENS; tour++) {
     liens = await lireLiens(tx, idsDuGroupe({ noeuds: [...connus] }))
+    if (!fonds) liens = horsFonds([], liens).liens
     const avant = connus.size
     for (const lien of liens) if (lien.certain) { connus.add(lien.a); connus.add(lien.b) }
     if (connus.size === avant) break
@@ -560,8 +567,8 @@ export async function resoudrePersonne(tx: Tx, qui: QuiLu, o: { candidats?: bool
 }
 
 /** Fiche, candidats ou rien : la reponse de l'outil, en JSON borne. */
-export async function construireFiche(tx: Tx, qui: QuiLu, budget = BUDGET_FICHE): Promise<string> {
-  const r = await resoudrePersonne(tx, qui)
+export async function construireFiche(tx: Tx, qui: QuiLu, budget = BUDGET_FICHE, o: { fonds?: boolean } = {}): Promise<string> {
+  const r = await resoudrePersonne(tx, qui, { fonds: o.fonds })
   if (r.statut !== 'un') return r.reponse
   const donnees = await lireFiche(tx, r.groupe)
   if (ficheVide(donnees)) return reponseAucun(r.libelle, r.indices)
@@ -638,14 +645,14 @@ export async function resoudrePersonnePourSupport(entree: unknown): Promise<
  * L'outil fiche_personne de l'agent du Cockpit. Ne leve jamais : une erreur
  * revient au modele en JSON, sans donnee.
  */
-export async function fichePersonnePourAgent(entree: unknown): Promise<string> {
+export async function fichePersonnePourAgent(entree: unknown, o: { fonds?: boolean } = {}): Promise<string> {
   const qui = lireQui(entree)
   if ('erreur' in qui) return JSON.stringify({ statut: 'erreur', erreur: qui.erreur })
   try {
     return await prisma.$transaction(async (tx) => {
       await tx.$executeRawUnsafe('set transaction read only')
       await tx.$executeRawUnsafe(`set local statement_timeout = '8000ms'`)
-      return construireFiche(tx, qui)
+      return construireFiche(tx, qui, BUDGET_FICHE, { fonds: o.fonds })
     }, { maxWait: 5000, timeout: 25000 })
   } catch (err) {
     const raison = err instanceof Error ? err.message.split('\n').filter(Boolean).pop() ?? '' : String(err)

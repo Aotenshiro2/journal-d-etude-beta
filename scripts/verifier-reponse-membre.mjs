@@ -355,7 +355,7 @@ test('perimetre : l\'outil n\'existe que pour l\'agent du cockpit, avec carte', 
   // (16/10) La piece jointe vient du canal (Agent AOK), jamais du modele ; rendre la main, sans carte.
   assert.match(agent, /controlerReponseMembre\(action, resoudrePersonnePourSupport, canal\.piece \?\? null\)/)
   assert.match(agent, /name: 'rendre_la_main_au_bot'/)
-  assert.ok(agent.indexOf("bloc.name === 'rendre_la_main_au_bot'") < agent.indexOf('const resultat = await executerSql(sql)'))
+  assert.ok(agent.indexOf("bloc.name === 'rendre_la_main_au_bot'") < agent.indexOf('const resultat = await executerSql(sql, accesFonds)'))
   assert.ok(!/rendre_la_main_au_bot: '/.test(agent), 'pas une action a carte')
   const serveur = lire('src/lib/reponse-membre.ts')
   assert.match(serveur, /\.\.\.\(fichier && piece \? \{ piece_jointe: true, piece \} : \{\}\)/)

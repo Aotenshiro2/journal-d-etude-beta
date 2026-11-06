@@ -105,6 +105,27 @@ export type Touche = { noeud: Noeud; champ: string; valeur: string | null; exact
 /** Un lien entre deux noeuds. certain = il reunit ; sinon il est seulement dit. */
 export type LienLu = { a: Noeud; b: Noeud; nature: string; certain: boolean }
 
+/**
+ * (06/11/2026, Brice : « corriger la protection pour que l'agent ne puisse pas
+ * lire les tables d'archive sans autorisation ») Un compte SANS acces au fonds
+ * d'archive (cockpit_allowlist.acces_fonds) : aucun noeud d'archive, ni comme
+ * touche ni par un lien. La personne ne se reunit que par ses comptes Telegram
+ * et sa fiche membre, et sa fiche ne lit donc aucune table du fonds.
+ */
+export function horsFonds(touches: readonly Touche[], liens: readonly LienLu[]): { touches: Touche[]; liens: LienLu[] } {
+  const archive = (n: Noeud) => n.startsWith('archive:')
+  return {
+    touches: touches.filter((t) => !archive(t.noeud)),
+    liens: liens.filter((l) => !archive(l.a) && !archive(l.b)),
+  }
+}
+
+/** La reponse a une fiche d'archive demandee par un compte sans acces au fonds. */
+export const REPONSE_HORS_FONDS = JSON.stringify({
+  statut: 'aucun',
+  note: "Fiche d'archive demandée : le fonds d'archive n'est pas ouvert à ce compte. Rien n'a été lu.",
+})
+
 export type Groupe = {
   noeuds: Noeud[]
   touches: Touche[]

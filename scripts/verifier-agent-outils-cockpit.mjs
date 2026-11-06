@@ -894,7 +894,7 @@ bloc('deja traite : seulement sur l ordre du titulaire, dans ses mots', () => {
   assert.ok(corps.indexOf('canal.essai') < corps.indexOf('ordreFilTraiteExplicite('), 'rien en essai')
   assert.ok(corps.indexOf('ordreFilTraiteExplicite(canal.texteTitulaire') < corps.indexOf('marquerFilTraitePourAgent('), "l'ordre du titulaire avant le geste")
   assert.match(corps, /marquerFilTraitePourAgent\(bloc\.input, resoudrePersonnePourSupport, userId\)/, 'le compte qui parle')
-  assert.ok(src.indexOf("bloc.name === 'marquer_fil_traite'") < src.indexOf('const resultat = await executerSql(sql)'))
+  assert.ok(src.indexOf("bloc.name === 'marquer_fil_traite'") < src.indexOf('const resultat = await executerSql(sql, accesFonds)'))
   const rm = lire('src/lib/reponse-membre.ts')
   const f = rm.slice(rm.indexOf('export async function marquerFilTraitePourAgent'), rm.indexOf('export async function executerReponseMembre'))
   assert.match(f, /const r = await resoudreFil\(fil\.slice\(0, 120\), resoudre\)/, 'le fil se designe comme pour rendre la main')

@@ -429,9 +429,23 @@ const TABLES_SERVEUR = /\bcockpit_liveclub_codes\w*|\bcockpit_oublis_emails\b/i
 // (is_cockpit_perso). L'agent tourne en postgres pour Melanie et Adil aussi :
 // il ne le lit pas.
 const TABLES_PERSO = /\bcockpit_perso_\w*/i
+// (06/11/2026, Brice : « corriger la protection pour que l'agent ne puisse pas
+// lire les tables d'archive sans autorisation ») LE FONDS D'ARCHIVE (les
+// conversations privees de tiers, migration 20260901120000) a son propre
+// interrupteur, cockpit_allowlist.acces_fonds, que le cockpit respecte par la
+// RLS (is_cockpit_fonds). L'agent lit en postgres, qui TRAVERSE la RLS : sans
+// ce verrou, un compte de l'allowlist SANS acces_fonds lisait tout le fonds
+// par requete_sql. Les tables cockpit_arch_*, la vue cockpit_membre_telegram
+// (elle lit cockpit_arch_personnes) et cockpit_membre_fonds_manuel (qui relie
+// un membre a sa fiche d'archive), et les deux fonctions de l'effacement qui
+// comptent et listent ses donnees d'archive (cockpit_effacement_apercu,
+// cockpit_effacement_cibles) : refusees a un compte sans acces_fonds, relu a
+// chaque tour (lireAccesFonds, ferme en cas de doute).
+const TABLES_FONDS = /\bcockpit_arch_\w*|\bcockpit_membre_telegram\b|\bcockpit_membre_fonds_manuel\b|\bcockpit_effacement_(apercu|cibles)\b/i
 const SQL_DYNAMIQUE = /\bu&["']|\b(query_to_xml\w*|table_to_xml\w*|cursor_to_xml\w*|schema_to_xml\w*|database_to_xml\w*|dblink\w*|ts_stat|crosstab\w*|connectby)\b/i
 
-function verrouSql(sql: string): string | null {
+/** Le verrou de requete_sql. `fonds` : le compte qui parle a acces au fonds d'archive (acces_fonds). */
+export function verrouSql(sql: string, o: { fonds: boolean }): string | null {
   const s = sql.trim()
   if (!/^(select|with)\b/i.test(s)) return 'Seul un SELECT (ou WITH … SELECT) est accepté.'
   if (s.includes(';')) return 'Une seule requête, sans point-virgule.'
@@ -439,12 +453,29 @@ function verrouSql(sql: string): string | null {
   if (SCHEMAS_INTERDITS.test(s)) return 'Requête refusée : uniquement les tables du cockpit (schéma public).'
   if (TABLES_SERVEUR.test(s)) return 'Requête refusée : table réservée au serveur du bot.'
   if (TABLES_PERSO.test(s)) return 'Requête refusée : espace personnel de Brice, hors de l\'agent.'
+  if (!o.fonds && TABLES_FONDS.test(s)) return 'Requête refusée : le fonds d\'archive n\'est pas ouvert à ce compte (accès au fonds).'
   if (SQL_DYNAMIQUE.test(s)) return 'Requête refusée : pas de SQL dynamique ni d\'identifiant échappé.'
   return null
 }
 
-async function executerSql(sql: string): Promise<string> {
-  const refus = verrouSql(sql)
+/**
+ * (06/11) Le compte qui parle a-t-il acces au fonds d'archive
+ * (cockpit_allowlist.acces_fonds) ? Ferme en cas de doute : panne, compte
+ * absent ou colonne illisible = non.
+ */
+export async function lireAccesFonds(userId: string): Promise<boolean> {
+  try {
+    const l = await prisma.$queryRaw<{ acces_fonds: boolean }[]>`
+      select acces_fonds from public.cockpit_allowlist where user_id = ${userId}::uuid limit 1`
+    return l[0]?.acces_fonds === true
+  } catch (err) {
+    console.warn(`[cockpit/agent] acces au fonds illisible, ferme : ${err instanceof Error ? err.message.split('\n')[0].slice(0, 120) : '?'}`)
+    return false
+  }
+}
+
+async function executerSql(sql: string, fonds: boolean): Promise<string> {
+  const refus = verrouSql(sql, { fonds })
   if (refus) return JSON.stringify({ erreur: refus })
   try {
     const lignes = await prisma.$transaction(async (tx) => {
@@ -1627,6 +1658,19 @@ export async function boucleAgent(
     })
   }
 
+  // (06/11, Brice) Le fonds d'archive : relu a chaque tour (acces_fonds),
+  // ferme en cas de doute. Le verrou est dans le code (verrouSql,
+  // fichePersonnePourAgent) ; la note evite que le modele s'acharne.
+  const accesFonds = await lireAccesFonds(userId)
+  if (!accesFonds) {
+    systeme.push({
+      type: 'text',
+      text: `LE FONDS D'ARCHIVE n'est pas ouvert à ce compte : requete_sql refuse les tables cockpit_arch_*,`
+        + ` cockpit_membre_telegram et cockpit_membre_fonds_manuel, et fiche_personne ne lit pas l'archive.`
+        + ` Si on te demande l'archive, dis simplement que ce compte n'a pas accès au fonds d'archive, sans chercher à le contourner.`,
+    })
+  }
+
   // (29/10, securite des bots) Le message du tour porte du texte suspect : une
   // note au modele, et aucune carte ni aucun geste sans carte dans ce tour.
   // Un resultat d'outil suspect met le reste du tour sous la meme prudence.
@@ -1963,7 +2007,8 @@ export async function boucleAgent(
         // La fiche d'une personne (15/10) : une lecture, sans carte. Bornee a
         // BUDGET_FICHE (12 000) par son module, donc jamais coupee ici.
         if (bloc.name === 'fiche_personne') {
-          const contenu = await fichePersonnePourAgent(bloc.input)
+          // (06/11) Sans acces au fonds, la fiche ignore l'archive (fiche-personne.ts, horsFonds).
+          const contenu = await fichePersonnePourAgent(bloc.input, { fonds: accesFonds })
           resultats.push({
             type: 'tool_result', tool_use_id: bloc.id,
             // (29/10) Propos de tiers : le texte cache y est signale (surveillerResultat).
@@ -2086,7 +2131,7 @@ export async function boucleAgent(
         }
 
         const sql = String((bloc.input as { sql?: string })?.sql ?? '')
-        const resultat = await executerSql(sql)
+        const resultat = await executerSql(sql, accesFonds)
         etapes.push({ sql, resultat_tronque: resultat.endsWith(']') === false })
         // (29/10) Propos de tiers (fils Support, groupes, archive) : le texte cache y est signale.
         resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: await surveillerResultat(resultat) })

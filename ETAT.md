@@ -60,6 +60,22 @@
 Etat vivant du projet (infra, securite, fils ouverts). Le suivi des taches
 reste dans TODO.md.
 
+## FONDS D'ARCHIVE : L'AGENT RESPECTE ACCES_FONDS (06/11/2026, EN LIGNE ; aucune migration)
+
+- Brice, Meet du 05/11 avec Alex : « corriger la protection pour que l'agent ne puisse pas lire les tables d'archive
+  sans autorisation » ; confie le 06/11 (« confie la »). L'agent lit en postgres (la RLS ne l'arrete pas) : un compte
+  de l'allowlist SANS acces_fonds lisait tout le fonds par requete_sql et par fiche_personne.
+- requete_sql : verrouSql(sql, { fonds }) refuse cockpit_arch_*, cockpit_membre_telegram, cockpit_membre_fonds_manuel,
+  cockpit_effacement_apercu/cibles sans acces_fonds. lireAccesFonds(userId) relu a CHAQUE tour, ferme en cas de doute.
+- fiche_personne : sans acces_fonds, aucun noeud d'archive (horsFonds : ni touche ni lien), une fiche d'archive
+  demandee = REPONSE_HORS_FONDS. Une note au modele dans le bloc de l'interlocuteur.
+- Aujourd'hui Brice, Melanie, Adil et Tab ont acces_fonds = true : rien ne change pour eux ; le verrou vaut pour
+  un compte ajoute sans ce droit ou a qui on le retire.
+- Hors de ce lot, a decider par Brice : l'API de Tab (portees tab et tache, donc aussi le MCP de Tache) lit le fonds
+  sans relire acces_fonds (coherent aujourd'hui, pas verrouille) ; proposer_effacement montre les comptes d'archive.
+- scripts/verifier-acces-fonds.mjs (6 blocs, le vrai verrouSql). verifier-fiche-personne echouait DEJA avant ce lot
+  (assertions de perimetre perimees depuis l'API de Tab) : non repare ici.
+
 ## TRADES : IMPORT DANS LE CARNET, MES TRADES, FICHE, TUTORIEL (05/11/2026, EN LIGNE sur GO de Brice ; aucune migration ; Carnet 1.8.13 envoye au Store)
 
 - Decide par Brice le 05/11 (suite des retours de Flow du 02/11). Briefs : D:\6_Societe\Pilotage\BRIEF-TRADES-J1-JOURNAL.md et
