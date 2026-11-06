@@ -68,8 +68,17 @@ async function compresser(fichier: Blob): Promise<string | null> {
   }
 }
 
-export default function BesoinFormulaire({ app, onFermer }: { app: string; onFermer: () => void }) {
-  const [texte, setTexte] = useState('')
+export default function BesoinFormulaire({ app, onFermer, texteInitial, signal = null }: {
+  app: string
+  onFermer: () => void
+  /** (06/11, piste C) La phrase pre-remplie par une ligne de friction, que le membre peut changer. */
+  texteInitial?: string
+  /** (06/11, piste C) La cle du signal : la demande va sur la carte de cette cle (POST signaler, champ signal). */
+  signal?: string | null
+}) {
+  const [texte, setTexte] = useState(texteInitial ?? '')
+  // La cle ne vaut que pour la demande pre-remplie : apres un envoi, « Signaler autre chose » repart sans elle.
+  const [signalActif, setSignalActif] = useState<string | null>(signal)
   const [capture, setCapture] = useState<string | null>(null)
   const [prevus, setPrevus] = useState<Prevu[] | null>(null)
   const [envoi, setEnvoi] = useState(false)
@@ -120,13 +129,16 @@ export default function BesoinFormulaire({ app, onFermer }: { app: string; onFer
       const r = await fetch('/api/besoins/signaler', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ app, texte: t, page: window.location.pathname, ...(capture ? { capture } : {}) }),
+        body: JSON.stringify({
+          app, texte: t, page: window.location.pathname, ...(capture ? { capture } : {}), ...(signalActif ? { signal: signalActif } : {}),
+        }),
       })
       const d = await r.json().catch(() => ({}))
       if (r.ok && typeof d.phrase === 'string') {
         setPhrase(d.phrase)
         setTexte('')
         setCapture(null)
+        setSignalActif(null)
       } else {
         setAvis(typeof d.error === 'string' ? d.error : `Envoi impossible (HTTP ${r.status}). Réessaie dans un instant.`)
       }

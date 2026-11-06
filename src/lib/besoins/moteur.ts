@@ -202,6 +202,8 @@ export type NoteDirecte = {
   peutDire: boolean
   /** Pour la trace d'usage du modele. */
   qui: string
+  /** (06/11, limites des agents) Qui cree une carte nouvelle ; detectePar par defaut ('agent' pour noter_limite). */
+  creePar?: string
 }
 
 export type IssueDirecte = { phrase: boolean; enregistres: number; suspects: number }
@@ -220,7 +222,7 @@ export async function noterEnDirect(n: NoteDirecte, depots: Depots): Promise<Iss
     if (!texte || !n.filId || !besoins.length) return issue
     const analyse = analyseDemande(texte)
     const empreinte = empreinteTexte(texte)
-    const ctx = contexteRegroupement(depots, { essai: false, creePar: n.detectePar, qui: n.qui })
+    const ctx = contexteRegroupement(depots, { essai: false, creePar: n.creePar ?? n.detectePar, qui: n.qui })
     const aAccuser: string[] = []
     for (const b of besoins) {
       try {

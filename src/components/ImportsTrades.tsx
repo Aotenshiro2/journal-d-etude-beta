@@ -2,6 +2,15 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Upload, Trash2 } from 'lucide-react'
+// (06/11, besoins des membres, piste C) Un import qui echoue : le signal
+// journal.import_echec (un code court, aucun contenu du fichier) et une ligne
+// qui ouvre « Il me manque quelque chose » pre-rempli dans « Aide et idées ».
+import {
+  BOUTON_LIGNE_BESOIN, LIGNE_IMPORT_ECHEC, LIGNE_IMPORT_NON_RECONNU, PHRASE_IMPORT_ECHEC, PHRASE_IMPORT_NON_RECONNU,
+  envoyerSignal, ouvrirBesoin,
+} from '@/lib/besoins/decouverte'
+
+const CLE_SIGNAL_IMPORT = 'journal.import_echec'
 
 // « Importer mes trades » — v1 Tradovate (go Brice 08/09/2026).
 // Deux temps, jamais d'écriture silencieuse : ANALYSER montre ce qui serait
@@ -56,7 +65,15 @@ export default function ImportsTrades() {
   const [analyse, setAnalyse] = useState<Analyse | null>(null)
   const [enCours, setEnCours] = useState(false)
   const [message, setMessage] = useState('')
+  // (06/11) L'echec de l'import : 'format' (fichier non reconnu) ou 'autre'.
+  const [echec, setEchec] = useState<'format' | 'autre' | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  // Le signal part une fois, au moment de l'echec (jamais de minuterie).
+  const signalerEchec = useCallback((code: string) => {
+    envoyerSignal('journal', CLE_SIGNAL_IMPORT, { code })
+    setEchec(code === 'format_inconnu' ? 'format' : 'autre')
+  }, [])
 
   const chargerEtat = useCallback(async () => {
     try {
@@ -70,6 +87,7 @@ export default function ImportsTrades() {
   const poster = useCallback(async (contenu: string, nom: string, confirmer: boolean) => {
     setEnCours(true)
     setMessage('')
+    setEchec(null)
     try {
       const r = await fetch('/api/imports-trades', {
         method: 'POST',
@@ -79,8 +97,12 @@ export default function ImportsTrades() {
       const data = await r.json()
       if (!r.ok) {
         setMessage(data.error ?? 'Erreur pendant l’analyse.')
+        // Une session expiree n'est pas une friction de l'import.
+        if (r.status !== 401) signalerEchec(`http_${r.status}`)
         return
       }
+      // Rien de lu : fichier non reconnu (format inconnu) ou sans trade.
+      if (!confirmer && Number(data.lus) === 0) signalerEchec(data.format ? 'aucun_trade' : 'format_inconnu')
       setAnalyse(data)
       if (confirmer) {
         setMessage(data.importes > 0 ? `${data.importes} trade${data.importes > 1 ? 's' : ''} importé${data.importes > 1 ? 's' : ''}.` : 'Rien de nouveau à importer.')
@@ -91,10 +113,11 @@ export default function ImportsTrades() {
       }
     } catch {
       setMessage('Erreur réseau, réessaie.')
+      signalerEchec('reseau')
     } finally {
       setEnCours(false)
     }
-  }, [chargerEtat])
+  }, [chargerEtat, signalerEchec])
 
   const lireFichier = useCallback((f: File) => {
     const lecteur = new FileReader()
@@ -163,6 +186,20 @@ export default function ImportsTrades() {
         <p className="text-sm rounded-lg px-3 py-2" style={{ background: 'var(--node-bg)', border: '1px solid var(--node-border)', color: 'var(--node-title)' }}>
           {message}
         </p>
+      )}
+
+      {/* (06/11, piste C) La ligne courte : elle ouvre le formulaire pre-rempli, rien ne part sans « Envoyer ». */}
+      {echec && (
+        <div className="text-sm rounded-lg px-3 py-2 flex items-center justify-between gap-3 flex-wrap" style={{ background: 'var(--node-bg)', border: '1px solid var(--node-border)', color: 'var(--node-title)' }}>
+          <span>{echec === 'format' ? LIGNE_IMPORT_NON_RECONNU : LIGNE_IMPORT_ECHEC}</span>
+          <button
+            onClick={() => ouvrirBesoin({ texte: echec === 'format' ? PHRASE_IMPORT_NON_RECONNU : PHRASE_IMPORT_ECHEC, signal: CLE_SIGNAL_IMPORT })}
+            className="text-sm px-3 py-1 rounded-lg font-medium"
+            style={{ background: 'var(--node-title)', color: 'var(--node-bg)' }}
+          >
+            {BOUTON_LIGNE_BESOIN}
+          </button>
+        </div>
       )}
 
       {/* Aperçu d'analyse */}

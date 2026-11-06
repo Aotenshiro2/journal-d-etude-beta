@@ -29,11 +29,14 @@ import {
 import { contexteRegroupement, regrouper, type Depots } from './moteur'
 import { depotsServeur } from './serveur'
 import {
-  OUTIL_DE_APP, PHRASE_BOUTON_BESOIN, PREVUS_MAX, SIGNALEMENTS_PAR_JOUR,
-  besoinARanger, cartePrevue, cheminCapture, lireApp, lireCapture, lireCorpsSignaler, lireCorpsVoter, lireReponseClassement,
-  requeteClassement, type CaptureLue, type CartePrevue,
+  LIVRES_MAX, OUTIL_DE_APP, PHRASE_BOUTON_BESOIN, PREVUS_MAX, SIGNALEMENTS_PAR_JOUR,
+  besoinARanger, carteLivree, cartePrevue, cheminCapture, lireApp, lireCapture, lireCorpsSignaler, lireCorpsVoter, lireReponseClassement,
+  requeteClassement, type CaptureLue, type CarteLivree, type CartePrevue,
 } from './bouton-pur'
 import { rangerCapture } from './captures'
+// (06/11, apres-midi) La ligne C : une demande rattachee a la carte d'une cle de signal, sans classement.
+import { besoinDuSignal, lireSignalDuBouton } from './signaux-pur'
+import { carteDuSignal } from './signaux'
 
 export type ReponseRoute = { status: number; corps: Record<string, unknown> }
 
@@ -212,10 +215,18 @@ async function insererSousCadence(d: DemandeLot2, max: number): Promise<string |
 // POST /api/besoins/signaler
 // ---------------------------------------------------------------------------
 
-/** Le signalement d'un membre connecte (userId = sa session). */
+/**
+ * Le signalement d'un membre connecte (userId = sa session).
+ * (06/11, apres-midi, ligne C) `signal` : une cle de la liste fermee, permise
+ * pour cette app. La demande va sur la carte de cette cle (creee si besoin,
+ * titre fixe de la cle, cree_par 'signal'), SANS classement IA, et compte
+ * comme une vraie demande du membre (meme cadence, meme phrase).
+ */
 export async function signalerBesoin(userId: string, brut: unknown): Promise<ReponseRoute> {
   const c = lireCorpsSignaler(brut)
   if ('erreur' in c) return erreur(c.status, c.erreur)
+  const signal = lireSignalDuBouton((brut as Record<string, unknown>).signal, c.app)
+  if (signal && typeof signal === 'object') return erreur(signal.status, signal.erreur)
   let capture: CaptureLue | null = null
   if (c.capture) {
     const l = lireCapture(c.capture)
@@ -256,10 +267,12 @@ export async function signalerBesoin(userId: string, brut: unknown): Promise<Rep
 
   try {
     const depots = depotsServeur()
-    const { carte, besoin } = await carteDuSignalement({
-      texte: c.texte, empreinte, outilImpose: c.outil, outilDefaut: c.outil, page: c.page, prudence: analyse.suspect,
-      origine: 'bouton', creePar: 'bouton', qui: userId,
-    }, depots)
+    const { carte, besoin } = signal
+      ? { carte: await carteDuSignal(signal, depots), besoin: besoinDuSignal(signal) }
+      : await carteDuSignalement({
+        texte: c.texte, empreinte, outilImpose: c.outil, outilDefaut: c.outil, page: c.page, prudence: analyse.suspect,
+        origine: 'bouton', creePar: 'bouton', qui: userId,
+      }, depots)
     const r = await insererSousCadence({
       besoinId: carte.id, canal: 'bouton', app: c.app, filId: null, membreRef: userId, membreId: null,
       texte: c.texte, empreinte, resume: besoin.resume, detectePar: 'bouton',
@@ -350,6 +363,47 @@ export async function prevusPourMembre(userId: string, appBrute: unknown): Promi
   } catch (err) {
     if (estTableAbsente(err)) return { status: 200, corps: { besoins: [] } }
     console.warn(`[besoins/prevus] illisible : ${erreurCourte(err)}`)
+    return erreur(503, 'Indisponible pour le moment.')
+  }
+}
+
+/**
+ * (06/11, D) « Livré grâce à vos demandes » : les cartes livrees de l'outil de
+ * cette app (10 au plus, les plus recentes d'abord), avec les personnes qui
+ * les ont demandees (cartes fusionnees comprises). Des titres de cartes,
+ * jamais un texte de membre.
+ */
+export async function livresPourMembre(appBrute: unknown): Promise<ReponseRoute> {
+  const app = lireApp(appBrute)
+  if (!app) return erreur(400, 'app inconnue.')
+  const outil = OUTIL_DE_APP[app]
+  try {
+    const l = await prisma.$queryRaw<{ id: string; titre: string; livre_le: Date; personnes: number }[]>`
+      with recursive cartes as (
+        select b.id, b.titre, b.statut_change_le from public.besoin b
+        where b.outil = ${outil} and b.fusionne_dans is null and b.statut = 'livre'
+        order by b.statut_change_le desc
+        limit ${LIVRES_MAX}
+      ),
+      racine (id, racine_id, profondeur) as (
+        select c.id, c.id, 0 from cartes c
+        union all
+        select b.id, r.racine_id, r.profondeur + 1 from public.besoin b join racine r on b.fusionne_dans = r.id
+        where r.profondeur < 10
+      ),
+      p as (
+        select r.racine_id, count(distinct d.membre_ref)::int as personnes
+        from public.besoin_demande d join racine r on r.id = d.besoin_id group by r.racine_id
+      )
+      select c.id::text as id, c.titre, c.statut_change_le as livre_le, coalesce(p.personnes, 0)::int as personnes
+      from cartes c
+      left join p on p.racine_id = c.id
+      order by c.statut_change_le desc`
+    const besoins = l.map(carteLivree).filter((x): x is CarteLivree => x !== null)
+    return { status: 200, corps: { besoins } }
+  } catch (err) {
+    if (estTableAbsente(err)) return { status: 200, corps: { besoins: [] } }
+    console.warn(`[besoins/livres] illisible : ${erreurCourte(err)}`)
     return erreur(503, 'Indisponible pour le moment.')
   }
 }

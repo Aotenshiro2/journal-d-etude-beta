@@ -236,5 +236,23 @@ export function cartePrevue(l: { id: unknown; titre: unknown; statut: unknown; v
   return { id: l.id, titre: l.titre, statut: l.statut, votes: Number.isFinite(votes) ? votes : 0, aVote: l.a_vote === true }
 }
 
+// ---------------------------------------------------------------------------
+// (06/11, D) « Livré grâce à vos demandes » : GET /api/besoins/livres
+// ---------------------------------------------------------------------------
+
+/** Au plus tant de cartes livrees rendues (les plus recentes d'abord). */
+export const LIVRES_MAX = 10
+
+/** Une carte livree telle qu'un membre la voit : un titre de carte (valide par Brice), jamais un texte de membre. */
+export type CarteLivree = { id: string; titre: string; livre_le: string; personnes: number }
+
+export function carteLivree(l: { id: unknown; titre: unknown; livre_le: unknown; personnes: unknown }): CarteLivree | null {
+  if (!estUuid(l.id) || typeof l.titre !== 'string' || !l.titre) return null
+  const quand = l.livre_le instanceof Date ? l.livre_le : typeof l.livre_le === 'string' ? new Date(l.livre_le) : null
+  if (!quand || !Number.isFinite(quand.getTime())) return null
+  const personnes = Number(l.personnes)
+  return { id: l.id, titre: l.titre, livre_le: quand.toISOString(), personnes: Number.isFinite(personnes) && personnes > 0 ? Math.trunc(personnes) : 0 }
+}
+
 /** Les listes du vocabulaire, pour les verifications. */
 export const VOCABULAIRE = { outils: OUTILS_BESOIN, natures: NATURES_BESOIN }

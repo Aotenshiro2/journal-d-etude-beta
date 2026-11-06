@@ -55,6 +55,7 @@ const SANS_FILTRE = {
   'src/lib/liveclub/relais.ts': 1,               // exclure l'equipe des silences du groupe
   'src/lib/tab/notes.ts': 1,                     // le compte de Brice seul
   'src/lib/securite/alerte.ts': 1,               // le compte de Brice seul
+  'src/lib/besoins/signaux.ts': 2,               // (06/11) reconnaitre un admin (Brice, Melanie, Adil) pour le tri des limites : aucune diffusion
 }
 
 const toutes = lectures()

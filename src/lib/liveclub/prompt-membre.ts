@@ -72,6 +72,12 @@
 // fonction qui manque, un blocage ou un bug dans nos outils : l'outil
 // noter_besoin (un classement seulement, le serveur recopie le message du fil
 // et ajoute lui-meme la phrase « C'est noté »). Refuse sous prudence.
+//
+// Brice, 06/11 apres-midi : les LIMITES DE L'AGENT (src/lib/besoins/signaux-pur.ts).
+// Ce qu'il n'a pas su faire : l'outil noter_limite { sujet, categorie }, sans
+// phrase au membre. Le TRI est fait par le serveur (une donnee sensible qui
+// ne concerne pas le membre, hors admin, n'est jamais gardee). Refuse sous
+// prudence. Changer ce prompt impose de rejouer scripts/eval-fuites.mjs.
 
 import type Anthropic from '@anthropic-ai/sdk'
 import { ARGUMENT_TARIF_PAUSE, SUPPORT, URL_FORMATION_LIVECLUB, URL_PORTAIL_CARTE, texteAbonnement } from './config'
@@ -83,6 +89,8 @@ import { OUTIL_CONNAISSANCES, resultatConnaissances as resultatCommun } from '..
 import { OUTIL_TROUVER_COURS } from '../trouver-cours-pur'
 // (06/11) Besoins des membres, lot 1 : l'outil noter_besoin (module pur, commun au chat support).
 import { CONSIGNE_NOTER_BESOIN, OUTIL_NOTER_BESOIN } from '../besoins/pur'
+// (06/11, apres-midi) Les limites des agents : noter_limite (module pur, commun au chat support ; tri par le serveur).
+import { CONSIGNE_NOTER_LIMITE, OUTIL_NOTER_LIMITE } from '../besoins/signaux-pur'
 
 /** Modele surchargeable par env sans redeployer de code. */
 export const MODELE_LIVECLUB = process.env.AI_MODEL_LIVECLUB?.trim() || 'claude-haiku-4-5-20251001'
@@ -112,6 +120,7 @@ Ce que tu sais faire, avec tes outils :
 - trouver_cours : chercher, dans les leçons de l'académie et dans les masterclass, celles qui traitent une notion (par exemple les FVG, le journal de trading, la psychologie, la gestion du risque). Quand il veut apprendre une notion, ou te demande s'il y a un cours, une vidéo ou une masterclass sur un sujet : appelle-le, puis donne-lui le ou les deux ou trois liens les plus utiles, adresses recopiées en entier, avec leur accès tel que l'outil l'écrit (gratuit, inclus dans son Live Club, ou formation complète du 10% Club). Tu n'expliques pas la notion toi-même. Si rien ne sort, dis-le simplement, sans inventer de cours.
 - ${NOM_OUTIL_INDICATEUR} : le membre veut l'indicateur TradingView d'Alex (« je veux l'indicateur d'Alex », comment l'avoir, donner ou changer son pseudo TradingView pour cet indicateur). Appelle-le sans écrire de texte : c'est le serveur qui lui répond, vérifie qu'il est bien membre et lui demande son pseudo TradingView. Tu ne prends pas son pseudo toi-même, tu ne le recopies pas, tu ne promets aucun accès, et tu ne parles pas de cet indicateur s'il ne t'en parle pas.
 - noter_besoin : ${CONSIGNE_NOTER_BESOIN}
+- noter_limite : ${CONSIGNE_NOTER_LIMITE}
 - demander_un_humain : transmettre à l'équipe, qui lira la conversation et répondra au membre ici même, dans Telegram. Appelle-le quand un humain est nécessaire : il demande à parler à quelqu'un, il demande un remboursement, une remise pour lui ou une remise qu'on lui aurait promise, il fait une réclamation, c'est un cas particulier que tes outils ne règlent pas, ou sa question porte sur son compte, le Live Club ou un produit et tu ne sais pas y répondre. Jamais pour ce que tu peux répondre toi-même : un lien utile, un prix, une info publique, une fiche produit, son abonnement ou ses montants. Pas pour une confidence, une humeur, un merci ou une simple discussion : là, tu réponds toi-même avec chaleur, et tu peux lui dire que l'équipe peut lui répondre ici s'il le souhaite. Ensuite, dis-lui en une phrase que l'équipe est prévenue et lui répondra ici, dans cette conversation, sans promettre de délai.
 Un outil proposer_ n'exécute RIEN : le membre reçoit un bouton de confirmation, et c'est son clic qui décide. Appelle-le seulement quand il le demande clairement, jamais de ta propre initiative.
 Pause ou arrêt. Une demande d'arrêt (« je veux arrêter », « résilie mon abonnement ») : appelle proposer_arret tout de suite, sans mon_abonnement avant et sans écrire de texte : c'est le serveur qui écrit le message. La première fois, il propose la pause, avec l'argument du tarif et des boutons, puis la confirmation de l'arrêt si le membre le veut toujours. Une question ou une hésitation (« pause ou arrêt ? », « je peux arrêter plutôt que faire une pause ? ») : réponds toi-même, une fois, que si c'est pour un temps, quelle qu'en soit la raison, la pause de 1 à 6 mois vaut mieux (elle démarre à la fin de sa période déjà payée), avec cet argument : « ${ARGUMENT_TARIF_PAUSE} » Puis c'est lui qui choisit, et tu fais ce qu'il décide. Une seule proposition de pause par demande d'arrêt : s'il l'a déjà eue plus haut et veut toujours arrêter, tu appelles proposer_arret sans la redire et sans insister.
@@ -207,6 +216,8 @@ export const OUTILS_MEMBRE: Anthropic.Tool[] = [
   },
   // (06/11) Besoins des membres, lot 1 (src/lib/besoins/pur.ts) : un classement, le serveur enregistre.
   OUTIL_NOTER_BESOIN,
+  // (06/11, apres-midi) Les limites de l'agent (src/lib/besoins/signaux-pur.ts) : triees par le serveur.
+  OUTIL_NOTER_LIMITE,
   {
     name: 'demander_un_humain',
     description: "Transmet à l'équipe du Live Club : le membre demande à parler à quelqu'un, un remboursement ou une remise, fait une réclamation, a un cas particulier, ou tu ne sais pas répondre à une question sur son compte ou le Live Club. Jamais pour une confidence ou une humeur. L'équipe répondra dans cette conversation Telegram. Sans paramètre.",

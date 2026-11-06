@@ -521,11 +521,13 @@ await bloc('passe : un paquet en panne garde ses curseurs, le budget coupe avant
 
 await bloc('bot des membres : noter_besoin refuse sous prudence, note en fin d echange, phrase sur un texte libre seulement', () => {
   const agent = lire('src/lib/liveclub/agent-membre.ts')
-  assert.match(agent, /if \(prudence && bloc\.name === NOM_OUTIL_NOTER_BESOIN\) \{\n\s+resultats\.push\(\{ type: 'tool_result', tool_use_id: bloc\.id, content: JSON\.stringify\(REFUS_PRUDENCE_MEMBRE\) \}\)/)
-  assert.ok(agent.indexOf('if (prudence && bloc.name === NOM_OUTIL_NOTER_BESOIN)') < agent.indexOf('if (bloc.name === NOM_OUTIL_NOTER_BESOIN) {'), 'la prudence avant la note')
+  // (06/11, apres-midi) La meme prudence couvre noter_limite.
+  assert.match(agent, /if \(prudence && \(bloc\.name === NOM_OUTIL_NOTER_BESOIN \|\| bloc\.name === NOM_OUTIL_NOTER_LIMITE\)\) \{\n\s+resultats\.push\(\{ type: 'tool_result', tool_use_id: bloc\.id, content: JSON\.stringify\(REFUS_PRUDENCE_MEMBRE\) \}\)/)
+  assert.ok(agent.indexOf('if (prudence && (bloc.name === NOM_OUTIL_NOTER_BESOIN') < agent.indexOf('if (bloc.name === NOM_OUTIL_NOTER_BESOIN) {'), 'la prudence avant la note')
   assert.match(agent, /const r = resultatNoterBesoin\(bloc\.input\)\n\s+if \(r\.besoin\) besoins\.push\(r\.besoin\)/)
   assert.match(agent, /const peutDire = !!reponse\.texte && !reponse\.repli && !reponse\.action && !reponse\.pauseAvantArret && !reponse\.indicateur/)
-  assert.match(agent, /noterBesoinsTelegram\(\{ telegramId, texteFil: nettoyerPourSupport\(question\.trim\(\)\)\.slice\(0, 4000\), besoins, peutDire \}\)/)
+  assert.match(agent, /const texteFil = nettoyerPourSupport\(question\.trim\(\)\)\.slice\(0, 4000\)/)
+  assert.match(agent, /noterBesoinsTelegram\(\{ telegramId, texteFil, besoins, peutDire \}\)/)
   assert.match(agent, /return note\.phrase && peutDire \? \{ \.\.\.reponse, texte: texteAvecPhrase\(reponse\.texte, true\) \} : reponse/)
   // La securite du message du membre reste la meme (verifier-securite-bots.mjs).
   assert.match(agent, /analyserTexte\(question, \{ niveau: 'injection' \}\)/)
@@ -1190,6 +1192,407 @@ await bloc('effacement, regles pures : cibles nettoyees, JSON de la base, chemin
     const t = EFP.phraseResultat(r, { besoins: fait })
     assert.ok(t.indexOf(fait[0]) > 0 && t.indexOf(fait[0]) < t.indexOf('À transmettre à la personne'), `niveau ${niveau}`)
     assert.equal(EFP.phraseResultat(r, { besoins: [] }), EFP.phraseResultat(r), 'rien a dire = resultat inchange')
+  }
+})
+
+// ===========================================================================
+// SUITE DU 06/11 APRES-MIDI : SIGNAUX DE FRICTION (« Refus + impasses »),
+// LIGNE C, LIVRES (D), CONSEIL DU BOT (E), LIMITES DES AGENTS ET TRI DE BRICE
+// ===========================================================================
+
+const { readdirSync } = await import('node:fs')
+const SP = await import('../src/lib/besoins/signaux-pur.ts')
+process.env.BESOINS_SIGNAL_SEL = 'sel-de-verification'
+const SG = await import('../src/lib/besoins/signaux.ts')
+const POL = await import('../src/lib/politique-information.ts')
+
+const CLES_CONTRAT = [
+  'pilotage.import_releve_non_reconnu', 'pilotage.import_broker_autre', 'pilotage.import_erreur',
+  'carnet.capture_impossible', 'carnet.sync_echec', 'carnet.export_echec',
+  'academie.recherche_vide', 'academie.video_illisible', 'journal.import_echec',
+  'site.page_introuvable', 'site.paiement_refuse', 'bot.bouton_perime', 'bot.message_non_compris',
+  'bot.info_absente', 'bot.agent_echec', 'bot.transmis_sans_reponse', 'site.info_absente',
+]
+
+await bloc('signaux, liste fermee : les cles du contrat et elles seules, forme d une cle de carte, titres fixes, refus = bug, impasse = blocage', () => {
+  assert.deepEqual([...SP.CLES_SIGNAUX].sort(), [...CLES_CONTRAT].sort())
+  const serveur = ['bot.bouton_perime', 'bot.message_non_compris', 'bot.info_absente', 'bot.agent_echec', 'bot.transmis_sans_reponse', 'site.info_absente']
+  for (const cle of SP.CLES_SIGNAUX) {
+    const d = SP.SIGNAUX[cle]
+    assert.match(cle, SP.RE_CLE_CARTE)
+    assert.ok(P.OUTILS_BESOIN.includes(SP.outilDuSignal(cle)), `outil de ${cle}`)
+    assert.ok(d.titre.length >= 3 && d.titre.length <= P.MAX_TITRE, `titre de ${cle}`)
+    sansTiretsLongs(d.titre)
+    assert.equal(SP.natureDuSignal(cle), d.genre === 'refus' ? 'bug' : 'blocage')
+    assert.equal(d.apps === 'serveur', serveur.includes(cle), `source de ${cle}`)
+    assert.equal(SP.estCleClient(cle), !serveur.includes(cle))
+    const b = SP.besoinDuSignal(cle)
+    assert.equal(b.cle, cle)
+    assert.equal(b.titre, d.titre)
+  }
+  // Les apps du contrat.
+  assert.deepEqual(SP.SIGNAUX['academie.recherche_vide'].apps, ['site', 'academie', 'masterclass'])
+  assert.deepEqual(SP.SIGNAUX['academie.video_illisible'].apps, ['academie', 'masterclass'])
+  assert.deepEqual(SP.SIGNAUX['carnet.sync_echec'].apps, ['extension'])
+  assert.deepEqual(Object.keys(SP.SIGNAUX['pilotage.import_releve_non_reconnu'].contexte), ['extension', 'broker_detecte'])
+  for (const cle of ['bot.bouton_perime', 'bot.message_non_compris', 'bot.agent_echec']) assert.deepEqual(SP.SIGNAUX[cle].contexte, {})
+  // La SEULE source : aucun autre module ne redefinit la liste (le front n'envoie qu'une cle de la liste).
+  const ailleurs = []
+  const parcourir = (dossier) => {
+    for (const e of readdirSync(path.join(RACINE, dossier), { withFileTypes: true })) {
+      const rel = path.join(dossier, e.name)
+      if (e.isDirectory()) parcourir(rel)
+      else if (/\.(ts|tsx)$/.test(e.name) && !rel.endsWith('signaux-pur.ts') && lire(rel).includes("'pilotage.import_broker_autre'")) ailleurs.push(rel)
+    }
+  }
+  parcourir('src')
+  assert.deepEqual(ailleurs, [], 'la liste fermee vit dans signaux-pur.ts seulement')
+  // Les cles envoyees en dur par le code sont dans la liste.
+  for (const f of ['src/lib/liveclub/bot-membre.ts', 'src/components/ImportsTrades.tsx']) {
+    for (const m of lire(f).matchAll(/'((?:bot|journal|site|pilotage|carnet|academie)\.[a-z_]+)'/g)) assert.ok(SP.estCleSignal(m[1]), `${f} : ${m[1]}`)
+  }
+})
+
+await bloc('signaux, corps et contexte : cle du serveur refusee, app de la cle, champ hors liste refuse, valeurs bornees et normalisees, aucun texte libre', () => {
+  const ok = SP.lireCorpsSignal({ app: 'journal', cle: 'journal.import_echec', contexte: { code: 'HTTP 500' } })
+  assert.deepEqual(ok, { app: 'journal', cle: 'journal.import_echec', contexte: { code: 'http_500' } })
+  assert.equal(SP.lireCorpsSignal({ app: 'journal', cle: 'bot.bouton_perime' }).status, 400, 'cle du serveur')
+  assert.equal(SP.lireCorpsSignal({ app: 'site', cle: 'journal.import_echec' }).status, 400, 'app hors de la cle')
+  assert.equal(SP.lireCorpsSignal({ app: 'journal', cle: 'journal.inventee' }).status, 400, 'cle inconnue')
+  assert.equal(SP.lireCorpsSignal({ app: 'telegram', cle: 'journal.import_echec' }).status, 400, 'app inconnue')
+  assert.equal(SP.lireCorpsSignal({ app: 'journal', cle: 'journal.import_echec', contexte: { code: 'x', note: 'mon trade' } }).status, 400, 'champ hors liste')
+  assert.equal(SP.lireCorpsSignal({ app: 'journal', cle: 'journal.import_echec', contexte: { code: { a: 1 } } }).status, 400, 'valeur objet')
+  assert.equal(SP.lireCorpsSignal({ app: 'journal', cle: 'journal.import_echec', contexte: [1] }).status, 400, 'tableau')
+  assert.equal(SP.lireCorpsSignal(null).status, 400)
+  assert.deepEqual(SP.lireCorpsSignal({ app: 'journal', cle: 'journal.import_echec' }).contexte, {})
+  // Texte court : ni email, ni lien, ni @, ni long nombre ; minuscules sans accents ; 60 au plus.
+  const t = SP.normaliserContexte('academie.recherche_vide', { termes: 'Les FVG écrits par jean.dupont@mail.fr https://x.y/z @pseudo 0612345678 ' + 'mot '.repeat(40) })
+  assert.ok(t.termes.length <= SP.MAX_VALEUR_CONTEXTE)
+  assert.ok(!/@|https|dupont|0612345678|é/.test(t.termes), t.termes)
+  assert.match(t.termes, /^les fvg ecrits par/)
+  // Chemin : sans requete ni fragment, segments-identifiants masques.
+  assert.deepEqual(SP.normaliserContexte('site.page_introuvable', { chemin: '/mon-espace/reset/0123456789abcdef0123?token=abc#x' }), { chemin: '/mon-espace/reset/:id' })
+  assert.deepEqual(SP.normaliserContexte('site.page_introuvable', { chemin: '/a/jean@mail.fr/b' }), { chemin: '/a/:id/b' })
+  assert.deepEqual(SP.normaliserContexte('site.page_introuvable', { chemin: 'https://autre.site/x' }), {}, 'pas un chemin : retire')
+  // Plateforme : liste connue ou « autre ».
+  assert.deepEqual(SP.normaliserContexte('carnet.capture_impossible', { plateforme: 'ChatGPT', raison: 'DOM change!' }), { plateforme: 'chatgpt', raison: 'dom_change' })
+  assert.deepEqual(SP.normaliserContexte('carnet.capture_impossible', { plateforme: 'MonSiteAMoi' }), { plateforme: 'autre' })
+  // Nombre accepte, vide retire.
+  assert.deepEqual(SP.normaliserContexte('journal.import_echec', { code: 404 }), { code: '404' })
+  assert.deepEqual(SP.normaliserContexte('journal.import_echec', { code: '!!!' }), {})
+  // Le pire contexte tient dans la contrainte de la migration (600 octets).
+  for (const cle of SP.CLES_SIGNAUX) {
+    const brut = Object.fromEntries(Object.keys(SP.SIGNAUX[cle].contexte).map(k => [k, `/${'é'.repeat(300)} ${'a'.repeat(300)}`]))
+    const c = SP.normaliserContexte(cle, brut) ?? {}
+    assert.ok(Buffer.byteLength(JSON.stringify(c)) <= 600, cle)
+    for (const v of Object.values(c)) assert.ok(v.length <= SP.MAX_VALEUR_CONTEXTE, `${cle} : ${v}`)
+  }
+  // Le serveur : les champs hors liste sont ecartes sans erreur.
+  assert.deepEqual(SP.contexteServeur('bot.info_absente', { sujet: 'Horaires du live', autre: 'x' }), { sujet: 'horaires du live' })
+  assert.deepEqual(SP.contexteServeur('bot.agent_echec', { sujet: 'x' }), {})
+})
+
+await bloc('signaux, cadence et seuil : une fois par heure et par cle, 30 par jour, 3 personnes en 7 jours, carte existante jamais rouverte', async () => {
+  assert.equal(SP.CADENCE_CLE_MINUTES, 60)
+  assert.equal(SP.SIGNAUX_PAR_JOUR, 30)
+  assert.equal(SP.SEUIL_PERSONNES, 3)
+  assert.equal(SP.SEUIL_JOURS, 7)
+  assert.equal(SP.decisionCadence({ dejaCetteHeure: false, aujourdhui: 0 }), 'ecrire')
+  assert.equal(SP.decisionCadence({ dejaCetteHeure: true, aujourdhui: 0 }), 'cadence_cle')
+  assert.equal(SP.decisionCadence({ dejaCetteHeure: false, aujourdhui: 29 }), 'ecrire')
+  assert.equal(SP.decisionCadence({ dejaCetteHeure: false, aujourdhui: 30 }), 'cadence_jour')
+  assert.equal(SP.decisionSeuil({ personnes7j: 2, carteExiste: false }), 'rien')
+  assert.equal(SP.decisionSeuil({ personnes7j: 3, carteExiste: false }), 'creer')
+  assert.equal(SP.decisionSeuil({ personnes7j: 9, carteExiste: true }), 'rattacher')
+  // La carte d'un signal : creee a_trier avec le titre FIXE et cree_par signal ; une carte deja la (meme refusee) gardee telle quelle.
+  const d = fauxDepots()
+  const c = await SG.carteDuSignal('journal.import_echec', d)
+  assert.equal(c.nouvelle, true)
+  assert.deepEqual(d.ecritures, [['creerCarte', 'journal.import_echec', 'signal']])
+  assert.equal(d.cartes.get('journal.import_echec').titre, SP.SIGNAUX['journal.import_echec'].titre)
+  const refusee = fauxDepots({ cartes: [{ id: 'id-r', cle: 'site.paiement_refuse', titre: 'Refusée', outil: 'site', statut: 'refuse' }] })
+  const c2 = await SG.carteDuSignal('site.paiement_refuse', refusee)
+  assert.deepEqual([c2.id, c2.nouvelle, refusee.ecritures.length], ['id-r', false, 0])
+  // Le serveur : verrou par personne, cadence lue SOUS le verrou, ecriture, puis le seuil ; aucun changement de statut.
+  const s = lire('src/lib/besoins/signaux.ts')
+  const i = (t) => { const k = s.indexOf(t); assert.ok(k > 0, t); return k }
+  assert.ok(i('pg_advisory_xact_lock(hashtextextended(${`besoins:signal:${personne}`}') < i('as heure') && i('as heure') < i('insert into public.besoin_signal'))
+  assert.ok(i('insert into public.besoin_signal') < i('await evaluerSeuil(o.cle)'))
+  assert.ok(!/update public\.besoin\b/.test(s), 'jamais de statut change par un signal')
+  assert.match(s, /if \(personnes7j < SEUIL_PERSONNES\) return/)
+  assert.ok(!/setInterval|setTimeout|cron/i.test(s), 'aucune minuterie')
+})
+
+await bloc('signaux, la personne : un HMAC (compte, Telegram, visiteur du jour), jamais l IP ; sans secret, rien', () => {
+  const ip = '203.0.113.7'
+  const v1 = SG.personneVisiteur(ip, 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)', new Date('2026-11-06T10:00:00Z'))
+  const v2 = SG.personneVisiteur(ip, 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)', new Date('2026-11-06T22:00:00Z'))
+  const v3 = SG.personneVisiteur(ip, 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)', new Date('2026-11-07T10:00:00Z'))
+  assert.match(v1, SP.RE_PERSONNE)
+  assert.equal(v1, v2, 'meme jour, meme empreinte')
+  assert.notEqual(v1, v3, 'le lendemain, une autre empreinte')
+  assert.ok(!v1.includes('203') && !v1.includes('113'))
+  assert.equal(SG.personneVisiteur(null, 'x'), null, 'sans IP lisible : rien')
+  const compte = SG.personneCompte('11111111-2222-3333-4444-555555555555')
+  assert.match(compte, /^c:[0-9a-f]{32}$/)
+  assert.ok(!compte.includes('1111'))
+  assert.match(SG.personneTelegram(123456789), /^t:[0-9a-f]{32}$/)
+  assert.equal(SG.personneTelegram(-5), null)
+  const sel = process.env.BESOINS_SIGNAL_SEL
+  const service = process.env.SUPABASE_SERVICE_ROLE_KEY
+  delete process.env.BESOINS_SIGNAL_SEL
+  delete process.env.SUPABASE_SERVICE_ROLE_KEY
+  assert.equal(SG.personneCompte('11111111-2222-3333-4444-555555555555'), null, 'sans secret, aucune personne')
+  process.env.BESOINS_SIGNAL_SEL = sel
+  if (service !== undefined) process.env.SUPABASE_SERVICE_ROLE_KEY = service
+  // Rien de la personne ni du contexte dans un log.
+  const s = lire('src/lib/besoins/signaux.ts')
+  for (const m of s.matchAll(/console\.(warn|log|error)\(`([^`]*)`\)/g)) {
+    for (const x of m[2].matchAll(/\$\{([^}]*)\}/g)) assert.match(x[1], /^erreurCourte\(err\)$/, `log : ${m[2]}`)
+  }
+})
+
+await bloc('route POST /api/besoins/signal : session facultative (chemin exact public), CORS, 200 meme ignore, 400, 503 en panne, corps borne', () => {
+  const route = lire('src/app/api/besoins/signal/route.ts')
+  assert.match(route, /export function OPTIONS\(req: NextRequest\) \{\n\s+return corsPreflight\(req\)/)
+  assert.match(route, /recevoirSignal\(req, \(\) => getUserId\(req\)\)/)
+  assert.match(route, /headers: corsHeaders\(req\)/)
+  const mw = lire('middleware.ts')
+  assert.match(mw, /pathname === '\/api\/besoins\/signal' \|\|/)
+  assert.ok(!/'\/api\/besoins\/signal'[,\]]/.test(mw.slice(mw.indexOf('const publicPaths'), mw.indexOf('const isPublic'))), 'pas en prefixe : /signaler garde sa session')
+  const s = lire('src/lib/besoins/signaux.ts')
+  const corps = s.slice(s.indexOf('export async function recevoirSignal'), s.indexOf('// Les signaux du serveur'))
+  assert.ok(corps.indexOf('lireCorpsSignal(brut)') < corps.indexOf('await session()'), 'la session seulement pour un corps valide')
+  assert.match(corps, /if \(issue === 'panne'\) return \{ status: 503/)
+  assert.match(corps, /return \{ status: 200, corps: \{ ok: true \} \}/)
+  assert.match(corps, /CORPS_SIGNAL_MAX_OCTETS/)
+  assert.equal(SP.CORPS_SIGNAL_MAX_OCTETS, 4096)
+})
+
+await bloc('ligne C : signaler avec signal = carte de la cle (creee si besoin), sans classement IA, vraie demande du bouton (cadence, phrase)', () => {
+  assert.equal(SP.lireSignalDuBouton(undefined, 'journal'), null)
+  assert.equal(SP.lireSignalDuBouton('', 'journal'), null)
+  assert.equal(SP.lireSignalDuBouton('journal.import_echec', 'journal'), 'journal.import_echec')
+  assert.equal(SP.lireSignalDuBouton('journal.import_echec', 'site').status, 400)
+  assert.equal(SP.lireSignalDuBouton('bot.agent_echec', 'journal').status, 400, 'cle du serveur')
+  assert.equal(SP.lireSignalDuBouton('journal.autre_chose', 'journal').status, 400)
+  const m = lire('src/lib/besoins/membres.ts')
+  const f = m.slice(m.indexOf('export async function signalerBesoin'), m.indexOf('// L\'entree du bot des membres'))
+  assert.match(f, /const signal = lireSignalDuBouton\(\(brut as Record<string, unknown>\)\.signal, c\.app\)/)
+  assert.match(f, /if \(signal && typeof signal === 'object'\) return erreur\(signal\.status, signal\.erreur\)/)
+  assert.match(f, /signal\n\s+\? \{ carte: await carteDuSignal\(signal, depots\), besoin: besoinDuSignal\(signal\) \}\n\s+: await carteDuSignalement\(/)
+  assert.match(f, /insererSousCadence\(\{[\s\S]*detectePar: 'bouton'/)
+  assert.match(f, /return \{ status: 200, corps: \{ ok: true, phrase: PHRASE_BOUTON_BESOIN \} \}/)
+  const front = lire('src/components/BesoinFormulaire.tsx')
+  assert.match(front, /\.\.\.\(signalActif \? \{ signal: signalActif \} : \{\}\)/)
+  assert.match(front, /setSignalActif\(null\)/)
+})
+
+await bloc('D, livres : cartes livrees de l outil de l app, 10 au plus, les plus recentes, titres et personnes seulement', () => {
+  assert.equal(B.LIVRES_MAX, 10)
+  const id = '6f1c3c1e-2b1a-4c1d-9e0f-0123456789ab'
+  assert.deepEqual(B.carteLivree({ id, titre: 'Export PDF', livre_le: new Date('2026-11-06T10:00:00Z'), personnes: '3' }),
+    { id, titre: 'Export PDF', livre_le: '2026-11-06T10:00:00.000Z', personnes: 3 })
+  assert.equal(B.carteLivree({ id: 'x', titre: 'a', livre_le: new Date(), personnes: 1 }), null)
+  assert.equal(B.carteLivree({ id, titre: 'a', livre_le: 'pas une date', personnes: 1 }), null)
+  const route = lire('src/app/api/besoins/livres/route.ts')
+  assert.match(route, /const METHODES = 'GET, OPTIONS'/)
+  assert.match(route, /const g = await gardeMembre\(req, METHODES\)\n\s+if \(!g\.ok\) return g\.reponse/)
+  const m = lire('src/lib/besoins/membres.ts')
+  const f = m.slice(m.indexOf('export async function livresPourMembre'), m.indexOf('/** Un vote par membre'))
+  assert.match(f, /b\.statut = 'livre'/)
+  assert.match(f, /order by b\.statut_change_le desc\n\s+limit \$\{LIVRES_MAX\}/)
+  assert.ok(!/texte_membre|resume|email/.test(f), 'jamais un texte de membre')
+})
+
+await bloc('limites des agents : outil noter_limite (ni texte du membre, ni identifiant), meme resultat garde ou ecarte, dans les deux bots, en cache', () => {
+  assert.deepEqual(Object.keys(SP.OUTIL_NOTER_LIMITE.input_schema.properties).sort(), ['categorie', 'sujet'])
+  assert.deepEqual(SP.OUTIL_NOTER_LIMITE.input_schema.properties.categorie.enum, ['info_manquante', 'action_impossible', 'donnee_sensible'])
+  assert.equal(SP.OUTIL_NOTER_LIMITE.input_schema.additionalProperties, false)
+  for (const cat of SP.CATEGORIES_LIMITE) {
+    const r = SP.resultatNoterLimite({ sujet: 'Horaires du prochain live', categorie: cat })
+    assert.equal(r.contenu, JSON.stringify(SP.RESULTAT_NOTER_LIMITE), 'le meme resultat, quelle que soit la categorie')
+    assert.equal(r.limite.categorie, cat)
+  }
+  assert.equal(SP.resultatNoterLimite({ sujet: 'x y z', categorie: 'autre' }).erreur, true)
+  assert.equal(SP.resultatNoterLimite({ sujet: '  ', categorie: 'info_manquante' }).erreur, true)
+  const l = SP.lireLimite({ sujet: 'Le tarif de jean@mail.fr https://x.fr @paul', categorie: 'donnee_sensible' })
+  assert.ok(!/@|https/.test(l.sujet), l.sujet)
+  const b = SP.besoinDeLimite({ sujet: 'Horaires du prochain live', categorie: 'info_manquante' }, 'bot')
+  assert.deepEqual([b.outil, b.nature, b.cle], ['bot', 'blocage', 'bot.limite_horaires_du_prochain_live'])
+  assert.match(b.resume, /^Limite de l'agent \(info manquante\) : /)
+  sansTiretsLongs(SP.CONSIGNE_NOTER_LIMITE)
+  // Dans les deux bots : l'outil, la consigne dans le prompt EN CACHE.
+  const rl = L.requeteAgentMembre([{ role: 'user', content: 'bonjour' }])
+  assert.ok(rl.tools.some(t => t.name === 'noter_limite'))
+  assert.equal(rl.system[0].cache_control?.type, 'ephemeral')
+  assert.ok(rl.system[0].text.includes(`- noter_limite : ${SP.CONSIGNE_NOTER_LIMITE}`))
+  const rs = S.requeteSupport('claude-haiku-4-5', 'journal', [{ role: 'user', content: 'bonjour' }])
+  assert.ok(rs.tools.some(t => t.name === 'noter_limite'))
+  assert.equal(rs.system[0].cache_control?.type, 'ephemeral')
+  assert.ok(rs.system[0].text.includes(`Tes limites. ${SP.CONSIGNE_NOTER_LIMITE}`))
+  // Ni la cle ni le contexte d'un signal ne vont dans un prompt.
+  for (const t of [rl.system[0].text, rs.system[0].text]) for (const cle of SP.CLES_SIGNAUX) assert.ok(!t.includes(cle), cle)
+  assert.ok(!/messages\.create|appelIA|requeteClassement/.test(lire('src/lib/besoins/signaux.ts')), 'aucun appel du modele pour un signal')
+})
+
+await bloc('TRI DE BRICE (serveur) : donnee sensible d un non-admin = rien ; d un admin = carte a_trier ; ignorance = a_trier ; prudence = rien', () => {
+  const suivi = (o = {}) => Object.assign(SP.suiviLimites(), o)
+  const sensible = { sujet: 'Combien paie un autre membre', categorie: 'donnee_sensible' }
+  const ignorance = { sujet: 'Horaires du prochain live', categorie: 'info_manquante' }
+  const base = { bot: 'liveclub', texteMembre: 'question', reponse: 'Je ne sais pas.' }
+  // 1. Sensible d'un membre : ni carte, ni demande, ni signal.
+  const s1 = suivi({ limites: [sensible], consultations: [{ outil: 'trouver_cours', sujet: 'x', vide: true }], humain: true })
+  assert.deepEqual(SP.triLimites(s1, { ...base, admin: false }), { limites: [], signaux: [], ecarte: 'sensible' })
+  // La formule de refus des regles d'information suffit, meme si l'agent a classe autrement.
+  const s1b = suivi({ limites: [ignorance] })
+  assert.ok(SP.echangeSensible(s1b, `Ça, je ne peux pas le partager. ${POL.TEXTE_PROMOS}`))
+  assert.deepEqual(SP.triLimites(s1b, { ...base, admin: false, reponse: POL.FORMULE_REFUS }).limites, [])
+  // 2. Sensible d'un admin : carte a_trier. Le refus seul (l'agent n'a rien note) : le filet du serveur, sujet fixe.
+  const r2 = SP.triLimites(suivi({ limites: [sensible] }), { ...base, admin: true })
+  assert.deepEqual(r2.limites, [sensible])
+  assert.equal(r2.ecarte, null)
+  assert.deepEqual(SP.triLimites(suivi(), { ...base, admin: true, reponse: `${POL.FORMULE_REFUS} C'est interne.` }).limites, [SP.LIMITE_REFUS_ADMIN])
+  assert.deepEqual(SP.triLimites(suivi(), { ...base, admin: false, reponse: `${POL.FORMULE_REFUS} C'est interne.` }).limites, [])
+  // 3. Ignorance : a_trier, et les signaux du serveur.
+  const s3 = suivi({ limites: [ignorance] })
+  SP.noterConsultation(s3, 'trouver_cours', { notion: 'FVG' }, { notion: 'FVG', aucun_resultat: true })
+  SP.noterHumain(s3)
+  const r3 = SP.triLimites(s3, { ...base, admin: false })
+  assert.deepEqual(r3.limites, [ignorance])
+  assert.deepEqual(r3.signaux, [
+    { cle: 'bot.info_absente', contexte: { sujet: 'fvg' } },
+    { cle: 'bot.transmis_sans_reponse', contexte: { sujet: 'fvg' } },
+  ])
+  // Un humain demande (remboursement, effacement, adresse) n'est pas une ignorance.
+  const s3b = suivi()
+  SP.noterConsultation(s3b, 'connaissances_produits', { sujets: ['carnet-du-trader'] }, { fiches: [{ titre: 't', texte: 'x' }] })
+  SP.noterHumain(s3b)
+  for (const t of ['je veux un remboursement', 'je veux parler à quelqu\'un', 'supprimez mes données', 'j\'ai payé avec une autre adresse']) {
+    assert.deepEqual(SP.triLimites(s3b, { ...base, admin: false, texteMembre: t }), { limites: [], signaux: [], ecarte: null }, t)
+  }
+  // Transmis faute de reponse, sans limite de l'agent : le signal, et le filet du serveur (carte a_trier, sujet fixe).
+  const r3b = SP.triLimites(s3b, { ...base, admin: false, texteMembre: 'Il y a des rencontres en vrai entre membres ?' })
+  assert.deepEqual(r3b.signaux, [{ cle: 'bot.transmis_sans_reponse', contexte: { sujet: 'carnet du trader' } }])
+  assert.deepEqual(r3b.limites, [SP.LIMITE_SANS_REPONSE])
+  const s3c = suivi()
+  SP.noterHumain(s3c)
+  assert.deepEqual(SP.triLimites(s3c, { ...base, admin: false }).signaux, [{ cle: 'bot.transmis_sans_reponse', contexte: {} }])
+  assert.equal(SP.rienANoter(s3c), false)
+  // 4. Prudence : rien, sauf l'echec sans contexte.
+  const s4 = suivi({ prudence: true, limites: [ignorance], echec: true, consultations: [{ outil: 'trouver_cours', sujet: 'x', vide: true }] })
+  assert.deepEqual(SP.triLimites(s4, { ...base, admin: true }), { limites: [], signaux: [{ cle: 'bot.agent_echec', contexte: {} }], ecarte: 'prudence' })
+  // Chat du support : site.info_absente avec l'app du fil.
+  const s5 = suivi()
+  SP.noterConsultation(s5, 'connaissances_produits', { sujets: ['inconnu'] }, { erreur: 'Aucune fiche pour ce sujet.', sujets_disponibles: [] })
+  assert.deepEqual(SP.triLimites(s5, { bot: 'support', admin: false, texteMembre: 'q', reponse: 'r', app: 'pilotage' }).signaux,
+    [{ cle: 'site.info_absente', contexte: { app: 'pilotage', sujet: 'inconnu' } }])
+  // Une panne de recherche n'est pas une absence ; deux limites au plus, sujets distincts.
+  const s6 = suivi()
+  SP.noterConsultation(s6, 'trouver_cours', { notion: 'x' }, { recherche_indisponible: true })
+  assert.equal(s6.consultations.length, 0)
+  SP.noterLimite(s6, ignorance); SP.noterLimite(s6, ignorance); SP.noterLimite(s6, sensible); SP.noterLimite(s6, { sujet: 'Autre', categorie: 'action_impossible' })
+  assert.equal(s6.limites.length, 2)
+  assert.equal(SP.rienANoter(SP.suiviLimites()), true)
+})
+
+await bloc('limites, branchement : admin = compte de l equipe reconnu par le bot, lu seulement si sensible ; carte cree_par agent sans phrase ; prudence', () => {
+  const s = lire('src/lib/besoins/signaux.ts')
+  assert.match(s, /from public\.cockpit_telegram_comptes where telegram_id = \$\{telegramId\}::bigint/)
+  assert.match(s, /from public\.cockpit_telegram_comptes where user_id::text = \$\{userId\}/)
+  for (const qui of ['estAdminTelegram(o.telegramId)', 'estAdminCompte(o.userId)']) assert.ok(s.includes(`const admin = sensible ? await ${qui} : false`), qui)
+  assert.match(s, /besoins: bilan\.limites\.map\(l => besoinDeLimite\(l, 'bot'\)\),\n\s+peutDire: false, creePar: 'agent'/)
+  assert.match(s, /besoins: bilan\.limites\.map\(l => besoinDeLimite\(l, 'site'\)\),\n\s+peutDire: false, creePar: 'agent'/)
+  assert.match(lire('src/lib/besoins/moteur.ts'), /creePar: n\.creePar \?\? n\.detectePar/)
+  const agent = lire('src/lib/liveclub/agent-membre.ts')
+  assert.match(agent, /await appliquerLimitesTelegram\(\{ telegramId, texteFil, texteMembre: question, reponse: reponse\.texte, suivi \}\)/)
+  assert.match(agent, /suivi\.prudence = prudence/)
+  assert.match(agent, /noterHumain\(suivi\)/)
+  assert.equal((agent.match(/noterConsultation\(suivi, bloc\.name, bloc\.input, brut\)/g) ?? []).length, 2)
+  assert.equal((agent.match(/suivi\.echec = true/g) ?? []).length, 2)
+  const route = lire('src/app/api/support/chat/route.ts')
+  assert.match(route, /suivi\.prudence = analyserTexte\(message, \{ niveau: 'injection' \}\)\.suspect/)
+  assert.match(route, /if \(bloc\.name === NOM_OUTIL_NOTER_LIMITE && suivi\.prudence\) \{\n\s+resultats\.push\(\{ type: 'tool_result', tool_use_id: bloc\.id, content: JSON\.stringify\(REFUS_PRUDENCE_LIMITE\) \}\)/)
+  assert.ok(route.indexOf('prisma.supportThread.create') < route.indexOf('await appliquerLimitesChat('), 'apres la sauvegarde du fil')
+  assert.match(S.OUTILS_SUPPORT.map(t => t.name).join(','), /noter_besoin,noter_limite$/)
+})
+
+await bloc('bot des membres : bouton perime, message non compris, agent en echec ; rien de change pour le membre', () => {
+  const bot = lire('src/lib/liveclub/bot-membre.ts')
+  assert.equal((bot.match(/await signalerBot\(u\.id, 'bot\.bouton_perime'\)/g) ?? []).length, 6)
+  assert.match(bot, /await envoyer\(chat, `Je ne lis que les messages écrits\. Écris-moi, ou utilise les boutons :`, clavierMenu\(\)\)\n(\s*\/\/[^\n]*\n)?\s*await signalerBot\(u\.id, 'bot\.message_non_compris'\)/)
+  assert.match(bot, /console\.warn\(`\[liveclub\/bot\] agent indisponible : \$\{messageErreur\(err\)\}`\)\n(\s*\/\/[^\n]*\n)?\s*await signalerBot\(u\.id, 'bot\.agent_echec'\)/)
+  // Les textes du membre sont ceux d'avant.
+  assert.ok(bot.includes("`Ce bouton ne marche plus (déjà utilisé, ou remplacé par une demande plus récente). Rien n'a été fait.`"))
+  assert.ok(bot.includes("`Ce bouton a expiré, et rien n'a été fait. Redemande, je te le repropose.`"))
+  assert.match(bot, /if \(rep\.texte === TEXTE_PERIME_BESOIN\) await signalerBot/)
+  assert.match(bot, /if \(rep\.texte === TEXTE_BOUTON_PERIME\) await signalerBot/)
+})
+
+await bloc('E, conseil du bot : J+6, texte du contrat a valider, bouton du menu ; A B C du Journal : textes a valider, bulle une fois, aucune minuterie', () => {
+  const T = lire('src/lib/liveclub/tips-accueil-pur.ts')
+  avantMarque('src/lib/liveclub/tips-accueil-pur.ts', 'TEXTE_TIP_BESOINS')
+  assert.ok(T.includes("{ cle: 'besoins', jours: TIP_BESOINS_JOURS }"))
+  for (const c of ['LIBELLE_AIDE_IDEES', 'TEXTE_BULLE_DECOUVERTE', 'LIGNE_IMPORT_NON_RECONNU', 'PHRASE_IMPORT_NON_RECONNU', 'LIGNE_IMPORT_ECHEC', 'PHRASE_IMPORT_ECHEC', 'BOUTON_LIGNE_BESOIN']) {
+    avantMarque('src/lib/besoins/decouverte.ts', c)
+  }
+  const dec = lire('src/lib/besoins/decouverte.ts')
+  assert.ok(dec.includes("export const LIBELLE_AIDE_IDEES = 'Aide et idées'"))
+  assert.ok(dec.includes(`export const TEXTE_BULLE_DECOUVERTE = "Une question ou une idée pour cet outil ? C'est ici."`))
+  assert.match(dec, /try \{\n\s+return window\.localStorage\.getItem\(CLE_BULLE_VUE\) === '1'\n\s+\} catch \{\n\s+return true/)
+  assert.match(dec, /try \{\n\s+window\.localStorage\.setItem\(CLE_BULLE_VUE, '1'\)/)
+  const bulle = lire('src/components/SupportBubble.tsx')
+  assert.match(bulle, /if \(bulleDejaVue\(\)\) return\n\s+marquerBulleVue\(\)\n\s+setBulle\(true\)/)
+  assert.match(bulle, /animation: aokBulleAide 0\.35s ease-out 1\.2s both/)
+  assert.match(bulle, /prefers-reduced-motion/)
+  const imp = lire('src/components/ImportsTrades.tsx')
+  assert.match(imp, /envoyerSignal\('journal', CLE_SIGNAL_IMPORT, \{ code \}\)/)
+  assert.match(imp, /if \(r\.status !== 401\) signalerEchec\(`http_\$\{r\.status\}`\)/)
+  for (const f of ['src/lib/besoins/signaux-pur.ts', 'src/lib/besoins/signaux.ts', 'src/lib/besoins/decouverte.ts', 'src/components/SupportBubble.tsx',
+    'src/components/BesoinFormulaire.tsx', 'src/components/ImportsTrades.tsx', 'src/app/api/besoins/signal/route.ts', 'src/app/api/besoins/livres/route.ts']) {
+    assert.ok(!/setInterval|setTimeout|cron/i.test(lire(f)), f)
+  }
+  // CanvasShell et NoteMapCanvas ne sont pas touches (une autre session y travaille) : verifie par git, pas ici.
+})
+
+await bloc('API de Tab : /besoins?vue=signaux en lecture (nombres et contexte court, jamais la personne), cree_par des cartes, aide', () => {
+  const t = lire('src/lib/besoins/tab.ts')
+  assert.match(t, /if \(vue !== null && vue !== 'signaux'\) return/)
+  const sql = t.slice(t.indexOf('const SQL_SIGNAUX'), t.indexOf('/** GET /besoins'))
+  assert.ok(!/personne\b(?! \))/.test(sql.replace(/count\(distinct s\.personne\)/g, '')), 'la personne ne sort jamais')
+  assert.match(t, /b\.statut_change_le, b\.cree_par`/)
+  assert.match(lire('src/lib/tab/aide.ts'), /'vue \(signaux\)'/)
+})
+
+await bloc('migration 20261106200000 : table fermee, contraintes (cle, personne HMAC, contexte borne), vue gardee, pas de point-virgule hors fin d ordre', () => {
+  const dossier = [path.resolve(RACINE, '../../sites/Aoknowledgecom/supabase/migrations'),
+    path.join(process.env.AOK_WORKSPACE ?? path.join(os.homedir(), 'Projects/Aoknowledge'), 'sites/Aoknowledgecom/supabase/migrations')].find(existsSync)
+  const sql = readFileSync(path.join(dossier, '20261106200000_besoins_signaux.sql'), 'utf8')
+  for (const [i, ligne] of sql.split('\n').entries()) {
+    if (ligne.trim().startsWith('--')) {
+      assert.ok(!ligne.includes(';'), `point-virgule dans un commentaire, ligne ${i + 1}`)
+      assert.ok(!ligne.includes("'"), `apostrophe dans un commentaire, ligne ${i + 1}`)
+    } else if (ligne.includes(';')) {
+      assert.ok(ligne.indexOf(';') === ligne.trimEnd().length - 1, `point-virgule hors fin d ordre, ligne ${i + 1}`)
+    }
+  }
+  // Aucune chaine SQL ne porte de point-virgule (le script coupe dessus).
+  for (const m of sql.replace(/^\s*--.*$/gm, '').matchAll(/'([^']*)'/g)) assert.ok(!m[1].includes(';'), m[1])
+  assert.match(sql, /constraint besoin_signal_cle_ck check \(cle ~ '\^\[a-z\]\+\[\.\]\[a-z0-9_\]\{1,64\}\$'\)/)
+  assert.match(sql, /constraint besoin_signal_personne_ck check \(personne ~ '\^\[act\]:\[0-9a-f\]\{32\}\$'\)/)
+  assert.match(sql, /octet_length\(contexte::text\) <= 600/)
+  assert.match(sql, /alter table public\.besoin_signal force row level security/)
+  assert.match(sql, /revoke all on table public\.besoin_signal from anon, authenticated/)
+  assert.ok(!/create policy/i.test(sql), 'aucune policy')
+  assert.match(sql, /where public\.is_cockpit_member\(\)\n\s+group by s\.cle/)
+  assert.match(sql, /grant select on public\.cockpit_besoin_signaux to authenticated/)
+  assert.ok(!/create (or replace )?function/i.test(sql), 'aucune fonction')
+  // La forme de la cle et de la personne : la meme que le journal.
+  assert.equal(SP.RE_CLE_CARTE.source, '^[a-z]+[.][a-z0-9_]{1,64}$')
+  assert.equal(SP.RE_PERSONNE.source, '^[act]:[0-9a-f]{32}$')
+  // Les colonnes de la vue que le cockpit lit.
+  for (const c of ['p.cle', 'p.personnes_7j', 'p.evenements_7j', 'p.personnes', 'p.evenements', 'p.dernier_le', 'as dernier_contexte', 'as carte_id', 'as carte_titre', 'as carte_statut']) {
+    assert.ok(sql.includes(c), c)
   }
 })
 

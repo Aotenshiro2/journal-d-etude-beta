@@ -171,12 +171,15 @@ import { estBoutonRelais } from './relais-pur'
 import {
   annulerIndicateur, confirmerIndicateur, etapeIndicateur, reponseTexteIndicateur, type ReponseIndicateur,
 } from './indicateur'
-import { BOUTON_INDICATEUR, lireBoutonIndicateur } from './indicateur-pur'
+import { BOUTON_INDICATEUR, TEXTE_BOUTON_PERIME, lireBoutonIndicateur } from './indicateur-pur'
 import {
   annulerEtapeBesoin, enregistrerBesoinDuBot, lireMessageEtapeBesoin, oublierEtapeBesoin, ouvrirEtapeBesoin, type ReponseBesoin,
 } from './besoin-etape'
-import { BOUTON_BESOIN, lireBoutonBesoin } from './besoin-etape-pur'
+import { BOUTON_BESOIN, TEXTE_PERIME_BESOIN, lireBoutonBesoin } from './besoin-etape-pur'
 import { TEXTE_BOUTON_MAX } from '@/lib/besoins/bouton-pur'
+// (06/11, apres-midi) Signaux de friction du bot (bouton perime, message non
+// compris, agent en echec) : sans IA, au serveur, rien de change pour le membre.
+import { signalerBot } from '@/lib/besoins/signaux'
 import {
   REGLE_RAISON_SORTIE, jetonBienForme, libelleBouton, messageErreur, normaliserEmail, pauseDejaProposee, relationAbsente,
   sortieAExpliquer, texteDette, texteTarifReserve, type GesteDate,
@@ -1240,6 +1243,7 @@ async function traiterChoixCompte(
   await retirerBoutons(chat, messageId)
   if (issue.etat !== 'ok') {
     await envoyer(chat, TEXTE_CHOIX_PERIME)
+    await signalerBot(u.id, 'bot.bouton_perime')
     return
   }
   const { email, anciens } = issue.choix
@@ -1596,6 +1600,8 @@ async function converserAvecAgent(
     reponse = await repondreAuMembre(u.id, historique, texte, { contexte })
   } catch (err) {
     console.warn(`[liveclub/bot] agent indisponible : ${messageErreur(err)}`)
+    // (06/11) L'agent n'a pas abouti, le bot retombe sur le menu : signal, sans contexte.
+    await signalerBot(u.id, 'bot.agent_echec')
     // (22/10) L'equipe a repondu pendant ce temps : elle a la main, rien a dire.
     if (await equipeAEcritDepuis(u.id, recuLe)) return
     // L'agent ne sait pas repondre : le fil passe en « veut un humain ».
@@ -1671,6 +1677,8 @@ export async function traiterMessagePrive(message: MessageTg, updateId: number):
     if (await recevoirImageMembre(chat, u, message)) return
     await versSupport(u.id, null, 'membre', '[message sans texte]')
     await envoyer(chat, `Je ne lis que les messages écrits. Écris-moi, ou utilise les boutons :`, clavierMenu())
+    // (06/11) Un message que le bot ne sait pas lire (vocal, fichier, autocollant) : signal, sans contexte.
+    await signalerBot(u.id, 'bot.message_non_compris')
     return
   }
 
@@ -2034,6 +2042,7 @@ export async function traiterBouton(bouton: BoutonTg, updateId: number): Promise
     const rep = await annulerEtapeBesoin(u.id, besoinBouton.nonce)
     await retirerBoutons(chat, message.message_id)
     await envoyerReponseBesoin(chat, rep, identite)
+    if (rep.texte === TEXTE_PERIME_BESOIN) await signalerBot(u.id, 'bot.bouton_perime')
     return
   }
   // (06/11) Tout autre bouton ferme l'etape « Il me manque quelque chose ».
@@ -2071,6 +2080,7 @@ export async function traiterBouton(bouton: BoutonTg, updateId: number): Promise
     const rep = indicateur.geste === 'oui' ? await confirmerIndicateur(u, indicateur.nonce) : await annulerIndicateur(u.id, indicateur.nonce)
     await retirerBoutons(chat, message.message_id)
     await envoyerReponseIndicateur(chat, rep, identite)
+    if (rep.texte === TEXTE_BOUTON_PERIME) await signalerBot(u.id, 'bot.bouton_perime')
     return
   }
 
@@ -2195,11 +2205,13 @@ export async function traiterBouton(bouton: BoutonTg, updateId: number): Promise
     if (issue.etat === 'inconnu') {
       await repondreBouton(bouton.id, 'Ce bouton ne marche plus.')
       await envoyer(chat, `Ce bouton ne marche plus (déjà utilisé, ou remplacé par une demande plus récente). Rien n'a été fait.`, clavierMenu())
+      await signalerBot(u.id, 'bot.bouton_perime')
       return
     }
     if (issue.etat === 'expire') {
       await repondreBouton(bouton.id, 'Trop tard, redemande.')
       await envoyer(chat, `Ce bouton a expiré, et rien n'a été fait. Redemande, je te le repropose.`, clavierMenu())
+      await signalerBot(u.id, 'bot.bouton_perime')
       return
     }
     if (confirmation[1] === 'x') {
@@ -2217,4 +2229,6 @@ export async function traiterBouton(bouton: BoutonTg, updateId: number): Promise
   await repondreBouton(bouton.id)
   await retour()
   await envoyerMenu(chat, u.id, undefined, r)
+  // (06/11) Un bouton d'un ancien message : signal bot.bouton_perime, rien de change pour le membre.
+  await signalerBot(u.id, 'bot.bouton_perime')
 }

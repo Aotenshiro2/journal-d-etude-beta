@@ -66,6 +66,12 @@ import { NOM_OUTIL_INDICATEUR } from './indicateur-pur'
 import { NOM_OUTIL_NOTER_BESOIN, resultatNoterBesoin, texteAvecPhrase, type BesoinPropose } from '@/lib/besoins/pur'
 import { noterBesoinsTelegram } from '@/lib/besoins/serveur'
 import { nettoyerPourSupport } from './support-pont'
+// (06/11, apres-midi) Les limites de l'agent : noter_limite, recherches vides,
+// passage a l'equipe faute de reponse, echec ; tri de Brice par le serveur.
+import {
+  NOM_OUTIL_NOTER_LIMITE, noterConsultation, noterHumain, noterLimite, resultatNoterLimite, suiviLimites, type SuiviLimites,
+} from '@/lib/besoins/signaux-pur'
+import { appliquerLimitesTelegram } from '@/lib/besoins/signaux'
 
 export { MODELE_LIVECLUB }
 
@@ -191,6 +197,12 @@ async function tracerUsage(telegramId: number, usage: Anthropic.Usage, echange: 
  * phrase du serveur (PHRASE_BESOIN_NOTE) finit une reponse en texte libre, une
  * fois, jamais une proposition, un repli ni l'etape de l'indicateur. Un echec :
  * la reponse part comme avant (noterBesoinsTelegram ne jette pas).
+ *
+ * (06/11, apres-midi) Les LIMITES DE L'AGENT : ce que la boucle a vu (recherche
+ * vide, passage a l'equipe apres une recherche, noter_limite, echec) est trie
+ * par le serveur a la fin de l'echange (appliquerLimitesTelegram, tri de
+ * Brice : une donnee sensible qui ne concerne pas le membre, hors admin, ne
+ * laisse rien), sans rien changer a la reponse. Ne jette pas.
  */
 export async function repondreAuMembre(
   telegramId: number,
@@ -200,20 +212,27 @@ export async function repondreAuMembre(
   o: { contexte?: string } = {},
 ): Promise<ReponseAgentMembre> {
   const besoins: BesoinPropose[] = []
-  const reponse = await boucleAgentMembre(telegramId, historique, question, o, besoins)
+  const suivi = suiviLimites()
+  const reponse = await boucleAgentMembre(telegramId, historique, question, o, besoins, suivi)
+  const texteFil = nettoyerPourSupport(question.trim()).slice(0, 4000)
+  await appliquerLimitesTelegram({ telegramId, texteFil, texteMembre: question, reponse: reponse.texte, suivi })
   if (!besoins.length) return reponse
   const peutDire = !!reponse.texte && !reponse.repli && !reponse.action && !reponse.pauseAvantArret && !reponse.indicateur
-  const note = await noterBesoinsTelegram({ telegramId, texteFil: nettoyerPourSupport(question.trim()).slice(0, 4000), besoins, peutDire })
+  const note = await noterBesoinsTelegram({ telegramId, texteFil, besoins, peutDire })
   return note.phrase && peutDire ? { ...reponse, texte: texteAvecPhrase(reponse.texte, true) } : reponse
 }
 
-/** La boucle question -> outils -> reponse ; `besoins` recoit les besoins notes (noter_besoin). */
+/**
+ * La boucle question -> outils -> reponse ; `besoins` recoit les besoins notes
+ * (noter_besoin), `suivi` ce que l'agent n'a pas su faire (limites des agents).
+ */
 async function boucleAgentMembre(
   telegramId: number,
   historique: MessageConserve[],
   question: string,
   o: { contexte?: string },
   besoins: BesoinPropose[],
+  suivi: SuiviLimites,
 ): Promise<ReponseAgentMembre> {
   const client = clientAgent()
   // (29/10) SECURITE DES BOTS : le message du membre (niveau 'injection' :
@@ -224,6 +243,7 @@ async function boucleAgentMembre(
   // habituelle : aucun message de plus.
   const analyse = analyserTexte(question, { niveau: 'injection' })
   const prudence = analyse.suspect
+  suivi.prudence = prudence
   if (prudence) {
     await alerterBriceSecurite({
       source: 'bot Live Club, message privé d\'un membre', qui: (await nomTelegram(telegramId)) ?? `u${telegramId}`, analyse,
@@ -259,9 +279,10 @@ async function boucleAgentMembre(
 
     if (response.stop_reason !== 'tool_use') {
       const texte = nettoyer(textOf(response))
-      return texte
-        ? { texte, ...drapeau() }
-        : { texte: TEXTE_SANS_REPONSE, repli: true, veutHumain: true }
+      if (texte) return { texte, ...drapeau() }
+      // (06/11) L'agent n'a pas abouti : signal bot.agent_echec (repondreAuMembre).
+      suivi.echec = true
+      return { texte: TEXTE_SANS_REPONSE, repli: true, veutHumain: true }
     }
 
     messages.push({ role: 'assistant', content: response.content })
@@ -283,8 +304,18 @@ async function boucleAgentMembre(
         continue
       }
       // (06/11) Ni la note d'un besoin : la passe de reperage le reprendra, marque suspect.
-      if (prudence && bloc.name === NOM_OUTIL_NOTER_BESOIN) {
+      // (06/11, apres-midi) Ni une limite de l'agent : le detecteur d'injection garde la main.
+      if (prudence && (bloc.name === NOM_OUTIL_NOTER_BESOIN || bloc.name === NOM_OUTIL_NOTER_LIMITE)) {
         resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify(REFUS_PRUDENCE_MEMBRE) })
+        continue
+      }
+
+      // (06/11, apres-midi) Une limite de l'agent : gardee pour le tri du serveur
+      // en fin d'echange. Le meme resultat au modele, gardee ou ecartee.
+      if (bloc.name === NOM_OUTIL_NOTER_LIMITE) {
+        const r = resultatNoterLimite(bloc.input)
+        if (r.limite) noterLimite(suivi, r.limite)
+        resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: r.contenu, ...(r.erreur ? { is_error: true } : {}) })
         continue
       }
 
@@ -332,6 +363,8 @@ async function boucleAgentMembre(
 
       if (bloc.name === 'demander_un_humain') {
         humain = true
+        // (06/11) « Transmis faute de reponse », sauf si le membre demandait l'equipe (tri en fin d'echange).
+        noterHumain(suivi)
         resultats.push({
           type: 'tool_result', tool_use_id: bloc.id,
           content: JSON.stringify(RESULTAT_DEMANDER_UN_HUMAIN),
@@ -342,14 +375,18 @@ async function boucleAgentMembre(
       // La base de connaissances produits (Brice, 18/10) : lecture pure,
       // aucune donnee de membre, la meme reponse que dans l'eval.
       if (bloc.name === 'connaissances_produits') {
-        resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify(resultatConnaissances(bloc.input)) })
+        const brut = resultatConnaissances(bloc.input)
+        noterConsultation(suivi, bloc.name, bloc.input, brut)
+        resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify(brut) })
         continue
       }
 
       // Le bon cours de l'academie ou la bonne masterclass (Brice, 19/10) :
       // lecture en direct des lecons publiees, aucune donnee de membre.
       if (bloc.name === NOM_OUTIL_TROUVER_COURS) {
-        resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify(await trouverCours(bloc.input, 'liveclub', { telegramId })) })
+        const brut = await trouverCours(bloc.input, 'liveclub', { telegramId })
+        noterConsultation(suivi, bloc.name, bloc.input, brut)
+        resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify(brut) })
         continue
       }
 
@@ -431,5 +468,7 @@ async function boucleAgentMembre(
     }
     messages.push({ role: 'user', content: resultats })
   }
+  // (06/11) Tours epuises : l'agent n'a pas abouti (signal bot.agent_echec).
+  suivi.echec = true
   return { texte: TEXTE_SANS_REPONSE, repli: true, veutHumain: true }
 }

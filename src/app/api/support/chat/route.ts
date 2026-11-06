@@ -12,6 +12,9 @@ import { texteAvecPhrase, type BesoinPropose } from '@/lib/besoins/pur'
 import { noterBesoinsDuChat } from '@/lib/besoins/serveur'
 import { analyserTexte } from '@/lib/securite/injection-pur'
 import { alerterBriceSecurite } from '@/lib/securite/alerte'
+// (06/11, apres-midi) Les limites des agents : noter_limite, les recherches vides, le tri de Brice par le serveur.
+import { NOM_OUTIL_NOTER_LIMITE, REFUS_PRUDENCE_LIMITE, noterConsultation, noterLimite, suiviLimites } from '@/lib/besoins/signaux-pur'
+import { appliquerLimitesChat } from '@/lib/besoins/signaux'
 
 // L'appel Claude peut dépasser les 10 s par défaut des fonctions Vercel
 export const maxDuration = 60
@@ -79,6 +82,11 @@ export async function POST(req: NextRequest) {
     // (06/11) Besoins des membres, lot 1 : les besoins notes par noter_besoin,
     // gardes en memoire et enregistres APRES la sauvegarde du fil.
     const besoins: BesoinPropose[] = []
+    // (06/11, apres-midi) Les limites de l'agent : recherches vides et noter_limite,
+    // triees par le serveur APRES la sauvegarde du fil (tri de Brice). Un
+    // message suspect (detecteur d'injection) : noter_limite refuse, rien garde.
+    const suivi = suiviLimites()
+    suivi.prudence = analyserTexte(message, { niveau: 'injection' }).suspect
     for (let tour = 0; tour < MAX_TOURS_SUPPORT; tour++) {
       const response = await client.messages.create(requeteSupport(model, app, messages))
       await logAiUsage(userId, 'support', model, response.usage, null, { usage: 'support_chat', echange })
@@ -90,8 +98,14 @@ export async function POST(req: NextRequest) {
       const resultats: Anthropic.ToolResultBlockParam[] = []
       for (const bloc of response.content) {
         if (bloc.type !== 'tool_use') continue
+        if (bloc.name === NOM_OUTIL_NOTER_LIMITE && suivi.prudence) {
+          resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: JSON.stringify(REFUS_PRUDENCE_LIMITE) })
+          continue
+        }
         const r = await resultatOutilSupport(bloc.name, bloc.input, e => trouverCours(e, 'support', { userId }))
         if (r.besoin) besoins.push(r.besoin)
+        if (r.limite) noterLimite(suivi, r.limite)
+        if (r.brut) noterConsultation(suivi, bloc.name, bloc.input, r.brut)
         resultats.push({ type: 'tool_result', tool_use_id: bloc.id, content: r.contenu, ...(r.erreur ? { is_error: true } : {}) })
       }
       messages.push({ role: 'user', content: resultats })
@@ -117,6 +131,11 @@ export async function POST(req: NextRequest) {
       : await prisma.supportThread.create({
           data: { userId, app, messages: updated as object[] },
         })
+
+    // (06/11, apres-midi) Les limites de l'agent : le tri de Brice par le
+    // serveur (donnee sensible d'un non-admin = rien), puis la carte (sans
+    // phrase au membre) et le signal site.info_absente. Ne jette pas.
+    await appliquerLimitesChat({ userId, app, filId: saved.id, texte: message, reponse: reply, suivi })
 
     // (06/11) Les besoins notes : enregistres maintenant que le fil existe (le
     // texte garde est le message du membre tel qu'au fil). Enregistre et non

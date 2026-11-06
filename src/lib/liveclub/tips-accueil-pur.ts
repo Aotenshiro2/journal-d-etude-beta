@@ -17,6 +17,9 @@
 // - J+4 : les liens utiles (« demande-moi ») ;
 // - J+5 (ajoute le 05/11, Brice : l'indicateur TradingView d'Alex, offert aux
 //   membres) : l'indicateur d'Alex, avec le bouton « Indicateur d'Alex » ;
+// - J+6 (ajoute le 06/11, besoins des membres, piste E « le dire hors de
+//   l'app ») : « Il me manque quelque chose » et « Aide et idées », avec le
+//   bouton du menu ; texte A VALIDER PAR BRICE (TEXTE_TIP_BESOINS) ;
 // - J+7 : l'abonnement (ou l'acces offert) et ses adresses email.
 //
 // Chaque conseil part du passage quotidien (passage.ts, tache q), le matin, un
@@ -41,6 +44,7 @@ import { URL_FORMATION_LIVECLUB } from './config'
 import { LIGNE_CHALLENGE_CORE_CONTENT, SUJETS_LIVECLUB, lienSujet } from './accueil-groupe'
 import { jourPlus } from './lots-pur'
 import { BOUTON_INDICATEUR } from './indicateur-pur'
+import { BOUTON_BESOIN } from './besoin-etape-pur'
 
 /**
  * (31/10, Brice) Les autres adresses email s'ajoutent au profil, confirmees par
@@ -63,12 +67,21 @@ export const TIP_SUJETS_JOURS = 2
 export const TIP_LIENS_JOURS = 4
 /** (05/11) L'indicateur d'Alex, entre les liens utiles et l'abonnement (le dernier conseil). */
 export const TIP_INDICATEUR_JOURS = 5
+/** (06/11) Les besoins des membres (piste E), entre l'indicateur et l'abonnement (le dernier conseil). */
+export const TIP_BESOINS_JOURS = 6
 export const TIP_ABONNEMENT_JOURS = 7
+
+/**
+ * (06/11, besoins des membres, piste E) Le conseil du bot : il manque quelque
+ * chose dans nos outils, l'equipe lit tout et previent quand c'est fait.
+ * A VALIDER PAR BRICE.
+ */
+export const TEXTE_TIP_BESOINS = `Il te manque quelque chose dans nos outils, le Carnet, le Journal, Pilotage ou l'académie ? Appuie sur « ${BOUTON_BESOIN.texte} » ou ouvre « Aide et idées » dans l'outil : l'équipe lit tout, et on te prévient quand c'est fait.`
 
 /** Au-dela, plus aucun conseil (un membre parti puis revenu longtemps apres n'en recoit pas). */
 export const TIPS_FENETRE_JOURS = 21
 
-export type CleTip = 'academie' | 'sujets' | 'liens' | 'indicateur' | 'abonnement'
+export type CleTip = 'academie' | 'sujets' | 'liens' | 'indicateur' | 'besoins' | 'abonnement'
 
 /** Le calendrier, dans l'ordre. */
 export const TIPS_ACCUEIL: readonly { cle: CleTip; jours: number }[] = [
@@ -76,6 +89,7 @@ export const TIPS_ACCUEIL: readonly { cle: CleTip; jours: number }[] = [
   { cle: 'sujets', jours: TIP_SUJETS_JOURS },
   { cle: 'liens', jours: TIP_LIENS_JOURS },
   { cle: 'indicateur', jours: TIP_INDICATEUR_JOURS },
+  { cle: 'besoins', jours: TIP_BESOINS_JOURS },
   { cle: 'abonnement', jours: TIP_ABONNEMENT_JOURS },
 ]
 
@@ -85,11 +99,12 @@ export const NOMS_TIPS: Readonly<Record<CleTip, string>> = {
   sujets: 'les autres sujets du groupe',
   liens: 'les liens utiles',
   indicateur: "l'indicateur d'Alex",
+  besoins: 'ce qui manque dans nos outils',
   abonnement: "l'abonnement et les adresses email",
 }
 
 export function estCleTip(v: unknown): v is CleTip {
-  return v === 'academie' || v === 'sujets' || v === 'liens' || v === 'indicateur' || v === 'abonnement'
+  return v === 'academie' || v === 'sujets' || v === 'liens' || v === 'indicateur' || v === 'besoins' || v === 'abonnement'
 }
 
 // ---------------------------------------------------------------------------
@@ -136,6 +151,8 @@ const MOTS_DEJA_PARLES: Readonly<Record<CleTip, RegExp>> = {
   liens: /liens? utiles?|\bbrokers?\b|prop ?firms?|\boutils?\b/i,
   // (05/11) Un appui sur « Indicateur d'Alex » entre au fil Support : il compte aussi.
   indicateur: /indicateur|trading ?view/i,
+  // (06/11) Il a deja signale un besoin (bouton du menu, ou dit au bot) : le conseil est saute.
+  besoins: /il me manque|manque quelque chose|aide et id[ée]es/i,
   abonnement: /abonnement|\bpause\b|arr[êe]t(er)?\b|r[ée]silie|adresses? (e-?)?mail|autre (adresse|e-?mail)/i,
 }
 
@@ -200,6 +217,9 @@ export function texteTip(cle: CleTip, o: OptionsTip): string {
       return `Un bonus réservé aux membres : Alex, membre du Live Club, t'offre l'accès à son indicateur TradingView tant que tu es dans le Live Club.\n`
         + `Pour l'avoir, appuie sur « ${BOUTON_INDICATEUR.texte} » juste en dessous (ou écris-moi « je veux l'indicateur d'Alex ») : je te demande ton pseudo TradingView et je le transmets à Alex.\n`
         + `Une question dessus ? Dis-le-moi ici.`
+    // (06/11, besoins des membres, piste E) A VALIDER PAR BRICE.
+    case 'besoins':
+      return TEXTE_TIP_BESOINS
     case 'abonnement':
       return o.accesOffert
         ? `Dernier petit conseil, et après je te laisse tranquille : ton accès au Live Club t'est offert, donc rien à payer ni à gérer de ton côté. `
@@ -221,5 +241,7 @@ export function texteTip(cle: CleTip, o: OptionsTip): string {
  */
 export function boutonsTip(cle: CleTip): { texte: string; data: string }[][] | undefined {
   if (cle === 'indicateur') return [[{ texte: BOUTON_INDICATEUR.texte, data: BOUTON_INDICATEUR.data }]]
+  // (06/11) Le bouton du menu « Il me manque quelque chose » sous le conseil des besoins.
+  if (cle === 'besoins') return [[{ texte: BOUTON_BESOIN.texte, data: BOUTON_BESOIN.data }]]
   return cle === 'abonnement' ? [[{ texte: 'Mon abonnement', data: 'm:abo' }]] : undefined
 }

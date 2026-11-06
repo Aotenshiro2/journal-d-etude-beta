@@ -36,8 +36,8 @@ function texteSain(t, nom) {
   for (const url of t.match(/https?:\/\/\S+/g) ?? []) assert.match(url, /[A-Za-z0-9/]$/, `${nom} : ponctuation collee au lien ${url}`)
 }
 
-bloc('constantes : J+1, J+2, J+4, J+5 (indicateur d Alex, 05/11), J+7, depuis le deploiement, coupure', () => {
-  assert.deepEqual(T.TIPS_ACCUEIL.map(t => [t.cle, t.jours]), [['academie', 1], ['sujets', 2], ['liens', 4], ['indicateur', 5], ['abonnement', 7]])
+bloc('constantes : J+1, J+2, J+4, J+5 (indicateur d Alex, 05/11), J+6 (besoins, 06/11), J+7, depuis le deploiement, coupure', () => {
+  assert.deepEqual(T.TIPS_ACCUEIL.map(t => [t.cle, t.jours]), [['academie', 1], ['sujets', 2], ['liens', 4], ['indicateur', 5], ['besoins', 6], ['abonnement', 7]])
   assert.match(T.TIPS_ACCUEIL_DEPUIS, /^2026-\d{2}-\d{2}$/)
   assert.ok(T.TIPS_FENETRE_JOURS > 7)
   assert.match(lire('src/lib/liveclub/config.ts'), /return process\.env\.LIVECLUB_TIPS_ACCUEIL\?\.trim\(\) !== '0'/)
@@ -60,15 +60,16 @@ bloc('calendrier : un conseil par jour au plus, une fois chacun, dans l ordre', 
   assert.deepEqual(e(4, ['academie', 'sujets']), ['liens'])
   // (05/11) L'indicateur d'Alex a J+5, entre les liens et l'abonnement.
   assert.deepEqual(e(5, ['academie', 'sujets', 'liens']), ['indicateur'])
-  assert.deepEqual(e(6, ['academie', 'sujets', 'liens', 'indicateur']), [])
-  assert.deepEqual(e(7, ['academie', 'sujets', 'liens', 'indicateur']), ['abonnement'])
-  assert.deepEqual(e(8, ['academie', 'sujets', 'liens', 'indicateur', 'abonnement']), [])
+  // (06/11) Les besoins des membres (piste E) a J+6, entre l'indicateur et l'abonnement.
+  assert.deepEqual(e(6, ['academie', 'sujets', 'liens', 'indicateur']), ['besoins'])
+  assert.deepEqual(e(7, ['academie', 'sujets', 'liens', 'indicateur', 'besoins']), ['abonnement'])
+  assert.deepEqual(e(8, ['academie', 'sujets', 'liens', 'indicateur', 'besoins', 'abonnement']), [])
   // En retard (un jour sans passage) : l'ordre est garde ; le passage n'envoie que le premier.
   assert.deepEqual(e(5, ['academie']), ['sujets', 'liens', 'indicateur'])
-  assert.deepEqual(e(7, ['academie', 'sujets', 'liens']), ['indicateur', 'abonnement'])
+  assert.deepEqual(e(7, ['academie', 'sujets', 'liens']), ['indicateur', 'besoins', 'abonnement'])
   // Un deja envoye aujourd'hui, ou une relance des lots aujourd'hui : rien, demain.
   assert.deepEqual(e(2, ['academie'], { envoyeAujourdhui: true }), [])
-  assert.deepEqual(e(7, ['academie', 'sujets', 'liens', 'indicateur'], { relanceLotsAujourdhui: true }), [])
+  assert.deepEqual(e(7, ['academie', 'sujets', 'liens', 'indicateur', 'besoins'], { relanceLotsAujourdhui: true }), [])
   // Entre avant le deploiement : aucun conseil. Hors fenetre : plus rien.
   assert.deepEqual(T.tipsDus({ entreLe: plus(T.TIPS_ACCUEIL_DEPUIS, -1), aujourdhui: T.TIPS_ACCUEIL_DEPUIS, traites: new Set(), envoyeAujourdhui: false, relanceLotsAujourdhui: false }), [])
   assert.deepEqual(e(T.TIPS_FENETRE_JOURS + 1), [])
@@ -88,6 +89,10 @@ bloc('deja parle : des mots simples dans SES messages, le conseil est saute', ()
   assert.equal(T.dejaParle('indicateur', ["[bouton] Indicateur d'Alex"]), true)
   assert.equal(T.dejaParle('indicateur', ['mon pseudo TradingView ?']), true)
   assert.equal(T.dejaParle('indicateur', ['merci, tout est bon']), false)
+  // (06/11) Les besoins : l'appui sur « Il me manque quelque chose » (au fil Support), ou les mots.
+  assert.equal(T.dejaParle('besoins', ['[bouton] Il me manque quelque chose']), true)
+  assert.equal(T.dejaParle('besoins', ["il me manque l'export PDF"]), true)
+  assert.equal(T.dejaParle('besoins', ['merci, tout est bon']), false)
 })
 
 bloc('les conseils : courts, detendus, une ouverture pour lui repondre', () => {
@@ -96,7 +101,8 @@ bloc('les conseils : courts, detendus, une ouverture pour lui repondre', () => {
       const texte = T.texteTip(t.cle, { chat: CHAT, accesOffert })
       texteSain(texte, `${t.cle} ${accesOffert ? 'offert' : 'abonne'}`)
       assert.ok(texte.length < 1100, `${t.cle} : ${texte.length}`)
-      assert.match(texte.split('\n').pop(), /(écris-moi ici|Dis-le-moi ici|demande-moi|Demande-moi|dis-le-moi|Dis-le-moi)/i, `${t.cle} : ouverture finale`)
+      // (06/11) Le conseil des besoins est le texte du contrat (A VALIDER PAR BRICE) : son ouverture est le bouton dessous.
+      if (t.cle !== 'besoins') assert.match(texte.split('\n').pop(), /(écris-moi ici|Dis-le-moi ici|demande-moi|Demande-moi|dis-le-moi|Dis-le-moi)/i, `${t.cle} : ouverture finale`)
       if (t.cle !== 'sujets') assert.ok(texte.split('\n').length <= 3, `${t.cle} : 3 lignes au plus`)
     }
   }
@@ -133,6 +139,10 @@ bloc('les conseils : courts, detendus, une ouverture pour lui repondre', () => {
   assert.equal(P.libelleBouton('m:indic'), "Indicateur d'Alex")
   assert.match(indic, /appuie sur « Indicateur d'Alex » juste en dessous \(ou écris-moi « je veux l'indicateur d'Alex »\)/)
   assert.match(indic, /tant que tu es dans le Live Club/)
+  // (06/11, besoins des membres, piste E) Le texte du contrat, le bouton du menu dessous.
+  assert.equal(T.texteTip('besoins', { chat: CHAT, accesOffert: false }), "Il te manque quelque chose dans nos outils, le Carnet, le Journal, Pilotage ou l'académie ? Appuie sur « Il me manque quelque chose » ou ouvre « Aide et idées » dans l'outil : l'équipe lit tout, et on te prévient quand c'est fait.")
+  assert.deepEqual(T.boutonsTip('besoins'), [[{ texte: 'Il me manque quelque chose', data: 'm:besoin' }]])
+  assert.equal(P.libelleBouton('m:besoin'), 'Il me manque quelque chose')
 })
 
 bloc('J0 : le message de l admission raccourci a l essentiel quand les conseils suivent', () => {

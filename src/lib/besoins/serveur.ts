@@ -310,11 +310,13 @@ export async function noterBesoinsDuChat(o: {
   texte: string
   besoins: readonly BesoinPropose[]
   peutDire: boolean
+  /** (06/11) 'agent' pour une limite (noter_limite) ; ia_chat par defaut. */
+  creePar?: string
 }): Promise<IssueDirecte> {
   if (!o.besoins.length) return SANS_NOTE
   return noterEnDirect({
     canal: 'chat', detectePar: 'ia_chat', app: o.app, filId: o.filId, membreRef: o.userId, membreId: null,
-    texte: o.texte, besoins: o.besoins, peutDire: o.peutDire, qui: o.userId,
+    texte: o.texte, besoins: o.besoins, peutDire: o.peutDire, qui: o.userId, creePar: o.creePar,
   }, depotsServeur())
 }
 
@@ -330,6 +332,8 @@ export async function noterBesoinsTelegram(o: {
   texteFil: string
   besoins: readonly BesoinPropose[]
   peutDire: boolean
+  /** (06/11) 'agent' pour une limite (noter_limite) ; ia_bot par defaut. */
+  creePar?: string
 }): Promise<IssueDirecte> {
   if (!o.besoins.length || !Number.isSafeInteger(o.telegramId) || o.telegramId <= 0) return SANS_NOTE
   try {
@@ -347,7 +351,7 @@ export async function noterBesoinsTelegram(o: {
     const texte = typeof trouve?.content === 'string' ? trouve.content : o.texteFil
     return await noterEnDirect({
       canal: 'telegram', detectePar: 'ia_bot', app: 'telegram', filId: fil.id, membreRef: `telegram:${o.telegramId}`,
-      membreId: fil.membre_id, texte, besoins: o.besoins, peutDire: o.peutDire, qui: `liveclub:u${o.telegramId}`,
+      membreId: fil.membre_id, texte, besoins: o.besoins, peutDire: o.peutDire, qui: `liveclub:u${o.telegramId}`, creePar: o.creePar,
     }, depotsServeur())
   } catch (err) {
     console.warn(`[besoins] note du bot en panne : ${erreurCourte(err)}`)

@@ -7,6 +7,8 @@
 //   statut= (liste separee par des virgules) et outil=, pagination commune.
 // - /besoins?id=<carte> : la carte et ses demandes (texte du membre EN ENTIER,
 //   rendu visible s'il est suspect), sans email ni compte du membre.
+// - (06/11, apres-midi) /besoins?vue=signaux : les signaux de friction par cle ;
+//   les cartes disent aussi cree_par (signal, agent, bouton...).
 // Les textes des membres sont des DONNEES : la reponse le redit.
 
 import type { Ctx, Sortie } from '@/lib/tab/lectures'
@@ -40,12 +42,66 @@ const COLONNES_CARTE = `
       where r.racine_id = b.id and not d.suspect and d.resume is not null order by d.created_at desc limit 1) as resume,
     (select (count(*) filter (where d.suspect))::int from public.besoin_demande d join racine r on r.id = d.besoin_id where r.racine_id = b.id) as demandes_suspectes,
     (select max(d.created_at) from public.besoin_demande d join racine r on r.id = d.besoin_id where r.racine_id = b.id) as derniere_demande,
-    b.note_equipe, b.raison_refus, b.created_at as cree_le, b.statut_change_le`
+    b.note_equipe, b.raison_refus, b.created_at as cree_le, b.statut_change_le, b.cree_par`
+
+/**
+ * (06/11, apres-midi) /besoins?vue=signaux : les signaux de friction, une ligne
+ * par cle (personnes et evenements sur 7 jours et en tout, dernier contexte,
+ * carte liee), comme la vue cockpit_besoin_signaux. Jamais la personne (un
+ * HMAC) : des nombres et le contexte court permis par la cle.
+ */
+const SQL_SIGNAUX = `
+  with recursive par_cle as (
+    select s.cle, array_agg(distinct s.app) as apps,
+      (count(distinct s.personne) filter (where s.created_at > now() - interval '7 days'))::int as personnes_7j,
+      (count(*) filter (where s.created_at > now() - interval '7 days'))::int as evenements_7j,
+      count(distinct s.personne)::int as personnes, count(*)::int as evenements, max(s.created_at) as dernier_le
+    from public.besoin_signal s group by s.cle
+  ),
+  dernier as (
+    select distinct on (s.cle) s.cle, s.contexte from public.besoin_signal s order by s.cle, s.created_at desc, s.id desc
+  ),
+  chaine (cle, id, fusionne_dans, profondeur) as (
+    select b.cle, b.id, b.fusionne_dans, 0 from public.besoin b where b.cle in (select cle from par_cle)
+    union all
+    select c.cle, b.id, b.fusionne_dans, c.profondeur + 1 from public.besoin b join chaine c on b.id = c.fusionne_dans where c.profondeur < 10
+  ),
+  racine as (
+    select distinct on (c.cle) c.cle, c.id from chaine c where c.fusionne_dans is null order by c.cle, c.profondeur desc
+  )
+  select p.cle, p.apps, p.personnes_7j, p.evenements_7j, p.personnes, p.evenements, p.dernier_le,
+    d.contexte as dernier_contexte, r.id::text as carte_id, b.titre as carte_titre, b.statut as carte_statut
+  from par_cle p
+  left join dernier d on d.cle = p.cle
+  left join racine r on r.cle = p.cle
+  left join public.besoin b on b.id = r.id
+  order by p.personnes_7j desc, p.evenements_7j desc, p.dernier_le desc
+  limit 200`
 
 /** GET /besoins de l'API de Tab. */
 export async function besoinsTab(c: Ctx): Promise<Sortie> {
   const sources = ['besoin, besoin_demande, besoin_vote (besoins des membres, migrations 20261106120000 et 20261106150000)']
   const id = c.params.get('id')
+  const vue = c.params.get('vue')
+  if (vue !== null && vue !== 'signaux') return { libelle: 'Besoins', sources, donnees: { erreur: 'vue : signaux.' }, lignes: 0, statut: 400 }
+  if (vue === 'signaux') {
+    const sourcesSignaux = ['besoin_signal (signaux de friction, migration 20261106200000), besoin']
+    try {
+      const signaux = propre(await c.tx.$queryRawUnsafe<Record<string, unknown>[]>(SQL_SIGNAUX))
+      return {
+        libelle: 'Signaux de friction des besoins',
+        sources: sourcesSignaux,
+        donnees: {
+          signaux,
+          regle: 'Un signal = un outil a dit non au membre (refus) ou le membre est tombé dans une impasse, envoyé une fois au moment de l\'événement. 3 personnes distinctes en 7 jours sur une clé = une carte à trier de cette clé (cree_par signal). dernier_contexte = le contexte court permis par la clé, jamais un texte libre.',
+        },
+        lignes: signaux.length,
+      }
+    } catch (err) {
+      if (estTableAbsente(err)) return { libelle: 'Signaux de friction des besoins', sources: sourcesSignaux, donnees: { signaux: [] }, lignes: 0, notes: ['Table des signaux absente en base (migration 20261106200000 pas appliquée) : rien à lire.'] }
+      throw err
+    }
+  }
   try {
     if (id !== null) {
       if (!estUuid(id)) return { libelle: 'Besoin', sources, donnees: { erreur: 'id : uuid d\'une carte attendu.' }, lignes: 0, statut: 400 }

@@ -4,6 +4,12 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { LifeBuoy, Send, User, X } from 'lucide-react'
 import BesoinFormulaire, { EntreeBesoin } from './BesoinFormulaire'
+// (06/11, apres-midi) Besoins des membres, pistes A, B et C : le bouton dit
+// « Aide et idées », la bulle de decouverte une seule fois, et le formulaire
+// pre-rempli ouvert par une ligne de friction (evenement EVENEMENT_OUVRIR_BESOIN).
+import {
+  EVENEMENT_OUVRIR_BESOIN, LIBELLE_AIDE_IDEES, TEXTE_BULLE_DECOUVERTE, bulleDejaVue, marquerBulleVue, type BesoinPrerempli,
+} from '@/lib/besoins/decouverte'
 
 // Support AOK — la même bouée que dans l'extension, côté journal web.
 // Même origine que les routes /api/support/* : l'auth passe par les cookies
@@ -46,9 +52,35 @@ export default function SupportBubble({ variant = 'pill-item' }: { variant?: 'pi
   const [notice, setNotice] = useState<string | null>(null)
   // (06/11) Besoins des membres, lot 2 : « Il me manque quelque chose » dans le meme panneau.
   const [vue, setVue] = useState<'chat' | 'besoin'>('chat')
+  // (06/11) Le formulaire pre-rempli par une ligne de friction (piste C) ; `n` le remonte a chaque ouverture.
+  const [prerempli, setPrerempli] = useState<(BesoinPrerempli & { n: number }) | null>(null)
+  // (06/11) La bulle de decouverte (piste B) : une seule fois, jamais avant d'avoir lu le navigateur.
+  const [bulle, setBulle] = useState(false)
   const threadIdRef = useRef<string | null>(null)
   const loadedRef = useRef(false)
   const bottomRef = useRef<HTMLDivElement>(null)
+
+  // B : montree une fois = vue (fermee ou non, elle ne revient pas). Stockage
+  // illisible : pas de bulle. L'apparition est en CSS, aucune minuterie.
+  useEffect(() => {
+    if (bulleDejaVue()) return
+    marquerBulleVue()
+    setBulle(true)
+  }, [])
+
+  // C : une ligne de friction ouvre « Il me manque quelque chose » pre-rempli.
+  useEffect(() => {
+    const ouvrir = (e: Event) => {
+      const d = (e as CustomEvent<BesoinPrerempli>).detail
+      if (!d || typeof d.texte !== 'string') return
+      setPrerempli(p => ({ texte: d.texte, signal: typeof d.signal === 'string' ? d.signal : null, n: (p?.n ?? 0) + 1 }))
+      setVue('besoin')
+      setBulle(false)
+      setOpen(true)
+    }
+    window.addEventListener(EVENEMENT_OUVRIR_BESOIN, ouvrir)
+    return () => window.removeEventListener(EVENEMENT_OUVRIR_BESOIN, ouvrir)
+  }, [])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -126,13 +158,26 @@ export default function SupportBubble({ variant = 'pill-item' }: { variant?: 'pi
     window.location.href = `mailto:${email}?subject=${encodeURIComponent("Support — Journal d'Études")}&body=${body}`
   }
 
+  // (06/11, piste A) Le bouton dit « Aide et idées » : en toutes lettres dans la
+  // pill (comme ses voisins « Relire », « Notes »), en libelle du bouton rond.
+  const basculer = () => {
+    setBulle(false)
+    setOpen(o => !o)
+  }
+
+  // Retour au support : le formulaire libre la prochaine fois (sans phrase ni signal).
+  const fermerBesoin = () => {
+    setVue('chat')
+    setPrerempli(null)
+  }
+
   const trigger =
     variant === 'round' ? (
       <button
-        onClick={() => setOpen(o => !o)}
+        onClick={basculer}
         className="canvas-float-pill"
-        title="Contacter le support"
-        aria-label="Contacter le support"
+        title={LIBELLE_AIDE_IDEES}
+        aria-label={LIBELLE_AIDE_IDEES}
         style={{
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           width: 42, height: 42, border: 'none', cursor: 'pointer',
@@ -143,20 +188,58 @@ export default function SupportBubble({ variant = 'pill-item' }: { variant?: 'pi
       </button>
     ) : (
       <button
-        onClick={() => setOpen(o => !o)}
-        title="Contacter le support"
-        aria-label="Contacter le support"
+        onClick={basculer}
+        title={LIBELLE_AIDE_IDEES}
         style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
           padding: '4px 8px', border: 'none', background: 'none', borderRadius: 6,
-          cursor: 'pointer', color: open ? '#3b82f6' : 'var(--node-meta)',
+          cursor: 'pointer', fontSize: 12, color: open ? '#3b82f6' : 'var(--node-meta)',
         }}
         onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = open ? '#3b82f6' : 'var(--node-title)' }}
         onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = open ? '#3b82f6' : 'var(--node-meta)' }}
       >
         <LifeBuoy size={14} />
+        {LIBELLE_AIDE_IDEES}
       </button>
     )
+
+  // (06/11, piste B) La bulle de decouverte, une seule fois : au-dessus du
+  // bouton, apparition en CSS (animation retardee, aucune minuterie JS), sans
+  // mouvement si le systeme le demande. Un clic ouvre le panneau, la croix la ferme.
+  const bulleDecouverte =
+    bulle && !open && typeof document !== 'undefined'
+      ? createPortal(
+          <div
+            role="status"
+            className="canvas-float-pill aok-bulle-aide"
+            style={{
+              position: 'fixed', right: 14, bottom: variant === 'round' ? 118 : 60, zIndex: 85,
+              maxWidth: 'min(260px, calc(100vw - 28px))', display: 'flex', alignItems: 'flex-start', gap: 8,
+              padding: '10px 10px 10px 12px', fontSize: 13, lineHeight: 1.45, color: 'var(--node-title)',
+            }}
+          >
+            <style>{`
+              @keyframes aokBulleAide { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: none } }
+              .aok-bulle-aide { animation: aokBulleAide 0.35s ease-out 1.2s both }
+              @media (prefers-reduced-motion: reduce) { .aok-bulle-aide { animation: none } }
+            `}</style>
+            <button
+              onClick={basculer}
+              style={{ flex: 1, border: 'none', background: 'none', padding: 0, cursor: 'pointer', textAlign: 'left', font: 'inherit', color: 'inherit' }}
+            >
+              {TEXTE_BULLE_DECOUVERTE}
+            </button>
+            <button
+              onClick={() => setBulle(false)}
+              aria-label="Fermer"
+              style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--node-meta)', display: 'flex', padding: 0 }}
+            >
+              <X size={14} />
+            </button>
+          </div>,
+          document.body
+        )
+      : null
 
   const panel =
     open && typeof document !== 'undefined'
@@ -174,7 +257,7 @@ export default function SupportBubble({ variant = 'pill-item' }: { variant?: 'pi
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: '1px solid var(--float-border)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <LifeBuoy size={15} style={{ color: '#3b82f6' }} />
-                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--node-title)' }}>Support</span>
+                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--node-title)' }}>{LIBELLE_AIDE_IDEES}</span>
               </div>
               <button
                 onClick={() => setOpen(false)}
@@ -185,7 +268,15 @@ export default function SupportBubble({ variant = 'pill-item' }: { variant?: 'pi
               </button>
             </div>
 
-            {vue === 'besoin' && <BesoinFormulaire app={APP_ID} onFermer={() => setVue('chat')} />}
+            {vue === 'besoin' && (
+              <BesoinFormulaire
+                key={prerempli?.n ?? 0}
+                app={APP_ID}
+                onFermer={fermerBesoin}
+                texteInitial={prerempli?.texte}
+                signal={prerempli?.signal ?? null}
+              />
+            )}
 
             {vue === 'chat' && (<>
             {/* Fil */}
@@ -288,6 +379,7 @@ export default function SupportBubble({ variant = 'pill-item' }: { variant?: 'pi
   return (
     <>
       {trigger}
+      {bulleDecouverte}
       {panel}
     </>
   )

@@ -15,6 +15,8 @@ import { NOM_OUTIL_CONNAISSANCES, OUTIL_CONNAISSANCES, resultatConnaissances } f
 import { NOM_OUTIL_TROUVER_COURS, OUTIL_TROUVER_COURS } from './trouver-cours-pur'
 // (06/11) Besoins des membres, lot 1 : l'outil noter_besoin (module pur, commun au bot Live Club).
 import { CONSIGNE_NOTER_BESOIN, NOM_OUTIL_NOTER_BESOIN, OUTIL_NOTER_BESOIN, resultatNoterBesoin, type BesoinPropose } from './besoins/pur'
+// (06/11, apres-midi) Les limites des agents : noter_limite (module pur, commun au bot Live Club ; tri par le serveur).
+import { CONSIGNE_NOTER_LIMITE, NOM_OUTIL_NOTER_LIMITE, OUTIL_NOTER_LIMITE, resultatNoterLimite, type LimiteNotee } from './besoins/signaux-pur'
 
 // 18/10 : le texte produit fige (extension, journal, site, masterclass,
 // connexion, problemes frequents) est remplace par les fiches de
@@ -32,6 +34,8 @@ Les produits et services (le Carnet du Trader, le Journal d'Études, Pilotage, l
 Un cours sur une notion de trading (« il y a un cours sur les FVG ? », « je veux apprendre la gestion du risque », une masterclass sur un sujet) : appelle l'outil trouver_cours, qui cherche dans les leçons de l'académie et dans les masterclass, puis donne le ou les deux ou trois liens les plus utiles, adresses recopiées en entier, avec leur accès tel que l'outil l'écrit. Tu n'expliques pas la notion toi-même : tu orientes vers le cours.
 
 Besoins produit. ${CONSIGNE_NOTER_BESOIN}
+
+Tes limites. ${CONSIGNE_NOTER_LIMITE}
 
 Règles strictes :
 - Ne réponds QUE sur ce que tu sais des produits et de l'école : leurs fiches et les informations publiques plus bas. Si tu n'es pas sûr, ou si la question sort du périmètre (facturation, remboursement, accès à un achat, bug que tu ne connais pas, situation de compte), dis-le simplement et propose de contacter un humain via le bouton prévu.
@@ -100,8 +104,10 @@ export function versMessagesSupport(fil: readonly MessageFilSupport[], message: 
  * src/lib/trouver-cours-pur.ts), tous deux communs au bot Live Club. Aucun
  * outil ne voit un compte. (06/11) noter_besoin (src/lib/besoins/pur.ts) :
  * un classement seulement, le serveur enregistre apres la sauvegarde du fil.
+ * (06/11, apres-midi) noter_limite (src/lib/besoins/signaux-pur.ts) : ce que
+ * l'agent n'a pas su faire, trie par le serveur (tri de Brice) apres le fil.
  */
-export const OUTILS_SUPPORT: Anthropic.Tool[] = [OUTIL_CONNAISSANCES, OUTIL_TROUVER_COURS, OUTIL_NOTER_BESOIN]
+export const OUTILS_SUPPORT: Anthropic.Tool[] = [OUTIL_CONNAISSANCES, OUTIL_TROUVER_COURS, OUTIL_NOTER_BESOIN, OUTIL_NOTER_LIMITE]
 
 /** La lecture en direct de trouver_cours (src/lib/trouver-cours.ts), passee par la route et par l'eval : ce module reste pur. */
 export type TrouverCoursSupport = (entree: unknown) => Promise<Record<string, unknown>>
@@ -115,10 +121,21 @@ export const MAX_TOURS_SUPPORT = 3
  * memoire et enregistre apres la sauvegarde du fil (le fil d'un premier message
  * n'existe pas encore pendant la boucle).
  */
-export async function resultatOutilSupport(nom: string, entree: unknown, trouverCours?: TrouverCoursSupport): Promise<{ contenu: string; erreur?: true; besoin?: BesoinPropose }> {
-  if (nom === NOM_OUTIL_CONNAISSANCES) return { contenu: JSON.stringify(resultatConnaissances(entree, 'support')) }
-  if (nom === NOM_OUTIL_TROUVER_COURS && trouverCours) return { contenu: JSON.stringify(await trouverCours(entree)) }
+export async function resultatOutilSupport(nom: string, entree: unknown, trouverCours?: TrouverCoursSupport): Promise<{
+  contenu: string; erreur?: true; besoin?: BesoinPropose; limite?: LimiteNotee
+  /** (06/11) Le resultat d'une recherche (fiches, cours), pour savoir s'il a rendu quelque chose (limites des agents). */
+  brut?: Record<string, unknown>
+}> {
+  if (nom === NOM_OUTIL_CONNAISSANCES) {
+    const brut = resultatConnaissances(entree, 'support')
+    return { contenu: JSON.stringify(brut), brut }
+  }
+  if (nom === NOM_OUTIL_TROUVER_COURS && trouverCours) {
+    const brut = await trouverCours(entree)
+    return { contenu: JSON.stringify(brut), brut }
+  }
   if (nom === NOM_OUTIL_NOTER_BESOIN) return resultatNoterBesoin(entree)
+  if (nom === NOM_OUTIL_NOTER_LIMITE) return resultatNoterLimite(entree)
   return { contenu: JSON.stringify({ erreur: 'Outil inconnu.' }), erreur: true }
 }
 

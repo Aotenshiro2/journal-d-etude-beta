@@ -1284,6 +1284,8 @@ const NOMS_TIPS_ACCUEIL: Readonly<Record<string, string>> = {
   liens: 'les liens utiles',
   // (05/11) Le conseil de l'indicateur d'Alex (J+5).
   indicateur: "l'indicateur d'Alex",
+  // (06/11) Le conseil des besoins des membres (J+6, piste E).
+  besoins: 'ce qui manque dans nos outils',
   abonnement: "l'abonnement et les adresses email",
 }
 
