@@ -1,5 +1,26 @@
 # ETAT du journal d etudes
 
+## BESOINS DES MEMBRES, FINITIONS (06/11/2026, commite NON pousse, branche besoins-finitions ; migration 20261106180000 ECRITE, NON appliquee)
+
+- Brice, 06/11 : « Option 1 partout » (labos retires du cockpit et du site, hors de ce depot). Ici : l'effacement d'une
+  personne (cockpit_effacer) connait enfin ses besoins. Leve la limite « ni les demandes sans fil, ni les votes, ni les
+  captures » des lots 2 a 4 ci-dessous.
+- effacement.ts : niveaux 2 et 3, cibles completes (cockpit_effacement_cibles, comptes AOK compris) lues AVANT
+  cockpit_effacer (au niveau 3 il supprime les comptes et ce qui les retrouve), puis juste APRES lui besoins/effacer.ts :
+  besoins_effacer (migration 20261106180000, SQL en UN seul ordre, aucun point-virgule dans le corps, role postgres
+  seulement) efface ses demandes restantes (compte AOK, telegram:<id>, email:<adresse>, contact_email, numero Telegram,
+  fiche ; jamais par le nom ni le pseudo) et ses votes, rend les chemins des captures que plus aucune demande ne nomme,
+  retirees du bucket par la cle de service (retirerCaptures). Ne jette pas : le resultat pour l'equipe dit, avant le
+  recapitulatif, ce qui est efface ou a reprendre (migration absente, panne, captures restees : chemins donnes).
+- Inventaire : docs/EFFACEMENT-DONNEES.md (5.3, residus en 8, section 10). Pas dans l'apercu : la carte de confirmation ne
+  compte pas encore les besoins. Le brief d'une carte planifiee et la note Perso pour Sora gardent les textes (residu dit).
+- Verifs : verifier-besoins.mjs 33 blocs (3 nouveaux) ; essai local de la migration sur PGlite (coupee aux points-virgules
+  comme le script, rejouee, droits fermes, cas partages) ; tsc ; eslint des fichiers touches ; next build ; -effacement et les
+  19 autres verificateurs hors ligne de la liste des lots 2 a 4 : ok.
+- MISE EN LIGNE, dans l'ordre : (1) migration 20261106150000 si ce n'est pas fait (colonne contact_email) ; (2) migration
+  20261106180000 ; (3) push du journal (besoins-finitions sur master). Journal avant la migration : l'etape dit « a
+  reprendre » et, au niveau 3, les demandes du bouton ne se retrouvent plus que par l'uuid du compte supprime.
+
 ## BESOINS DES MEMBRES, LOTS 2 A 4 (06/11/2026, commite NON pousse, branche besoins-lots234 ; migration 20261106150000 ECRITE, NON appliquee)
 
 - Brice, 06/11 : « fais tout les lots a la suite ». Contrat commun aux trois codeurs (journal, cockpit, boutons des outils) :
