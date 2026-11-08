@@ -246,14 +246,17 @@ bloc('modeles : marques, BROUILLON, prenom absent, HTML echappe, adresses de tes
   assert.equal(masquerEmails(new Error('refus pour anne@example.com, ligne 3')), 'refus pour [email], ligne 3')
 })
 
-bloc('modeles BROUILLON du depot : complets, marques BROUILLON, sans tiret long', () => {
+// Depuis le 08/11 au soir, les modeles du depot portent les textes VALIDES par Brice (« je valide tel quel »,
+// avec le mot sur le site de Melanie) : ils ne sont plus des brouillons et doivent pouvoir partir.
+bloc('modeles du depot : textes valides, complets, plus aucun BROUILLON, sans tiret long', () => {
   const dossier = fileURLToPath(new URL('./modeles-invitation-skool/', import.meta.url))
   const noms = ['payant', 'payant-compte', 'gratuit', 'relance-payant', 'relance-gratuit']
   const { modeles, defauts } = lireModeles(dossier, noms)
   assert.deepEqual(defauts, [])
   for (const nom of noms) {
     const m = modeles.get(nom)
-    assert.ok(estBrouillon(m), `${nom} doit rester marque BROUILLON`)
+    assert.ok(!estBrouillon(m), `${nom} ne doit plus etre marque BROUILLON`)
+    assert.deepEqual(verifierModele(m), [], `${nom} : modele incomplet`)
     assert.ok(!INTERDITS.test(m.sujet + m.corps), `${nom} : caractere interdit (tiret long...)`)
   }
   assert.deepEqual(readdirSync(dossier).sort(), noms.flatMap(nm => [`${nm}.corps.txt`, `${nm}.sujet.txt`]).sort())
