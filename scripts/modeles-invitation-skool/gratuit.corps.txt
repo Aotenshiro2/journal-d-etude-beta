@@ -1,12 +1,16 @@
-BROUILLON : texte de mécanique, à remplacer par la version validée par Brice.
+Salut {{prenom}},
 
-Bonjour {{prenom}},
+Tu as peut-être vu passer l'annonce sur Skool : notre Skool ferme ses portes le 16 novembre, et l'Académie continue sur aoknowledge.com.
 
-Skool ferme. Ce qui était gratuit le reste, sur l'académie AO Knowledge.
+Pour suivre, il te suffit de créer ton compte gratuit avec cette adresse email, ici : {{lien}}
 
-Crée ton compte avec cette adresse email, c'est gratuit :
-{{lien}}
+Tu y retrouves les modules gratuits : Bienvenue, Novice en trading et les bases Smart Money. Et si tu as envie d'échanger au quotidien avec d'autres traders, c'est au Live Club que ça se passe.
 
-Une question ? Réponds à cet email.
+Et si tu nous as rejoints par le site de Mélanie (https://melaniechart.com/), tu as accès à la même base de données par son site, sur https://academie.melaniechart.com/academie. C'est exactement la même chose derrière, les sites communiquent entre eux : c'est juste une question de préférence personnelle, mais on est comme toujours une équipe et un projet soudés.
 
+Une seule chose ne fait pas le voyage : la progression de tes leçons, qui repart de zéro (Skool ne nous laisse pas l'emporter).
+
+Si quelque chose coince, réponds simplement à ce mail.
+
+À très vite sur l'Académie,
 Brice

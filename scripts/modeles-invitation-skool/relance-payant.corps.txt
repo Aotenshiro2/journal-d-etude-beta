@@ -1,10 +1,9 @@
-BROUILLON : texte de mécanique, à remplacer par la version validée par Brice.
+Salut {{prenom}},
 
-Bonjour {{prenom}},
+Je reviens vers toi, car ton compte sur l'Académie n'est pas encore créé, et notre Skool ferme lundi 16 novembre.
 
-Ton compte sur l'académie n'est pas encore créé. Un clic suffit, tes accès premium sont prêts :
-{{lien}}
+Ton lien est toujours là : {{lien}}
 
-Le lien est personnel. Une question ? Réponds à cet email.
+Un clic, et tes formations sont ouvertes. Si tu préfères une autre adresse email, crée ton compte avec, puis ajoute celle-ci dans Mon espace > Paramètres > Comptes liés : tes accès suivront.
 
 Brice
