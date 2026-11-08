@@ -26,13 +26,19 @@ import { fileURLToPath } from 'node:url'
 import { PrismaClient } from '@prisma/client'
 
 const RACINE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const MIGRATION = path.join(RACINE, '../../sites/Aoknowledgecom/supabase/migrations/20261018233000_mon_espace_parametres.sql')
+// Le depot du workspace (migrations) : deux niveaux au-dessus du journal, ou
+// AOK_WORKSPACE quand le journal tourne depuis un worktree a part.
+const MIGRATIONS = path.join(process.env.AOK_WORKSPACE ? path.resolve(process.env.AOK_WORKSPACE) : path.join(RACINE, '../..'),
+  'sites/Aoknowledgecom/supabase/migrations')
+const MIGRATION = path.join(MIGRATIONS, '20261018233000_mon_espace_parametres.sql')
 // Lot 1 (18/10/2026) : bio, liens, fuseau, espaces visibles, support.
-const MIGRATION_LOT1 = path.join(RACINE, '../../sites/Aoknowledgecom/supabase/migrations/20261018234500_mon_espace_lot1.sql')
+const MIGRATION_LOT1 = path.join(MIGRATIONS, '20261018234500_mon_espace_lot1.sql')
 // Lot 2 (18/10/2026) : points, niveaux, grille d'activite, profil public par numero.
-const MIGRATION_LOT2 = path.join(RACINE, '../../sites/Aoknowledgecom/supabase/migrations/20261019000000_mon_espace_lot2.sql')
+const MIGRATION_LOT2 = path.join(MIGRATIONS, '20261019000000_mon_espace_lot2.sql')
 // Visibilite (18/10/2026) : prive, membres connectes (defaut), web.
-const MIGRATION_VISIBILITE = path.join(RACINE, '../../sites/Aoknowledgecom/supabase/migrations/20261019010000_profil_visibilite_membres.sql')
+const MIGRATION_VISIBILITE = path.join(MIGRATIONS, '20261019010000_profil_visibilite_membres.sql')
+// C10 (08/11/2026) : historique complet des paiements (PayPal de l'academie, Skool), mot de passe defini.
+const MIGRATION_C10 = path.join(MIGRATIONS, '20261108230000_mon_espace_historique_paiements.sql')
 const prisma = new PrismaClient()
 
 let ecarts = 0
@@ -126,6 +132,20 @@ async function main() {
       console.log(`migration de la visibilite absente : jouee dans la transaction (${ordres.length} ordres, annulee a la fin)`)
     } else {
       console.log('migration de la visibilite presente en base')
+    }
+
+    // C10 (08/11/2026) : historique complet des paiements, mot de passe defini.
+    const dejaC10 = Number((await tx.$queryRawUnsafe(
+      `select count(*)::int as n from pg_proc where proname = 'aok_compte_de' and pronamespace = 'public'::regnamespace
+          and prosrc like '%paiements_tiers%'`))[0].n)
+      && Number((await tx.$queryRawUnsafe(
+        `select count(*)::int as n from pg_proc where proname = 'aok_mot_de_passe_defini' and pronamespace = 'public'::regnamespace`))[0].n)
+    if (!dejaC10) {
+      const ordres = decouper(readFileSync(MIGRATION_C10, 'utf8'))
+      for (const o of ordres) await tx.$executeRawUnsafe(o)
+      console.log(`migration C10 absente : jouee dans la transaction (${ordres.length} ordres, annulee a la fin)`)
+    } else {
+      console.log('migration C10 presente en base')
     }
 
     const comptes = await tx.$queryRawUnsafe(`
@@ -440,13 +460,103 @@ async function main() {
       attendre('lot 2 : export : points et niveau', exp.ok && Number(exp.lignes[0].n) >= 1, exp.ok ? '' : exp.motif)
     }
 
+    // --- C10 (08/11/2026) : historique complet des paiements --------------------------
+    {
+      const hasard = () => randomUUID().replace(/-/g, '').slice(0, 16)
+      // Une fiche du cockpit pour B (celle de son email si elle existe deja).
+      let membreB = (await tx.$queryRawUnsafe(
+        'select membre_id::text as m from public.cockpit_membre_emails where lower(email) = $1 limit 1', B.email))[0]?.m
+      if (!membreB) {
+        membreB = randomUUID()
+        await tx.$executeRawUnsafe(`insert into public.cockpit_membres (membre_id, nom) values ($1::uuid, 'Essai C10')`, membreB)
+        await tx.$executeRawUnsafe('insert into public.cockpit_membre_emails (email, membre_id, verifie) values ($1, $2::uuid, true)', B.email, membreB)
+      }
+      const idSkool = `skool:in_essai${hasard()}`
+      const idSkoolImpaye = `skool:in_essai${hasard()}`
+      await tx.$executeRawUnsafe(
+        `insert into public.cockpit_paiements_tiers (paiement_id, encaisse_par, membre_id, date_paiement, montant, devise, produit, statut, facture, origine)
+         values ($1, 'skool', $3::uuid, now() - interval '200 days', 17, 'USD', '10% Club sur Skool', 'paye', 'ESSAI-0001', 'essai'),
+                ($2, 'skool', $3::uuid, now() - interval '170 days', 17, 'USD', '10% Club sur Skool', 'impaye', 'ESSAI-0002', 'essai')`,
+        idSkool, idSkoolImpaye, membreB)
+      const offreClub = (await tx.$queryRawUnsafe(`select id::text as id from public.academie_offres where slug = 'formation-complete'`))[0]?.id
+      const idPaypal = `paypal:ESSAI${hasard().toUpperCase()}`
+      await tx.$executeRawUnsafe(
+        `insert into public.academie_acces (user_id, offre_id, source, reference, montant_eur, paiement_id, cote, pose_par, note)
+         values ($1::uuid, $2::uuid, 'paypal', $3, 1, $4, 'brice', 'essai verifier-mon-espace-rls', 'essai'),
+                ($1::uuid, $2::uuid, 'stripe', $5, 1, $6, 'brice', 'essai verifier-mon-espace-rls', 'essai')`,
+        B.id, offreClub, `ESSAI-${hasard()}`, idPaypal, `cs_essai${hasard()}`, idAchat)
+
+      const cB = await compte(B.id)
+      const jB = cB.ok ? JSON.parse(cB.lignes[0].c) : null
+      const tiersB = jB?.paiements_tiers ?? []
+      const acadB = jB?.paiements_academie ?? []
+      attendre('C10 : B voit son paiement Skool (moyen skool, sans recu, n de facture)',
+        tiersB.some((p) => p.paiement_id === idSkool && p.moyen === 'skool' && p.encaisse_par === 'skool' && p.recu === false && p.facture === 'ESSAI-0001'),
+        cB.ok ? `${tiersB.length} ligne(s)` : cB.motif)
+      attendre('C10 : une facture Skool impayee n est pas un paiement', !tiersB.some((p) => p.paiement_id === idSkoolImpaye))
+      attendre('C10 : B voit son 10% Club PayPal pas encore recopie (moyen paypal, encaisse par AO Knowledge)',
+        acadB.some((p) => p.paiement_id === idPaypal && p.moyen === 'paypal' && p.encaisse_par === 'aoknowledge' && p.recu === false
+          && p.produit && Number(p.montant) === 1))
+      attendre('C10 : un achat deja dans cockpit_paiements n est pas rendu deux fois', !acadB.some((p) => p.paiement_id === idAchat)
+        && (jB?.achats ?? []).filter((p) => p.paiement_id === idAchat).length === 1)
+      attendre('C10 : les lignes de cockpit_paiements disent leur moyen et qui a encaisse',
+        (jB?.achats ?? []).some((p) => p.paiement_id === idAchat && p.moyen === 'stripe' && p.encaisse_par === 'aoknowledge')
+          && (jB?.live_club_paiements ?? []).some((p) => p.paiement_id === idLive && p.moyen === 'stripe' && p.encaisse_par === 'melanie'))
+      const cA = await compte(A.id)
+      const tA = cA.ok ? cA.lignes[0].c : ''
+      attendre('C10 : A ne voit ni le Skool ni le PayPal de B', cA.ok && !tA.includes(idSkool) && !tA.includes(idPaypal), cA.ok ? '' : cA.motif)
+      const tiersA = await comme('authenticated', A.id, 'select count(*)::int as n from public.cockpit_paiements_tiers')
+      attendre('C10 : cockpit_paiements_tiers ne rend rien au membre en direct', !tiersA.ok || tiersA.lignes[0].n === 0,
+        tiersA.ok ? `${tiersA.lignes[0].n}` : tiersA.motif)
+      const tiersAnon = await comme('anon', null, 'select count(*)::int as n from public.cockpit_paiements_tiers')
+      attendre('C10 : cockpit_paiements_tiers fermee a l anonyme', !tiersAnon.ok, tiersAnon.motif)
+      const tiersEcrit = await comme('authenticated', B.id,
+        `insert into public.cockpit_paiements_tiers (paiement_id, encaisse_par, membre_id, date_paiement, montant, devise)
+         values ($1, 'skool', $2::uuid, now(), 1, 'EUR') returning 1`, `skool:in_pirate${hasard()}`, membreB)
+      attendre('C10 : le membre n ecrit pas cockpit_paiements_tiers', !tiersEcrit.ok, tiersEcrit.motif)
+      const equipe = (await tx.$queryRawUnsafe('select user_id::text as id from public.cockpit_allowlist order by created_at limit 1'))[0]
+      if (equipe) {
+        const tEq = await comme('authenticated', equipe.id, 'select count(*)::int as n from public.cockpit_paiements_tiers where paiement_id = $1', idSkool)
+        attendre('C10 : l equipe du cockpit lit les paiements Skool', tEq.ok && tEq.lignes[0].n === 1, tEq.ok ? '' : tEq.motif)
+      }
+      const eB = await comme('authenticated', B.id, 'select public.aok_exporter_mes_donnees()::text as e')
+      attendre('C10 : export de B : son Skool et son PayPal dedans', eB.ok && eB.lignes[0].e.includes(idSkool) && eB.lignes[0].e.includes(idPaypal), eB.ok ? '' : eB.motif)
+      const eA = await comme('authenticated', A.id, 'select public.aok_exporter_mes_donnees()::text as e')
+      attendre('C10 : export de A : rien de B', eA.ok && !eA.lignes[0].e.includes(idSkool) && !eA.lignes[0].e.includes(idPaypal))
+      // Fiche effacee (cockpit_oublier_membre) : ses paiements Skool partent avec elle.
+      const fiche = Number((await tx.$queryRawUnsafe(
+        `select count(*)::int as n from pg_constraint where conname = 'cockpit_paiements_tiers_membre_id_fkey' and confdeltype = 'c'`))[0].n)
+      attendre('C10 : paiements Skool effaces avec la fiche (cascade)', fiche === 1)
+
+      // Mot de passe defini : vrai seulement si le compte du jeton en a un.
+      const mdpAnon = await comme('anon', null, 'select public.aok_mot_de_passe_defini() as m')
+      attendre('mot de passe : fonction fermee a l anonyme', !mdpAnon.ok, mdpAnon.motif)
+      for (const [nom, c] of [['A', A], ['B', B]]) {
+        const vrai = (await tx.$queryRawUnsafe(`select coalesce(encrypted_password, '') <> '' as v from auth.users where id = $1::uuid`, c.id))[0].v
+        const r = await comme('authenticated', c.id, 'select public.aok_mot_de_passe_defini() as m')
+        attendre(`mot de passe : ${nom} lit le sien (${vrai ? 'defini' : 'absent'})`, r.ok && r.lignes[0].m === vrai, r.ok ? `${r.lignes[0].m}` : r.motif)
+      }
+      // Un vrai compte SANS mot de passe (Google, lien magique, ou cree par l equipe
+      // avec admin.createUser) : faux, donc pas « Actif ». Aucun mot de passe touche.
+      const sans = (await tx.$queryRawUnsafe(
+        `select u.id::text as id from auth.users u where coalesce(u.encrypted_password, '') = '' and u.email_confirmed_at is not null
+           and not exists (select 1 from public.cockpit_allowlist c where c.user_id = u.id) order by u.created_at limit 1`))[0]
+      attendre('mot de passe : un compte sans mot de passe existe pour l essai', Boolean(sans))
+      if (sans) {
+        const r = await comme('authenticated', sans.id, 'select public.aok_mot_de_passe_defini() as m')
+        attendre('mot de passe : compte sans mot de passe = faux', r.ok && r.lignes[0].m === false, r.ok ? `${r.lignes[0].m}` : r.motif)
+      }
+      const inconnu = await comme('authenticated', randomUUID(), 'select public.aok_mot_de_passe_defini() as m')
+      attendre('mot de passe : jeton sans compte = faux', inconnu.ok && inconnu.lignes[0].m === false, inconnu.ok ? `${inconnu.lignes[0].m}` : inconnu.motif)
+    }
+
     // --- Fonctions : search_path fixe, security definer --------------------------------
     const fns = await tx.$queryRawUnsafe(`
       select p.proname, p.prosecdef, coalesce(array_to_string(p.proconfig, ','), '') as conf
         from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname like 'aok\\_%'`)
     const attendues = ['aok_avatar_lisible', 'aok_mes_sessions', 'aok_revoquer_session', 'aok_emails_verifies', 'aok_compte_de',
       'aok_mon_compte', 'aok_exporter_mes_donnees', 'aok_profils_publics', 'aok_espaces_reels', 'aok_capture_ecrivable',
-      'aok_activite_par_jour', 'aok_points_calcul', 'aok_ma_progression', 'aok_profil_public']
+      'aok_activite_par_jour', 'aok_points_calcul', 'aok_ma_progression', 'aok_profil_public', 'aok_mot_de_passe_defini']
     for (const nom of attendues) {
       const f = fns.find((x) => x.proname === nom)
       attendre(`fonction ${nom} : security definer, search_path vide`, f && f.prosecdef && /search_path=("")?$|search_path=""/.test(f.conf), f ? f.conf : 'absente')

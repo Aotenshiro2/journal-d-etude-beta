@@ -30,16 +30,25 @@ export type IssueSupport =
   | { ok: true; prevenue: boolean }
   | { ok: false; erreur: 'limite' | 'captures' | 'paiement' | 'indisponible' }
 
-type Paiement = { paiement_id?: unknown; produit?: unknown; date?: unknown }
+type Paiement = { paiement_id?: unknown; produit?: unknown; date?: unknown; moyen?: unknown }
 
-/** Le libelle d'un paiement du compte (« Live Club, 12/10/2026 »), ou null s'il n'est pas a lui. */
+/**
+ * Le libelle d'un paiement du compte (« Live Club, 12/10/2026 »), ou null s'il n'est pas a lui.
+ * (08/11/2026, C10) Toutes les listes de la page Achats : aussi les achats de l'academie pas encore
+ * recopies (paiements_academie) et les paiements encaisses par Skool (paiements_tiers, « Skool » ajoute
+ * au libelle pour l'equipe). Cles absentes (migration 20261108230000 pas appliquee) : comme avant.
+ */
 async function libellePaiement(userId: string, paiementId: string): Promise<string | null> {
   const l = await prisma.$queryRawUnsafe<{ c: string | null }[]>('select public.aok_compte_de($1::uuid)::text as c', userId)
-  const o = JSON.parse(l[0]?.c ?? '{}') as { achats?: Paiement[]; live_club_paiements?: Paiement[] }
-  const p = [...(o.achats ?? []), ...(o.live_club_paiements ?? [])].find((x) => x.paiement_id === paiementId)
+  const o = JSON.parse(l[0]?.c ?? '{}') as {
+    achats?: Paiement[]; live_club_paiements?: Paiement[]; paiements_academie?: Paiement[]; paiements_tiers?: Paiement[]
+  }
+  const p = [...(o.achats ?? []), ...(o.live_club_paiements ?? []), ...(o.paiements_academie ?? []), ...(o.paiements_tiers ?? [])]
+    .find((x) => x.paiement_id === paiementId)
   if (!p) return null
   const date = typeof p.date === 'string' ? p.date.slice(0, 10).split('-').reverse().join('/') : ''
-  return [typeof p.produit === 'string' ? p.produit : 'Achat', date].filter(Boolean).join(', ')
+  const tiers = p.moyen === 'skool' ? 'paye sur Skool' : p.moyen === 'paypal' ? 'PayPal' : ''
+  return [typeof p.produit === 'string' ? p.produit : 'Achat', date, tiers].filter(Boolean).join(', ')
 }
 
 export async function enregistrerDemandeSupport(compte: { id: string; email: string | null }, d: DemandeSupport): Promise<IssueSupport> {
