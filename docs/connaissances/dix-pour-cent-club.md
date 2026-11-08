@@ -21,7 +21,7 @@ Pour ceux qui veulent comprendre pourquoi le prix bouge plutôt que suivre la le
 
 - 1 999 € en un seul paiement, accès à vie.
 - Ou en 4 fois sans frais avec PayPal, sous réserve d'éligibilité selon les critères de PayPal.
-- Les accès sont fournis sous 24 heures.
+- L'accès s'ouvre dès que PayPal confirme le paiement, et un email te le confirme.
 - Inclus en plus du programme : le Carnet du Trader Premium, le Journal d'Études et Pilotage.
 - Le Live Club est un abonnement séparé, sans engagement, à 139 € par mois.
 - Droit de rétractation de 14 jours, qui cesse dès que la fourniture des contenus numériques a commencé avec ton accord.
@@ -36,4 +36,4 @@ Pour ceux qui veulent comprendre pourquoi le prix bouge plutôt que suivre la le
 Non. Le 10% Club est la formation, le Live Club est l'entraînement en live : deux offres séparées, qui se cumulent.
 
 ### J'ai payé, je n'ai pas encore mes accès.
-Les accès sont fournis sous 24 heures. Au-delà, l'équipe regarde.
+L'accès s'ouvre dès que PayPal confirme le paiement, avec un email. S'il n'est pas ouvert, écris au support : l'équipe regarde.
