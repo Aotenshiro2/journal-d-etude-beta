@@ -1,0 +1,12 @@
+BROUILLON : texte de mécanique, à remplacer par la version validée par Brice.
+
+Bonjour {{prenom}},
+
+Skool ferme. Ce qui était gratuit le reste, sur l'académie AO Knowledge.
+
+Crée ton compte avec cette adresse email, c'est gratuit :
+{{lien}}
+
+Une question ? Réponds à cet email.
+
+Brice

@@ -1,0 +1,16 @@
+BROUILLON : texte de mécanique, à remplacer par la version validée par Brice.
+
+Bonjour {{prenom}},
+
+Skool ferme. Tes accès premium sont déjà prêts sur l'académie AO Knowledge.
+
+Ce lien crée ton compte avec cette adresse et t'ouvre l'académie en un clic :
+{{lien}}
+
+Il est personnel et reste valable 14 jours.
+
+Pour revenir ensuite : aoknowledge.com/connexion, avec cette même adresse (Google, ou un lien de connexion reçu par email).
+
+Une question ? Réponds à cet email.
+
+Brice

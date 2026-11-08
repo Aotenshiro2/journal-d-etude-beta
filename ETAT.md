@@ -1,5 +1,40 @@
 # ETAT du journal d etudes
 
+## PASSATION SKOOL : INVITATIONS DES MEMBRES, LIEN EN 1 CLIC, COMPTEUR (08/11/2026, commite NON pousse, branche passation-invitations depuis origin/master ; migration 20261108200000 ECRITE, NON appliquee)
+
+- Brice, 08/11 : options A2 (email aux 235 adresses connues, versions payant et gratuit, relance J+3), A4 (lien
+  personnel qui cree le compte et connecte en un clic, payants sans compte) et A7 (compteur). Options :
+  D:\6_Societe\Pilotage\Academie\PASSATION-SKOOL-OPTIONS-2026-11-08.md. Brief : D:\7_Agents\briefs\2026-11-08-passation-invitations-a2-a4.md.
+- Route GET /api/academie/invitation?j=<jeton 43 car.> (publique, chemin exact dans middleware.ts) : sha256 du jeton
+  -> ligne academie_invitations (version payant, non expiree) -> compte de l'EMAIL DE CONNEXION (auth.users), cree
+  sinon par admin.createUser (email_confirm, first_name du CSV) ; adresse seulement secondaire d'un autre compte :
+  pas de session (repere compte) -> generateLink 'magiclink' (aucun email) -> ouvert_le, clics, compte_le notes ->
+  303 vers aoknowledge.com/auth/invitation#token_hash=...&type=... (fragment), ou le site fait verifyOtp (son
+  client est PKCE : un lien admin classique, flux implicite, y serait refuse). Echecs : 303 vers
+  aoknowledge.com/connexion?invitation=invalide|expiree|compte|erreur. HEAD = 204 sans effet (sondes des
+  antivirus). Lien cliquable PLUSIEURS FOIS jusqu'a expiration (14 jours) : chaque clic regenere un jeton Supabase.
+  Jeton derive (HMAC de SUPABASE_SERVICE_ROLE_KEY, id de ligne, numero) : la base n'a que son sha256, la relance
+  redonne le meme lien. Sentry : jeton masque (sentry-masque.ts). ACADEMIE_INVITATIONS=off coupe la route.
+- Script scripts/inviter-membres-skool.mjs (essai a blanc par defaut ; --ecrire ; --relance ; --max 90 ; --lot ;
+  --compteur ; --test-vers delivered@resend.dev) : CSV email;version;prenom sur D:, payants d'abord, payant avec
+  compte utilisable = payant-compte (lien de connexion, pas de jeton). Modeles <nom>.sujet.txt / .corps.txt
+  ({{prenom}}, {{lien}}) ; scripts/modeles-invitation-skool/ = BROUILLONS (refuses par --ecrire). Resend
+  (RESEND_API_KEY_LIVECLUB sinon RESEND_API_KEY), support@, cle d'idempotence par ligne et par etape, arret au
+  premier refus de quota ou de cadence. Sortie chiffree, jamais une adresse.
+- Serveur : src/lib/academie/invitations.ts ; pur : invitations-pur.ts (regles, plan, compteur, modeles, deroule
+  de la route a ports injectes, requetes SQL).
+- Verifs : scripts/verifier-invitations-skool.mjs 23 blocs hors ligne (MIGRATIONS_DIR pour le bloc de la migration) ;
+  -mcp-gpt, -mcp-tache, -indicateur-alex, -academie, -lien-magique-cockpit ok ; tsc ; eslint ; next build. Essai a
+  blanc et --compteur sur le vrai CSV (235 lignes : 71 payants dont 13 avec compte et 1 compte jamais confirme,
+  164 gratuits dont 9 avec compte). PAS LANCES : scripts/essayer-migration-invitations.mjs (transaction annulee,
+  consigne lectures seules) et l'envoi d'essai vers delivered@resend.dev (aucune cle Resend dans .env.local).
+- MISE EN LIGNE, dans l'ordre, sur go de Brice : (1) essayer-migration-invitations.mjs puis migration 20261108200000 ;
+  (2) push du journal (route) ; (3) site (page /auth/invitation, phrases de /connexion, lien de /contact) ;
+  (4) envoi d'essai vers delivered@resend.dev, textes valides par Brice a la place des BROUILLONS, puis --ecrire.
+- Limites : le jeton est dans la requete (?j=) : journaux de requetes de Vercel ; un antivirus qui SUIT le lien par
+  GET cree le compte et note ouvert_le (sans session, sauf s'il execute le JavaScript du site) ; un compte cree a
+  l'avance par un tiers avec l'adresse (jamais confirme) est confirme par le clic.
+
 ## BESOINS DES MEMBRES, SIGNAUX ET LIMITES DES AGENTS (06/11/2026 apres-midi, commite NON pousse, branche besoins-signaux au-dessus de besoins-finitions ; migration 20261106200000 ECRITE, NON appliquee)
 
 - Brice, 06/11 : pistes A a E sans labo, signaux « Refus + impasses », limites des agents avec son tri. Contrat :

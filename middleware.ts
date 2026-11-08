@@ -47,7 +47,8 @@ export async function middleware(request: NextRequest) {
   // /api/mcp-alex/ : le connecteur MCP de l'assistant d'Alex (indicateur), secret du chemin verifie dans la route (05/11/2026).
   const publicPaths = ['/auth', '/api/health', '/guide', '/api/membres/photo', '/api/academie/achat', '/api/academie/catalogue', '/api/academie/suivi', '/api/tab/', '/api/liveclub/stripe', '/api/liveclub/resend', '/api/mcp/', '/api/club/paypal', '/api/pilotage/achat', '/api/newsletter/subscribe', '/api/kit/webhook/', '/api/mcp-cockpit/', '/api/cockpit/lien-magique', '/api/mcp-alex/']
   // /api/besoins/signal : un signal de friction de nos outils, session facultative (empreinte du jour sans session) ; chemin EXACT, /api/besoins/signaler garde sa session (06/11/2026).
-  const isPublic = pathname === '/' || pathname === '/api/besoins/signal' || publicPaths.some(p => pathname.startsWith(p))
+  // /api/academie/invitation : le lien personnel de l'email d'invitation des payants de Skool, sans session ; le jeton est verifie dans la route ; chemin EXACT (08/11/2026).
+  const isPublic = pathname === '/' || pathname === '/api/besoins/signal' || pathname === '/api/academie/invitation' || publicPaths.some(p => pathname.startsWith(p))
   if (isPublic) return supabaseResponse
 
   // API routes — allow Bearer token through (handled in route handlers)

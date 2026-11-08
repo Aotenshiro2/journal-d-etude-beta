@@ -1,0 +1,10 @@
+BROUILLON : texte de mécanique, à remplacer par la version validée par Brice.
+
+Bonjour {{prenom}},
+
+Ton compte sur l'académie n'est pas encore créé. Un clic suffit, tes accès premium sont prêts :
+{{lien}}
+
+Le lien est personnel. Une question ? Réponds à cet email.
+
+Brice
