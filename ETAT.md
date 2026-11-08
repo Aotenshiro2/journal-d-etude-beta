@@ -35,6 +35,27 @@
   GET cree le compte et note ouvert_le (sans session, sauf s'il execute le JavaScript du site) ; un compte cree a
   l'avance par un tiers avec l'adresse (jamais confirme) est confirme par le clic.
 
+## MON ESPACE, HISTORIQUE COMPLET DES PAIEMENTS, C10 (08/11/2026, commite NON pousse, branche historique-paiements ; migration 20261108230000 ECRITE, NON appliquee)
+
+- Brice, 08/11 : tout l'historique de paiement du membre, quel que soit le moyen ; ce qu'on ne peut pas fournir renvoie
+  vers le bon service. Le site (branche historique-paiements du workspace) fait l'ecran ; detail dans
+  sites/Aoknowledgecom/ETAT.md, section C10.
+- support-membre.ts : libellePaiement lit aussi paiements_academie et paiements_tiers de aok_compte_de (un paiement Skool
+  ou un 10% Club PayPal pas encore recopie peut etre cite au support), cles absentes = comme avant. A POUSSER AVANT le
+  site.
+- scripts/importer-paiements-skool.mjs : factures Skool de l'export du 07/11 (D:) vers cockpit_paiements_tiers,
+  abonnement de Brice (hosting) ecarte, email de membres.csv si la facture n'en a pas, rattachement par
+  cockpit_membre_emails. Essai a blanc par defaut, --ecrire (upsert, rejouable). Essai a blanc du 08/11 : 11 factures de
+  membres, 7 payees ; 4 rattachables (2 payees), 5 sans fiche (4 payees), 2 sans email (1 payee) ; 0 visible aujourd'hui
+  (aucun de ces membres n'a encore de compte du site). Tests : verifier-paiements-skool.mjs (6 blocs).
+- verifier-mon-espace-rls.mjs : AOK_WORKSPACE pour lancer depuis un worktree ; migration C10 jouee dans la transaction ;
+  controles C10 (Skool et PayPal de B rendus a B seul, impayee ecartee, pas de doublon, moyen et encaisse_par, table
+  fermee au membre et a l'anonyme, lue par l'equipe, export, cascade) et mot de passe defini (anonyme refuse, A et B,
+  compte sans mot de passe = faux, jeton sans compte = faux). 08/11 : aucun ecart, transaction annulee.
+- Collecte PayPal (lu le 08/11) : la tache AOK-Collecte-PayPal tourne chaque lundi, OK, mais l'app « Claude Data » ne
+  voit AUCUNE transaction depuis le 23/08/2025 (dumps vides du 15/07 au 02/11/2026). cockpit_paiements paypal s'arrete
+  donc au 23/08/2025. Aucun paiement PayPal de 2026 en base (academie_acces paypal : 0, mails_achat_envoyes : 0).
+
 ## BESOINS DES MEMBRES, SIGNAUX ET LIMITES DES AGENTS (06/11/2026 apres-midi, commite NON pousse, branche besoins-signaux au-dessus de besoins-finitions ; migration 20261106200000 ECRITE, NON appliquee)
 
 - Brice, 06/11 : pistes A a E sans labo, signaux « Refus + impasses », limites des agents avec son tri. Contrat :
