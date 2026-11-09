@@ -1,6 +1,32 @@
 # ETAT du journal d etudes
 
-## MON COACHING : SEANCES RESTANTES, WEBHOOK CAL, COCKPIT, MEET (09/11/2026, commite NON pousse, branche mon-coaching depuis origin/master ; migration 20261109140000 ECRITE, NON appliquee)
+## MON COACHING EN HEURES : LES REGLAGES DE BRICE (09/11/2026, commite NON pousse, branche coaching-heures depuis origin/master 828483b ; migration 20261109200000 ECRITE, NON appliquee)
+
+- Brief : D:\7_Agents\briefs\2026-11-09-mon-coaching-reglages.md ; rapport : coaching-heures-rapport.md (notes de la
+  conversation Yume Orchestre). Reponses de Brice : l'ETM est modulable (1 h par semaine sur 3 mois, mais 2 x 30 min pour
+  l'un, 1 h toutes les 2 semaines pour l'autre) ; une annulation, meme de derniere minute, ne compte pas ; le pack 8 h n'a
+  pas de date limite et n'est pas de l'ETM ; Melanie se joint aussi en direct sur Telegram (@melmomtrader).
+- ON COMPTE EN HEURES (minutes) : src/lib/coaching/pur.ts. Un droit porte des minutes (vue coaching_droits_tous.minutes,
+  coalesce de l'ancienne colonne seances x 60) ; une seance prevue ou faite retire sa duree (30 min = 0,5 h), une annulee
+  jamais ; le reste d'une seance passe au droit suivant (partage) ; depassement en minutes (hors_droits_min, hors_min).
+  Phrases : « 6 h restantes sur 8 h avec Brice », 7,5 h, 6 h 50, 50 min. Lignes : total_min, faites_min, prevues_min,
+  restantes_min, nb_faites, nb_prevues (plus de total / faites / restantes en seances).
+- Gestes du cockpit : accorder_droit et corriger_droit en `minutes` (par quart d'heure, 15 a 6000). L'ancien ecran du
+  cockpit envoie encore `seances` : accepte et converti (x 60) tant qu'il n'est pas redeploye. MINUTES_ETM_DEFAUT = 720.
+- Base (base.ts) : ecrit minutes seul (seances vide), l'heure payee sur Cal porte la duree du rendez-vous (droit de 50 min
+  pour un rendez-vous de 50 min). Catalogue de l'agent du cockpit a jour.
+- Mail du coaching (modeleEmailCoaching, club-paypal-pur.ts) : 8 h, accompagnement pendant la formation (check-ups, lecons
+  bien comprises, exercices et guidelines), sans date limite, sans promesse ; plus d'« acces prioritaire par message ».
+- Verifs : `node scripts/verifier-coaching.mjs` (20 blocs, AOK_WORKSPACE=<worktree coaching-heures>) ;
+  `node scripts/verifier-coaching-paypal.mjs` (12 blocs) ; `node --env-file=.env.local scripts/essayer-migration-coaching-heures.mjs`
+  (11 etapes, transaction annulee : l'ancien journal ecrit avant et apres la migration, reprise, nouveau journal, calcul,
+  lectures authenticated et anon, contraintes) ; tsc et `npm run build` OK.
+- ORDRE DE MISE EN LIGNE : 1) migration 20261109200000 (puis `npm run verifier:rls`) ; 2) ce journal (push de
+  coaching-heures) ; 3) site et cockpit. Dans cet ordre, rien ne casse : l'ancien journal marche sur la base migree, le
+  nouveau journal accepte l'ancien cockpit, le site n'affiche que les phrases. Plus tard : minutes obligatoire et seances
+  supprimee (une migration a part, une fois le nouveau journal en ligne).
+
+## MON COACHING : SEANCES RESTANTES, WEBHOOK CAL, COCKPIT, MEET (09/11/2026, EN LIGNE le 09/11 : journal 828483b, migration 20261109140000 APPLIQUEE, d apres le brief du 09/11. Compte en heures : section du dessus)
 
 - Demande de Brice du 09/11 (seances restantes dans Mon espace ; trois branchements : Cal pour Brice, cockpit pour Melanie
   qui n'a pas de Cal, enregistrements Meet proposes a confirmer). Brief : D:\7_Agents\briefs\2026-11-09-mon-coaching-seances.md ;
