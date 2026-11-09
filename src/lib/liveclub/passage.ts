@@ -126,6 +126,7 @@ import { resumeDuMatin } from './resume'
 import { relaisDuMatin } from './relais'
 import { tacheIndicateur } from './indicateur'
 import { recalculerAContacter } from './contact-instantane'
+import { rafraichirPointsJours } from '@/lib/points-jours'
 import { appelTelegram, envoyer, lienDemandeAdhesion } from './telegram'
 import { lireEtatFil, tracerGeste, tracerMessageBot } from './support-pont'
 import { quiRepond } from './support-pont-pur'
@@ -172,6 +173,8 @@ const BUDGET_RELAIS_MS = 255_000
 const BUDGET_INSTANTANE_MS = 280_000
 /** (05/11) L'indicateur d'Alex ne relit plus de droit apres 3 min 20 (une lecture Stripe par demande). */
 const BUDGET_INDICATEUR_MS = 200_000
+/** (09/11) Les points par jour, en dernier : 2 s au plus aujourd'hui, ils passent jusqu'a 4 min 45. */
+const BUDGET_POINTS_JOURS_MS = 285_000
 
 export type SynthesePassage = {
   ok: boolean
@@ -302,6 +305,12 @@ export type SynthesePassage = {
    * fait, recent, en_cours, fonction_absente, reporte. Des comptes seulement.
    */
   a_contacter: { etat: string; risque: number; a_venir: number }
+  /**
+   * (v) Points par jour du classement Activite (09/11, points-jours.ts) :
+   * fait, en_cours, fonction_absente, reporte ; complet ou non, comptes
+   * recalcules, jours ecrits et retires. Des nombres seulement.
+   */
+  points_jours: { etat: string; complet: boolean; recalcules: number; jours_ecrits: number; jours_retires: number }
   /** Lignes de journal perdues (table ou contrainte pas encore migree). */
   journal_echecs: number
   /** Messages qui n'ont pu partir ni en prive ni par email. */
@@ -3514,6 +3523,7 @@ function nouveauContexte(maintenant: Date): Contexte {
       resume: { etat: 'pas_lance', lignes: 0, livres: 0 },
       relais: { etat: 'pas_lance', lignes: 0, livres: 0 },
       a_contacter: { etat: 'pas_lance', risque: 0, a_venir: 0 },
+      points_jours: { etat: 'pas_lance', complet: false, recalcules: 0, jours_ecrits: 0, jours_retires: 0 },
       journal_echecs: 0,
       messages_perdus: 0,
       erreurs: [],
@@ -3756,6 +3766,24 @@ export async function passageQuotidien(maintenant: Date = new Date()): Promise<S
     const b = await resumeDuMatin()
     ctx.s.resume = { etat: b.etat, lignes: b.lignes, livres: b.livres }
     if (b.etat === 'panne' || b.etat === 'echec' || b.etat === 'table_absente') erreur(ctx, `resume_${b.etat}`)
+  })
+
+  // (v) Les points par jour du classement Activite (09/11, points-jours.ts),
+  // EN DERNIER : personne ne les attend dans ce passage, ils ne retardent ni
+  // le relais ni le resume. Incremental (comptes touches depuis le dernier
+  // passage), complet une fois par semaine. Fonction absente (migration
+  // 20261109234000 pas passee) : rien, sans erreur. Trop tard dans le budget :
+  // reporte, le passage suivant repart du dernier passage fait.
+  await etape('points_jours', async () => {
+    if (Date.now() - ctx.debut > BUDGET_POINTS_JOURS_MS) {
+      ctx.s.points_jours.etat = 'reporte'
+      erreur(ctx, 'points_jours_reporte')
+      return
+    }
+    const b = await rafraichirPointsJours(prisma, ACTEUR)
+    ctx.s.points_jours = {
+      etat: b.etat, complet: b.complet, recalcules: b.recalcules, jours_ecrits: b.jours_ecrits, jours_retires: b.jours_retires,
+    }
   })
 
   ctx.s.sorties_reelles = ctx.plafond.faites

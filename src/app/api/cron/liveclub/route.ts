@@ -7,7 +7,8 @@ import { passageQuotidien } from '@/lib/liveclub/passage'
  * par le cron Vercel (vercel.json, 7 h UTC). Pauses, acces broker,
  * desabonnes (SIMULES tant que LIVECLUB_SORTIES_ACTIVES n'est pas '1'),
  * rappel J-3 avant chaque prelevement, sorties abusives de Metricgram
- * (signalees, lien de retour en prive), purge des conversations : toute la
+ * (signalees, lien de retour en prive), purge des conversations, et depuis le
+ * 09/11 les points par jour du classement de l'academie : toute la
  * logique vit dans
  * src/lib/liveclub/passage.ts.
  *
