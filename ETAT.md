@@ -1,5 +1,16 @@
 # ETAT du journal d etudes
 
+## CLASSEMENT ACTIVITE : LA REGLE DES COMPTES GRATUITS (10/11/2026, commite NON pousse, branche classement-v2 ; migration 20261109234100 du workspace ECRITE, NON appliquee)
+
+- Brief : D:\7_Agents\briefs\2026-11-10-classement-activite-page.md ; rapport : classement-reel-rapport.md (notes
+  de Yume Orchestre). Rien de neuf dans le code du journal : seulement l essai.
+- Essai : AOK_WORKSPACE=<workspace> [AOK_ANNUAIRE=<worktree anciens-membres>] node --env-file=.env --env-file=.env.local
+  scripts/essayer-migration-classement-gratuits.mjs [--empreintes]. Phase A (fonctions seules, aucune table) : md5 de
+  la garde, aok_a_un_programme = aok_annuaire_acces (statut autre que communaute) pour chaque compte. Phase B, UNE
+  fois : 233000, 234000, 234100, premier remplissage, profils rendus publics dans la transaction, vue d un gratuit,
+  d un compte avec programme, de l equipe. 10/11 : 9 etapes ok, 4,5 s du begin au rollback (lock_timeout 5 s).
+- Ordre de mise en ligne : ETAT du site, section « Classement Activite : la vraie page ».
+
 ## POINTS PAR JOUR DU CLASSEMENT ACTIVITE (09/11/2026, commite NON pousse, branche classement-v2 depuis origin/master 86bced9 ; migrations 20261109233000 et 20261109234000 du workspace ECRITES, NON appliquees)
 
 - Brief : D:\7_Agents\briefs\2026-11-09-points-jours.md ; rapport : points-jours-rapport.md (notes de la
