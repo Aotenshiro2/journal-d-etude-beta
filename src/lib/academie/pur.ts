@@ -110,11 +110,18 @@ export type FaitsCompte = {
    */
   secoursEssai: boolean
   lignes: LigneAcces[]
+  /**
+   * (09/11/2026) Le statut equipe (estEquipe : profiles.role = 'admin') :
+   * tout ouvert et Live Club 'oui', sans Stripe ni abonnement. Absent = faux.
+   */
+  equipe?: boolean
 }
 
 export type Droits = {
   admin: boolean
   etm: boolean
+  /** (09/11/2026) Le compte est de l'equipe AOK (estEquipe). */
+  equipe: boolean
   liveClub: EtatLiveClub
   ouvertures: Ouverture[]
   /** Une source illisible pouvait ouvrir quelque chose : un 'ferme' peut etre faux. */
@@ -149,7 +156,9 @@ function estSource(s: unknown): s is SourceAcces {
 export function preparerDroits(f: FaitsCompte): Droits {
   const ouvertures: Ouverture[] = []
   const tout: Cible = { tout: true }
-  if (f.admin) ouvertures.push({ cible: tout, raison: 'admin', siLiveClub: false })
+  const equipe = f.equipe === true
+  // L'equipe ouvre tout, comme l'admin : la raison 'admin' se lit « Ouvert pour l'équipe » sur le site.
+  if (f.admin || equipe) ouvertures.push({ cible: tout, raison: 'admin', siLiveClub: false })
   if (f.etm) ouvertures.push({ cible: tout, raison: 'etm', siLiveClub: false })
 
   for (const l of f.lignes) {
@@ -177,8 +186,10 @@ export function preparerDroits(f: FaitsCompte): Droits {
     }
   }
 
-  const incomplet = f.liveClub === 'inconnu' && ouvertures.some(o => o.siLiveClub)
-  return { admin: f.admin, etm: f.etm, liveClub: f.liveClub, ouvertures, incomplet }
+  // (09/11) L'equipe a le Live Club sans abonnement : 'oui', jamais « tu n'es pas membre ».
+  const liveClub: EtatLiveClub = equipe ? 'oui' : f.liveClub
+  const incomplet = liveClub === 'inconnu' && ouvertures.some(o => o.siLiveClub)
+  return { admin: f.admin, etm: f.etm, equipe, liveClub, ouvertures, incomplet }
 }
 
 type Niveau = 'module' | 'section' | 'lecon'
@@ -264,7 +275,7 @@ export function ouvertureModule(d: Droits, moduleId: string, lecons: readonly Re
  * paquet d'entree ni offre Live Club garnie n'a rien a y gagner).
  */
 export function liveClubUtile(f: Omit<FaitsCompte, 'liveClub'>): boolean {
-  if (f.admin || f.etm) return false
+  if (f.admin || f.etm || f.equipe) return false
   return f.lignes.some(l =>
     (l.origine === 'acces' && l.source === 'liveclub' && (l.ouvreTout || l.moduleId !== null))
     || (l.origine === 'base' && l.slug === OFFRE_LIVE_CLUB && (l.ouvreTout || l.moduleId !== null)))
@@ -960,6 +971,21 @@ export function appareilCourt(ua: string | null): string | null {
 export const ROLE_ADMIN = 'admin'
 
 export function estAdmin(role: string | null | undefined): boolean {
+  return role === ROLE_ADMIN
+}
+
+/**
+ * (09/11/2026) LE STATUT « EQUIPE » (Brice, Melanie, Adil, Adrien). Un seul
+ * statut, celui qui existait deja : profiles.role = 'admin', pose sur ces
+ * quatre comptes et sur eux seuls (inventaire du 09/11). Il ouvre tout ce
+ * qu'ouvre un abonnement actif (Live Club 'oui' sans Stripe, toute
+ * l'academie, le palier Club des apps) et sort la personne des chiffres de
+ * membres du cockpit. En base, la meme regle s'appelle aok_est_equipe(uuid)
+ * (migration 20261109210000_statut_equipe.sql) : changer l'une, c'est
+ * changer l'autre. Se pose par une ligne SQL (le role est ferme a l'ecriture
+ * navigateur depuis le 30/09).
+ */
+export function estEquipe(role: string | null | undefined): boolean {
   return role === ROLE_ADMIN
 }
 

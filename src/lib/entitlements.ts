@@ -16,10 +16,13 @@
 // avec son deuxième email est quand même reconnu. Le backend décide, jamais
 // l'extension.
 import { prisma } from './db'
+import { estEquipe } from './academie/pur'
 
 // 'duo' (brief E1, 30/10/2026) : l'abonnement Premium Duo (Carnet + Pilotage,
 // Stripe aoknowledge) ouvre le même palier que 'carnet-premium'.
-export type MentoratReason = 'etm' | 'manuel' | 'liveclub' | 'skool-vip' | 'skool-premium' | 'formation' | 'duo' | 'carnet-premium'
+// 'equipe' (09/11/2026) : le statut équipe AOK (profiles.role = 'admin',
+// estEquipe), qui ouvre ce qu'ouvre un abonnement actif, sans abonnement.
+export type MentoratReason = 'equipe' | 'etm' | 'manuel' | 'liveclub' | 'skool-vip' | 'skool-premium' | 'formation' | 'duo' | 'carnet-premium'
 
 // Le produit « Carnet Premium » (5,99 €/mois) sur le Stripe aoknowledge —
 // créé le 28/08/2026. La vérification en direct donne l'accès IMMÉDIAT après
@@ -213,12 +216,20 @@ export interface MentoratAccess {
 }
 
 export async function checkMentoratAccess(userId: string): Promise<MentoratAccess> {
-  // L'email du compte connecté (Supabase Auth, même base)
-  const users = await prisma.$queryRaw<{ email: string | null }[]>`
-    select email from auth.users where id = ${userId}::uuid limit 1
+  // L'email du compte connecté (Supabase Auth, même base) et son rôle métier
+  // (profiles.role, lu dans la même requête pour le statut équipe).
+  const users = await prisma.$queryRaw<{ email: string | null; role: string | null }[]>`
+    select u.email, p.role::text as role
+    from auth.users u left join public.profiles p on p.id = u.id
+    where u.id = ${userId}::uuid limit 1
   `
   const email = users[0]?.email?.toLowerCase().trim() ?? null
   if (!email) return { entitled: false, reason: null, email: null }
+
+  // -1. Le statut équipe AOK (09/11/2026, Brice : « je suis l'administrateur
+  // principal [...] on a un statut à part ») : Brice, Mélanie, Adil, Adrien.
+  // Il ouvre ce qu'ouvre un abonnement actif, sans abonnement ni Stripe.
+  if (estEquipe(users[0]?.role)) return { entitled: true, reason: 'equipe', email }
 
   // 0. Statut ETM actif sur le membre, par n'importe lequel de ses emails.
   // Lu en premier : c'est le statut le plus haut, et il ne dépend ni de

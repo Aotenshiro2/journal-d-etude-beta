@@ -18,7 +18,8 @@ import { messageErreur, relationAbsente } from '@/lib/liveclub/pur'
  * Reponse 200 :
  *   {
  *     ok: true,
- *     compte: { admin, etm, live_club },   live_club : oui, non, inconnu, non_lu (pas demande)
+ *     compte: { admin, etm, equipe, live_club },   live_club : oui, non, inconnu, non_lu (pas demande) ;
+ *                           equipe (09/11/2026) : statut equipe AOK (estEquipe), live_club vaut alors 'oui'
  *     incomplet,                            true = une source illisible (Stripe) : des contenus sont « inconnu »
  *     continuer: { lecon, module, reprise_s, derniere_vue_le, acces, etat } | null,   la derniere lecon ouverte
  *     questions_entree: { poser, version, questions: [texte, texte] },   les questions d'entree (30/10/2026,
@@ -114,7 +115,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json(
     {
       ok: true,
-      compte: { admin: droits.admin, etm: droits.etm, live_club: droits.liveClub },
+      compte: { admin: droits.admin, etm: droits.etm, equipe: droits.equipe, live_club: droits.liveClub },
       incomplet: droits.incomplet,
       continuer,
       modules,

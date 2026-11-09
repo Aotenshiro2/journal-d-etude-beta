@@ -35,7 +35,7 @@ import {
   ouvertureLecon, ouvertureModule, ouvertureSection, preparerDroits, progressionDuModule, ressourcesPropres, trierRaisons,
   ECART_MIN_S, INTERVALLE_MAX_S, JETON_MAX, MARGE_S, MAX_RESSOURCES, SEUIL_VU, VITESSE_MAX,
   colonneAbsente, tempsActifMinimum, texteLu, LECTURE_PLANCHER_S, MOTS_PAR_MINUTE, PART_LECTURE, PLAFOND_TEXTE_S, PROFONDEUR_LUE,
-  autoriserEdition, champsModifies, estAdmin, fusionImport, lireCibleEdition, lireDemandeEdition, planEdition, LIMITES_EDITION,
+  autoriserEdition, champsModifies, estAdmin, estEquipe, fusionImport, lireCibleEdition, lireDemandeEdition, planEdition, LIMITES_EDITION,
 } from '../src/lib/academie/pur.ts'
 import { configBibliotheque, configBunny, jetonLecture, lienLecture, signerLecture, DUREE_LIEN_S } from '../src/lib/academie/bunny.ts'
 import { configPdfBunny, jetonPdf, lienPdf, signerPdf, DUREE_URL_PDF_S } from '../src/lib/academie/pdf-bunny.ts'
@@ -107,6 +107,32 @@ bloc('admin : tout, raison admin', () => {
   assert.equal(ouvertureLecon(d, L2).raisons[0], 'admin')
   assert.deepEqual(juger(d, F, LECONS_F), { acces: 'entier', raisons: ['admin'] })
   assert.equal(liveClubUtile({ admin: true, etm: false, secoursEssai: false, lignes: BASE }), false)
+})
+
+bloc('equipe (09/11) : tout, raison admin, Live Club oui sans Stripe, jamais incomplet', () => {
+  // Le statut equipe = profiles.role 'admin', exactement (meme regle que estAdmin).
+  assert.equal(estEquipe('admin'), true)
+  for (const role of [null, undefined, '', 'member', 'super_admin', 'equipe', 'Admin', ' admin']) {
+    assert.equal(estEquipe(role), false, `role ${JSON.stringify(role)}`)
+  }
+  // Le cas de Brice le 09/11 : admin, Live Club jamais lu ('non_lu'), Mon espace disait « pas membre ».
+  for (const lu of ['non_lu', 'non', 'inconnu']) {
+    const d = droitsDe({ admin: true, equipe: true, liveClub: lu })
+    assert.equal(d.equipe, true)
+    assert.equal(d.liveClub, 'oui', `Live Club lu ${lu}`)
+    assert.equal(d.incomplet, false)
+    for (const l of [L1, L2, L3, L4, N1, E1]) assert.equal(acces(l, d), 'ouvert')
+    assert.equal(ouvertureLecon(d, L2).raisons[0], 'admin')
+  }
+  // L'equipe seule (sans le drapeau admin) ouvre tout aussi.
+  const seule = droitsDe({ equipe: true, liveClub: 'non_lu' })
+  for (const l of [L1, L2, L3, L4, N1, E1]) assert.equal(acces(l, seule), 'ouvert')
+  assert.equal(liveClubUtile({ admin: false, etm: false, equipe: true, secoursEssai: false, lignes: BASE }), false)
+  // Hors equipe, rien ne change : le Live Club reste celui qui a ete lu.
+  const membre = droitsDe({ liveClub: 'non' })
+  assert.equal(membre.equipe, false)
+  assert.equal(membre.liveClub, 'non')
+  assert.equal(droitsDe({ liveClub: 'inconnu' }).liveClub, 'inconnu')
 })
 
 bloc('ETM : tout, raison etm', () => {

@@ -28,7 +28,8 @@ bloc('palier : equipe, Duo, Pilotage Premium, raisons Club du Carnet ; Carnet Pr
   assert.deepEqual(r({ sansPlafond: true, produits: ['premium-duo'] }), { palier: 'equipe', raison: 'equipe' })
   assert.deepEqual(r({ produits: ['pilotage-premium', 'premium-duo'] }), { palier: 'premium', raison: 'premium-duo' })
   assert.deepEqual(r({ produits: ['pilotage-premium'], raisonCarnet: 'liveclub' }), { palier: 'premium', raison: 'pilotage-premium' })
-  for (const raison of ['etm', 'manuel', 'liveclub', 'skool-vip', 'skool-premium', 'formation']) {
+  // 'equipe' (09/11/2026) : le statut equipe du Carnet (checkMentoratAccess), palier premium, pas le palier sans plafond.
+  for (const raison of ['equipe', 'etm', 'manuel', 'liveclub', 'skool-vip', 'skool-premium', 'formation']) {
     assert.deepEqual(r({ raisonCarnet: raison }), { palier: 'premium', raison }, raison)
   }
   assert.deepEqual(r({ raisonCarnet: 'carnet-premium' }), { palier: 'libre', raison: null })

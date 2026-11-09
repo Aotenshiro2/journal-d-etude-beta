@@ -28,8 +28,9 @@ export interface AccesIA {
  *  avec skool-vip : même niveau d'accès pour l'instant (tranché le 30/08).
  *  etm (statut posé depuis le cockpit, 09/09) ouvre le même palier sans
  *  être un abonnement Live Club. formation (pack 1 999 €, 18/10) aussi :
- *  il reprend ce qu'ouvrait le rang Premium de Skool. */
-export const RAISONS_CLUB: MentoratReason[] = ['etm', 'manuel', 'liveclub', 'skool-vip', 'skool-premium', 'formation']
+ *  il reprend ce qu'ouvrait le rang Premium de Skool. equipe (statut équipe
+ *  AOK, 09/11/2026) : ce qu'ouvre un abonnement actif, donc le même palier. */
+export const RAISONS_CLUB: MentoratReason[] = ['equipe', 'etm', 'manuel', 'liveclub', 'skool-vip', 'skool-premium', 'formation']
 
 /** L'email est-il rattaché à un membre connu du cockpit, abonné ou non ?
  *  cockpit_membre_emails porte TOUS les emails connus d'un membre : quelqu'un

@@ -4,7 +4,9 @@
 // une seule fonction pour la route de lecture, le suivi et l'ecran d'accueil.
 // Elle fait l'union de :
 //   - l'equipe : profiles.role = 'admin' ouvre tout (le role METIER vit dans
-//     profiles.role ; auth.users.role reste 'authenticated') ;
+//     profiles.role ; auth.users.role reste 'authenticated') ; depuis le
+//     09/11/2026 c'est LE statut equipe (estEquipe, pur.ts) : Live Club 'oui'
+//     sans Stripe, pour que Mon espace ne dise plus « tu n'es pas membre » ;
 //   - le statut ETM actif (cockpit_statut_etm, par un email verifie) : tout ;
 //   - tout compte : l'offre « compte gratuit », les lecons d'usage
 //     externe_compte ou externe_libre, les lecons d'apercu ;
@@ -51,7 +53,7 @@ import { abonnementsLiveClubParEmail } from '@/lib/liveclub/stripe'
 import { lireProduitsLiveClub } from '@/lib/liveclub/produits'
 import { meilleurAbonnement } from '@/lib/liveclub/pur'
 import {
-  CacheCourt, conclureLiveClub, estAdmin, liveClubUtile, preparerDroits,
+  CacheCourt, conclureLiveClub, estAdmin, estEquipe, liveClubUtile, preparerDroits,
   type Droits, type EtatLiveClub, type FaitsCompte, type LigneAcces,
 } from './pur'
 import { SQL_ACCES, SQL_FAITS_COCKPIT, SQL_IDENTITE } from './requetes'
@@ -142,6 +144,8 @@ export async function droitsAcademie(userId: string): Promise<DroitsAcademie> {
   const identite = (await prisma.$queryRawUnsafe<LigneIdentite[]>(SQL_IDENTITE, userId))[0]
   const emails = identite?.emails ?? []
   const admin = estAdmin(identite?.role)
+  // (09/11/2026) Le statut equipe : tout ouvert, Live Club 'oui', sans Stripe (pur.ts, estEquipe).
+  const equipe = estEquipe(identite?.role)
 
   const [cockpit, lignesSql] = await Promise.all([
     prisma.$queryRawUnsafe<LigneCockpit[]>(SQL_FAITS_COCKPIT, emails),
@@ -158,6 +162,7 @@ export async function droitsAcademie(userId: string): Promise<DroitsAcademie> {
   }))
   const faits: Omit<FaitsCompte, 'liveClub'> = {
     admin,
+    equipe,
     etm: c?.etm === true,
     secoursEssai: c?.secours_essai === true,
     lignes,
@@ -227,7 +232,7 @@ export type AccesAcademieEssai = {
 }
 
 const RAISONS_MEMBRE_PAYANT: ReadonlySet<MentoratReason> = new Set<MentoratReason>([
-  'etm', 'manuel', 'liveclub', 'skool-vip', 'skool-premium', 'formation',
+  'equipe', 'etm', 'manuel', 'liveclub', 'skool-vip', 'skool-premium', 'formation',
 ])
 
 function estRaisonMembrePayant(r: MentoratReason | null): r is Exclude<MentoratReason, 'carnet-premium' | 'duo'> {

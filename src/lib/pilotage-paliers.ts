@@ -76,7 +76,7 @@ export const produitDe = (slug: SlugOffrePilotage): ProduitPilotage => CATALOGUE
 // ---------------------------------------------------------------------------
 
 /** Les raisons Club du Carnet (RAISONS_CLUB de ia-niveau.ts, recopiees : ce module n'importe rien). */
-export const RAISONS_CLUB_PILOTAGE = ['etm', 'manuel', 'liveclub', 'skool-vip', 'skool-premium', 'formation'] as const
+export const RAISONS_CLUB_PILOTAGE = ['equipe', 'etm', 'manuel', 'liveclub', 'skool-vip', 'skool-premium', 'formation'] as const
 
 export interface ResolutionPalier { palier: Palier; raison: string | null }
 

@@ -1,5 +1,21 @@
 # ETAT du journal d etudes
 
+## LE STATUT EQUIPE : BRICE, MELANIE, ADIL, ADRIEN (09/11/2026, commite NON pousse, branche statut-equipe depuis origin/master 2c79f3e ; migration 20261109210000 ECRITE, NON appliquee)
+
+- Brief : D:\7_Agents\briefs\2026-11-09-statut-equipe.md ; rapport : statut-equipe-rapport.md (notes de la
+  conversation Yume Orchestre). Brice : Mon espace lui disait « Tu n'es pas membre du Live Club ».
+- Le statut = profiles.role 'admin', deja pose sur les quatre comptes et sur eux seuls. estEquipe (academie/pur.ts),
+  meme regle que aok_est_equipe en base et equipe.ts du site.
+- droitsAcademie : equipe -> tout ouvert (raison admin), Live Club 'oui' sans Stripe ; /moi rend compte.equipe.
+- checkMentoratAccess : raison 'equipe' en premier (RAISONS_CLUB, RAISONS_CLUB_PILOTAGE, essai) : palier Club des
+  apps, Pilotage premium (pas le palier sans plafond, qui reste l'email de Brice).
+- Essai : node --env-file=.env.local scripts/essayer-migration-statut-equipe.mjs (worktree : AOK_WORKSPACE=...),
+  transaction annulee, 12 etapes ok le 09/11. Tests : verifier-academie (bloc equipe), verifier-pilotage-paliers.
+- Pas touche : le bot du Live Club (les quatre comptes Telegram y sont deja exemptes fondateur ou equipe ; le texte
+  « offert par l'equipe » que verrait Adrien demanderait de rejouer les evals), lireEquipe du resume (meme equipe
+  aujourd'hui, ne lit pas encore cockpit_equipe_fiches()).
+- Ordre : migration, puis ce journal, puis site et cockpit.
+
 ## MON COACHING EN HEURES : LES REGLAGES DE BRICE (09/11/2026, commite NON pousse, branche coaching-heures depuis origin/master 828483b ; migration 20261109200000 ECRITE, NON appliquee)
 
 - Brief : D:\7_Agents\briefs\2026-11-09-mon-coaching-reglages.md ; rapport : coaching-heures-rapport.md (notes de la
