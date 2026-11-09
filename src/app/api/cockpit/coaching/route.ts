@@ -24,8 +24,10 @@ import { relationAbsente } from '@/lib/liveclub/pur'
  *   { action: 'fiche', emails }   les droits, seances et le reste des emails d'une fiche
  *   { action: 'ajouter_seance', email, coach, debut, duree_min, statut?, note? }
  *   { action: 'statut_seance', id, statut: 'prevue' | 'faite' | 'annulee' }
- *   { action: 'accorder_droit', email, coach, seances, source: 'offert' | 'etm', depuis?, note? }
- *   { action: 'corriger_droit', id, seances, note? }   (pas un pack : un pack se complete par un droit offert)
+ *   { action: 'accorder_droit', email, coach, minutes, source: 'offert' | 'etm', depuis?, note? }
+ *   { action: 'corriger_droit', id, minutes, note? }   (pas un pack : un pack se complete par des heures offertes)
+ *     minutes : de 15 a 6000, par quart d'heure (09/11, compte en heures). L'ancien ecran du cockpit envoie
+ *     encore seances (heures pleines) : accepte et converti, tant qu'il n'est pas redeploye.
  *   { action: 'retirer_droit', id }                    (retire_le, rien ne s'efface)
  *   { action: 'confirmer_detection', id, email, coach?, duree_min? }   cree la seance (faite, source meet)
  *   { action: 'ecarter_detection', id }
@@ -111,13 +113,13 @@ export async function POST(req: NextRequest) {
       }
       case 'accorder_droit': {
         const r = await accorderDroit(prisma, d, par)
-        console.info(`[cockpit/coaching] droit ${r.id.slice(0, 8)} accorde (${d.coach}, ${d.source}, ${d.seances})`)
+        console.info(`[cockpit/coaching] droit ${r.id.slice(0, 8)} accorde (${d.coach}, ${d.source}, ${d.minutes} min)`)
         return NextResponse.json({ ok: true, id: r.id }, { headers })
       }
       case 'corriger_droit': {
-        const r = await corrigerDroit(prisma, d.id, d.seances, d.note)
-        if (!r) return introuvable("Droit introuvable ou retiré (un pack se complète par un droit offert).")
-        console.info(`[cockpit/coaching] droit ${d.id.slice(0, 8)} corrige (${d.seances})`)
+        const r = await corrigerDroit(prisma, d.id, d.minutes, d.note)
+        if (!r) return introuvable("Droit introuvable ou retiré (un pack se complète par des heures offertes).")
+        console.info(`[cockpit/coaching] droit ${d.id.slice(0, 8)} corrige (${d.minutes} min)`)
         return NextResponse.json({ ok: true }, { headers })
       }
       case 'retirer_droit': {

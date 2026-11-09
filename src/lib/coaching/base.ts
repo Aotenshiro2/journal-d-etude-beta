@@ -29,8 +29,12 @@ select pe.profile_id::text from public.profile_emails pe
  where lower(btrim(pe.email)) = $1::text and pe.verified = true
 `
 
-const COLS_DROIT = `id::text as id, email, user_id::text as user_id, coach, seances, source, reference, libelle,
+// minutes : la quantite du droit (migration 20261109200000_coaching_heures, coalesce de l'ancienne colonne seances).
+const COLS_DROIT = `id::text as id, email, user_id::text as user_id, coach, seances, minutes, source, reference, libelle,
        depuis, note, pose_par, retire_le, derive`
+/** Ce que rend une ecriture de coaching_droits (la meme forme que la vue). */
+const RETOUR_DROIT = `id::text as id, email, user_id::text as user_id, coach, seances, coalesce(minutes, seances * 60) as minutes,
+              source, reference, null::text as libelle, depuis, note, pose_par, retire_le, false as derive`
 const COLS_SEANCE = `id::text as id, email, user_id::text as user_id, coach, debut, duree_min, statut, source, reference,
        droit_id::text as droit_id, note, pose_par, pose_le, statut_le, statut_par`
 
@@ -79,7 +83,7 @@ select ${COLS_SEANCE} from public.coaching_seances
 
 /** Tous les droits, avec l'email du compte quand le pack a ete achete connecte (email vide). */
 export const SQL_TOUS_DROITS = `
-select d.id::text as id, coalesce(d.email, lower(btrim(u.email))) as email, d.user_id::text as user_id, d.coach, d.seances,
+select d.id::text as id, coalesce(d.email, lower(btrim(u.email))) as email, d.user_id::text as user_id, d.coach, d.seances, d.minutes,
        d.source, d.reference, d.libelle, d.depuis, d.note, d.pose_par, d.retire_le, d.derive
   from public.coaching_droits_tous d
   left join auth.users u on u.id = d.user_id
@@ -195,10 +199,11 @@ select id::text, droit_id::text, false from public.coaching_seances
  where source = 'cal' and reference = $6::text and not exists (select 1 from ins)
 `
 
+// Le droit d'une heure payee sur Cal porte la duree du rendez-vous ($5, en minutes) : il couvre sa seance, ni plus ni moins.
 const SQL_DROIT_CAL = `
 with ins as (
-  insert into public.coaching_droits (email, user_id, coach, seances, source, reference, pose_par, note)
-  values ($1::text, $2::uuid, $3::text, 1, 'cal', $4::text, 'cal', 'Heure payée sur Cal')
+  insert into public.coaching_droits (email, user_id, coach, minutes, source, reference, pose_par, note)
+  values ($1::text, $2::uuid, $3::text, $5::int, 'cal', $4::text, 'cal', 'Heure payée sur Cal')
   on conflict (source, reference) where reference is not null do nothing
   returning id::text as id
 )
@@ -217,7 +222,8 @@ export type IssuePoserCal = { seance: string; etat: 'cree' | 'mis_a_jour' | 'rep
  * Pose ou met a jour la seance d'un rendez-vous Cal (dans une transaction).
  * Un report deplace la seance d'origine (son lien au droit suit). Une seance
  * annulee ou faite ne revient jamais a « prevue » par un evenement en retard.
- * Une heure payee cree son droit d'une seance (une fois) et la seance s'y lie.
+ * Une heure payee cree son droit (une fois), de la duree du rendez-vous, et la
+ * seance s'y lie.
  */
 export async function poserSeanceCal(c: ClientSql, ev: Extract<EvenementCal, { geste: 'poser' }>): Promise<IssuePoserCal> {
   const userId = await compteDeLEmail(c, ev.email)
@@ -243,7 +249,7 @@ export async function poserSeanceCal(c: ClientSql, ev: Extract<EvenementCal, { g
   if (ev.paye) {
     if (seance.droit_id) droit = 'deja'
     else {
-      const [d] = await c.$queryRawUnsafe<{ id: string }[]>(SQL_DROIT_CAL, ev.email, userId, COACH_CAL, ev.uid)
+      const [d] = await c.$queryRawUnsafe<{ id: string }[]>(SQL_DROIT_CAL, ev.email, userId, COACH_CAL, ev.uid, ev.duree_min)
       if (d) await c.$executeRawUnsafe(SQL_LIER_DROIT, seance.id, d.id)
       droit = 'cree_ou_lie'
     }
@@ -298,24 +304,27 @@ export async function changerStatutSeance(c: ClientSql, id: string, statut: Stat
   return l ?? null
 }
 
+/** Accorde des heures (offertes ou ETM), en minutes. L'ancienne colonne seances reste vide. */
 export async function accorderDroit(c: ClientSql, d: D<'accorder_droit'>, posePar: string): Promise<DroitLu> {
   const userId = await compteDeLEmail(c, d.email)
   const [l] = await c.$queryRawUnsafe<DroitLu[]>(`
-    insert into public.coaching_droits (email, user_id, coach, seances, source, depuis, note, pose_par)
+    insert into public.coaching_droits (email, user_id, coach, minutes, source, depuis, note, pose_par)
     values ($1::text, $2::uuid, $3::text, $4::int, $5::text, coalesce($6::timestamptz, now()), $7::text, $8::text)
-    returning id::text as id, email, user_id::text as user_id, coach, seances, source, reference, null::text as libelle,
-              depuis, note, pose_par, retire_le, false as derive`,
-  d.email, userId, d.coach, d.seances, d.source, d.depuis, d.note, posePar)
+    returning ${RETOUR_DROIT}`,
+  d.email, userId, d.coach, d.minutes, d.source, d.depuis, d.note, posePar)
   return l
 }
 
-/** Corrige un droit de la table (pas un pack : il se complete par un droit offert). null = introuvable ou retire. */
-export async function corrigerDroit(c: ClientSql, id: string, seances: number, note: string | null): Promise<DroitLu | null> {
+/**
+ * Corrige la quantite d'un droit de la table, en minutes (pas un pack : il se
+ * complete par des heures offertes). L'ancienne colonne seances se vide : seule
+ * minutes compte. null = introuvable ou retire.
+ */
+export async function corrigerDroit(c: ClientSql, id: string, minutes: number, note: string | null): Promise<DroitLu | null> {
   const [l] = await c.$queryRawUnsafe<DroitLu[]>(`
-    update public.coaching_droits set seances = $2::int, note = coalesce($3::text, note)
+    update public.coaching_droits set minutes = $2::int, seances = null, note = coalesce($3::text, note)
      where id = $1::uuid and retire_le is null
-    returning id::text as id, email, user_id::text as user_id, coach, seances, source, reference, null::text as libelle,
-              depuis, note, pose_par, retire_le, false as derive`, id, seances, note)
+    returning ${RETOUR_DROIT}`, id, minutes, note)
   return l ?? null
 }
 

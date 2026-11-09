@@ -13,18 +13,26 @@
 //      l'invite (normaliserEmail, compteUnique) ;
 //   4. le corps des gestes du cockpit (lireDemandeCockpit).
 //
-// LE CALCUL DU RESTE, en clair :
-//   - un droit compte tant qu'il n'est pas retire ; une seance compte (consomme
-//     une place) si elle est prevue ou faite, jamais annulee ;
-//   - une seance liee a un droit (droit_id) le consomme d'abord, s'il est du
-//     meme coach et a encore de la place (une heure payee sur Cal consomme son
-//     propre droit) ;
-//   - les autres prennent, dans l'ordre de leur date, le droit le plus ancien
-//     du meme coach qui a encore de la place (premier arrive, premier servi) ;
-//   - ce qui ne trouve pas de place est « hors droits » (le cockpit le signale) ;
+// LE CALCUL DU RESTE, EN HEURES (09/11/2026, suite : brief
+// D:\7_Agents\briefs\2026-11-09-mon-coaching-reglages.md, migration
+// 20261109200000_coaching_heures.sql). Tout se compte en MINUTES :
+//   - un droit porte des minutes (pack 8 h = 480, ETM pose eleve par eleve,
+//     12 h par defaut) tant qu'il n'est pas retire ;
+//   - une seance prevue ou faite retire sa duree (30 min = 0,5 h). Une seance
+//     ANNULEE NE RETIRE JAMAIS RIEN, annulee tot ou au dernier moment (Brice :
+//     « Une annulation de derniere minute ne compte pas »). Un rendez-vous
+//     manque sans prevenir reste prevu (« Passee ») et compte tant que l'equipe
+//     ne le marque pas : « annulee » rend l'heure, « faite » la garde ;
+//   - une seance liee a un droit (droit_id) prend d'abord sur lui (une heure
+//     payee sur Cal consomme son propre droit) ;
+//   - le reste de sa duree prend, dans l'ordre des dates, sur le droit le plus
+//     ancien du meme coach qui a encore du temps, puis le suivant (une seance
+//     peut se partager entre deux droits) ;
+//   - ce qui ne trouve aucune place est « hors droits » (le cockpit le signale) ;
 //   - une ligne par coach et par famille : le pack (par offre), l'ETM, les
-//     seances a l'unite (offertes ou payees sur Cal). Un coach sans aucun droit
-//     mais avec des seances a une ligne « seances » sans total.
+//     heures a l'unite (offertes ou payees sur Cal). Un coach sans aucun droit
+//     mais avec des seances a une ligne sans total.
+// Les phrases : « 6 h restantes sur 8 h avec Brice », « 7,5 h », « 6 h 50 ».
 
 import { createHmac, timingSafeEqual } from 'node:crypto'
 
@@ -42,7 +50,10 @@ export const STATUTS_SEANCE: readonly StatutSeance[] = ['prevue', 'faite', 'annu
 export type Droit = {
   id: string
   coach: Coach
-  seances: number
+  /** La quantite du droit en minutes (vue coaching_droits_tous, migration 20261109200000). */
+  minutes?: number | null
+  /** L'ancienne quantite en seances d'une heure : lue seulement si minutes manque. */
+  seances?: number | null
   source: SourceDroit
   /** pack : le slug de l'offre ; cal : l'uid du rendez-vous ; sinon libre ou vide. */
   reference: string | null
@@ -78,11 +89,16 @@ export type LigneCoaching = {
   /** Le slug du pack (famille pack), sinon null. */
   pack: string | null
   titre: string
-  /** null = aucun droit pour ce coach, seulement des seances. */
-  total: number | null
-  faites: number
-  prevues: number
-  restantes: number | null
+  /** Le total des droits en minutes. null = aucun droit pour ce coach, seulement des seances. */
+  total_min: number | null
+  /** Les minutes prises sur cette ligne par les seances faites, puis prevues. */
+  faites_min: number
+  prevues_min: number
+  /** total_min - faites_min - prevues_min, ou null sans droit. */
+  restantes_min: number | null
+  /** Le nombre de seances faites et prevues qui prennent sur cette ligne. */
+  nb_faites: number
+  nb_prevues: number
   phrase: string
   detail: string
 }
@@ -91,8 +107,10 @@ export type StatutAffiche = 'prevue' | 'passee' | 'faite' | 'annulee'
 
 export type SeanceResumee = Seance & {
   statut_affiche: StatutAffiche
-  /** La ligne qui la decompte (cle), ou null : annulee, ou hors droits. */
+  /** La ligne qui la decompte (celle qui en prend le plus), ou null : annulee, ou hors droits. */
   ligne: string | null
+  /** Les minutes de cette seance qui n'ont trouve aucune place (0 le plus souvent). */
+  hors_min: number
 }
 
 export type ResumeCoaching = {
@@ -102,8 +120,10 @@ export type ResumeCoaching = {
   prochain: SeanceResumee | null
   /** La plus recente d'abord. */
   historique: SeanceResumee[]
-  /** Seances prevues ou faites qui n'ont trouve aucune place, par coach. */
+  /** Le nombre de seances prevues ou faites qui depassent les droits, par coach. */
   hors_droits: Record<Coach, number>
+  /** Les minutes qui depassent les droits, par coach. */
+  hors_droits_min: Record<Coach, number>
 }
 
 const ms = (d: string | Date) => (d instanceof Date ? d.getTime() : Date.parse(d))
@@ -118,25 +138,64 @@ export function cleLigne(d: Pick<Droit, 'coach' | 'source' | 'reference'>): stri
   return f === 'pack' ? `${d.coach}:pack:${d.reference ?? ''}` : `${d.coach}:${f}`
 }
 
-const s = (n: number) => (Math.abs(n) >= 2 ? 's' : '')
-
-/** « 5 séances restantes sur 8 avec Brice », « 0 séance restante sur 8 avec Brice ». */
-export function phraseReste(restantes: number, total: number, coach: Coach): string {
-  return `${restantes} séance${s(restantes)} restante${s(restantes)} sur ${total} avec ${NOM_COACH[coach]}`
+const positif = (v: unknown): number | null => {
+  const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : null
 }
 
-/** « 2 faites, 1 prévue », « aucune séance pour l'instant ». */
+/** La quantite d'un droit en minutes : minutes, ou l'ancienne quantite en seances d'une heure. 0 = rien. */
+export function minutesDuDroit(d: Pick<Droit, 'minutes' | 'seances'>): number {
+  const m = positif(d.minutes)
+  if (m !== null) return m
+  const n = positif(d.seances)
+  return n !== null ? n * 60 : 0
+}
+
+/** La duree d'une seance en minutes, 0 si elle est illisible. */
+const dureeDe = (x: Pick<Seance, 'duree_min'>): number => positif(x.duree_min) ?? 0
+
+/**
+ * Une duree en heures, a la francaise : « 8 h », « 7,5 h », « 0,5 h » (demi-heures
+ * en decimal), « 6 h 50 », « 1 h 15 », « 50 min » (le reste).
+ */
+export function texteHeures(min: number): string {
+  const m = Math.max(0, Math.round(min))
+  if (m % 60 === 0) return `${m / 60} h`
+  if (m % 30 === 0) return `${Math.floor(m / 60)},5 h`
+  if (m < 60) return `${m} min`
+  return `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}`
+}
+
+/** Le pluriel qui suit une duree : a partir de 2 (2 h, 2,5 h, 50 min), jamais en dessous (1,5 h restante). */
+const sDuree = (min: number) => {
+  const m = Math.max(0, Math.round(min))
+  return m >= 120 || (m < 60 && m % 30 !== 0 && m >= 2) ? 's' : ''
+}
+
+const s = (n: number) => (Math.abs(n) >= 2 ? 's' : '')
+
+/** « 6 h restantes sur 8 h avec Brice », « 0,5 h restante sur 12 h avec Brice », « 0 h restante sur 8 h avec Brice ». */
+export function phraseReste(restantesMin: number, totalMin: number, coach: Coach): string {
+  return `${texteHeures(restantesMin)} restante${sDuree(restantesMin)} sur ${texteHeures(totalMin)} avec ${NOM_COACH[coach]}`
+}
+
+/** Un coach sans droit : « 2 h de coaching avec Mélanie ». */
+export function phraseSansDroit(min: number, coach: Coach): string {
+  return `${texteHeures(min)} de coaching avec ${NOM_COACH[coach]}`
+}
+
+/** « 2 séances faites, 1 prévue », « 1 séance prévue », « aucune séance pour l'instant ». */
 export function detailSeances(faites: number, prevues: number): string {
-  const morceaux: string[] = []
-  if (faites) morceaux.push(`${faites} faite${s(faites)}`)
-  if (prevues) morceaux.push(`${prevues} prévue${s(prevues)}`)
-  return morceaux.length ? morceaux.join(', ') : "aucune séance pour l'instant"
+  if (!faites && !prevues) return "aucune séance pour l'instant"
+  if (!prevues) return `${faites} séance${s(faites)} faite${s(faites)}`
+  if (!faites) return `${prevues} séance${s(prevues)} prévue${s(prevues)}`
+  return `${faites} séance${s(faites)} faite${s(faites)}, ${prevues} prévue${s(prevues)}`
 }
 
 function titreLigne(famille: Famille, libelle: string | null): string {
   if (famille === 'pack') return libelle || 'Pack de coaching'
   if (famille === 'etm') return 'ETM'
-  return 'Séances'
+  return 'Heures de coaching'
 }
 
 export function statutAffiche(se: Pick<Seance, 'statut' | 'debut'>, maintenant: number): StatutAffiche {
@@ -152,71 +211,99 @@ export const LIBELLE_STATUT: Record<StatutAffiche, string> = {
   annulee: 'Annulée',
 }
 
-/** Le calcul du reste. maintenant en millisecondes (Date.now() par defaut). */
+/** Le calcul du reste, en minutes. maintenant en millisecondes (Date.now() par defaut). */
 export function resumerCoaching(droits: Droit[], seances: Seance[], maintenant = Date.now()): ResumeCoaching {
   const actifs = droits
-    .filter(d => !d.retire_le && estCoach(d.coach) && Number.isFinite(d.seances) && d.seances > 0)
+    .filter(d => !d.retire_le && estCoach(d.coach) && minutesDuDroit(d) > 0)
     .sort((a, b) => ms(a.depuis) - ms(b.depuis) || a.id.localeCompare(b.id))
+  const capacite = new Map<string, number>(actifs.map(d => [d.id, minutesDuDroit(d)]))
   const utilise = new Map<string, number>(actifs.map(d => [d.id, 0]))
   const parId = new Map(actifs.map(d => [d.id, d]))
-  const place = (d: Droit) => d.seances - (utilise.get(d.id) ?? 0)
+  const place = (d: Droit) => (capacite.get(d.id) ?? 0) - (utilise.get(d.id) ?? 0)
 
   const valides = seances.filter(x => estCoach(x.coach) && STATUTS_SEANCE.includes(x.statut))
+  // Seule une seance prevue ou faite retire du temps. Une annulee jamais.
   const comptees = valides
-    .filter(x => x.statut === 'prevue' || x.statut === 'faite')
+    .filter(x => (x.statut === 'prevue' || x.statut === 'faite') && dureeDe(x) > 0)
     .sort((a, b) => ms(a.debut) - ms(b.debut) || a.id.localeCompare(b.id))
 
-  const affectation = new Map<string, Droit>()
-  // 1. Les seances liees a un droit precis.
+  // Ce que chaque seance prend a chaque droit, en minutes.
+  const reste = new Map<string, number>(comptees.map(x => [x.id, dureeDe(x)]))
+  const parts = new Map<string, { droit: Droit; min: number }[]>()
+  const prendre = (x: Seance, d: Droit) => {
+    const n = Math.min(place(d), reste.get(x.id) ?? 0)
+    if (n <= 0) return
+    utilise.set(d.id, (utilise.get(d.id) ?? 0) + n)
+    reste.set(x.id, (reste.get(x.id) ?? 0) - n)
+    const l = parts.get(x.id) ?? []
+    l.push({ droit: d, min: n })
+    parts.set(x.id, l)
+  }
+  // 1. Les seances liees a un droit precis prennent d'abord sur lui.
   for (const x of comptees) {
     const d = x.droit_id ? parId.get(x.droit_id) : undefined
-    if (d && d.coach === x.coach && place(d) > 0) {
-      affectation.set(x.id, d)
-      utilise.set(d.id, (utilise.get(d.id) ?? 0) + 1)
-    }
+    if (d && d.coach === x.coach) prendre(x, d)
   }
-  // 2. Les autres : le droit le plus ancien du meme coach qui a de la place.
-  const hors: Record<Coach, number> = { brice: 0, melanie: 0 }
+  // 2. Le reste de chaque seance : le droit le plus ancien du meme coach qui a du temps, puis le suivant.
   for (const x of comptees) {
-    if (affectation.has(x.id)) continue
-    const d = actifs.find(r => r.coach === x.coach && place(r) > 0)
-    if (d) {
-      affectation.set(x.id, d)
-      utilise.set(d.id, (utilise.get(d.id) ?? 0) + 1)
-    } else {
-      hors[x.coach]++
+    for (const d of actifs) {
+      if ((reste.get(x.id) ?? 0) <= 0) break
+      if (d.coach === x.coach) prendre(x, d)
     }
   }
 
   // Les lignes : une par coach et par famille (un pack par offre).
-  type Acc = { coach: Coach; famille: Famille; pack: string | null; libelle: string | null; total: number; faites: number; prevues: number; depuis: number }
+  type Acc = {
+    coach: Coach; famille: Famille; pack: string | null; libelle: string | null
+    total: number; faites: number; prevues: number; nbFaites: number; nbPrevues: number
+  }
   const acc = new Map<string, Acc>()
   for (const d of actifs) {
     const cle = cleLigne(d)
     const f = familleDe(d)
-    const a = acc.get(cle) ?? { coach: d.coach, famille: f, pack: f === 'pack' ? d.reference : null, libelle: d.libelle, total: 0, faites: 0, prevues: 0, depuis: ms(d.depuis) }
-    a.total += d.seances
+    const a = acc.get(cle) ?? {
+      coach: d.coach, famille: f, pack: f === 'pack' ? d.reference : null, libelle: d.libelle,
+      total: 0, faites: 0, prevues: 0, nbFaites: 0, nbPrevues: 0,
+    }
+    a.total += capacite.get(d.id) ?? 0
     acc.set(cle, a)
   }
   const ligneDe = new Map<string, string>()
   for (const x of comptees) {
-    const d = affectation.get(x.id)
-    if (!d) continue
-    const cle = cleLigne(d)
-    ligneDe.set(x.id, cle)
-    const a = acc.get(cle)!
-    if (x.statut === 'faite') a.faites++
-    else a.prevues++
+    const parLigne = new Map<string, number>()
+    for (const p of parts.get(x.id) ?? []) {
+      const cle = cleLigne(p.droit)
+      parLigne.set(cle, (parLigne.get(cle) ?? 0) + p.min)
+    }
+    let principale: string | null = null
+    let plus = 0
+    for (const [cle, min] of parLigne) {
+      const a = acc.get(cle)!
+      if (x.statut === 'faite') { a.faites += min; a.nbFaites++ } else { a.prevues += min; a.nbPrevues++ }
+      if (min > plus) { principale = cle; plus = min }
+    }
+    if (principale) ligneDe.set(x.id, principale)
   }
-  // Un coach sans droit mais avec des seances : une ligne sans total.
-  const sansDroit = new Map<Coach, { faites: number; prevues: number }>()
+
+  // Ce qui reste sans place : un coach sans aucun droit a une ligne sans total,
+  // sinon c'est « hors droits ».
+  const sansDroit = new Map<Coach, { faites: number; prevues: number; nbFaites: number; nbPrevues: number }>()
+  const hors: Record<Coach, number> = { brice: 0, melanie: 0 }
+  const horsMin: Record<Coach, number> = { brice: 0, melanie: 0 }
+  const horsDe = new Map<string, number>()
   for (const x of comptees) {
-    if (affectation.has(x.id) || actifs.some(r => r.coach === x.coach)) continue
-    const c = sansDroit.get(x.coach) ?? { faites: 0, prevues: 0 }
-    if (x.statut === 'faite') c.faites++
-    else c.prevues++
-    sansDroit.set(x.coach, c)
-    ligneDe.set(x.id, `${x.coach}:seances`)
+    const r = reste.get(x.id) ?? 0
+    if (r <= 0) continue
+    if (!actifs.some(d => d.coach === x.coach)) {
+      const c = sansDroit.get(x.coach) ?? { faites: 0, prevues: 0, nbFaites: 0, nbPrevues: 0 }
+      if (x.statut === 'faite') { c.faites += r; c.nbFaites++ } else { c.prevues += r; c.nbPrevues++ }
+      sansDroit.set(x.coach, c)
+      ligneDe.set(x.id, `${x.coach}:seances`)
+    } else {
+      hors[x.coach]++
+      horsMin[x.coach] += r
+      horsDe.set(x.id, r)
+    }
   }
 
   const lignes: LigneCoaching[] = []
@@ -224,23 +311,27 @@ export function resumerCoaching(droits: Droit[], seances: Seance[], maintenant =
     const restantes = a.total - a.faites - a.prevues
     lignes.push({
       cle, coach: a.coach, famille: a.famille, pack: a.pack, titre: titreLigne(a.famille, a.libelle),
-      total: a.total, faites: a.faites, prevues: a.prevues, restantes,
-      phrase: phraseReste(restantes, a.total, a.coach), detail: detailSeances(a.faites, a.prevues),
+      total_min: a.total, faites_min: a.faites, prevues_min: a.prevues, restantes_min: restantes,
+      nb_faites: a.nbFaites, nb_prevues: a.nbPrevues,
+      phrase: phraseReste(restantes, a.total, a.coach), detail: detailSeances(a.nbFaites, a.nbPrevues),
     })
   }
   for (const [coach, c] of sansDroit) {
-    const n = c.faites + c.prevues
     lignes.push({
-      cle: `${coach}:seances`, coach, famille: 'seances', pack: null, titre: 'Séances',
-      total: null, faites: c.faites, prevues: c.prevues, restantes: null,
-      phrase: `${n} séance${s(n)} avec ${NOM_COACH[coach]}`, detail: detailSeances(c.faites, c.prevues),
+      cle: `${coach}:seances`, coach, famille: 'seances', pack: null, titre: titreLigne('seances', null),
+      total_min: null, faites_min: c.faites, prevues_min: c.prevues, restantes_min: null,
+      nb_faites: c.nbFaites, nb_prevues: c.nbPrevues,
+      phrase: phraseSansDroit(c.faites + c.prevues, coach), detail: detailSeances(c.nbFaites, c.nbPrevues),
     })
   }
   lignes.sort((a, b) => COACHS.indexOf(a.coach) - COACHS.indexOf(b.coach)
     || ORDRE_FAMILLE[a.famille] - ORDRE_FAMILLE[b.famille] || a.cle.localeCompare(b.cle))
 
   const resumees: SeanceResumee[] = valides.map(x => ({
-    ...x, statut_affiche: statutAffiche(x, maintenant), ligne: x.statut === 'annulee' ? null : (ligneDe.get(x.id) ?? null),
+    ...x,
+    statut_affiche: statutAffiche(x, maintenant),
+    ligne: x.statut === 'annulee' ? null : (ligneDe.get(x.id) ?? null),
+    hors_min: horsDe.get(x.id) ?? 0,
   }))
   const historique = [...resumees].sort((a, b) => ms(b.debut) - ms(a.debut) || a.id.localeCompare(b.id))
   const prochain = resumees
@@ -249,7 +340,7 @@ export function resumerCoaching(droits: Droit[], seances: Seance[], maintenant =
 
   return {
     visible: actifs.length > 0 || valides.some(x => x.statut !== 'annulee'),
-    lignes, prochain, historique, hors_droits: hors,
+    lignes, prochain, historique, hors_droits: hors, hors_droits_min: horsMin,
   }
 }
 
@@ -497,15 +588,20 @@ export function lireEvenementCal(brut: unknown, typesSuivis: ReadonlySet<string>
 // ---------------------------------------------------------------------------
 
 export const MAX_NOTE = 500
-export const MAX_SEANCES_DROIT = 100
+/** Un droit pose depuis le cockpit : de 15 min a 100 h, par quart d'heure (12 h = 720, 6,5 h = 390). */
+export const MIN_MINUTES_DROIT = 15
+export const MAX_MINUTES_DROIT = 6000
+export const PAS_MINUTES_DROIT = 15
+/** L'ETM par defaut (Brice, 09/11) : 1 h par semaine sur 3 mois. Le cockpit le preremplit, l'equipe l'ajuste. */
+export const MINUTES_ETM_DEFAUT = 12 * 60
 
 export type DemandeCockpit =
   | { action: 'lister' }
   | { action: 'fiche'; emails: string[] }
   | { action: 'ajouter_seance'; email: string; coach: Coach; debut: string; duree_min: number; statut: 'prevue' | 'faite'; note: string | null }
   | { action: 'statut_seance'; id: string; statut: StatutSeance }
-  | { action: 'accorder_droit'; email: string; coach: Coach; seances: number; source: 'offert' | 'etm'; depuis: string | null; note: string | null }
-  | { action: 'corriger_droit'; id: string; seances: number; note: string | null }
+  | { action: 'accorder_droit'; email: string; coach: Coach; minutes: number; source: 'offert' | 'etm'; depuis: string | null; note: string | null }
+  | { action: 'corriger_droit'; id: string; minutes: number; note: string | null }
   | { action: 'retirer_droit'; id: string }
   | { action: 'confirmer_detection'; id: string; email: string; coach: Coach; duree_min: number | null }
   | { action: 'ecarter_detection'; id: string }
@@ -534,7 +630,22 @@ function lireDate(v: unknown): string | null {
 const entier = (v: unknown, min: number, max: number): number | null =>
   typeof v === 'number' && Number.isInteger(v) && v >= min && v <= max ? v : null
 
-export type ErreurCockpit = 'action' | 'id' | 'email' | 'coach' | 'date' | 'duree' | 'statut' | 'seances' | 'source' | 'note' | 'emails'
+/**
+ * La quantite d'un droit pose depuis le cockpit, en minutes : `minutes` (par
+ * quart d'heure, de 15 min a 100 h), ou `seances` (de 1 a 100, en heures
+ * pleines) que l'ancien ecran du cockpit envoie encore tant qu'il n'est pas
+ * redeploye. null = invalide ou absente.
+ */
+function lireMinutesDroit(c: Record<string, unknown>): number | null {
+  if (c.minutes !== undefined) {
+    const m = entier(c.minutes, MIN_MINUTES_DROIT, MAX_MINUTES_DROIT)
+    return m !== null && m % PAS_MINUTES_DROIT === 0 ? m : null
+  }
+  const n = entier(c.seances, 1, MAX_MINUTES_DROIT / 60)
+  return n === null ? null : n * 60
+}
+
+export type ErreurCockpit = 'action' | 'id' | 'email' | 'coach' | 'date' | 'duree' | 'statut' | 'heures' | 'source' | 'note' | 'emails'
 
 /** Le corps de POST /api/cockpit/coaching, verifie. */
 export function lireDemandeCockpit(corps: unknown): DemandeCockpit | { erreur: ErreurCockpit } {
@@ -572,8 +683,8 @@ export function lireDemandeCockpit(corps: unknown): DemandeCockpit | { erreur: E
       const email = normaliserEmail(c.email)
       if (!email) return { erreur: 'email' }
       if (!estCoach(c.coach)) return { erreur: 'coach' }
-      const seances = entier(c.seances, 1, MAX_SEANCES_DROIT)
-      if (seances === null) return { erreur: 'seances' }
+      const minutes = lireMinutesDroit(c)
+      if (minutes === null) return { erreur: 'heures' }
       if (c.source !== 'offert' && c.source !== 'etm') return { erreur: 'source' }
       let depuis: string | null = null
       if (c.depuis !== undefined && c.depuis !== null && c.depuis !== '') {
@@ -582,16 +693,16 @@ export function lireDemandeCockpit(corps: unknown): DemandeCockpit | { erreur: E
       }
       const note = lireNote(c.note)
       if (note === 'invalide') return { erreur: 'note' }
-      return { action: 'accorder_droit', email, coach: c.coach, seances, source: c.source, depuis, note }
+      return { action: 'accorder_droit', email, coach: c.coach, minutes, source: c.source, depuis, note }
     }
     case 'corriger_droit': {
       const id = lireUuid(c.id)
       if (!id) return { erreur: 'id' }
-      const seances = entier(c.seances, 1, MAX_SEANCES_DROIT)
-      if (seances === null) return { erreur: 'seances' }
+      const minutes = lireMinutesDroit(c)
+      if (minutes === null) return { erreur: 'heures' }
       const note = lireNote(c.note)
       if (note === 'invalide') return { erreur: 'note' }
-      return { action: 'corriger_droit', id, seances, note }
+      return { action: 'corriger_droit', id, minutes, note }
     }
     case 'retirer_droit': {
       const id = lireUuid(c.id)
@@ -630,7 +741,7 @@ export const TEXTE_ERREUR: Record<ErreurCockpit, string> = {
   date: 'Date invalide.',
   duree: 'Durée invalide (5 à 480 minutes).',
   statut: 'Statut inconnu.',
-  seances: `Nombre de séances invalide (1 à ${MAX_SEANCES_DROIT}).`,
+  heures: "Nombre d'heures invalide (de 15 min à 100 h, par quart d'heure).",
   source: 'Origine inconnue (offert ou ETM).',
   note: `Note trop longue (${MAX_NOTE} caractères au plus).`,
 }
