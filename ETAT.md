@@ -1,5 +1,24 @@
 # ETAT du journal d etudes
 
+## QUESTIONS SOUS LES LECONS DE L'ACADEMIE (09/11/2026, commite NON pousse, branche questions-lecons depuis origin/master ; migration 20261109090000 ECRITE, NON appliquee)
+
+- Decision de Brice du 16/10 (PLAN-ACADEMIE section 12), lancee le 08/11 avant la fermeture de Skool. Brief :
+  D:\7_Agents\briefs\2026-11-08-questions-sous-les-lecons.md ; rapport : questions-lecons-rapport.md (notes de la conversation
+  Yume Orchestre).
+- `POST /api/academie/questions-lecon` (Bearer du site, CORS academie) : `lire` / `poser`. Droit sur la lecon par
+  droitsAcademie + ouvertureLecon (gratuits compris sur ce qu'ils ouvrent), 5 questions sur 24 h glissantes (limite dans le
+  meme ordre SQL que l'insert), 1000 caracteres, texte nettoye. Rend les publiees et les siennes, jamais un compte ni un email.
+  Alerte Agent AOK a chaque question (alerterEquipeTexte, support: true, analyse de securite des bots).
+- `POST /api/cockpit/academie/questions-lecons` (allowlist) : lister (attente / traitees), repondre (publier ou prive,
+  question corrigee possible, signature = prenom du libelle de cockpit_allowlist), retoucher sans email, ecarter. UN email
+  au membre a la premiere reponse (Resend, cle des mails du Live Club, lien de la lecon #questions).
+- Code : src/lib/academie/questions-lecons.ts (sans import : regles, textes, SQL) et questions-lecons-envois.ts.
+- Verifs : `node scripts/verifier-questions-lecons.mjs` (11 blocs) ; `node --env-file=.env.local
+  scripts/essayer-migration-questions-lecons.mjs` (transaction annulee, 17 etapes, lectures rejouees sous authenticated avec
+  vrai sub et vrai email, et anon). Dans un worktree : `AOK_WORKSPACE=<racine du workspace>`.
+- ORDRE DE MISE EN LIGNE : migration, puis ce journal, puis le site et le cockpit (sans la migration, les routes rendent 503
+  code migration et le bloc du site dit « ne se chargent pas »).
+
 ## PASSATION SKOOL : INVITATIONS DES MEMBRES, LIEN EN 1 CLIC, COMPTEUR (08/11/2026, commite NON pousse, branche passation-invitations depuis origin/master ; migration 20261108200000 ECRITE, NON appliquee)
 
 - Brice, 08/11 : options A2 (email aux 235 adresses connues, versions payant et gratuit, relance J+3), A4 (lien
