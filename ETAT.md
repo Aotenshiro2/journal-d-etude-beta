@@ -1,5 +1,40 @@
 # ETAT du journal d etudes
 
+## MON COACHING : SEANCES RESTANTES, WEBHOOK CAL, COCKPIT, MEET (09/11/2026, commite NON pousse, branche mon-coaching depuis origin/master ; migration 20261109140000 ECRITE, NON appliquee)
+
+- Demande de Brice du 09/11 (seances restantes dans Mon espace ; trois branchements : Cal pour Brice, cockpit pour Melanie
+  qui n'a pas de Cal, enregistrements Meet proposes a confirmer). Brief : D:\7_Agents\briefs\2026-11-09-mon-coaching-seances.md ;
+  rapport : mon-coaching-rapport.md (notes de la conversation Yume Orchestre).
+- Code : src/lib/coaching/pur.ts (calcul du reste, vue du membre, signature et lecture des evenements Cal, corps des gestes du
+  cockpit, regroupement par personne) et src/lib/coaching/base.ts (les requetes ; SQL_COMPTES_DE_EMAIL recopie a l'identique,
+  verifie par le script).
+- Routes :
+  - `POST /api/coaching/cal` : PUBLIQUE (middleware.ts), 503 tant que CAL_WEBHOOK_SECRET n'est pas pose, 401 si la signature
+    X-Cal-Signature-256 (HMAC-SHA256 hex du corps brut) ne colle pas. BOOKING_CREATED / PAID / RESCHEDULED posent ou deplacent la
+    seance (prevue, coach brice, rattachee par l'email de l'invite) ; BOOKING_PAID cree le droit d'une seance (une fois) et l'y
+    lie ; BOOKING_CANCELLED / REJECTED annulent (et retirent le droit Cal de la seance). Une seance ne se pose que pour un type
+    d'evenement liste dans CAL_COACHING_TYPES (slugs ou ids, virgules) : vide = rien ne se pose (un appel decouverte ne doit
+    jamais consommer un pack). Une seance annulee ou faite ne revient jamais a prevue par un evenement en retard.
+  - `POST /api/compte/coaching` : jeton du site, CORS academie. Rend la vue du membre (phrases, prochain, historique, bouton) :
+    ni email, ni note, ni identifiant, ni source. Lien du pack : COACHING_RESERVATION_URL (meme variable que l'email d'achat).
+  - `POST /api/cockpit/coaching` : allowlist. lister, fiche, ajouter_seance, statut_seance, accorder_droit (offert | etm),
+    corriger_droit, retirer_droit, confirmer_detection, ecarter_detection.
+- Regles du reste : un droit compte tant qu'il n'est pas retire ; une seance prevue ou faite consomme une place, annulee non ;
+  une seance liee a un droit le consomme d'abord, les autres prennent le droit le plus ancien du meme coach qui a de la place ;
+  le surplus est « hors droits » (signale au cockpit). Le pack 8 h se deduit de academie_acces (vue coaching_droits_tous) :
+  rien ne change dans la capture PayPal.
+- Agent du cockpit : coaching_droits_tous, coaching_seances, coaching_detections ajoutes au catalogue (agent-cockpit.ts).
+- Verifs : `node scripts/verifier-coaching.mjs` (16 blocs, hors ligne) ; `node --env-file=.env.local
+  scripts/essayer-migration-coaching.mjs` (transaction annulee, 19 etapes : migration jouee deux fois, parcours Cal complet,
+  Meet, lectures rejouees sous authenticated avec vrai sub et vrai email, et anon). Worktree : `AOK_WORKSPACE=<racine du workspace>`.
+  `npm run build` OK.
+- Meet : D:\6_Societe\Pilotage\Data-Performance\automations\coaching_meet.py (Python Windows, sec par defaut, --ecrire pour
+  inserer, --essai pour les regles). AUCUN jeton du coffre ne couvre Drive : il attend credentials.local\google-drive-meet.local.json
+  (drive.metadata.readonly, compte Google d'AOK de Brice).
+- ORDRE DE MISE EN LIGNE : migration (puis `npm run verifier:rls`) ; ce journal avec CAL_WEBHOOK_SECRET et CAL_COACHING_TYPES ;
+  site et cockpit ; webhook dans Cal (Ping test = 200 « ignore ») ; jeton Drive puis coaching_meet.py. Ouverts : effacement RGPD
+  et export ne connaissent pas les tables coaching_*.
+
 ## QUESTIONS SOUS LES LECONS DE L'ACADEMIE (09/11/2026, commite NON pousse, branche questions-lecons depuis origin/master ; migration 20261109090000 ECRITE, NON appliquee)
 
 - Decision de Brice du 16/10 (PLAN-ACADEMIE section 12), lancee le 08/11 avant la fermeture de Skool. Brief :
