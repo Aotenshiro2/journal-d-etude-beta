@@ -1,5 +1,28 @@
 # ETAT du journal d etudes
 
+## COACHING 8 H VENDU PAR LE TUNNEL PAYPAL DU 10% CLUB (08/11/2026, commite NON pousse, branche club-coaching depuis origin/master ; migration 20261108235500 du workspace ECRITE, NON appliquee)
+
+- Brice, 08/11 : recommandation de PLAN-UPSELL.md section 7 suivie. Brief : D:\7_Agents\briefs\2026-11-08-club-tunnel-coaching.md.
+- Les routes /api/club/paypal (GET, commande, capturer) sont generiques par offre (OFFRES_PAYPAL de
+  club-paypal-pur.ts) : { offre: 'coaching' } (GET : ?offre=coaching), absente = le Club comme avant. Reponses
+  avec offre (le site exige offre = 'coaching' : un journal plus ancien ne vend jamais le Club a sa place).
+  L'offre est relue dans le reference_id de la commande PayPal (coaching-8h, coaching-8h-essai), jamais dans le corps.
+- Coaching : offre academie coaching-8h (1 000 EUR en base, AUCUN prix a defaut : sans la migration, 503 'config',
+  essai compris), pas de case de renonciation, PayPal-Request-Id coaching8h-capture-<commande>. Drapeau
+  COACHING_PAYPAL_PUBLIC=1 (sinon essai admin a 1 EUR seulement). COACHING_RESERVATION_URL facultative (https).
+- Capture COMPLETED du coaching : ligne academie_acces (source paypal, offre coaching-8h, renonciation vide,
+  aucun contenu ouvert), email a l'acheteur (meme expediteur et gabarit que le Club, modeleEmailCoaching :
+  « Brice vous contacte sous 48 h » faute de lien de reservation), alerte Telegram a l'equipe (alerterEquipeClub,
+  texteAlerteCoaching : montant, acheteur, achat du Club retrouve ou non par SQL_MEMBRE_OFFRE, email parti ou non).
+  Paye mais non note (base, offre absente) : alerte texteAlerteNonNote, Club compris, une fois par capture.
+- Cockpit : comme le Club, par la collecte PayPal hebdomadaire (cockpit_paiements paypal:<capture>, non classe) ;
+  Mon espace le montre avant (paiements_academie de aok_compte_de).
+- Verifs : verifier-coaching-paypal.mjs (12 blocs), verifier-club-paypal.mjs (15, MIGRATIONS_DIR depuis un worktree),
+  verifier-mails-achat.mjs (10), tsc, eslint, next build. Envoi d'essai vers delivered@resend.dev accepte.
+- MISE EN LIGNE, dans l'ordre, sur go : (1) migration 20261108235500 ; (2) push du journal ; (3) push du site ;
+  (4) essai admin a 1 EUR (/club?achat=essai puis /merci, ou /merci?achat=essai) ; (5) COACHING_PAYPAL_PUBLIC=1 +
+  redeploiement du journal.
+
 ## PASSATION SKOOL : INVITATIONS DES MEMBRES, LIEN EN 1 CLIC, COMPTEUR (08/11/2026, commite NON pousse, branche passation-invitations depuis origin/master ; migration 20261108200000 ECRITE, NON appliquee)
 
 - Brice, 08/11 : options A2 (email aux 235 adresses connues, versions payant et gratuit, relance J+3), A4 (lien
