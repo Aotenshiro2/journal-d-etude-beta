@@ -512,6 +512,10 @@ export function lienReservation(v: unknown): string | null {
  * l'achat est rattache, puis la suite : le lien de reservation s'il existe,
  * sinon « Brice vous contacte sous 48 h ». Aucun acces a l'academie : le
  * coaching se livre en seances.
+ * 09/11 (Brice) : le pack n'est pas de l'ETM, c'est un accompagnement pendant
+ * que l'eleve parcourt la formation (check-ups, lecons bien comprises,
+ * exercices et guidelines), en heures, sans date limite. Aucune promesse de
+ * resultat.
  */
 export function modeleEmailCoaching(p: {
   email: string; essai: boolean; montant?: string | null; prenom?: string | null; reservation: string | null
@@ -522,8 +526,9 @@ export function modeleEmailCoaching(p: {
     sujet: `${p.essai ? '[Essai] ' : ''}Votre coaching avec Brice est confirmé`,
     paragraphes: [
       p.prenom ? `Bonjour ${p.prenom},` : 'Bonjour,',
-      `Merci, ${paiement} : vos 8 séances de coaching individuel avec Brice vous attendent. Si vous payez en 4 fois, les échéances sont gérées par PayPal, pas par nous.`,
-      "Chaque séance dure 1 h. On y analyse vos trades et votre journal, et on corrige votre process en temps réel. Entre deux séances, vous avez un accès prioritaire par message.",
+      `Merci, ${paiement} : vos 8 h de coaching individuel avec Brice vous attendent. Si vous payez en 4 fois, les échéances sont gérées par PayPal, pas par nous.`,
+      "Ce coaching vous accompagne pendant que vous parcourez la formation. À chaque séance, Brice fait le point avec vous : il vérifie que les leçons sont bien comprises et vous donne des exercices et des guidelines à travailler d'ici la suivante.",
+      "Vos 8 h n'ont pas de date limite : elles suivent votre avancée dans la formation, à votre rythme.",
       reservation
         ? `Pour fixer votre première séance, choisissez votre créneau : {lien:${reservation}|${reservation.replace(/^https:\/\//, '')}}`
         : 'Brice vous contacte sous 48 h pour fixer votre première séance.',

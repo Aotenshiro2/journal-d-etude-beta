@@ -134,7 +134,14 @@ bloc('email du coaching sans lien de reservation : paye, seances, Brice sous 48 
   for (const t of [texte, html]) {
     assert.ok(t.includes('Bonjour Eleve,'))
     assert.ok(t.includes('1 000 euros'))
-    assert.match(t, /8 séances de coaching individuel avec Brice/)
+    assert.match(t, /8 h de coaching individuel avec Brice/)
+    // 09/11 (Brice) : un accompagnement pendant la formation, pas de l'ETM, sans date limite, sans promesse.
+    assert.match(t, /pendant que vous parcourez la formation/)
+    assert.match(t, /leçons sont bien comprises/)
+    assert.match(t, /exercices et des guidelines/)
+    assert.match(t, /pas de date limite/)
+    assert.doesNotMatch(t, /8 séances|accès prioritaire|en temps réel|valable|expire|dans les \d+ mois|\b\d+ mois\b/, 'ni seances comptees, ni ancienne promesse, ni duree de validite')
+    assert.doesNotMatch(t, /garanti|résultats? assurés?|rentab/i, 'aucune promesse de resultat')
     assert.match(t, /Brice vous contacte sous 48 h pour fixer votre première séance\./)
     assert.ok(t.includes('eleve@exemple.fr'))
     assert.match(t, /4 fois/)
