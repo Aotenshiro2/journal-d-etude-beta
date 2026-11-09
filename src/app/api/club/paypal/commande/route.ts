@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { configPayPal, creerCommande, ErreurPayPal, prixClub, ventePubliqueClub } from '@/lib/academie/club-paypal'
-import { decisionCommande, emailClub, montantAttendu, type Titulaire } from '@/lib/academie/club-paypal-pur'
+import { configPayPal, creerCommande, ErreurPayPal, offreEnBase, ventePublique } from '@/lib/academie/club-paypal'
+import { decisionCommande, offrePayPal, prixCommande, titulaireDe } from '@/lib/academie/club-paypal-pur'
 import { roleAcademie } from '@/lib/academie/droits'
 import { compteDuJeton, corsAcademie, entetesAcademie, refusAcademie, tronquer } from '@/lib/academie/http'
 import { estAdmin } from '@/lib/academie/pur'
@@ -11,16 +11,23 @@ import { messageErreur } from '@/lib/liveclub/pur'
  * appelee par le createOrder des boutons PayPal de /club (29/10/2026). Route
  * PUBLIQUE : on peut payer sans compte, l'acces s'attache alors a l'email tape.
  *
- * Corps : { email?, renonciation: true, essai?: true }. Bearer facultatif :
- * connecte, le compte part en custom_id (u:<uuid>, lu dans le jeton, jamais
- * dans le corps) et l'email du corps est ignore ; sinon custom_id = e:<email>.
+ * 08/11/2026 : la meme route vend le coaching de 8 h de /merci ({ offre:
+ * 'coaching' }). Sans offre : le 10% Club, comme avant. Le coaching n'a pas
+ * de case de renonciation (il se livre en seances, plus tard) et ne se vend
+ * que si son offre est en base (migration 20261108235500), essai compris.
+ *
+ * Corps : { offre?, email?, renonciation: true (Club seulement), essai?: true }.
+ * Bearer facultatif : connecte, le compte part en custom_id (u:<uuid>, lu dans
+ * le jeton, jamais dans le corps) et l'email du corps est ignore ; sinon
+ * custom_id = e:<email> (sur /merci, l'email de l'achat du Club).
  * Le montant n'est jamais lu dans le corps : 1 EUR en essai, sinon le prix de
- * l'offre formation-complete en base (1 999 a defaut).
- * Tant que CLUB_PAYPAL_PUBLIC n'est pas a 1, seule une demande essai d'un
+ * l'offre en base (1 999 a defaut pour le Club, aucun defaut pour le coaching).
+ * Tant que la vente publique de l'offre est fermee (CLUB_PAYPAL_PUBLIC ou
+ * COACHING_PAYPAL_PUBLIC differente de 1), seule une demande essai d'un
  * compte admin (profiles.role, estAdmin) passe. Ouverte, l'essai reste admin.
  *
- * 200 { ok, order_id }
- * 400 'corps' | 'renonciation' | 'email' | 401 'jeton' (essai sans compte)
+ * 200 { ok, order_id, offre }
+ * 400 'corps' | 'offre' | 'renonciation' | 'email' | 401 'jeton' (essai sans compte)
  * 403 'ferme' | 'droit' | 503 'config' | 'indisponible' | 502 'paypal'
  */
 
@@ -38,9 +45,11 @@ export async function POST(req: NextRequest) {
   let corps: Record<string, unknown>
   try { corps = (await req.json()) as Record<string, unknown> } catch { return refus('corps', 400) }
   if (!corps || typeof corps !== 'object') return refus('corps', 400)
-  if (corps.renonciation !== true) return refus('renonciation', 400)
+  const offre = offrePayPal(corps.offre)
+  if (!offre) return refus('offre', 400)
+  if (offre.renonciation && corps.renonciation !== true) return refus('renonciation', 400)
   const essai = corps.essai === true
-  const ouvert = ventePubliqueClub()
+  const ouvert = ventePublique(offre.cle)
   if (!ouvert && !essai) return refus('ferme', 403)
 
   const config = configPayPal()
@@ -74,35 +83,39 @@ export async function POST(req: NextRequest) {
   const decision = decisionCommande({ ouvert, essai, connecte: !!userId, admin })
   if (decision === 'jeton') return refus('jeton', 401)
   if (decision === 'droit') {
-    console.warn(`[club/paypal/commande] essai refuse (pas admin) compte=${userId ? tronquer(userId) : 'aucun'}`)
+    console.warn(`[club/paypal/commande] essai refuse (pas admin) compte=${userId ? tronquer(userId) : 'aucun'} offre=${offre.cle}`)
     return refus('droit', 403)
   }
   if (decision === 'ferme') return refus('ferme', 403)
 
-  let titulaire: Titulaire
-  if (userId) titulaire = { userId }
-  else {
-    const email = emailClub(corps.email)
-    if (!email) return refus('email', 400)
-    titulaire = { email }
-  }
+  const titulaire = titulaireDe({ userId, email: corps.email })
+  if (!titulaire) return refus('email', 400)
 
-  let prixBase: number | null = null
-  if (!essai) {
+  // L'offre en base : son prix hors essai ; pour une offre sans prix a defaut
+  // (coaching), sa presence meme, essai compris (l'achat y sera note).
+  let ligne: { prix: number | null } | null | undefined
+  if (!essai || offre.prixDefautEur === null) {
     try {
-      prixBase = await prixClub()
+      ligne = await offreEnBase(offre.slug)
     } catch (err) {
       console.warn(`[club/paypal/commande] base illisible : ${messageErreur(err)}`)
       return refus('indisponible', 503)
     }
-    if (prixBase === null) console.warn('[club/paypal/commande] prix absent en base, 1 999 EUR par defaut')
+    if (!essai && !ligne?.prix && offre.prixDefautEur !== null) {
+      console.warn(`[club/paypal/commande] prix absent en base, ${offre.prixDefautEur} EUR par defaut (offre ${offre.slug})`)
+    }
   }
-  const montantEur = montantAttendu({ essai, prixBase })
+  const prix = prixCommande({ offre, essai, ligne })
+  if (!prix.ok) {
+    console.warn(`[club/paypal/commande] offre ${offre.slug} absente en base ou sans prix : rien ne se vend (migration a appliquer ?)`)
+    return refus('config', 503)
+  }
+  const montantEur = prix.montantEur
 
   try {
-    const orderId = await creerCommande(config, { titulaire, montantEur, essai })
-    console.info(`[club/paypal/commande] commande creee ${orderId} compte=${userId ? tronquer(userId) : 'email'} ${montantEur} EUR${essai ? ' essai' : ''}`)
-    return NextResponse.json({ ok: true, order_id: orderId }, { headers })
+    const orderId = await creerCommande(config, { titulaire, montantEur, essai, offre })
+    console.info(`[club/paypal/commande] commande creee ${orderId} offre=${offre.cle} compte=${userId ? tronquer(userId) : 'email'} ${montantEur} EUR${essai ? ' essai' : ''}`)
+    return NextResponse.json({ ok: true, order_id: orderId, offre: offre.cle }, { headers })
   } catch (err) {
     if (err instanceof ErreurPayPal && (err.statut === 401 || err.statut === 403)) {
       console.warn(`[club/paypal/commande] identifiants PayPal refuses (${err.statut} ${err.issue})`)

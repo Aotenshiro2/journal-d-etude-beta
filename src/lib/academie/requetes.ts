@@ -507,11 +507,46 @@ select o.prix_eur::text as prix from public.academie_offres o where o.slug = $1:
 `
 
 /**
- * L'acces d'un achat PayPal du 10% Club, une seule fois par commande (index
+ * Le coaching de 8 h (08/11/2026) : l'acheteur a-t-il un acces actif a
+ * l'offre $3 (formation-complete) ? $1 = compte (uuid ou null), $2 = email de
+ * l'achat (minuscules, ou null). On cherche par le compte et tous ses emails
+ * verifies, et par l'email et tous les comptes qui le portent verifie (memes
+ * regles que SQL_IDENTITE et SQL_COMPTES_DE_EMAIL). Rend { membre }.
+ */
+export const SQL_MEMBRE_OFFRE = `
+with ids as (
+  select $1::uuid as id where $1::uuid is not null
+  union
+  select u.id from auth.users u
+   where $2::text is not null and lower(btrim(u.email)) = $2::text and u.email_confirmed_at is not null
+  union
+  select pe.profile_id from public.profile_emails pe
+   where $2::text is not null and lower(btrim(pe.email)) = $2::text and pe.verified = true
+),
+emails as (
+  select $2::text as e where $2::text is not null
+  union
+  select lower(btrim(u.email)) from auth.users u join ids on ids.id = u.id
+   where u.email is not null and u.email_confirmed_at is not null
+  union
+  select lower(btrim(pe.email)) from public.profile_emails pe join ids on ids.id = pe.profile_id
+   where pe.verified = true and pe.email is not null
+)
+select exists (
+  select 1 from public.academie_acces a
+    join public.academie_offres o on o.id = a.offre_id
+   where o.slug = $3::text
+     and a.retire_le is null and a.debut <= now() and (a.fin is null or a.fin > now())
+     and (a.user_id in (select id from ids) or a.email in (select e from emails))
+) as membre
+`
+
+/**
+ * L'achat PayPal du 10% Club ou du coaching, une seule fois par commande (index
  * academie_acces_paypal_reference_idx). $1 = user_id ou null, $2 = email ou
  * null, $3 = slug de l'offre, $4 = id de la commande PayPal, $5 = montant EUR,
  * $6 = renonciation a la retractation (create_time de la commande : la case
- * est cochee avant sa creation), $7 = note, $8 = paiement_id (paypal:<capture>).
+ * est cochee avant sa creation ; null pour le coaching, livre en seances), $7 = note, $8 = paiement_id (paypal:<capture>).
  * A vie (fin vide), cote brice. Rend { offre_connue, cree } : cree = false si
  * la commande etait deja notee.
  */

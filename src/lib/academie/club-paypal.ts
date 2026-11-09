@@ -11,6 +11,12 @@
 //                          production (api-m.paypal.com).
 //   CLUB_PAYPAL_PUBLIC=1   ouvre la vente a tous. Sans elle, seule une demande
 //                          « essai » d'un compte admin cree une commande (1 EUR).
+//   COACHING_PAYPAL_PUBLIC=1  la meme chose pour le coaching de 8 h de /merci
+//                          (08/11/2026). Sans elle, /merci garde le lien ncp et
+//                          seul l'essai admin a 1 EUR passe.
+//   COACHING_RESERVATION_URL  lien https de reservation des seances, mis dans
+//                          l'email du coaching. Absente : « Brice vous contacte
+//                          sous 48 h » (aucun lien propre au coaching le 08/11).
 //   RESEND_API_KEY_LIVECLUB (ou RESEND_API_KEY) : la cle Resend des emails du
 //                          Live Club, meme domaine d'envoi (support@).
 //   CLUB_FROM_EMAIL        expediteur, par defaut « AO Knowledge <support@aoknowledge.com> ».
@@ -23,10 +29,11 @@ import { Resend } from 'resend'
 import { prisma } from '@/lib/db'
 import { oublierDroitsDuCompte } from '@/lib/trouver-cours'
 import {
-  OFFRE_CLUB, corpsCommande, htmlEmailClub, issuePayPal, modeleEmailClub, requeteCapture, texteEmailClub,
-  type Titulaire,
+  OFFRE_CLUB, URL_RESERVATION_COACHING, corpsCommande, htmlEmailClub, issuePayPal, lienReservation, modeleEmailClub,
+  requeteCapture, texteEmailClub,
+  type CleOffre, type ModeleEmailClub, type OffrePayPal, type Titulaire,
 } from './club-paypal-pur'
-import { SQL_COMPTES_DE_EMAIL, SQL_POSER_ACHAT_PAYPAL, SQL_PRIX_OFFRE } from './requetes'
+import { SQL_COMPTES_DE_EMAIL, SQL_MEMBRE_OFFRE, SQL_POSER_ACHAT_PAYPAL, SQL_PRIX_OFFRE } from './requetes'
 
 const DELAI_MS = 15_000
 
@@ -41,6 +48,15 @@ export function configPayPal(): { clientId: string; secret: string } | null {
 }
 
 export const ventePubliqueClub = () => process.env.CLUB_PAYPAL_PUBLIC?.trim() === '1'
+
+/** La vente publique de l'offre : CLUB_PAYPAL_PUBLIC pour le Club, COACHING_PAYPAL_PUBLIC pour le coaching. */
+export function ventePublique(offre: CleOffre): boolean {
+  if (offre === 'coaching') return process.env.COACHING_PAYPAL_PUBLIC?.trim() === '1'
+  return ventePubliqueClub()
+}
+
+/** Le lien de reservation du coaching : la variable s'il est valable, sinon la constante (null le 08/11). */
+export const reservationCoaching = () => lienReservation(process.env.COACHING_RESERVATION_URL) ?? URL_RESERVATION_COACHING
 
 export const hotePayPal = () => process.env.PAYPAL_ENV?.trim().toLowerCase() === 'sandbox'
   ? 'https://api-m.sandbox.paypal.com'
@@ -111,16 +127,25 @@ async function appeler(
 // Commande et capture
 // ---------------------------------------------------------------------------
 
+/**
+ * L'offre en base : null si sa ligne academie_offres manque (migration pas
+ * appliquee), sinon son prix (null s'il est vide ou nul).
+ */
+export async function offreEnBase(slug: string): Promise<{ prix: number | null } | null> {
+  const l = (await prisma.$queryRawUnsafe<{ prix: string | null }[]>(SQL_PRIX_OFFRE, slug))[0]
+  if (!l) return null
+  const n = l.prix === null || l.prix === undefined ? NaN : Number(l.prix)
+  return { prix: Number.isFinite(n) && n > 0 ? n : null }
+}
+
 /** Le prix de l'offre du 10% Club en base, ou null (la regle pure retombe sur 1 999). */
 export async function prixClub(): Promise<number | null> {
-  const l = (await prisma.$queryRawUnsafe<{ prix: string | null }[]>(SQL_PRIX_OFFRE, OFFRE_CLUB))[0]
-  const n = l?.prix === null || l?.prix === undefined ? NaN : Number(l.prix)
-  return Number.isFinite(n) && n > 0 ? n : null
+  return (await offreEnBase(OFFRE_CLUB))?.prix ?? null
 }
 
 export async function creerCommande(
   c: { clientId: string; secret: string },
-  p: { titulaire: Titulaire; montantEur: number; essai: boolean },
+  p: { titulaire: Titulaire; montantEur: number; essai: boolean; offre?: OffrePayPal },
 ): Promise<string> {
   const o = await appeler(c, '/v2/checkout/orders', { corps: corpsCommande(p) })
   if (typeof o.id !== 'string') throw new ErreurPayPal(502, 'reponse')
@@ -136,10 +161,12 @@ export function lireCommandePayPal(c: { clientId: string; secret: string }, orde
  * fixe par commande) ; une commande deja capturee (appel concurrent) est
  * relue telle quelle.
  */
-export async function capturerCommandePayPal(c: { clientId: string; secret: string }, orderId: string): Promise<Record<string, unknown>> {
+export async function capturerCommandePayPal(
+  c: { clientId: string; secret: string }, orderId: string, offre: CleOffre = 'club',
+): Promise<Record<string, unknown>> {
   try {
     return await appeler(c, `/v2/checkout/orders/${encodeURIComponent(orderId)}/capture`, {
-      methode: 'POST', corps: {}, requestId: requeteCapture(orderId),
+      methode: 'POST', corps: {}, requestId: requeteCapture(orderId, offre),
     })
   } catch (err) {
     if (err instanceof ErreurPayPal && err.issue === 'ORDER_ALREADY_CAPTURED') return lireCommandePayPal(c, orderId)
@@ -151,13 +178,20 @@ export async function capturerCommandePayPal(c: { clientId: string; secret: stri
 // L'acces et l'email
 // ---------------------------------------------------------------------------
 
-/** L'acces d'une capture terminee. Idempotent : la seconde fois, cree = false. offre_connue = false si l'offre manque en base. */
+/**
+ * L'achat d'une capture terminee, une ligne academie_acces sur l'offre (le
+ * Club par defaut ; le coaching n'ouvre aucun contenu, la ligne note l'achat
+ * et le rattache au compte ou a l'email, comme les abonnements de Pilotage).
+ * Idempotent : la seconde fois, cree = false. offre_connue = false si l'offre
+ * manque en base. renonciationLe null : pas de renonciation (coaching).
+ */
 export async function poserAccesClub(p: {
-  userId: string | null; email: string | null; orderId: string; montantEur: number; renonciationLe: Date
-  note: string; captureId: string
+  userId: string | null; email: string | null; orderId: string; montantEur: number; renonciationLe: Date | null
+  note: string; captureId: string; slug?: string
 }): Promise<{ offreConnue: boolean; cree: boolean }> {
   const l = (await prisma.$queryRawUnsafe<{ offre_connue: number; cree: number }[]>(
-    SQL_POSER_ACHAT_PAYPAL, p.userId, p.email, OFFRE_CLUB, p.orderId, p.montantEur, p.renonciationLe, p.note, `paypal:${p.captureId}`,
+    SQL_POSER_ACHAT_PAYPAL, p.userId, p.email, p.slug ?? OFFRE_CLUB, p.orderId, p.montantEur, p.renonciationLe, p.note,
+    `paypal:${p.captureId}`,
   ))[0]
   const offreConnue = !!l && l.offre_connue > 0
   const cree = !!l && l.cree > 0
@@ -180,9 +214,16 @@ async function oublierDroitsGardes(userId: string | null, email: string | null):
 export async function envoyerEmailClub(
   email: string, essai: boolean, extra: { montant?: string | null; prenom?: string | null } = {},
 ): Promise<{ ok: true } | { ok: false; erreur: string }> {
+  return envoyerEmailModele(email, modeleEmailClub({ email, essai, montant: extra.montant, prenom: extra.prenom }))
+}
+
+/**
+ * Un email d'achat (Club ou coaching) : meme cle Resend, meme expediteur,
+ * meme reponse a support@, meme gabarit. Ne jette jamais.
+ */
+export async function envoyerEmailModele(email: string, m: ModeleEmailClub): Promise<{ ok: true } | { ok: false; erreur: string }> {
   const cle = process.env.RESEND_API_KEY_LIVECLUB?.trim() || process.env.RESEND_API_KEY?.trim()
   if (!cle) return { ok: false, erreur: 'RESEND_API_KEY_LIVECLUB et RESEND_API_KEY absentes' }
-  const m = modeleEmailClub({ email, essai, montant: extra.montant, prenom: extra.prenom })
   try {
     const { error } = await new Resend(cle).emails.send({
       from: process.env.CLUB_FROM_EMAIL?.trim() || 'AO Knowledge <support@aoknowledge.com>',
@@ -197,6 +238,16 @@ export async function envoyerEmailClub(
   } catch (err) {
     return { ok: false, erreur: `Resend : ${err instanceof Error ? err.name : 'erreur'}` }
   }
+}
+
+/**
+ * L'acheteur a-t-il un achat actif du 10% Club ? Par le compte, ses emails
+ * verifies, ou l'email de l'achat et les comptes qui le portent (SQL_MEMBRE_OFFRE).
+ * Sert a l'alerte du coaching. Jette si la base ne repond pas (l'appelant met null).
+ */
+export async function aAchatClub(p: { userId: string | null; email: string | null }): Promise<boolean> {
+  const l = (await prisma.$queryRawUnsafe<{ membre: boolean }[]>(SQL_MEMBRE_OFFRE, p.userId, p.email, OFFRE_CLUB))[0]
+  return l?.membre === true
 }
 
 /**

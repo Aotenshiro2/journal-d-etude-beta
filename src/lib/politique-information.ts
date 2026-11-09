@@ -176,7 +176,7 @@ export const LIENS_PARTENAIRES: readonly LienPartenaire[] = [
     offre: "le journal de trading recommandé par AOKnowledge. C'est un abonnement à part, pas compris dans le Live Club. Avec le lien partenaire et le code, 20 % de réduction sur l'abonnement Edgyx.",
     url: 'https://www.edgyx.ai/fr/partnercampaign/liveclub',
     code: 'LIVECLUB20',
-    source: 'sites/Aoknowledgecom/v3/src/pages/DecouvrirEdgyxPage.tsx (page publique /decouvrir-edgyx), repris sur LiveClubPage.tsx et LibraryPage.tsx',
+    source: 'sites/Aoknowledgecom/v3/src/pages/LiveClubPage.tsx et LibraryPage.tsx (la page /decouvrir-edgyx du tunnel du 10% Club est remplacee par /apps-incluses le 08/11/2026)',
     verifieLe: '2026-09-29',
   },
 ]
