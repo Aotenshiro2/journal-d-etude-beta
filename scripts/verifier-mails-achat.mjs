@@ -244,8 +244,10 @@ await bloc('10% Club : modeleEmailClub dit mot pour mot le texte de la Formation
   assert.ok(C.htmlEmailClub(m).includes('À bientôt sur les marchés,<br>Brice et Mélanie'))
   assert.ok(!C.htmlEmailClub(m).includes('>AO Knowledge<'))
   // L'envoi passe le montant et le prenom, sans changer son declenchement (acces cree, email connu).
+  // 08/11/2026 : la route vend aussi le coaching ; le mail du Club ne part que pour l'offre club.
   const r = lire('../src/app/api/club/paypal/capturer/route.ts')
-  assert.match(r, /if \(r\.cree\) \{[\s\S]{0,400}if \(email\) \{\n\s+const envoi = await envoyerEmailClub\(email, c\.essai, \{\n\s+montant: formaterEuros\(c\.capture\.centimes \?\? c\.centimes\),\n\s+prenom: prenomDe\(c\.payeurPrenom\),/)
+  assert.match(r, /const centimesPayes = c\.capture\.centimes \?\? c\.centimes\n/)
+  assert.match(r, /if \(r\.cree && offre\.cle === 'club'\) \{[\s\S]{0,400}if \(email\) \{\n\s+const envoi = await envoyerEmailClub\(email, c\.essai, \{\n\s+montant: formaterEuros\(centimesPayes\),\n\s+prenom: prenomDe\(c\.payeurPrenom\),/)
   const lu = C.lireCommande({
     id: '5O190127TN364715T', status: 'APPROVED', payer: { email_address: 'p@x.fr', name: { given_name: ' Camille ' } },
     purchase_units: [{ reference_id: 'club-10', custom_id: 'e:eleve@exemple.fr', amount: { currency_code: 'EUR', value: '1999.00' } }],

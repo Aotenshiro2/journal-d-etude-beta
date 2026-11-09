@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import {
-  alerterEquipeClub, capturerCommandePayPal, configPayPal, envoyerEmailClub, ErreurPayPal, lireCommandePayPal, poserAccesClub,
-  prixClub,
+  aAchatClub, alerterEquipeClub, capturerCommandePayPal, configPayPal, envoyerEmailClub, envoyerEmailModele, ErreurPayPal,
+  lireCommandePayPal, offreEnBase, poserAccesClub, reservationCoaching,
 } from '@/lib/academie/club-paypal'
 import {
-  estIdPayPal, etatCapture, lireCommande, montantConforme, noteAcces, texteAlerteEnAttente, type CommandeLue,
+  OFFRES_PAYPAL, estIdPayPal, etatCapture, lireCommande, modeleEmailCoaching, montantConforme, noteAcces, texteAlerteCoaching,
+  texteAlerteEnAttente, texteAlerteNonNote, type CommandeLue,
 } from '@/lib/academie/club-paypal-pur'
 import { emailConfirme } from '@/lib/academie/achat'
 import { roleAcademie } from '@/lib/academie/droits'
@@ -30,8 +31,17 @@ import { formaterEuros, prenomDe } from '@/lib/mails-achat-pur'
  * (pas de webhook PayPal dans ce lot) ; rappeler cette route une fois le
  * paiement confirme ouvre l'acces.
  *
+ * 08/11/2026, le coaching de 8 h de /merci passe par la meme route : l'offre
+ * est relue dans la commande (reference_id coaching-8h), jamais dans le corps.
+ * Capture COMPLETED d'un coaching : l'achat est note dans academie_acces sur
+ * l'offre coaching-8h (aucun contenu ouvert, aucune renonciation : il se
+ * livre en seances), l'email de l'acheteur part (lien de reservation, ou
+ * « Brice vous contacte sous 48 h ») et l'equipe recoit une alerte Telegram,
+ * qui dit si l'acheteur a bien un achat du 10% Club. etat 'ouvert' veut alors
+ * dire « paye et note ».
+ *
  * Corps : { order_id }, Bearer facultatif (seulement pour compte_lie).
- * 200 { ok, etat: 'ouvert', email, compte_lie } | { ok, etat: 'en_attente' }
+ * 200 { ok, etat: 'ouvert', email, compte_lie, offre } | { ok, etat: 'en_attente', offre }
  * 400 'corps' | 404 'commande' | 402 'refuse' (INSTRUMENT_DECLINED : la page
  * relance les boutons, l'acheteur choisit un autre moyen) | 402 'echoue'
  * (capture DECLINED ou FAILED, definitif) | 409 'non_approuve' | 'annule' |
@@ -74,9 +84,10 @@ export async function POST(req: NextRequest) {
   }
 
   // 2. Le montant : celui que la route commande a pose (1 EUR en essai, le prix sinon). Verifie AVANT de capturer.
+  const offre = OFFRES_PAYPAL[lu.commande.offre]
   let prixBase: number | null = null
   if (!lu.commande.essai) {
-    try { prixBase = await prixClub() } catch (err) {
+    try { prixBase = (await offreEnBase(offre.slug))?.prix ?? null } catch (err) {
       console.warn(`[club/paypal/capturer] base illisible : ${messageErreur(err)}`)
       return refus('indisponible', 503)
     }
@@ -98,7 +109,7 @@ export async function POST(req: NextRequest) {
     }
   }
   if (!montantConforme(lu.commande, prixBase)) {
-    console.warn(`[club/paypal/capturer] commande ${lu.commande.orderId} : montant inattendu (${lu.commande.centimes} centimes ${lu.commande.devise}${lu.commande.essai ? ', essai' : ''}), non capturee`)
+    console.warn(`[club/paypal/capturer] commande ${lu.commande.orderId} offre=${offre.cle} : montant inattendu (${lu.commande.centimes} centimes ${lu.commande.devise}${lu.commande.essai ? ', essai' : ''}), non capturee`)
     return refus('montant', 409)
   }
 
@@ -107,7 +118,7 @@ export async function POST(req: NextRequest) {
   const avant = etatCapture(lu.commande)
   if (avant === 'a_capturer') {
     try {
-      const apres = lireCommande(await capturerCommandePayPal(config, lu.commande.orderId))
+      const apres = lireCommande(await capturerCommandePayPal(config, lu.commande.orderId, offre.cle))
       // Reponse de capture incomplete : on relit la commande.
       lu = apres.ok && apres.commande.capture ? apres : lireCommande(await lireCommandePayPal(config, lu.commande.orderId))
       captureeIci = true
@@ -142,44 +153,79 @@ export async function POST(req: NextRequest) {
     console.warn(`[club/paypal/capturer] capture EN ATTENTE commande=${c.orderId} capture=${c.capture?.id ?? 'aucune'} statut=${c.capture?.statut ?? c.statut}${c.essai ? ' essai' : ''}`)
     // Une alerte par capture faite ici (pas a chaque relecture d'une commande en attente).
     if (captureeIci && c.capture) {
-      await alerterEquipeClub(texteAlerteEnAttente({ orderId: c.orderId, captureId: c.capture.id, centimes: c.centimes, essai: c.essai, email }))
+      await alerterEquipeClub(texteAlerteEnAttente({
+        orderId: c.orderId, captureId: c.capture.id, centimes: c.centimes, essai: c.essai, email, offre: offre.cle,
+      }))
     }
-    return NextResponse.json({ ok: true, etat: 'en_attente' }, { headers })
+    return NextResponse.json({ ok: true, etat: 'en_attente', offre: offre.cle }, { headers })
   }
 
-  // 4. Capture terminee : l'acces, une seule fois.
+  // 4. Capture terminee : l'achat (l'acces du Club, la ligne du coaching), une seule fois.
   const captureId = c.capture.id
-  const montantEur = (c.capture.centimes ?? c.centimes) / 100
+  const centimesPayes = c.capture.centimes ?? c.centimes
+  const montantEur = centimesPayes / 100
+  // Encaisse mais pas note : l'equipe le sait tout de suite (une fois, a la capture faite ici).
+  const nonNote = async () => {
+    if (captureeIci) {
+      await alerterEquipeClub(texteAlerteNonNote({ orderId: c.orderId, captureId, centimes: centimesPayes, essai: c.essai, email, offre: offre.cle }))
+    }
+  }
   let r: { offreConnue: boolean; cree: boolean }
   try {
     r = await poserAccesClub({
-      userId, email, orderId: c.orderId, montantEur, captureId,
-      renonciationLe: c.creeLe ?? new Date(),
+      userId, email, orderId: c.orderId, montantEur, captureId, slug: offre.slug,
+      // La case cochee avant la commande (Club) ; le coaching n'en a pas.
+      renonciationLe: offre.renonciation ? c.creeLe ?? new Date() : null,
       note: noteAcces({
-        orderId: c.orderId, captureId, centimes: c.capture.centimes ?? c.centimes, essai: c.essai,
-        renonciationLe: c.creeLe, payeurEmail: c.payeurEmail, email,
+        orderId: c.orderId, captureId, centimes: centimesPayes, essai: c.essai,
+        renonciationLe: c.creeLe, payeurEmail: c.payeurEmail, email, offre: offre.cle,
       }),
     })
   } catch (err) {
-    console.warn(`[club/paypal/capturer] PAYE mais acces NON pose commande=${c.orderId} : ${messageErreur(err)}`)
+    console.warn(`[club/paypal/capturer] PAYE mais achat NON note commande=${c.orderId} offre=${offre.cle} : ${messageErreur(err)}`)
+    await nonNote()
     return refus('indisponible', 503)
   }
   if (!r.offreConnue) {
-    console.warn(`[club/paypal/capturer] PAYE mais offre formation-complete absente en base, commande=${c.orderId}`)
+    console.warn(`[club/paypal/capturer] PAYE mais offre ${offre.slug} absente en base, commande=${c.orderId}`)
+    await nonNote()
     return refus('indisponible', 503)
   }
 
-  if (r.cree) {
+  if (r.cree && offre.cle === 'club') {
     console.info(`[club/paypal/capturer] acces pose commande=${c.orderId} compte=${userId ? tronquer(userId) : 'email'} ${montantEur} EUR${c.essai ? ' essai' : ''}`)
     if (email) {
       const envoi = await envoyerEmailClub(email, c.essai, {
-        montant: formaterEuros(c.capture.centimes ?? c.centimes),
+        montant: formaterEuros(centimesPayes),
         prenom: prenomDe(c.payeurPrenom),
       })
       if (!envoi.ok) console.warn(`[club/paypal/capturer] email d'acces NON envoye commande=${c.orderId} : ${envoi.erreur}`)
     } else {
       console.warn(`[club/paypal/capturer] acces pose sans email confirme (compte=${userId ? tronquer(userId) : '?'}) : pas d'email d'acces`)
     }
+  }
+
+  if (r.cree && offre.cle === 'coaching') {
+    console.info(`[club/paypal/capturer] coaching note commande=${c.orderId} compte=${userId ? tronquer(userId) : 'email'} ${montantEur} EUR${c.essai ? ' essai' : ''}`)
+    const reservation = reservationCoaching()
+    let emailEnvoye = false
+    if (email) {
+      const envoi = await envoyerEmailModele(email, modeleEmailCoaching({
+        email, essai: c.essai, montant: formaterEuros(centimesPayes), prenom: prenomDe(c.payeurPrenom), reservation,
+      }))
+      emailEnvoye = envoi.ok
+      if (!envoi.ok) console.warn(`[club/paypal/capturer] email du coaching NON envoye commande=${c.orderId} : ${envoi.erreur}`)
+    } else {
+      console.warn(`[club/paypal/capturer] coaching note sans email confirme (compte=${userId ? tronquer(userId) : '?'}) : pas d'email`)
+    }
+    let membreClub: boolean | null = null
+    try { membreClub = await aAchatClub({ userId, email }) } catch (err) {
+      console.warn(`[club/paypal/capturer] achat du Club non verifie : ${messageErreur(err)}`)
+    }
+    await alerterEquipeClub(texteAlerteCoaching({
+      orderId: c.orderId, captureId, centimes: centimesPayes, essai: c.essai, email, payeurEmail: c.payeurEmail,
+      membreClub, emailEnvoye, reservation,
+    }))
   }
 
   // Le compte connecte porte-t-il cet acces ? (meme regle que /api/academie/achat/confirmer)
@@ -195,5 +241,5 @@ export async function POST(req: NextRequest) {
     }
   } catch { /* compte illisible : la page proposera le lien de connexion */ }
 
-  return NextResponse.json({ ok: true, etat: 'ouvert', email, compte_lie: compteLie }, { headers })
+  return NextResponse.json({ ok: true, etat: 'ouvert', email, compte_lie: compteLie, offre: offre.cle }, { headers })
 }

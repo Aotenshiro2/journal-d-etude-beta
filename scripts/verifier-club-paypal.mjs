@@ -222,7 +222,11 @@ bloc('alerte en attente : la commande et la relance, aucun secret', () => {
 
 bloc('base : l index de la migration est celui de l ON CONFLICT, l offre est formation-complete', () => {
   assert.equal(OFFRE_CLUB, 'formation-complete')
-  const migration = readFileSync(new URL('../../../sites/Aoknowledgecom/supabase/migrations/20261029140000_academie_achat_paypal.sql', import.meta.url), 'utf8')
+  // Depuis un worktree, le depot du site n'est pas a ../../../ : MIGRATIONS_DIR le dit (08/11/2026).
+  const fichier = '20261029140000_academie_achat_paypal.sql'
+  const migration = readFileSync(process.env.MIGRATIONS_DIR
+    ? `${process.env.MIGRATIONS_DIR.replace(/\/$/, '')}/${fichier}`
+    : new URL(`../../../sites/Aoknowledgecom/supabase/migrations/${fichier}`, import.meta.url), 'utf8')
   assert.match(migration, /create unique index if not exists academie_acces_paypal_reference_idx\s+on public\.academie_acces \(reference\)\s+where source = 'paypal' and reference is not null;/)
   assert.match(SQL_POSER_ACHAT_PAYPAL, /on conflict \(reference\) where source = 'paypal' and reference is not null do nothing/)
   assert.match(SQL_POSER_ACHAT_PAYPAL, /'paypal', \$4::text, \$5::numeric, now\(\), null, \$6::timestamptz, 'paypal', \$7::text, \$8::text, 'brice'/)

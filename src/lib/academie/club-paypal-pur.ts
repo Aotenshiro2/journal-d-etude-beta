@@ -14,10 +14,23 @@
 // - corpsCommande : le corps de POST /v2/checkout/orders ;
 // - lireCommande / etatCapture : ce qu'une commande PayPal relue ouvre ;
 // - cleIdempotence : la reference unique de l'acces et l'en-tete PayPal-Request-Id ;
-// - noteAcces, modeleEmailClub, htmlEmailClub, texteEmailClub : la trace et l'email.
+// - noteAcces, modeleEmailClub, htmlEmailClub, texteEmailClub : la trace et l'email ;
+// - offrePayPal, offreDeReference, prixCommande, titulaireDe : quelle offre, quel prix, a qui ;
+// - modeleEmailCoaching, texteAlerteCoaching, texteAlerteNonNote : le coaching de 8 h.
+//
+// 08/11/2026 : la meme mecanique vend aussi le coaching de 8 h propose sur
+// /merci, juste apres l'achat du Club (PLAN-UPSELL.md, section 7, decide par
+// Brice le 08/11). Une seule mecanique pour les deux : OFFRES_PAYPAL dit ce
+// qui change d'une offre a l'autre (slug en base, reference_id, prix a
+// defaut, case de renonciation), la page dit quelle offre elle vend
+// (offrePayPal), et la capture relit l'offre dans la commande PayPal
+// (offreDeReference), jamais dans le corps de la requete.
 
 /** L'offre que vend /club : la formation complete (17 modules, Masterclass a part). */
 export const OFFRE_CLUB = 'formation-complete'
+
+/** L'offre du coaching de 8 h (academie_offres.slug, migration 20261108235500). */
+export const OFFRE_COACHING = 'coaching-8h'
 
 /** Le prix public si la base n'en donne pas (academie_offres.prix_eur). */
 export const PRIX_CLUB_DEFAUT_EUR = 1999
@@ -30,6 +43,80 @@ export const REFERENCE_PUBLIQUE = 'club-10'
 export const REFERENCE_ESSAI = 'club-10-essai'
 
 export const DESCRIPTION_COMMANDE = '10% Club - formation complète AO Knowledge'
+
+// ---------------------------------------------------------------------------
+// Les offres vendues par ce tunnel PayPal
+// ---------------------------------------------------------------------------
+
+export type CleOffre = 'club' | 'coaching'
+
+export type OffrePayPal = {
+  cle: CleOffre
+  /** academie_offres.slug : la ligne academie_acces de l'achat pointe sur cette offre. */
+  slug: string
+  /** Le nom dans la note de l'achat et les alertes de l'equipe. */
+  nom: string
+  /** Le prix si la base n'en donne pas. null : l'offre DOIT etre en base pour se vendre (migration d'abord). */
+  prixDefautEur: number | null
+  /** purchase_units[0].reference_id, vente publique puis essai admin a 1 EUR. */
+  reference: string
+  referenceEssai: string
+  /** purchase_units[0].description, vue par l'acheteur chez PayPal (127 caracteres au plus). */
+  description: string
+  /** Prefixe de l'en-tete PayPal-Request-Id de la capture. */
+  prefixeCapture: string
+  /**
+   * La case « acces immediat, je renonce a la retractation » est exigee
+   * avant la commande (contenu numerique ouvert tout de suite). Le coaching
+   * se livre en seances, plus tard : pas de case, le droit de retractation
+   * reste entier.
+   */
+  renonciation: boolean
+}
+
+export const OFFRES_PAYPAL: Record<CleOffre, OffrePayPal> = {
+  club: {
+    cle: 'club',
+    slug: OFFRE_CLUB,
+    nom: '10% Club',
+    prixDefautEur: PRIX_CLUB_DEFAUT_EUR,
+    reference: REFERENCE_PUBLIQUE,
+    referenceEssai: REFERENCE_ESSAI,
+    description: DESCRIPTION_COMMANDE,
+    prefixeCapture: 'club10-capture-',
+    renonciation: true,
+  },
+  coaching: {
+    cle: 'coaching',
+    slug: OFFRE_COACHING,
+    nom: 'Coaching 8 h',
+    prixDefautEur: null,
+    reference: 'coaching-8h',
+    referenceEssai: 'coaching-8h-essai',
+    description: 'Coaching individuel 8 h avec Brice - AO Knowledge',
+    prefixeCapture: 'coaching8h-capture-',
+    renonciation: false,
+  },
+}
+
+/**
+ * L'offre demandee par la page : absente = le 10% Club (les pages d'avant le
+ * 08/11 n'envoient rien), 'club' ou 'coaching', sinon null (la route rend 400).
+ */
+export function offrePayPal(v: unknown): OffrePayPal | null {
+  if (v === undefined || v === null || v === 'club') return OFFRES_PAYPAL.club
+  if (v === 'coaching') return OFFRES_PAYPAL.coaching
+  return null
+}
+
+/** L'offre et le mode essai portes par un reference_id relu chez PayPal, ou null (pas une commande de ce tunnel). */
+export function offreDeReference(v: unknown): { offre: OffrePayPal; essai: boolean } | null {
+  for (const offre of Object.values(OFFRES_PAYPAL)) {
+    if (v === offre.reference) return { offre, essai: false }
+    if (v === offre.referenceEssai) return { offre, essai: true }
+  }
+  return null
+}
 
 /** custom_id : 127 caracteres au plus chez PayPal, prefixe compris. */
 export const MAX_CUSTOM_ID = 127
@@ -52,6 +139,19 @@ export function emailClub(v: unknown): string | null {
 }
 
 export type Titulaire = { userId: string; email?: undefined } | { email: string; userId?: undefined }
+
+/**
+ * A qui se rattache l'achat : le compte du jeton d'abord (l'email du corps
+ * est alors ignore), sinon l'email envoye par la page. Sur /merci, c'est
+ * l'email de l'achat du 10% Club que la page a garde (ou celui que l'acheteur
+ * tape) : le coaching se rattache ainsi a la meme personne que le Club.
+ * null : ni compte ni email valable (la route rend 400 'email').
+ */
+export function titulaireDe(p: { userId: string | null; email: unknown }): Titulaire | null {
+  if (p.userId && UUID.test(p.userId)) return { userId: p.userId.toLowerCase() }
+  const email = emailClub(p.email)
+  return email ? { email } : null
+}
 
 /** Le custom_id de la commande : le compte connecte d'abord, sinon l'email tape. */
 export function customIdDe(t: Titulaire): string {
@@ -85,10 +185,28 @@ export function decisionCommande(p: { ouvert: boolean; essai: boolean; connecte:
   return p.ouvert ? 'ok' : 'ferme'
 }
 
-/** Le montant de la commande, en euros : 1 en essai, sinon le prix en base (a defaut 1 999). */
-export function montantAttendu(p: { essai: boolean; prixBase: number | null }): number {
+/**
+ * Le montant de la commande, en euros : 1 en essai, sinon le prix en base,
+ * a defaut celui de l'offre (1 999 pour le Club). null : l'offre n'a pas de
+ * prix a defaut (coaching) et la base n'en donne pas, rien ne se vend.
+ */
+export function montantAttendu(p: { essai: boolean; prixBase: number | null; offre?: OffrePayPal }): number | null {
   if (p.essai) return PRIX_ESSAI_EUR
-  return typeof p.prixBase === 'number' && Number.isFinite(p.prixBase) && p.prixBase > 0 ? p.prixBase : PRIX_CLUB_DEFAUT_EUR
+  if (typeof p.prixBase === 'number' && Number.isFinite(p.prixBase) && p.prixBase > 0) return p.prixBase
+  return (p.offre ?? OFFRES_PAYPAL.club).prixDefautEur
+}
+
+/**
+ * Le prix d'une commande a creer, d'apres la ligne de l'offre en base (null
+ * si l'offre n'y est pas, undefined si on ne l'a pas lue). Une offre sans
+ * prix a defaut (coaching) ne se vend pas, meme en essai, tant qu'elle n'est
+ * pas en base : l'achat ne pourrait pas y etre note apres la capture.
+ */
+export function prixCommande(p: { offre: OffrePayPal; essai: boolean; ligne: { prix: number | null } | null | undefined }):
+  { ok: true; montantEur: number } | { ok: false } {
+  if (p.offre.prixDefautEur === null && !p.ligne) return { ok: false }
+  const montantEur = montantAttendu({ essai: p.essai, prixBase: p.ligne?.prix ?? null, offre: p.offre })
+  return montantEur === null ? { ok: false } : { ok: true, montantEur }
 }
 
 /** « 1999.00 » : le format de PayPal (deux decimales, point). */
@@ -106,12 +224,13 @@ export function centimes(v: unknown): number | null {
  * l'acheteur peut choisir la carte (formulaire invite) ou le 4x, et
  * application_context vaut pour toutes les sources (NO_SHIPPING compris).
  */
-export function corpsCommande(p: { titulaire: Titulaire; montantEur: number; essai: boolean }): Record<string, unknown> {
+export function corpsCommande(p: { titulaire: Titulaire; montantEur: number; essai: boolean; offre?: OffrePayPal }): Record<string, unknown> {
+  const offre = p.offre ?? OFFRES_PAYPAL.club
   return {
     intent: 'CAPTURE',
     purchase_units: [{
-      reference_id: p.essai ? REFERENCE_ESSAI : REFERENCE_PUBLIQUE,
-      description: DESCRIPTION_COMMANDE,
+      reference_id: p.essai ? offre.referenceEssai : offre.reference,
+      description: offre.description,
       custom_id: customIdDe(p.titulaire),
       amount: { currency_code: 'EUR', value: valeurPayPal(p.montantEur) },
     }],
@@ -132,7 +251,8 @@ export function corpsCommande(p: { titulaire: Titulaire; montantEur: number; ess
 export const cleIdempotence = (orderId: string) => orderId.toUpperCase()
 
 /** L'en-tete PayPal-Request-Id de la capture : la rejouer rend la meme reponse chez PayPal. */
-export const requeteCapture = (orderId: string) => `club10-capture-${cleIdempotence(orderId)}`
+export const requeteCapture = (orderId: string, offre: CleOffre = 'club') =>
+  `${OFFRES_PAYPAL[offre].prefixeCapture}${cleIdempotence(orderId)}`
 
 export type CaptureLue = { id: string; statut: string; centimes: number | null }
 
@@ -141,6 +261,8 @@ export type CommandeLue = {
   /** Statut de la commande : CREATED, APPROVED, COMPLETED, VOIDED, PAYER_ACTION_REQUIRED... */
   statut: string
   essai: boolean
+  /** L'offre lue dans reference_id (jamais dans la requete de la page). */
+  offre: CleOffre
   titulaire: Titulaire
   centimes: number
   devise: string
@@ -180,15 +302,16 @@ function captureDe(unite: Record<string, unknown>): CaptureLue | null {
 
 /**
  * Une commande PayPal relue (GET /v2/checkout/orders/:id, ou la reponse de la
- * capture) : l'achat du 10% Club qu'elle porte, ou pourquoi rien. Seules
- * comptent nos commandes : reference_id club-10 (ou club-10-essai) et un
- * custom_id que nous avons pose.
+ * capture) : l'achat qu'elle porte (10% Club ou coaching), ou pourquoi rien.
+ * Seules comptent nos commandes : un reference_id de OFFRES_PAYPAL (club-10,
+ * coaching-8h, ou leur essai) et un custom_id que nous avons pose. La raison
+ * 'pas_club' garde son nom d'avant le 08/11 : « pas une commande de ce tunnel ».
  */
 export function lireCommande(o: Record<string, unknown>): LectureCommande {
   const unites = Array.isArray(o.purchase_units) ? o.purchase_units.map(objet) : []
   const u = unites[0] ?? {}
-  const reference = u.reference_id
-  if (!estIdPayPal(o.id) || (reference !== REFERENCE_PUBLIQUE && reference !== REFERENCE_ESSAI) || unites.length !== 1) {
+  const ref = offreDeReference(u.reference_id)
+  if (!estIdPayPal(o.id) || !ref || unites.length !== 1) {
     return { ok: false, raison: 'pas_club' }
   }
   const capture = captureDe(u)
@@ -205,7 +328,8 @@ export function lireCommande(o: Record<string, unknown>): LectureCommande {
     commande: {
       orderId: cleIdempotence(String(o.id)),
       statut: typeof o.status === 'string' ? o.status : 'INCONNU',
-      essai: reference === REFERENCE_ESSAI,
+      essai: ref.essai,
+      offre: ref.offre.cle,
       titulaire,
       centimes: total,
       devise: montant.currency_code,
@@ -236,9 +360,15 @@ export function etatCapture(c: Pick<CommandeLue, 'statut' | 'capture'>): EtatCap
   return 'inconnu'
 }
 
-/** La commande porte-t-elle le bon montant (EUR, 1 EUR en essai, le prix sinon) ? */
-export function montantConforme(c: Pick<CommandeLue, 'centimes' | 'devise' | 'essai'>, prixBase: number | null): boolean {
-  return c.devise === 'EUR' && c.centimes === Math.round(montantAttendu({ essai: c.essai, prixBase }) * 100)
+/**
+ * La commande porte-t-elle le bon montant (EUR, 1 EUR en essai, le prix de
+ * son offre sinon) ? Une offre sans prix en base ni prix a defaut : jamais.
+ */
+export function montantConforme(
+  c: Pick<CommandeLue, 'centimes' | 'devise' | 'essai'> & { offre?: CleOffre }, prixBase: number | null,
+): boolean {
+  const attendu = montantAttendu({ essai: c.essai, prixBase, offre: OFFRES_PAYPAL[c.offre ?? 'club'] })
+  return attendu !== null && c.devise === 'EUR' && c.centimes === Math.round(attendu * 100)
 }
 
 /** Le premier « issue » d'une erreur PayPal (ORDER_ALREADY_CAPTURED, INSTRUMENT_DECLINED...), sans valeur ni description. */
@@ -253,12 +383,13 @@ export function issuePayPal(corps: unknown): string {
 /** La note de l'acces : de quoi retrouver le paiement chez PayPal (1 000 caracteres au plus). */
 export function noteAcces(p: {
   orderId: string; captureId: string; centimes: number; essai: boolean; renonciationLe: Date | null
-  payeurEmail: string | null; email: string | null
+  payeurEmail: string | null; email: string | null; offre?: CleOffre
 }): string {
+  const offre = OFFRES_PAYPAL[p.offre ?? 'club']
   const bouts = [
-    `PayPal 10% Club : commande ${p.orderId}, capture ${p.captureId}, ${(p.centimes / 100).toFixed(2)} EUR`,
+    `PayPal ${offre.nom} : commande ${p.orderId}, capture ${p.captureId}, ${(p.centimes / 100).toFixed(2)} EUR`,
     p.essai ? 'ACHAT TEST (essai a 1 EUR, a rembourser)' : null,
-    p.renonciationLe ? null : 'renonciation datee de la capture (date de commande illisible)',
+    !offre.renonciation ? 'seances a fixer avec Brice, aucun contenu ouvert' : p.renonciationLe ? null : 'renonciation datee de la capture (date de commande illisible)',
     p.payeurEmail && p.payeurEmail !== p.email ? `email du payeur PayPal : ${p.payeurEmail}` : null,
   ]
   return bouts.filter(Boolean).join(' | ').slice(0, 1000)
@@ -276,7 +407,8 @@ export type ModeleEmailClub = {
   sujet: string
   /** Paragraphes ; {lien:<url>|<texte>} devient un lien en HTML et « texte : url » en texte brut. */
   paragraphes: string[]
-  bouton: { texte: string; url: string }
+  /** null : pas de bouton (le mail du coaching sans lien de reservation). */
+  bouton: { texte: string; url: string } | null
 }
 
 export const URL_CONDITIONS = 'https://aoknowledge.com/conditions-generales'
@@ -330,26 +462,128 @@ function paragrapheHtml(p: string): string {
 /** Meme gabarit que les emails du Live Club (liveclub/emails.ts), signe Brice et Melanie (brief F1). */
 export function htmlEmailClub(m: ModeleEmailClub): string {
   const corps = m.paragraphes.map(p => `<p style="margin:0 0 16px;line-height:1.5">${paragrapheHtml(p)}</p>`).join('\n')
+  const bouton = m.bouton
+    ? `<p style="margin:24px 0"><a href="${echapper(m.bouton.url)}" style="display:inline-block;padding:12px 20px;border-radius:8px;background:#111827;color:#ffffff;text-decoration:none;font-weight:600">${echapper(m.bouton.texte)}</a></p>
+<p style="margin:0 0 16px;font-size:13px;color:#6b7280">Si le bouton ne marche pas, copiez ce lien : ${echapper(m.bouton.url)}</p>
+`
+    : ''
   return `<!doctype html><html lang="fr"><body style="margin:0;padding:24px;background:#ffffff;color:#111827;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:15px">
 <div style="max-width:560px;margin:0 auto">
 ${corps}
-<p style="margin:24px 0"><a href="${echapper(m.bouton.url)}" style="display:inline-block;padding:12px 20px;border-radius:8px;background:#111827;color:#ffffff;text-decoration:none;font-weight:600">${echapper(m.bouton.texte)}</a></p>
-<p style="margin:0 0 16px;font-size:13px;color:#6b7280">Si le bouton ne marche pas, copiez ce lien : ${echapper(m.bouton.url)}</p>
-<p style="margin:32px 0 0;line-height:1.5">${SIGNATURE_CLUB.map(echapper).join('<br>')}</p>
+${bouton}<p style="margin:32px 0 0;line-height:1.5">${SIGNATURE_CLUB.map(echapper).join('<br>')}</p>
 </div></body></html>`
 }
 
 export function texteEmailClub(m: ModeleEmailClub): string {
   const paragraphes = m.paragraphes.map(p => p.replace(LIEN, (_t, url: string) => url))
-  return [...paragraphes, `${m.bouton.texte} : ${m.bouton.url}`, SIGNATURE_CLUB.join('\n')].join('\n\n')
+  return [...paragraphes, ...(m.bouton ? [`${m.bouton.texte} : ${m.bouton.url}`] : []), SIGNATURE_CLUB.join('\n')].join('\n\n')
+}
+
+// ---------------------------------------------------------------------------
+// Le coaching de 8 h (08/11/2026) : l'email de l'acheteur et l'alerte de l'equipe
+// ---------------------------------------------------------------------------
+
+/**
+ * Le lien de reservation des seances. Aucun lien propre au coaching de 8 h
+ * le 08/11 : cal.com/brice-delannay montre l'appel decouverte (30 min) et une
+ * consultation PAYANTE (50 min, 250 EUR) ; les evenements caches deep-dive et
+ * elite-trader-mentorship servent d'autres offres. Sans lien, l'email dit
+ * que Brice contacte l'acheteur sous 48 h, et l'alerte le lui rappelle. Un
+ * lien se pose sans code par la variable COACHING_RESERVATION_URL (journal).
+ */
+export const URL_RESERVATION_COACHING: string | null = null
+
+/** Un lien de reservation acceptable (https, sans espace, 300 caracteres au plus), ou null. */
+export function lienReservation(v: unknown): string | null {
+  if (typeof v !== 'string') return null
+  const u = v.trim()
+  if (!/^https:\/\/[^\s<>"'{}|\\^`]+$/.test(u) || u.length > 300) return null
+  try {
+    return new URL(u).protocol === 'https:' ? u : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * L'email de l'acheteur du coaching : meme expediteur, meme gabarit et meme
+ * signature que le mail du Club (vouvoiement, brief F1). Ce qui est paye, ce
+ * que contiennent les seances (les points de /merci), l'adresse a laquelle
+ * l'achat est rattache, puis la suite : le lien de reservation s'il existe,
+ * sinon « Brice vous contacte sous 48 h ». Aucun acces a l'academie : le
+ * coaching se livre en seances.
+ */
+export function modeleEmailCoaching(p: {
+  email: string; essai: boolean; montant?: string | null; prenom?: string | null; reservation: string | null
+}): ModeleEmailClub {
+  const paiement = p.montant ? `votre paiement de ${p.montant} est bien reçu` : 'votre paiement est bien reçu'
+  const reservation = lienReservation(p.reservation)
+  return {
+    sujet: `${p.essai ? '[Essai] ' : ''}Votre coaching avec Brice est confirmé`,
+    paragraphes: [
+      p.prenom ? `Bonjour ${p.prenom},` : 'Bonjour,',
+      `Merci, ${paiement} : vos 8 séances de coaching individuel avec Brice vous attendent. Si vous payez en 4 fois, les échéances sont gérées par PayPal, pas par nous.`,
+      "Chaque séance dure 1 h. On y analyse vos trades et votre journal, et on corrige votre process en temps réel. Entre deux séances, vous avez un accès prioritaire par message.",
+      reservation
+        ? `Pour fixer votre première séance, choisissez votre créneau : {lien:${reservation}|${reservation.replace(/^https:\/\//, '')}}`
+        : 'Brice vous contacte sous 48 h pour fixer votre première séance.',
+      `Votre coaching est enregistré avec ${p.email}, l'adresse de votre achat. C'est elle que nous utilisons pour vous joindre. Votre reçu, lui, vient de PayPal.`,
+      "Une question d'ici là ? Répondez à cet email, ou écrivez à support@aoknowledge.com : ça arrive chez nous dans les deux cas.",
+    ],
+    bouton: reservation ? { texte: 'Réserver ma première séance', url: reservation } : null,
+  }
+}
+
+/**
+ * L'alerte de l'equipe a chaque coaching paye (Telegram, Agent AOK, comme la
+ * capture en attente) : qui, combien, s'il a bien un achat du 10% Club, si
+ * l'email est parti, et ce qu'il reste a faire. Rien que PayPal ne sache deja.
+ */
+export function texteAlerteCoaching(p: {
+  orderId: string; captureId: string; centimes: number; essai: boolean
+  email: string | null; payeurEmail: string | null; membreClub: boolean | null
+  emailEnvoye: boolean; reservation: string | null
+}): string {
+  const club = p.membreClub === true
+    ? 'Rattache a un achat du 10% Club (meme compte ou meme email).'
+    : p.membreClub === false
+      ? 'AUCUN achat du 10% Club trouve pour ce compte ou cet email : verifier qui a paye.'
+      : "Achat du 10% Club non verifie (base illisible)."
+  const mail = !p.emailEnvoye
+    ? "Email de confirmation NON envoye : prevenir l'acheteur a la main."
+    : p.reservation ? "Email envoye avec le lien de reservation." : 'Email envoye : il dit que Brice le contacte sous 48 h.'
+  return [
+    `Coaching 8 h PAYE${p.essai ? ' (essai a 1 EUR, a rembourser)' : ''} : ${(p.centimes / 100).toFixed(2)} EUR par PayPal.`,
+    `Acheteur : ${p.email ?? 'email inconnu'}${p.payeurEmail && p.payeurEmail !== p.email ? ` (payeur PayPal : ${p.payeurEmail})` : ''}.`,
+    club,
+    mail,
+    p.reservation ? null : 'A FAIRE : le contacter sous 48 h pour fixer la premiere seance.',
+    `Commande ${p.orderId}, capture ${p.captureId}.`,
+  ].filter(Boolean).join('\n')
+}
+
+/** L'alerte d'un paiement encaisse dont l'achat n'a pas pu etre note (base, offre absente) : a reprendre a la main. */
+export function texteAlerteNonNote(p: { orderId: string; captureId: string; centimes: number; essai: boolean; email: string | null; offre: CleOffre }): string {
+  const offre = OFFRES_PAYPAL[p.offre]
+  return [
+    `${offre.nom} : paiement PayPal ENCAISSE mais NON NOTE en base${p.essai ? ' (essai)' : ''}.`,
+    `Commande ${p.orderId}, capture ${p.captureId}, ${(p.centimes / 100).toFixed(2)} EUR${p.email ? `, pour ${p.email}` : ''}.`,
+    `Relancer la capture une fois la base revenue (elle est idempotente) : POST https://journal.aoknowledge.com/api/club/paypal/capturer {"order_id":"${p.orderId}"}`,
+  ].join('\n')
 }
 
 /** L'alerte de l'equipe pour une capture en attente (Telegram, Agent AOK). Pas de secret, rien que PayPal ne sache deja. */
-export function texteAlerteEnAttente(p: { orderId: string; captureId: string; centimes: number; essai: boolean; email: string | null }): string {
+export function texteAlerteEnAttente(p: {
+  orderId: string; captureId: string; centimes: number; essai: boolean; email: string | null; offre?: CleOffre
+}): string {
+  const offre = OFFRES_PAYPAL[p.offre ?? 'club']
+  const coaching = offre.cle === 'coaching'
   return [
-    `10% Club : paiement PayPal EN ATTENTE${p.essai ? ' (essai)' : ''}.`,
-    `Commande ${p.orderId}, capture ${p.captureId}, ${(p.centimes / 100).toFixed(2)} EUR${p.email ? `, acces prevu pour ${p.email}` : ''}.`,
-    "L'acces n'est PAS ouvert. Pas de webhook PayPal pour l'instant : une fois le paiement confirme chez PayPal, relancer la capture (elle ouvre l'acces et envoie l'email) :",
+    `${offre.nom} : paiement PayPal EN ATTENTE${p.essai ? ' (essai)' : ''}.`,
+    `Commande ${p.orderId}, capture ${p.captureId}, ${(p.centimes / 100).toFixed(2)} EUR${p.email ? `, ${coaching ? 'achat' : 'acces'} prevu pour ${p.email}` : ''}.`,
+    coaching
+      ? "Le coaching n'est PAS encore note. Pas de webhook PayPal pour l'instant : une fois le paiement confirme chez PayPal, relancer la capture (elle note l'achat, envoie l'email et l'alerte) :"
+      : "L'acces n'est PAS ouvert. Pas de webhook PayPal pour l'instant : une fois le paiement confirme chez PayPal, relancer la capture (elle ouvre l'acces et envoie l'email) :",
     `POST https://journal.aoknowledge.com/api/club/paypal/capturer {"order_id":"${p.orderId}"}`,
   ].join('\n')
 }

@@ -25,7 +25,6 @@ Pour les membres qui cherchent un outil, une plateforme, une prop firm ou un bro
 ## Comment y aller
 
 - Edgyx : https://www.edgyx.ai/fr/partnercampaign/liveclub (code LIVECLUB20)
-- La page Edgyx du site : https://aoknowledge.com/decouvrir-edgyx
 - Le reste de la liste : demande la catégorie qui t'intéresse.
 
 ## Questions fréquentes
