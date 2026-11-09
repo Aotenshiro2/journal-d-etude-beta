@@ -43,6 +43,16 @@ import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import { PrismaClient } from '@prisma/client'
 
+// OBSOLETE depuis le 10/11/2026 : le lot 1 (20261109234500) ne renumerote plus
+// et ne recree plus la sequence member_number_seq dans la migration. Cet essai
+// attend l'ancienne version (301 et +) et inscrit des comptes d'essai : sur la
+// vraie sequence, non transactionnelle, il brulerait des numeros pour de bon.
+// L'essai a jour : scripts/essayer-migration-statuts-anciens.mjs.
+if (!process.env.ESSAI_ANCIEN_FORCE) {
+  console.error('Essai obsolete depuis le 10/11/2026 : utiliser scripts/essayer-migration-statuts-anciens.mjs.')
+  process.exit(1)
+}
+
 const LOT1 = '20261109234500_anciens_membres_numeros.sql'
 const ANNUAIRE = '20261109235500_aok_annuaire.sql'
 const NOM_MIGRATION = '20261109235900_aok_profils_par_numero.sql'

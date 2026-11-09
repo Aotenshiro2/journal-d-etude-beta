@@ -1,5 +1,31 @@
 # ETAT du journal d etudes
 
+## STATUTS DES ANCIENS ELEVES ET NOUVELLE NUMEROTATION : LES SCRIPTS (10/11/2026, commite NON pousse, branche anciens-membres ; migrations 20261109234500 (revue) et 20261110010000 du workspace ECRITES, NON appliquees)
+
+- Brief : D:\7_Agents\briefs\2026-11-10-statuts-anciens-eleves.md ; rapport : statuts-anciens-rapport.md (notes de
+  Yume Orchestre). Detail : ETAT du site, section « Statuts des anciens eleves et nouvelle numerotation ».
+- scripts/lister-anciens-membres.mjs : anciens a partir de 30 ; une personne qui porte un statut d'ancien eleve paye
+  entre dans la liste quelle que soit sa nature (Djock, Sebastien Picard) ; epoque par les statuts (les groupes SMM de
+  2025, ranges en IziMoney, donnent LearnyBox) ; statuts par ligne, ETM documentes (ETM_DOCUMENTES, sources), notes,
+  droits et « sans droits » de Brice, Marlon Wricka ; nouveaux champs de decisions-brice.json : deja_numerotes,
+  anciennete_depuis_equipe, sans_droits, droits, notes, a_trancher, etm_valide_le. Statuts lus en base une fois la
+  migration passee, calcules sinon par un MIROIR de la correspondance de la migration (GROUPES_STATUTS, EXCEPTIONS) :
+  a garder identiques. Page : lib-anciens-membres-page.mjs.
+- scripts/importer-anciens-membres.mjs + lib-importer-anciens.mjs (le meme coeur que l'essai) : refuse sans valide_le,
+  si a_trancher n'est pas vide, si decisions-brice.json a change depuis la liste. Reservations (30 et +, equipe 5 a 20
+  hors deja_numerotes), Marlon Wricka (cockpit_arch_personnes + note d'identite), reglages des droits, ETM (seulement
+  avec etm_valide_le), activation des comptes, PUIS aok_numeros_renumeroter() : les inscrits juste apres le dernier
+  ancien, sequence recreee. --compacter n'existe plus.
+- Essai : AOK_WORKSPACE=<worktree du workspace> node --env-file=.env --env-file=.env.local
+  scripts/essayer-migration-statuts-anciens.mjs (lot 1, annuaire, profils, parcours, puis l'import reel de la liste
+  validee, transaction annulee, lock_timeout 5 s ; 6,5 s du begin au rollback le 10/11). ⚠️ La premiere version
+  inscrivait deux comptes d'essai AVANT la renumerotation : la sequence n'est pas transactionnelle, 21290 et 21291 ont
+  ete brules pour de bon (prochain inscrit 21292, sans autre effet). Corrigee : plus aucun compte cree avant la
+  renumerotation. Les trois essais precedents (anciens membres, annuaire, profils par numero) refusent desormais de
+  tourner (ESSAI_ANCIEN_FORCE pour forcer) : ils attendent l'ancienne numerotation et bruleraient des numeros.
+- agent-cockpit.ts : les tables cockpit_parcours* au catalogue de l'agent, et dans TABLES_FONDS (refusees a un compte
+  sans acces_fonds, comme cockpit_arch_*). A redeployer avec le journal APRES la migration 20261110010000.
+
 ## PHOTO D'UN PROFIL « MEMBRES » : LA REGLE DE L'ANNUAIRE (10/11/2026, commite NON pousse, branche anciens-membres ; migration 20261109235900 du workspace ECRITE, NON appliquee)
 
 - Brief : D:\7_Agents\briefs\2026-11-10-annuaire-profils-par-numero.md ; rapport : annuaire-profils-rapport.md (notes de
