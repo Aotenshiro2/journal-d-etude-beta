@@ -1,5 +1,19 @@
 # ETAT du journal d etudes
 
+## PHOTO D'UN PROFIL « MEMBRES » : LA REGLE DE L'ANNUAIRE (10/11/2026, commite NON pousse, branche anciens-membres ; migration 20261109235900 du workspace ECRITE, NON appliquee)
+
+- Brief : D:\7_Agents\briefs\2026-11-10-annuaire-profils-par-numero.md ; rapport : annuaire-profils-rapport.md (notes de
+  Yume Orchestre). Detail : ETAT du site, section « /membres/<n°> suit la regle de l'annuaire ».
+- `GET /api/membres/photo` (profil « membres », m=1) : apres le jeton, `select public.aok_profil_visible(compte, cible)`
+  (role postgres). Faux : le meme 404. Erreur ou fonction absente : 503, jamais la photo. Ne compte pas dans le plafond
+  de l'annuaire (24 photos par page de l'annuaire). Profil web : inchange.
+- Essai : AOK_WORKSPACE=<worktree du workspace> node --env-file=.env --env-file=.env.local
+  scripts/essayer-migration-profils-par-numero.mjs (lot 1, annuaire, puis 20261109235900, transaction annulee,
+  lock_timeout 5 s ; 12 etapes ok le 10/11, 8,4 s du begin au rollback).
+- verifier-mon-espace-rls.mjs : apres la migration, le profil « membres » d'essai de A est place en tete des 24 (mesure
+  d'essai annulee) pour que B, compte sans programme, le lise encore.
+- Ordre : migration 20261109235900 AVANT ce journal (sinon 503 sur les photos « membres »).
+
 ## LE STATUT EQUIPE : BRICE, MELANIE, ADIL, ADRIEN (09/11/2026, commite NON pousse, branche statut-equipe depuis origin/master 2c79f3e ; migration 20261109210000 ECRITE, NON appliquee)
 
 - Brief : D:\7_Agents\briefs\2026-11-09-statut-equipe.md ; rapport : statut-equipe-rapport.md (notes de la

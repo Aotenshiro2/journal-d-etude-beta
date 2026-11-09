@@ -432,6 +432,14 @@ async function main() {
       attendre('lot 2 : numero inconnu : rien', inconnu.ok && inconnu.lignes[0].p === null)
       // Trois etats (Brice 18/10, migration 20261019010000) : prive, membres (defaut), web.
       await tx.$executeRawUnsafe('update public.profiles set profil_public = true, masquer_moteurs = true where id = $1::uuid', A.id)
+      // Depuis 20261109235900 (10/11/2026), un compte sans programme (B) ne lit un profil « membres »
+      // que dans ses 24 de l'annuaire. A y est place en tete par une mesure d'essai (annulee avec le reste),
+      // sinon il en sortirait des que 24 profils sont publics. La regle elle-meme : essayer-migration-profils-par-numero.mjs.
+      if ((await tx.$queryRawUnsafe(`select to_regprocedure('public.aok_annuaire_gratuits()') is not null as la`))[0].la) {
+        await tx.$executeRawUnsafe(`insert into public.aok_annuaire_mesures (profile_id, niveau, progres, pts_mois, mois, calcule_le)
+          values ($1::uuid, 1, 0, 1000000, (date_trunc('month', ((date_trunc('month', now() at time zone 'Europe/Paris'))::date - 1)))::date, now())
+          on conflict (profile_id) do update set pts_mois = excluded.pts_mois, mois = excluded.mois, calcule_le = excluded.calcule_le`, A.id)
+      }
       const rMembresAnon = await pub('anon', null)
       attendre('visibilite : profil MEMBRES de A : rien pour l\'anonyme', rMembresAnon.ok && rMembresAnon.lignes[0].p === null, rMembresAnon.ok ? '' : rMembresAnon.motif)
       const rMembresB = await pub('authenticated', B.id)

@@ -21,6 +21,12 @@ import { compteDuJeton, corsAcademie } from '@/lib/academie/http'
  *   - membres (profil_public, masquer_moteurs = true) : jeton Bearer d'un
  *     compte AOK exige (le site appelle avec fetch et la session du
  *     visiteur), reponse jamais mise en cache. Sans jeton valide : le meme 404.
+ *     Depuis le 10/11/2026 (migration 20261109235900_aok_profils_par_numero.sql),
+ *     le compte doit aussi pouvoir lire le profil, par aok_profil_visible en
+ *     base : son titulaire, un compte avec programme, ou un compte sans
+ *     programme si le profil est dans ses 24 de l'annuaire. Sinon le meme 404
+ *     (on ne contourne pas l'annuaire par les photos). La photo ne compte pas
+ *     dans le plafond de l'annuaire : une page de l'annuaire en charge 24.
  *
  * Route publique (middleware.ts). Aucun identifiant dans les logs.
  */
@@ -65,7 +71,7 @@ export async function GET(req: NextRequest) {
   const ligne = lignes[0]
   if (!ligne) return absent(avecJeton)
 
-  // Profil « membres » : un compte AOK connecte seulement.
+  // Profil « membres » : un compte AOK connecte qui peut le lire (meme regle que aok_profil_public).
   if (ligne.membres) {
     let compte: string | null
     try {
@@ -74,6 +80,11 @@ export async function GET(req: NextRequest) {
       return new NextResponse('indisponible', { status: 503, headers: { ...cors, 'Cache-Control': 'no-store' } })
     }
     if (!compte) return absent(true)
+    // Fonction absente (migration pas encore passee) ou base injoignable : 503, jamais la photo.
+    const lisible = await prisma.$queryRawUnsafe<{ ok: boolean }[]>(
+      `select public.aok_profil_visible($1::uuid, $2::uuid) as ok`, compte, ligne.id).catch(() => null)
+    if (lisible === null) return new NextResponse('indisponible', { status: 503, headers: { ...cors, 'Cache-Control': 'no-store' } })
+    if (lisible[0]?.ok !== true) return absent(true)
   }
 
   const s = stockage()
