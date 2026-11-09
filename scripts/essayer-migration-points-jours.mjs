@@ -83,7 +83,7 @@ for (const ligne of texteMigration.split('\n').filter(l => l.trim().startsWith('
   assert.ok(!ligne.includes(';'), `point-virgule dans un commentaire : ${ligne.trim()}`)
 }
 for (const m of texteMigration.matchAll(/comment on [^']+'([^']*)'/g)) assert.ok(!m[1].includes(';'), m[1])
-assert.ok(!/—/.test(texteMigration), 'pas de tiret cadratin')
+assert.ok(!/\u2014/.test(texteMigration), 'pas de tiret cadratin')
 
 class Annulation extends Error {}
 const prisma = new PrismaClient(process.env.DIRECT_URL ? { datasourceUrl: process.env.DIRECT_URL } : undefined)

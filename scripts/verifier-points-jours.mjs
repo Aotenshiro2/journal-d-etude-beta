@@ -62,7 +62,7 @@ bloc('la migration : tables fermees, rafraichissement reserve, regles en un seul
     assert.ok(!ligne.includes(';'), `point-virgule dans un commentaire : ${ligne.trim()}`)
   }
   for (const m of sql.matchAll(/comment on [^']+'([^']*)'/g)) assert.ok(!m[1].includes(';'), m[1])
-  assert.ok(!/—/.test(sql), 'pas de tiret cadratin')
+  assert.ok(!/\u2014/.test(sql), 'pas de tiret cadratin')
 })
 
 console.log(`\n${n} blocs verifies, tout est bon.`)
