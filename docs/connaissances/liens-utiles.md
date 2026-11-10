@@ -2,9 +2,9 @@
 sujet: liens-utiles
 titre: Les liens utiles et partenaires
 resume: Les liens publiés par Brice et Mélanie (prop firms, brokers, plateformes, outils), le partenaire Edgyx et la règle des codes promo.
-mots: liens, partenaires, affiliation, prop firm, broker, tradingview, edgyx, code, promo, réduction
-verifie: 2026-10-18
-sources: apps/journal-d-etude/src/lib/politique-information.ts (LIENS_PARTENAIRES, LIENS_UTILES, TEXTE_PROMOS, PHRASE_AFFILIATION, CANAL_PROMOS) ; sites/Aoknowledgecom/v3/src/pages/DecouvrirEdgyxPage.tsx
+mots: liens, partenaires, affiliation, prop firm, broker, tradingview, edgyx, code, promo, réduction, raisefx, dépôt
+verifie: 2026-11-10
+sources: apps/journal-d-etude/src/lib/politique-information.ts (LIENS_PARTENAIRES, LIENS_UTILES, TEXTE_PROMOS, PHRASE_AFFILIATION, CANAL_PROMOS) ; sites/Aoknowledgecom/v3/src/pages/DecouvrirEdgyxPage.tsx ; accès au Live Club par dépôt RaiseFx : docs/connaissances/live-club.md (src/lib/liveclub/emails.ts, modeleAccesBroker ; src/lib/liveclub/lots-pur.ts, DELAI_LOTS_JOURS)
 ---
 
 ## Ce que c'est
@@ -20,6 +20,7 @@ Pour les membres qui cherchent un outil, une plateforme, une prop firm ou un bro
 ## Prix et accès
 
 - Edgyx, le journal de trading recommandé par AOKnowledge, est un abonnement à part, pas compris dans le Live Club. Avec le lien partenaire et le code LIVECLUB20, 20 % de réduction sur l'abonnement Edgyx.
+- RaiseFx, dans les brokers de la liste, est aussi le broker partenaire du Live Club : un dépôt fait par ce lien ouvre le même Live Club que l'abonnement, offert pour une durée, à condition de trader ses premiers lots chez lui dans les 3 semaines. Le détail est dans la fiche du Live Club.
 - Codes promo et réductions sur les offres AOKnowledge : aucun code n'est donné ici. Les promos du moment, que Mélanie lance de temps en temps, sont annoncées sur son canal Telegram « MELMOM | ICT Trading » : https://t.me/melmom1993
 
 ## Comment y aller

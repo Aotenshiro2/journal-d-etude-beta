@@ -1,10 +1,10 @@
 ---
 sujet: live-club
 titre: Le Live Club
-resume: L'abonnement de lives éducatifs animés par Mélanie et Brice, avec le groupe Telegram, les replays, les modules de formation et le Carnet Premium. 139 € par mois, sans engagement.
-mots: live club, lives, abonnement, telegram, groupe, replays, académie, pause, arrêt, bot, prix, meltrade, melaniechart, horaires, heures, annonce
-verifie: 2026-11-03
-sources: sites/Aoknowledgecom/v3/src/pages/LiveClubPage.tsx ; sites/Aoknowledgecom/v3/src/pages/LiveClubCGVPage.tsx ; apps/journal-d-etude/src/lib/liveclub/config.ts (URLS_ABONNEMENT, URL_PORTAIL_CARTE, URL_FORMATION_LIVECLUB) ; src/lib/politique-information.ts ; src/lib/liveclub/accueil-groupe.ts
+resume: L'abonnement de lives éducatifs animés par Mélanie et Brice, avec le groupe Telegram, les replays, les modules de formation et le Carnet Premium. 139 € par mois, sans engagement, ou le même accès offert pour une durée par un dépôt chez notre broker partenaire (RaiseFx).
+mots: live club, lives, abonnement, telegram, groupe, replays, académie, pause, arrêt, bot, prix, meltrade, melaniechart, horaires, heures, annonce, broker, dépôt, raisefx, lots, accès offert
+verifie: 2026-11-10
+sources: sites/Aoknowledgecom/v3/src/pages/LiveClubPage.tsx ; sites/Aoknowledgecom/v3/src/pages/LiveClubCGVPage.tsx ; apps/journal-d-etude/src/lib/liveclub/config.ts (URLS_ABONNEMENT, URL_PORTAIL_CARTE, URL_FORMATION_LIVECLUB) ; src/lib/politique-information.ts (LIENS_UTILES, RaiseFx) ; src/lib/liveclub/accueil-groupe.ts ; src/lib/liveclub/emails.ts (modeleAccesBroker, modeleRappelFinBroker, modeleFinBroker, modeleRelanceLots, modeleSuspensionLots) ; src/lib/liveclub/lots-pur.ts (DELAI_LOTS_JOURS, EXEMPLE_LOTS, TENUE_LOTS, departLots) ; src/lib/liveclub/prompt-membre.ts (consigneLots) ; réponse de l'équipe au fil support bdb0cde7 du 10/11/2026 (accès par dépôt RaiseFx)
 ---
 
 ## Ce que c'est
@@ -26,6 +26,7 @@ Pour les traders qui ont déjà les bases et veulent les mettre à l'épreuve du
 - L'arrêt prend effet à la fin de la période payée : le groupe reste ouvert jusque-là, puis plus rien n'est prélevé.
 - Une pause de 1 à 6 mois est possible : elle démarre à la fin de la période déjà payée et l'abonnement reprend tout seul ensuite.
 - L'abonnement se gère avec le bot Telegram du Live Club : pause, arrêt, accès au groupe, situation de l'abonnement.
+- Un dépôt chez notre broker partenaire (RaiseFx aujourd'hui), fait par notre lien, ouvre le même Live Club que l'abonnement : groupe Telegram, lives, replays. C'est un accès offert pour une durée, jusqu'à une date, non renouvelable : pour rester ensuite, on s'abonne avec la même adresse email. Une condition : trader ses premiers lots chez le broker dans les 3 semaines qui suivent l'entrée au Live Club. Le montant du dépôt et la durée de l'accès, c'est l'équipe qui les confirme.
 - Edgyx, le journal de trading recommandé, est un abonnement à part, pas compris dans le Live Club.
 - Les conditions : https://aoknowledge.com/live-club/conditions
 
@@ -48,3 +49,6 @@ Dans le Telegram du Live Club, dans le sujet Replay.
 
 ### Edgyx est compris dans l'abonnement ?
 Non, c'est un abonnement à part. Le lien partenaire et le code LIVECLUB20 donnent 20 % de réduction sur Edgyx.
+
+### Un dépôt chez votre broker partenaire donne-t-il accès au Live Club ?
+Oui. Un dépôt chez notre broker partenaire (RaiseFx aujourd'hui), fait par notre lien, te donne exactement le même Live Club que l'abonnement : le groupe Telegram, les lives et les replays, rien de moins. Une seule condition, pour que le dépôt soit validé : trader tes premiers lots chez le broker dans les 3 semaines qui suivent ton entrée. Pas besoin de risquer ton compte : 2 lots sur le NAS, avec une position tenue 30 secondes, suffisent. Sans ces lots, ton accès au groupe se met en pause jusqu'à ce qu'ils soient faits. Après ton dépôt, l'équipe le vérifie chez le broker et ouvre ton accès : tu reçois l'email « Votre accès au Live Club est ouvert », puis le bot du Live Club te donne le lien du groupe. C'est un accès offert pour une durée, non renouvelable : on te prévient une semaine avant la fin, et pour rester, tu t'abonnes avec la même adresse email. Le montant du dépôt et la durée de l'accès, c'est l'équipe qui te les confirme.
