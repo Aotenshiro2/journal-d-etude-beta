@@ -70,7 +70,7 @@ const texte = fichier(MIGRATION)
 for (const ligne of texte.split('\n').filter(l => l.trim().startsWith('--'))) {
   assert.ok(!ligne.includes(';'), `point-virgule dans un commentaire : ${ligne.trim()}`)
 }
-assert.ok(!/—/.test(texte), 'pas de tiret cadratin')
+assert.ok(!/\u2014/.test(texte), 'pas de tiret cadratin')
 const ordres = decouper(sansCommentaires(texte))
 const creation = ordres.find(o => o.toLowerCase().startsWith('create or replace function public.aok_anciens_correspondances('))
 assert.ok(creation, 'creation de aok_anciens_correspondances dans le fichier')

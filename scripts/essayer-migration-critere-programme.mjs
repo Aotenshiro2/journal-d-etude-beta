@@ -66,7 +66,7 @@ for (const ligne of texte.split('\n').filter(l => l.trim().startsWith('--'))) {
   assert.ok(!ligne.includes(';'), `point-virgule dans un commentaire : ${ligne.trim()}`)
 }
 for (const m of texte.matchAll(/comment on [^']+'([^']*)'/g)) assert.ok(!m[1].includes(';'), m[1])
-assert.ok(!/—/.test(texte), 'pas de tiret cadratin')
+assert.ok(!/\u2014/.test(texte), 'pas de tiret cadratin')
 const ordres = decouper(sansCommentaires(texte))
 const creation = ordres.find(o => o.toLowerCase().startsWith('create or replace function public.aok_a_un_programme('))
 assert.ok(creation, 'creation de aok_a_un_programme dans le fichier')
