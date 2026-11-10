@@ -1207,7 +1207,7 @@ const SG = await import('../src/lib/besoins/signaux.ts')
 const POL = await import('../src/lib/politique-information.ts')
 
 const CLES_CONTRAT = [
-  'pilotage.import_releve_non_reconnu', 'pilotage.import_broker_autre', 'pilotage.import_erreur',
+  'pilotage.import_releve_non_reconnu', 'pilotage.import_broker_autre', 'pilotage.import_erreur', 'pilotage.cause_autre',
   'carnet.capture_impossible', 'carnet.sync_echec', 'carnet.export_echec',
   'academie.recherche_vide', 'academie.video_illisible', 'journal.import_echec',
   'site.page_introuvable', 'site.paiement_refuse', 'bot.bouton_perime', 'bot.message_non_compris',
@@ -1594,6 +1594,32 @@ await bloc('migration 20261106200000 : table fermee, contraintes (cle, personne 
   for (const c of ['p.cle', 'p.personnes_7j', 'p.evenements_7j', 'p.personnes', 'p.evenements', 'p.dernier_le', 'as dernier_contexte', 'as carte_id', 'as carte_titre', 'as carte_statut']) {
     assert.ok(sql.includes(c), c)
   }
+})
+
+await bloc('Pilotage 0.4 : la cause « Autre » du cimetiere (texte court normalise) et le regroupement des textes proches', async () => {
+  const ctx = SP.normaliserContexte('pilotage.cause_autre', { cause: 'Revenge trading apres une news, mail moi@exemple.fr 1234567' })
+  assert.equal(ctx.cause, 'revenge trading apres une news mail')
+  assert.equal(SP.normaliserContexte('pilotage.cause_autre', { autre: 'x' }), null)
+  assert.equal(SP.estCleClient('pilotage.cause_autre'), true)
+  const TP = await import('../src/lib/besoins/textes-proches.ts')
+  assert.deepEqual(TP.motsUtiles('J ai fait du revenge trading'), ['fait', 'revenge', 'trading'])
+  assert.equal(TP.textesProches('revenge trading', 'du revenge trading apres une perte'), true)
+  assert.equal(TP.textesProches('revenge trading', 'la news de 14h30'), false)
+  assert.equal(TP.textesProches('trop de trades', 'trades en trop'), true)
+  const g = TP.regrouperTextes([
+    { texte: 'revenge trading', personnes: 3, fois: 4 },
+    { texte: 'la news de 14h30', personnes: 1, fois: 1 },
+    { texte: 'revenge trading apres une perte', personnes: 1, fois: 1 },
+    { texte: 'news 14h30', personnes: 2, fois: 2 },
+  ])
+  assert.deepEqual(g.map(x => [x.texte, x.personnes, x.fois, x.variantes]), [
+    ['revenge trading', 4, 5, ['revenge trading apres une perte']],
+    ['news 14h30', 3, 3, ['la news de 14h30']],
+  ])
+  const { readFileSync: lireFichier } = await import('node:fs')
+  const script = lireFichier(new URL('./lire-causes-cimetiere.mjs', import.meta.url), 'utf8')
+  assert.match(script, /where s\.cle = 'pilotage\.cause_autre'/)
+  assert.doesNotMatch(script, /\b(insert|update|delete)\b/i)
 })
 
 console.log(`\n${n} blocs ok`)

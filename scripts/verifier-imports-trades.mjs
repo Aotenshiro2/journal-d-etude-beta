@@ -748,6 +748,35 @@ bloc('Alex : journal des notifications de Tradovate (FR et EN) et infos du compt
   refuse(parserFichierTrades('Total P/L,Open P/L,Net Liq,Total Margin Used\n0,0,abc,0\n'), 'tradovate-compte', 'Tradovate', IT.messageCompteTradovate(null))
 })
 
+bloc('Pilotage 0.4 : un export refuse recense le compte (le solde de Net Liq, le compte d une colonne Account commune), jamais devine', () => {
+  // Les infos du compte : le solde rendu a part (nombre), en plus du message.
+  const info = parserFichierTrades(fixture('tradovate-info-compte.csv'))
+  assert.equal(info.solde, 50250)
+  assert.equal(info.compte, undefined)
+  // Une colonne de compte, la meme partout : le compte ; et le solde de sa ligne.
+  const avecCompte = parserFichierTrades('Account,Total P/L,Open P/L,Net Liq,Available Margin\nESSAI0001,120.00,0.00,"51,276.50",51276.50\n')
+  assert.equal(avecCompte.refuse, true)
+  assert.equal(avecCompte.compte, 'ESSAI0001')
+  assert.equal(avecCompte.solde, 51276.5)
+  // Deux comptes dans le fichier : ni compte ni solde (aucun n'est le bon), le message sans montant.
+  const deux = parserFichierTrades('Account,Total P/L,Net Liq,Available Margin\nESSAI0001,0,50000,50000\nESSAI0002,0,25000,25000\n')
+  assert.equal(deux.compte, undefined)
+  assert.equal(deux.solde, null)
+  assert.equal(deux.erreurs[0], IT.messageCompteTradovate(null))
+  // Sans colonne de compte, une seule ligne : le solde, pas de compte.
+  assert.equal(parserFichierTrades('Total P/L,Net Liq,Day Margin\n0,1000,0\n').solde, 1000)
+  // Le rapport Orders de Tradovate porte un compte commun : il est rendu ; les ordres FR n'en ont pas.
+  const rapport = 'orderId,Account,Order ID,B/S,Contract,Product,avgPrice,filledQty,Fill Time,Status\n1,ESSAI0001,1,Buy,MNQZ6,MNQ,20000.25,5,10/05/2026 15:30:00,Filled\n2,ESSAI0001,2,Sell,MNQZ6,MNQ,20010.25,5,10/05/2026 15:40:00,Filled\n'
+  const ordres = parserFichierTrades(rapport)
+  assert.equal(ordres.format, 'tradovate-ordres')
+  assert.equal(ordres.compte, 'ESSAI0001')
+  assert.equal(ordres.solde, undefined)
+  const fr = parserFichierTrades(fixture('tradovate-ordres-fr.csv'))
+  assert.equal(fr.compte, undefined)
+  // Les comptes changent d'une ligne a l'autre : aucun compte.
+  assert.equal(parserFichierTrades(rapport.replace('2,ESSAI0001', '2,ESSAI0002')).compte, undefined)
+})
+
 bloc('Alex : le rapport Performance de Tradovate (ses ventes avant achats) se lit toujours, rien ne change', () => {
   const r = parserFichierTrades(fixture('tradovate-performance.csv'))
   assert.equal(r.format, 'tradovate-performance')

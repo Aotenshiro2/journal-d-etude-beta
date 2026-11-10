@@ -58,6 +58,9 @@ export interface ResultatParse {
   refuse?: boolean
   /** La plateforme reconnue aux en-têtes (« Tradovate », « NinjaTrader »), quand le format la dit. */
   plateforme?: string
+  /** Export refusé qui dit le solde du compte (infos du compte de Tradovate : Net Liq). Pilotage le propose
+   *  comme solde du compte (0.4, 10/11/2026) ; rien n'est écrit sans la revue du membre. */
+  solde?: number | null
 }
 
 /** Les colonnes d'un CSV inconnu, désignées par le membre (nom d'en-tête par champ). */
@@ -800,6 +803,23 @@ function entetesNormalises(ligne: string): { sep: string; normes: string[] } {
   return { sep, normes: entetes.map(normaliserNom) }
 }
 
+/** Les noms normalisés d'une colonne de compte (Account, Compte, Nom du compte, Account ID...). */
+const COLONNES_COMPTE = ['account', 'compte', 'accountname', 'accountid', 'accountnumber', 'nomducompte', 'numerodecompte', 'numeroducompte', 'ndecompte', 'nducompte']
+
+/** Le compte d'un export quand une colonne le porte et qu'il est le même sur toutes les lignes ; sinon null. */
+function compteDesLignes(lignes: string[], sep: string, normes: string[]): string | null {
+  const i = normes.findIndex(n => COLONNES_COMPTE.includes(n))
+  if (i < 0) return null
+  let vu: string | null = null
+  for (const ligne of lignes.slice(1, 20001)) {
+    const v = (decouperLigneCsv(ligne, sep)[i] ?? '').trim().slice(0, 80)
+    if (!v) continue
+    if (vu !== null && v !== vu) return null
+    vu = v
+  }
+  return vu
+}
+
 /**
  * Un export reconnu qui ne porte pas de trades : le refus (`refuse`), avec ce
  * que c'est et quel export faire. Null : ce n'en est pas un (le CSV générique
@@ -809,15 +829,24 @@ function entetesNormalises(ligne: string): { sep: string; normes: string[] } {
 function reconnaitreSansTrades(lignes: string[]): ResultatParse | null {
   const { sep, normes } = entetesNormalises(lignes[0])
   const a = (...noms: string[]) => noms.some(n => normes.includes(n))
-  const refus = (format: string, plateforme: string, message: string): ResultatParse => ({ format, trades: [], erreurs: [message], refuse: true, plateforme })
+  // Le compte, quand une colonne le porte et qu'il est le même sur toutes les lignes (Pilotage 0.4 :
+  // à défaut de trades, le fichier recense le compte). Absent de la plupart de ces exports.
+  const compte = compteDesLignes(lignes, sep, normes)
+  const refus = (format: string, plateforme: string, message: string, solde?: number | null): ResultatParse => ({
+    format, trades: [], erreurs: [message], refuse: true, plateforme,
+    ...(compte ? { compte } : {}),
+    ...(solde !== undefined ? { solde } : {}),
+  })
   const resultat = a('pnl', 'profit', 'pl', 'netpnl', 'realizedpnl', 'profitloss', 'gainperte', 'resultat', 'benefice', 'grosspl', 'netpl')
 
   // Tradovate, les infos du compte (Total P/L, Open P/L, Net Liq, marges) : le solde, rien d'autre.
   const NET_LIQ = /^(netliq|netliquidity|netliquidatingvalue|liquiditenette|liqnette|valeurnetteliquidative|valeurliquidativenette)/
   if (normes.some(n => NET_LIQ.test(n)) && a('totalpl', 'openpl', 'availablemargin', 'totalmarginused', 'daymargin', 'pltotal', 'plouvert', 'margedisponible', 'margeutilisee')) {
     const i = normes.findIndex(n => NET_LIQ.test(n))
-    const solde = lignes[1] ? lireMontant(decouperLigneCsv(lignes[1], sep)[i] ?? '') : null
-    return refus('tradovate-compte', 'Tradovate', messageCompteTradovate(solde))
+    // Plusieurs lignes sans compte commun : plusieurs comptes, aucun solde n'est le bon.
+    const donnees = lignes.slice(1).filter(l => l.trim())
+    const solde = donnees.length === 1 || (donnees.length > 1 && compte) ? lireMontant(decouperLigneCsv(donnees[0], sep)[i] ?? '') : null
+    return refus('tradovate-compte', 'Tradovate', messageCompteTradovate(solde), solde)
   }
   // Tradovate, le journal des notifications (Symbole, Heure, Titre, Texte ; Symbol, Time, Title, Text).
   if (a('titre', 'title') && a('texte', 'text', 'message') && a('heure', 'time', 'timestamp', 'date', 'dateheure')) {

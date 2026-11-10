@@ -126,7 +126,18 @@ export interface Lecture {
   /** CSV de trades aux colonnes devinées : les en-têtes et la correspondance proposée. */
   entetes?: string[]
   proposition?: Partial<ColonnesCsv>
+  /** La plateforme que le format dit (exports reconnus sans trades, 10/11/2026). */
+  plateforme?: string | null
+  /**
+   * Un export sans trades qui recense quand même le compte (Pilotage 0.4, 10/11/2026 :
+   * « à défaut d'en tirer des trades on peut recenser les comptes ») : la plateforme,
+   * le numéro et le solde quand le fichier les porte. Pilotage le PROPOSE, le membre accepte.
+   */
+  compteLu?: CompteLu | null
 }
+
+/** Le compte recensé par un export sans trades (historique d'ordres, notifications, infos du compte, journal). */
+export interface CompteLu { plateforme: string; identifiant: string | null; solde: number | null; devise: string | null }
 
 /** Un compte de Pilotage, tel qu'envoyé avec le document (body.comptes). */
 export interface ComptePilotage {
@@ -572,7 +583,24 @@ export function lireCsv(texte: string, nom: string): Lecture | null {
   const lu = parserFichierTrades(propre, nom)
   // Un export reconnu qui ne porte pas de trades (ordres, notifications, solde, journal de NinjaTrader,
   // 10/11/2026) : sans IA, rien à écrire, et la remarque dit quel export faire à la place.
-  if (lu.refuse) return { ...lectureVide('illisible', 'csv'), broker: lu.plateforme ?? null, remarque: lu.erreurs[0] ?? 'Ce fichier ne porte pas de trades.' }
+  // Pilotage 0.4 : le fichier recense le compte (plateforme, numéro et solde quand il les porte).
+  if (lu.refuse) {
+    const plateforme = lu.plateforme ?? null
+    const identifiant = lu.compte ?? null
+    const solde = typeof lu.solde === 'number' && Number.isFinite(lu.solde) ? lu.solde : null
+    // Le solde de Tradovate (Net Liq) est en dollars : ses comptes de futures le sont tous.
+    const devise = solde !== null && plateforme === 'Tradovate' ? 'USD' : null
+    return {
+      ...lectureVide('illisible', 'csv'),
+      broker: plateforme,
+      firme: firmeDuCompte(identifiant),
+      identifiant,
+      devise,
+      plateforme,
+      ...(plateforme ? { compteLu: { plateforme, identifiant, solde, devise } } : {}),
+      remarque: lu.erreurs[0] ?? 'Ce fichier ne porte pas de trades.',
+    }
+  }
   const avecTrades = (trades: TradeNormalise[], format: string, confiance: number, remarque: string, extra: Partial<Lecture> = {}): Lecture => {
     const origine = BROKERS_FORMAT[format] ?? { broker: null, firme: null }
     return {

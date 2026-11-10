@@ -65,6 +65,10 @@ const DEFINITIONS = {
   'pilotage.import_releve_non_reconnu': { apps: ['pilotage'], genre: 'refus', titre: "Pilotage : relevé de broker non reconnu à l'import", contexte: { extension: 'jeton', broker_detecte: 'texte' } },
   'pilotage.import_broker_autre': { apps: ['pilotage'], genre: 'impasse', titre: "Pilotage : broker absent de la liste à l'import", contexte: { broker_saisi: 'texte' } },
   'pilotage.import_erreur': { apps: ['pilotage'], genre: 'refus', titre: "Pilotage : erreur pendant l'import d'un relevé", contexte: { etape: 'jeton' } },
+  // Pilotage 0.4 (10/11/2026) : la cause « Autre » d'un compte passé au cimetière, dite par le membre en
+  // quelques mots (texte court normalisé). Lue par scripts/lire-causes-cimetiere.mjs, regroupée par texte
+  // proche : une proposition qui revient souvent peut rejoindre la liste des causes de Pilotage.
+  'pilotage.cause_autre': { apps: ['pilotage'], genre: 'impasse', titre: "Pilotage : cause « Autre » d'un compte cramé", contexte: { cause: 'texte' } },
   'carnet.capture_impossible': { apps: ['extension'], genre: 'refus', titre: 'Carnet : capture impossible', contexte: { plateforme: 'plateforme', raison: 'jeton' } },
   'carnet.sync_echec': { apps: ['extension'], genre: 'refus', titre: 'Carnet : synchronisation en échec', contexte: { code: 'jeton' } },
   'carnet.export_echec': { apps: ['extension'], genre: 'refus', titre: 'Carnet : export en échec', contexte: { format: 'jeton' } },

@@ -211,6 +211,26 @@ export async function listerDocuments(userId: string) {
   }
 }
 
+/**
+ * L'original d'un document du membre, pour le relire avec le lecteur à jour
+ * (Pilotage 0.4, « Relire mes documents ») : ses octets, son nom et son type.
+ * Seulement s'il est au membre (sinon `absent`, comme un id inconnu).
+ */
+export async function originalDocument(userId: string, id: string): Promise<
+  { nom: string; type: string; taille: number; octets: Uint8Array } | { absent: true } | { erreur: string }
+> {
+  const document = await prisma.documentPilotage.findFirst({ where: { id, userId }, select: { nom: true, type: true, taille: true, chemin: true } })
+  if (!document) return { absent: true }
+  const s = stockage()
+  if (!s) return { erreur: 'Coffre indisponible pour le moment.' }
+  const { data, error } = await s.storage.from(BUCKET_DOCUMENTS).download(document.chemin)
+  if (error || !data) {
+    console.error('[pilotage/documents] original non relu', error?.message)
+    return { erreur: "L'original ne se relit pas pour le moment." }
+  }
+  return { nom: document.nom, type: document.type, taille: document.taille, octets: new Uint8Array(await data.arrayBuffer()) }
+}
+
 /** Une URL signée de 10 minutes vers l'original, seulement s'il est au membre. */
 export async function lienDocument(userId: string, id: string): Promise<{ url: string } | { absent: true } | { erreur: string }> {
   const document = await prisma.documentPilotage.findFirst({ where: { id, userId }, select: { chemin: true } })

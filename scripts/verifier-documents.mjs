@@ -1168,4 +1168,39 @@ bloc('routes : le classeur est lu par l appelant (documents/lire et trades/impor
   assert.deepEqual(modules, ['fflate'])
 })
 
+bloc('Pilotage 0.4 : un export sans trades recense le compte (compteLu : plateforme, numero, solde), le message reste, rapproche au numero', () => {
+  const info = preparerClasseur('tradovate-info-du-compte.csv', fixtureOctets('tradovate-info-compte.csv'))
+  assert.equal(info.lecture.type, 'illisible')
+  assert.equal(info.lecture.plateforme, 'Tradovate')
+  assert.equal(info.lecture.broker, 'Tradovate')
+  assert.deepEqual(info.lecture.compteLu, { plateforme: 'Tradovate', identifiant: null, solde: 50250, devise: 'USD' })
+  assert.match(info.lecture.remarque, /^Ce fichier donne le solde de ton compte Tradovate/)
+  const ordres = preparerClasseur('tradovate-ordres-tout.csv', fixtureOctets('tradovate-ordres-fr.csv'))
+  assert.deepEqual(ordres.lecture.compteLu, { plateforme: 'Tradovate', identifiant: null, solde: null, devise: null })
+  assert.equal(ordres.lecture.remarque, IT.MESSAGE_ORDRES_TRADOVATE)
+  // Un compte dans le fichier : identifiant de la lecture, firme d'apres son prefixe, rapprochement au numero.
+  const octets = new TextEncoder().encode('Account,Total P/L,Net Liq,Available Margin\nAPEX-12345-01,0,50250,50250\n')
+  const apex = preparerClasseur('info.csv', octets)
+  assert.equal(apex.lecture.identifiant, 'APEX-12345-01')
+  assert.equal(apex.lecture.firme, 'Apex')
+  assert.equal(apex.lecture.compteLu.identifiant, 'APEX-12345-01')
+  const fin = D.finaliserLecture(apex.lecture, [{ id: 'c1', nom: 'Apex 1', firmName: 'Apex', identifiants: ['APEX-12345-01'] }, { id: 'c2', nom: 'Apex 2', firmName: 'Apex', identifiants: ['APEX-99999-01'] }])
+  assert.equal(fin.lecture.compteId, 'c1')
+  assert.equal(fin.lecture.origine.identifiant, 'document')
+  // Le journal de NinjaTrader : la plateforme seule.
+  const log = preparerClasseur('NinjaTrader Grid.xlsx', fixtureOctets('ninjatrader-journal-fr.xlsx'))
+  assert.deepEqual(log.lecture.compteLu, { plateforme: 'NinjaTrader', identifiant: null, solde: null, devise: null })
+  // Un CSV illisible sans plateforme reconnue n'a pas de compteLu.
+  assert.equal(D.lireCsv('', 'vide.csv').compteLu, undefined)
+})
+
+bloc('Pilotage 0.4 : la route relire relit l original du coffre SANS IA, lecture seule, bornee au membre', () => {
+  const route = lire('../src/app/api/pilotage/documents/[id]/relire/route.ts')
+  assert.match(route, /originalDocument\(userId, id\)/)
+  assert.match(route, /if \(!\('lecture' in prep\)\) return NextResponse\.json\(\{ lecture: null, avecAide: true, document \}/)
+  assert.doesNotMatch(route, /lireParIA|quotaDuMembre|garderDocument|prisma\./)
+  const serveur = lire('../src/lib/documents-serveur.ts')
+  assert.match(serveur, /export async function originalDocument[\s\S]*?findFirst\(\{ where: \{ id, userId \}/)
+})
+
 console.log(`\n${n} blocs verifies, tout est bon.`)

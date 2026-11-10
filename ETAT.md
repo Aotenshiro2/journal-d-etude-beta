@@ -1,5 +1,29 @@
 # ETAT du journal d etudes
 
+## PILOTAGE 0.4 : COMPTES RECENSES DEPUIS LES EXPORTS SANS TRADES, ROUTE RELIRE, SIGNAL DES CAUSES DU CIMETIERE (10/11/2026, commite NON pousse, branche journal-pilotage-0-4 depuis origin/master b9e4fa4 ; aucune migration)
+
+- Brief : D:\7_Agents\briefs\2026-11-10-pilotage-0-4.md (go de Brice) ; rapport : pilotage-0-4-rapport.md (notes de Yume
+  Orchestre). Cote Pilotage : son ETAT, section 0.4 (branche pilotage-0-4).
+- imports-trades.ts : un export refuse (ordres, notifications, infos du compte, Log, Executions, Orders) rend `compte`
+  quand une colonne Account / Compte porte le meme compte sur toutes les lignes, et `solde` (Net Liq) pour les infos du
+  compte de Tradovate ; plusieurs lignes sans compte commun : ni compte ni solde, le message sans montant.
+- documents-pilotage.ts : la lecture refusee reste `illisible` (message inchange) mais porte `plateforme`, `identifiant`,
+  `firme` (prefixe du compte), `devise` (USD pour le Net Liq de Tradovate) et `compteLu` { plateforme, identifiant,
+  solde, devise } : Pilotage 0.4 propose le compte et son solde. Un Pilotage d'avant ignore ces champs.
+- POST /api/pilotage/documents/[id]/relire (NOUVEAU) : l'original du coffre (originalDocument, documents-serveur.ts,
+  borne au userId) relu par preparerLecture puis finaliserLecture avec les comptes envoyes ; SANS IA (aucune lecture
+  comptee : `lecture: null, avecAide: true` quand il en faudrait une) ; lecture seule (ni coffre ni table touches).
+- Signal `pilotage.cause_autre` { cause: texte } (signaux-pur.ts) : la cause « Autre » d'un compte passe au cimetiere.
+  Point de lecture : `node --env-file=.env.local scripts/lire-causes-cimetiere.mjs [--jours 90] [--json f]` (LECTURE
+  SEULE, mots de membres, la sortie reste sur la machine) : textes proches regroupes (src/lib/besoins/textes-proches.ts,
+  Jaccard des mots utiles >= 0,5 ou inclusion), « a proposer a Brice » des 3 personnes. Pas de contrat besoins-contrat-api.md
+  trouve dans le depot pour y ajouter la cle.
+- Verifs : verifier-imports-trades.mjs 40 blocs (1 nouveau), verifier-documents.mjs 31 (2 nouveaux), verifier-besoins.mjs
+  48 (1 nouveau, cle ajoutee au contrat), verifier-doublons-compte 9, verifier-mes-trades 16, verifier-synthese-trades 19 ;
+  eslint des fichiers touches ; npm run build OK (route relire listee).
+- Ordre de mise en ligne : ce journal AVANT Pilotage 0.4 (sans lui, Pilotage ne recense rien et « Relire » rend 404 par
+  document, dit en erreur dans la revue).
+
 ## RESTES DU 10/11 : CLE KIT REFUSEE, ADRESSES A RELIER DANS /moi, ESSAI DU CRITERE UNIQUE (10/11/2026, commite NON pousse, branche restes-10-11 depuis origin/master 9e0f4a2)
 
 - Brief : D:\7_Agents\briefs\2026-11-10-academie-restes-du-10-11.md ; rapport : restes-10-11-rapport.md (notes de
