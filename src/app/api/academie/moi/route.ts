@@ -50,8 +50,12 @@ import { messageErreur, relationAbsente } from '@/lib/liveclub/pur'
  *                 lecons: [{ id, slug, section_id, ordre, titre, type, format, duree_s, apercu, statut,
  *                            lisible, acces, raisons,
  *                            etat: non_vu | ouvert | en_cours | vu,
- *                            progression | null }] }]
+ *                            progression | null,
+ *                            live?: { le, type, organisations, intervenants } }] }]
  *   }
+ * live (11/11/2026, Rediffusion des Lives, migration 20261111010000) : la date du live (AAAA-MM-JJ),
+ * son type (slug), ses organisations et intervenants (noms affiches). Absent hors des lecons de live
+ * et avant la migration.
  * etat (Brice, 15/10) : non_vu = jamais ouverte ; ouvert = lien ou contenu
  * delivre, rien de consomme ; en_cours = du temps reellement regarde ou lu ;
  * vu = 60 % regardes, fin de la video, texte lu jusqu'en bas ou clic

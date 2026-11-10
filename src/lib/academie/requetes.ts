@@ -214,6 +214,23 @@ select l.id::text as id, l.module_id::text as module_id, l.section_id::text as s
  order by l.module_id, l.ordre, l.titre
 `
 
+/**
+ * (11/11/2026, Rediffusion des Lives, migration 20261111010000) La meme liste, avec les donnees du live de chaque
+ * lecon (date, type, organisations, intervenants ; vides hors des lecons de live). Avant la migration, Postgres
+ * repond 42703 (colonne absente) : catalogue.ts relit alors SQL_LECONS_VISIBLES.
+ */
+export const SQL_LECONS_VISIBLES_LIVE = `
+select l.id::text as id, l.module_id::text as module_id, l.section_id::text as section_id,
+       l.slug, l.ordre, l.titre, l.type, l.format, l.usage, l.duree_s, l.apercu, l.statut,
+       b.publie_le as billet_publie_le,
+       l.live_le::text as live_le, l.live_type, l.live_organisations, l.live_intervenants
+  from public.academie_lecons l
+  join public.academie_modules m on m.id = l.module_id
+  left join public.academie_billets b on b.lecon_id = l.id and b.retire_le is null
+ where m.statut in ('publie', 'a_venir') and l.statut in ('publie', 'a_venir')
+ order by l.module_id, l.ordre, l.titre
+`
+
 const COLONNES_LECON = `
   l.id::text as id, l.module_id::text as module_id, l.section_id::text as section_id,
   l.slug, l.ordre, l.titre, l.type, l.format, l.usage, l.hebergeur, l.bunny_bibliotheque, l.bunny_video_id,

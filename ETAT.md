@@ -1,5 +1,25 @@
 # ETAT du journal d etudes
 
+## REDIFFUSION DES LIVES : DONNEES DU LIVE DANS /moi, IMPORT DU MODULE RENOMME (11/11/2026, commite NON pousse, branche rediffusion-des-lives depuis origin/master b9e4fa4 ; migration 20261111010000 du workspace ECRITE, NON appliquee)
+
+- Brief : D:\7_Agents\briefs\2026-11-11-rediffusion-des-lives-module.md ; rapport : rediffusion-des-lives-rapport.md
+  (notes de Yume Orchestre). Cote site : son ETAT, section du meme nom.
+- **/moi et /catalogue** (vue-moi.ts, catalogue.ts, requetes.ts SQL_LECONS_VISIBLES_LIVE) : chaque lecon de live rend
+  `live: { le, type, organisations, intervenants }` (absent ailleurs). Avant la migration, Postgres rend 42703 :
+  catalogue.ts relit l'ancienne liste et ne reessaie qu'au bout de 10 minutes. Le journal peut donc partir avant ou
+  apres la migration sans casser /moi.
+- **Import** (scripts/importer-catalogue-academie.mjs) : le champ « live » d'une lecon remplit live_le, live_type,
+  live_organisations, live_intervenants (verifie par lireLive ; une ecriture seulement si ca change ; une lecon sans
+  « live » les vide). Deux gardes : l'ancien fichier replays-live-club.json est REFUSE une fois le module renomme
+  (SLUGS_REMPLACES : il recreerait le module et ses 90 lecons en double) ; le nouveau (« remplace ») est refuse tant
+  que la migration n'est pas appliquee. Un import a blanc du nouveau fichier contre la prod d'aujourd'hui rend donc
+  « appliquer d'abord sa migration » : c'est voulu.
+- **Essai** : scripts/essayer-migration-rediffusion.mjs (migration puis import, transaction annulee, lock_timeout
+  5 s, ~21 a 26 s du begin au rollback ; le ALTER TABLE tient academie_lecons tout ce temps : le lancer la nuit).
+  Photo : D:\6_Societe\Pilotage\Academie\catalogue\rediffusion-des-lives\essai-migration.json.
+- **Ordre** : migration 20261111010000, import --ecrire de modules/rediffusion-des-lives.json (depuis ce worktree),
+  push du journal, push du site. Detail et commandes : le rapport.
+
 ## PILOTAGE 0.4 : COMPTES RECENSES DEPUIS LES EXPORTS SANS TRADES, ROUTE RELIRE, SIGNAL DES CAUSES DU CIMETIERE (10/11/2026, commite NON pousse, branche journal-pilotage-0-4 depuis origin/master b9e4fa4 ; aucune migration)
 
 - Brief : D:\7_Agents\briefs\2026-11-10-pilotage-0-4.md (go de Brice) ; rapport : pilotage-0-4-rapport.md (notes de Yume

@@ -116,6 +116,8 @@ export function construire(catalogue: Catalogue, droits: Droits, progression: Ma
         raisons: r.raisons,
         etat: etatLecon(progression.get(l.id)),
         progression: progressionPublique(progression.get(l.id)),
+        // (11/11/2026) Rediffusion des Lives : date, type, organisations, intervenants. Absent hors des lives.
+        ...(l.live ? { live: l.live } : {}),
       })),
     }
   })

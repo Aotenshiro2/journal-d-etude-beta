@@ -49,6 +49,15 @@
 //   module d'origine), vide les marques et note ce qui est defait (academie_editions, origine import).
 // LA MIGRATION 20261023150000 DOIT ETRE APPLIQUEE avant d'importer.
 //
+// Les donnees du live (11/11/2026, module « Rediffusion des Lives », migration 20261111010000) : le champ « live »
+// d'une lecon, { "le": "AAAA-MM-JJ", "type": "<slug>", "organisations": [...], "intervenants": [...] }, remplit
+// live_le, live_type, live_organisations et live_intervenants. Une lecon sans « live » les vide (le fichier fait foi).
+// Un fichier qui porte des « live » sur une base sans ces colonnes : l'import s'arrete (migration a appliquer).
+//
+// Un module renomme (11/11/2026) : replays-live-club est devenu rediffusion-des-lives (meme ligne, meme id). L'ancien
+// fichier est refuse une fois le module renomme (il recreerait un module et ses lecons en double) ; le nouveau
+// (« remplace » : l'ancien slug) est refuse tant que la migration qui renomme n'est pas appliquee.
+//
 // importerModule(tx, donnees, dossier, options) est exportee pour les scripts essayer-migration-*
 // (memes ordres, dans une transaction toujours annulee).
 import { readFileSync } from 'node:fs'
@@ -64,6 +73,28 @@ const SELECT_LECON = `select id::text as id, module_id::text as module_id, secti
   statut, titre, contenu, edite_le is not null as edite, deplace_le is not null as deplace,
   statut_le is not null as statut_modifie, origine_module_id::text as origine_module_id, origine_slug
   from public.academie_lecons`
+
+// Modules renommes par une migration (ancien slug -> nouveau) : l'ancien fichier ne s'importe plus.
+export const SLUGS_REMPLACES = { 'replays-live-club': 'rediffusion-des-lives' }
+
+const COLONNES_LIVE = ['live_le', 'live_type', 'live_organisations', 'live_intervenants']
+
+/** Le champ « live » d'une lecon du fichier, verifie (null s'il est absent). Jette sur une valeur invalide. */
+export function lireLive(brut, slug) {
+  if (brut === undefined || brut === null) return null
+  const faux = quoi => { throw new Error(`lecon ${slug} : champ live invalide (${quoi})`) }
+  if (typeof brut !== 'object' || Array.isArray(brut)) faux('objet attendu')
+  const le = brut.le
+  if (typeof le !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(le) || Number.isNaN(Date.parse(`${le}T00:00:00Z`))) faux('le')
+  const type = brut.type ?? null
+  if (type !== null && (typeof type !== 'string' || !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(type) || type.length > 40)) faux('type')
+  const liste = (v, max, nom) => {
+    const l = v ?? []
+    if (!Array.isArray(l) || l.length > max || l.some(x => typeof x !== 'string' || !x.trim() || x.length > 80)) faux(nom)
+    return l.map(x => x.trim())
+  }
+  return { le, type, organisations: liste(brut.organisations, 8, 'organisations'), intervenants: liste(brut.intervenants, 12, 'intervenants') }
+}
 
 /**
  * Joue l'import d'un module dans la transaction tx. Rend le bilan. Jette sur une donnee invalide.
@@ -81,6 +112,27 @@ export async function importerModule(tx, donnees, dossier, { ecraserEditions = f
   const noterRangement = async (cible, id, nom, plan) => {
     if (plan.historique.length) await tx.$executeRawUnsafe(SQL_EDITION_HISTORIQUE_IMPORT, cible, id, JSON.stringify(plan.historique))
     if (ecraserEditions && (plan.effacerPlace || plan.effacerStatut)) bilan.rangements_ecrases.push(nom)
+  }
+
+  // Un module renomme : l'ancien fichier recreerait le module et ses lecons en double ; le nouveau attend la migration.
+  const slugExiste = async slug => (await tx.$queryRawUnsafe(`select 1 from public.academie_modules where slug = $1`, slug)).length > 0
+  const nouveauSlug = SLUGS_REMPLACES[m.slug]
+  if (nouveauSlug && await slugExiste(nouveauSlug)) {
+    throw new Error(`le module ${m.slug} s'appelle maintenant ${nouveauSlug} : importer modules/${nouveauSlug}.json `
+      + `(outils/rediffusion_vers_module.py le refait depuis ${m.slug}.json)`)
+  }
+  if (donnees.remplace && await slugExiste(donnees.remplace) && !(await slugExiste(m.slug))) {
+    throw new Error(`le module ${donnees.remplace} n'est pas encore renomme en ${m.slug} : appliquer d'abord sa migration`)
+  }
+
+  // Les donnees du live : verifiees avant toute ecriture ; les colonnes doivent exister si le fichier en porte.
+  const lives = new Map((donnees.lecons ?? []).map(l => [l.slug, lireLive(l.live, l.slug)]))
+  const [{ n: nbColonnesLive }] = await tx.$queryRawUnsafe(
+    `select count(*)::int as n from information_schema.columns
+      where table_schema = 'public' and table_name = 'academie_lecons' and column_name = any($1::text[])`, COLONNES_LIVE)
+  const avecLive = nbColonnesLive === COLONNES_LIVE.length
+  if (!avecLive && [...lives.values()].some(Boolean)) {
+    throw new Error('le fichier porte des donnees de live : appliquer d\'abord la migration 20261111010000 (colonnes live_*)')
   }
 
   // Le module tel qu'il est en base (verrouille jusqu'a la fin de l'import) : une edition, un rangement dans l'app ?
@@ -191,6 +243,7 @@ export async function importerModule(tx, donnees, dossier, { ecraserEditions = f
       video && hebergeur === 'bunny' ? (l.bunny_bibliotheque ?? 'formation') : null,
       bunnyVideoId, wistiaId, l.duree_s ?? null, fl.valeurs.contenu, JSON.stringify(l.ressources ?? []), Boolean(l.apercu),
     ]
+    let leconId = leconBase?.id ?? null
     if (leconBase) {
       await tx.$executeRawUnsafe(
         `update public.academie_lecons set module_id = $2::uuid, section_id = $3::uuid, slug = $4, ordre = $5, titre = $6,
@@ -207,12 +260,25 @@ export async function importerModule(tx, donnees, dossier, { ecraserEditions = f
         fl.effacerEdition, pl.effacerPlace, pl.effacerStatut,
       )
     } else {
-      await tx.$executeRawUnsafe(
+      const [cree] = await tx.$queryRawUnsafe(
         `insert into public.academie_lecons (module_id, section_id, slug, ordre, titre, type, format, usage, hebergeur,
            bunny_bibliotheque, bunny_video_id, wistia_id, duree_s, contenu, ressources, apercu, statut)
-         values ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb, $16, $17)`,
+         values ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb, $16, $17)
+         returning id::text as id`,
         moduleId, sectionId ?? null, l.slug, l.ordre, fl.valeurs.titre, ...champs, pl.statut,
       )
+      leconId = cree.id
+      bilan.lecons_creees = (bilan.lecons_creees ?? 0) + 1
+    }
+    // Les donnees du live (une ecriture seulement si elles changent).
+    if (avecLive) {
+      const v = lives.get(l.slug)
+      const n = await tx.$executeRawUnsafe(
+        `update public.academie_lecons set live_le = $2::date, live_type = $3, live_organisations = $4::text[], live_intervenants = $5::text[]
+          where id = $1::uuid and (live_le is distinct from $2::date or live_type is distinct from $3
+            or live_organisations is distinct from $4::text[] or live_intervenants is distinct from $5::text[])`,
+        leconId, v?.le ?? null, v?.type ?? null, v?.organisations ?? [], v?.intervenants ?? [])
+      if (n) bilan.lives_ecrits = (bilan.lives_ecrits ?? 0) + 1
     }
     if (fl.garde) bilan.gardees.push(`lecon ${l.slug} (titre et texte)`)
     if (pl.gardePlace) bilan.places_gardees.push(`lecon ${l.slug}${pl.ailleurs ? ` (dans un autre module, slug ${pl.slug})` : ` (ordre ${pl.ordre})`}`)

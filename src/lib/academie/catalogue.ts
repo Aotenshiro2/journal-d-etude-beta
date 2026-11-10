@@ -13,10 +13,10 @@
 // pas encore appliquee) se reconnait avec relationAbsente.
 
 import { prisma } from '@/lib/db'
-import { ressourcesPropres, type Ressource, type TypeLecon } from './pur'
+import { colonneAbsente, ressourcesPropres, type Ressource, type TypeLecon } from './pur'
 import {
-  SQL_LECON_PAR_ID, SQL_LECONS_PAR_VIDEO, SQL_LECONS_VISIBLES, SQL_MODULES_VISIBLES, SQL_OFFRES_DES_MODULES,
-  SQL_SECTIONS_VISIBLES,
+  SQL_LECON_PAR_ID, SQL_LECONS_PAR_VIDEO, SQL_LECONS_VISIBLES, SQL_LECONS_VISIBLES_LIVE, SQL_MODULES_VISIBLES,
+  SQL_OFFRES_DES_MODULES, SQL_SECTIONS_VISIBLES,
 } from './requetes'
 
 export type StatutContenu = 'brouillon' | 'publie' | 'archive' | 'a_venir'
@@ -52,6 +52,12 @@ export type OffreDuModule = {
 
 export type SectionCatalogue = { id: string; moduleId: string; ordre: number; titre: string }
 
+/**
+ * (11/11/2026) Les donnees d'un live (module « Rediffusion des Lives », migration 20261111010000) : date
+ * (AAAA-MM-JJ), type (slug), organisations et intervenants (noms affiches). null hors des lecons de live.
+ */
+export type LiveLecon = { le: string; type: string | null; organisations: string[]; intervenants: string[] }
+
 export type LeconCatalogue = {
   id: string
   moduleId: string
@@ -67,6 +73,8 @@ export type LeconCatalogue = {
   statut: StatutContenu
   /** Billet du jour (academie_billets, 27/10/2026) : sa date de publication, pour la fenetre libre. Sinon null. */
   billetPublieLe: Date | null
+  /** (11/11/2026) Les donnees du live (Rediffusion des Lives), null sinon ou avant la migration. */
+  live: LiveLecon | null
 }
 
 export type Catalogue = {
@@ -107,6 +115,8 @@ type LigneLecon = {
   id: string; module_id: string; section_id: string | null; slug: string; ordre: number; titre: string
   type: TypeLecon; format: string; usage: string; duree_s: number | null; apercu: boolean; statut: StatutContenu
   billet_publie_le: Date | null
+  /** Seulement avec SQL_LECONS_VISIBLES_LIVE (absents des autres lectures). */
+  live_le?: string | null; live_type?: string | null; live_organisations?: string[] | null; live_intervenants?: string[] | null
 }
 type LigneLeconComplete = LigneLecon & {
   hebergeur: 'bunny' | 'wistia' | null; bunny_bibliotheque: string | null; bunny_video_id: string | null
@@ -129,13 +139,36 @@ function leconDeLigne(l: LigneLecon): LeconCatalogue {
     apercu: l.apercu,
     statut: l.statut,
     billetPublieLe: l.billet_publie_le ?? null,
+    live: l.live_le ? {
+      le: l.live_le.slice(0, 10),
+      type: l.live_type ?? null,
+      organisations: Array.isArray(l.live_organisations) ? l.live_organisations : [],
+      intervenants: Array.isArray(l.live_intervenants) ? l.live_intervenants : [],
+    } : null,
   }
+}
+
+// (11/11/2026) Les colonnes du live absentes (journal en ligne avant la migration 20261111010000) : la liste sans
+// elles, et on ne reessaie qu'au bout de 10 minutes.
+const REESSAI_LIVE_MS = 10 * 60_000
+let liveAbsentJusqua = 0
+
+async function lireLecons(): Promise<LigneLecon[]> {
+  if (Date.now() >= liveAbsentJusqua) {
+    try {
+      return await prisma.$queryRawUnsafe<LigneLecon[]>(SQL_LECONS_VISIBLES_LIVE)
+    } catch (err) {
+      if (!colonneAbsente(err)) throw err
+      liveAbsentJusqua = Date.now() + REESSAI_LIVE_MS
+    }
+  }
+  return prisma.$queryRawUnsafe<LigneLecon[]>(SQL_LECONS_VISIBLES)
 }
 
 async function lireCatalogueEnBase(): Promise<Catalogue> {
   const modules = await prisma.$queryRawUnsafe<LigneModule[]>(SQL_MODULES_VISIBLES)
   const sections = await prisma.$queryRawUnsafe<LigneSection[]>(SQL_SECTIONS_VISIBLES)
-  const lecons = await prisma.$queryRawUnsafe<LigneLecon[]>(SQL_LECONS_VISIBLES)
+  const lecons = await lireLecons()
   const offres = await prisma.$queryRawUnsafe<LigneOffre[]>(SQL_OFFRES_DES_MODULES)
 
   const offreDeLigne = (o: LigneOffre): OffreDuModule =>
