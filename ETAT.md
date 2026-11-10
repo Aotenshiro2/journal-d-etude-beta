@@ -23,6 +23,25 @@
   eslint des fichiers touches ; npm run build OK (route relire listee).
 - Ordre de mise en ligne : ce journal AVANT Pilotage 0.4 (sans lui, Pilotage ne recense rien et « Relire » rend 404 par
   document, dit en erreur dans la revue).
+## BESOINS : LA ROUTE AUTOMATIQUE DU TRI DU SOIR (10/11/2026, commite NON pousse, branche besoins-auto depuis origin/master b9e4fa4 ; migration 20261110190000 du workspace ECRITE, NON appliquee)
+
+- Brief : D:\7_Agents\briefs\2026-11-10-besoins-route-automatique.md ; rapport : besoins-auto-rapport.md (notes de
+  Yume Orchestre).
+- POST /api/cockpit/besoins/auto, sans session : Authorization Bearer BESOINS_AUTO_TOKEN (sha256 des deux cotes puis
+  timingSafeEqual ; variable absente ou de moins de 32 caracteres = tout refuse). Actions lire (cartes a_trier, 20 au
+  plus, demandes par la lecture de l'API de Tab, signaux de leur cle), statut (planifie, en_cours, livre, refuse,
+  note_equipe, raison_refus ; brief rendu au passage en planifie), fusionner, prevenir (le message de l'apercu du
+  bouton, prevenirMembres reutilise, idempotent par sa reservation). essai = a blanc. Regles : besoins/auto-pur.ts ;
+  depots : besoins/auto.ts ; prevenirMembres prend un 3e parametre maxEnvois (30 par appel), la route de Brice inchangee.
+- Chaque geste trace dans besoin_geste (par = tri automatique, nombres seulement) ; table absente = 503 avant tout geste.
+- Apres la revue de securite : passages vers l'avant seulement (livre et refuse ne bougent plus, planifie ne se
+  replanifie pas), fusion d'une carte a_trier seulement, raison_refus (qui part aux membres) 300 car. sans lien, @,
+  balise ni accolade, 100 envois sur 24 h pour la route ; prevenirMembres ne libere plus la reservation d'un membre
+  dont le message est parti (trace du bot isolee) : plus de second envoi apres une panne, pour le bouton aussi.
+- Verifs : scripts/verifier-besoins-auto.mjs (14 blocs, hors ligne) ; verifier-besoins.mjs 47 blocs ; tsc ; eslint ;
+  essai local de la garde (next dev, jeton jetable) : 401 sans jeton et mauvais jeton, 400 action inconnue et 21 cartes.
+- MISE EN LIGNE, dans l'ordre : migration 20261110190000 ; poser_jeton_besoins_auto.py (Vercel, Production) ; push ;
+  controle par besoins_auto.py lire --essai.
 
 ## RESTES DU 10/11 : CLE KIT REFUSEE, ADRESSES A RELIER DANS /moi, ESSAI DU CRITERE UNIQUE (10/11/2026, commite NON pousse, branche restes-10-11 depuis origin/master 9e0f4a2)
 

@@ -505,8 +505,13 @@ export type EchecPrevenir = { demandeId: string; libelle: string; canal: string;
  * POST : l'envoi, sur le clic de Brice. Etat relu (la carte, ses membres),
  * puis membre par membre : reservation, envoi, statut. Budget de temps : au-dela,
  * plus aucun envoi ne commence (restants).
+ * (10/11) maxEnvois : au plus ce nombre d'envois tentes (Telegram ou email),
+ * les membres suivants restent a prevenir (restants, repris au prochain appel :
+ * un membre prevenu ne l'est pas deux fois). La route automatique du tri
+ * (auto-pur.ts) s'en sert pour sa limite de messages par appel ; le clic de
+ * Brice garde l'infini. tentatives = les envois tentes, rendus dans la reponse.
  */
-export async function prevenirMembres(brut: unknown, budgetMs: number): Promise<ReponseRoute> {
+export async function prevenirMembres(brut: unknown, budgetMs: number, maxEnvois = Number.POSITIVE_INFINITY): Promise<ReponseRoute> {
   const debut = Date.now()
   const b = lireCorpsPrevenir(brut)
   if ('erreur' in b) return erreur(b.status, b.erreur)
@@ -522,12 +527,13 @@ export async function prevenirMembres(brut: unknown, budgetMs: number): Promise<
   const sujet = sujetEmail(p.statut, p.carte.titre)
   let envoyes = 0
   let restants = 0
+  let tentatives = 0
   const echecs: EchecPrevenir[] = []
   const aLaMain: { demandeId: string; libelle: string; email?: string; telegram?: string }[] = []
 
   for (const g of p.groupes) {
     if (!g.aPrevenir.length) continue
-    if (Date.now() - debut > budgetMs) {
+    if (Date.now() - debut > budgetMs || (g.canal !== 'a_la_main' && tentatives >= maxEnvois)) {
       restants++
       continue
     }
@@ -541,6 +547,10 @@ export async function prevenirMembres(brut: unknown, budgetMs: number): Promise<
     }
     // Deja reserve par un autre clic, ou la carte a change de statut : rien ici.
     if (!reserves.length) continue
+    if (g.canal !== 'a_la_main') tentatives++
+    // (10/11) parti : le message est sorti. Une panne APRES ne libere plus la
+    // reservation (sinon le membre serait prevenu deux fois au clic suivant).
+    let parti = false
     try {
       if (g.canal === 'a_la_main') {
         await marquer(reserves, 'a_la_main')
@@ -549,7 +559,12 @@ export async function prevenirMembres(brut: unknown, budgetMs: number): Promise<
       }
       if (g.canal === 'telegram' && g.telegramId) {
         const r = await envoyerTelegram(g.telegramId, message)
-        await tracerMessageBot(g.telegramId, message, { livre: r.ok })
+        parti = r.ok
+        try {
+          await tracerMessageBot(g.telegramId, message, { livre: r.ok })
+        } catch (err) {
+          console.warn(`[cockpit/besoins/prevenir] trace du bot non ecrite : ${erreurCourte(err)}`)
+        }
         if (!r.ok) {
           const raison = `telegram ${r.code ?? 'refus'}`
           await liberer(reserves, statutEchec(raison))
@@ -567,6 +582,7 @@ export async function prevenirMembres(brut: unknown, budgetMs: number): Promise<
           echecs.push({ demandeId: g.demandeId, libelle: g.libelle, canal: g.canal, raison })
           continue
         }
+        parti = true
         let fil = false
         if (/^[0-9a-f-]{36}$/i.test(g.membre_ref)) {
           try {
@@ -583,10 +599,15 @@ export async function prevenirMembres(brut: unknown, budgetMs: number): Promise<
       echecs.push({ demandeId: g.demandeId, libelle: g.libelle, canal: g.canal, raison: 'aucun canal' })
     } catch (err) {
       console.warn(`[cockpit/besoins/prevenir] envoi en panne : ${erreurCourte(err)}`)
+      if (parti) {
+        await marquer(reserves, 'envoye, suite en panne').catch(() => {})
+        envoyes++
+        continue
+      }
       await liberer(reserves, statutEchec('panne')).catch(() => {})
       echecs.push({ demandeId: g.demandeId, libelle: g.libelle, canal: g.canal, raison: 'panne' })
     }
   }
   console.log(`[cockpit/besoins/prevenir] ${envoyes} envoye(s), ${echecs.length} echec(s), ${aLaMain.length} a la main, ${restants} restant(s)`)
-  return { status: 200, corps: { envoyes, echecs: echecs.length, aLaMain: aLaMain.length, restants, details: { echecs, aLaMain } } }
+  return { status: 200, corps: { envoyes, echecs: echecs.length, aLaMain: aLaMain.length, restants, tentatives, details: { echecs, aLaMain } } }
 }
