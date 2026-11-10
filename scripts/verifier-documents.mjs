@@ -10,6 +10,9 @@
 // trades lus par l'IA, exports Quantower (executions sur quatre separateurs,
 // ordres Filled) et releve eToro sans IA, tranches IA fusionnees, IBAN et restes
 // d'extraction sans signal, provenance nom-de-fichier, positions ouvertes.
+// 10/11/2026 (fichiers d'Alex) : un .xlsx se lit (premier onglet utile, en CSV),
+// et les exports qui ne portent pas de trades disent quel export faire ;
+// fixtures ANONYMISEES dans scripts/fixtures/imports-alex-2026-11.
 // node scripts/verifier-documents.mjs
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
@@ -21,6 +24,8 @@ const E = await import('../src/lib/trades-envoyes.ts')
 const IT = await import('../src/lib/imports-trades.ts')
 const { separerNouveaux, empreinteTrade, parserFichierTrades } = IT
 const { analyserTexte } = await import('../src/lib/securite/injection-pur.ts')
+const X = await import('../src/lib/classeur-xlsx.ts')
+const { zipSync, strToU8 } = await import('fflate')
 
 let n = 0
 const bloc = (nom, f) => { f(); n++; console.log(`ok  ${nom}`) }
@@ -125,7 +130,7 @@ bloc('nature : refus des HEIC, RAR, ZIP, videos, classeurs, sans appel IA (metho
     ['photo.jpg', 'image/jpeg', ftyp('mif1'), /HEIC/], // une HEIC renommee : les octets l'emportent
     ['archives.rar', '', avecEntete([0x52, 0x61, 0x72, 0x21, 0x1a, 0x07]), /Archive/],
     ['factures.zip', 'application/zip', avecEntete([0x50, 0x4b, 0x03, 0x04]), /Archive/],
-    ['classeur.xlsx', '', avecEntete([0x50, 0x4b, 0x03, 0x04]), /Classeur/],
+    ['tableur.ods', '', avecEntete([0x50, 0x4b, 0x03, 0x04]), /Classeur/],
     ['ancien.xls', '', avecEntete([0xd0, 0xcf, 0x11, 0xe0]), /Classeur/],
     ['IMG_1928.MOV', 'video/quicktime', ftyp('qt  '), /Vidéo/],
     ['clip.mp4', 'video/mp4', octets('pas une video lisible'), /Vidéo/],
@@ -1067,6 +1072,100 @@ bloc('D3 positions ouvertes et notes de seance : capture-tableau, aucun trade, m
   const notes = IA.lectureDepuisIA({ type: 'capture-tableau', confiance: 0.82, firme: 'Topstep', remarque: 'Notes de séance.', trades: [{ symbole: 'NQZ6', entreLe: '2026-03-09T15:30:00', pnl: 0 }], capture: { date: '2026-03-09', texte: 'Tableau de bord' } }, { methode: 'texte', texte: 'Session Topstep 2026-03-09', nom: 'Session.pdf' })
   assert.equal(notes.trades, undefined)
   assert.equal(notes.capture.date, '2026-03-09')
+})
+
+
+// ── Les classeurs et les fichiers d'Alex (10/11/2026) ───────────────────────
+
+const ALEX = 'fixtures/imports-alex-2026-11/'
+const fixtureOctets = nom => new Uint8Array(readFileSync(new URL(ALEX + nom, import.meta.url)))
+/** Un .xlsx minimal en chaines EN LIGNE (t="inlineStr"), une feuille, dates au style 1 (numFmtId 22). */
+function xlsxEnLigne(lignes) {
+  const xml = s => '<?xml version="1.0" encoding="UTF-8"?>' + s
+  const cellule = (v, ref) => (v === '' ? '' : typeof v === 'object' ? `<c r="${ref}" s="1"><v>${v.date}</v></c>` : typeof v === 'number' ? `<c r="${ref}"><v>${v}</v></c>` : `<c r="${ref}" t="inlineStr"><is><t>${v.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</t></is></c>`)
+  const feuille = xml('<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>' + lignes.map((r, k) => `<row r="${k + 1}">${r.map((v, i) => cellule(v, String.fromCharCode(65 + i) + (k + 1))).join('')}</row>`).join('') + '</sheetData></worksheet>')
+  return zipSync({
+    '_rels/.rels': strToU8(xml('<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="r1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="/xl/workbook.xml"/></Relationships>')),
+    'xl/workbook.xml': strToU8(xml('<x:workbook xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><x:sheets><x:sheet name="Trades" sheetId="1" r:id="rId1"/></x:sheets></x:workbook>')),
+    'xl/_rels/workbook.xml.rels': strToU8(xml('<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>')),
+    'xl/styles.xml': strToU8(xml('<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="1"><numFmt numFmtId="164" formatCode="dd/mm/yyyy hh:mm:ss"/></numFmts><cellXfs count="2"><xf numFmtId="0"/><xf numFmtId="164"/></cellXfs></styleSheet>')),
+    'xl/worksheets/sheet1.xml': strToU8(feuille),
+  })
+}
+const preparerClasseur = (nom, o) => {
+  const nature = D.natureDuDocument(nom, '', o)
+  return D.preparerLecture({ nom, nature, octets: o, classeur: nature.famille === 'classeur' ? X.texteDuClasseur(o) : null })
+}
+
+bloc('classeur .xlsx : nature classeur (aux octets ZIP), .xls / .ods / .xlsx abime refuses avec la marche a suivre', () => {
+  const zip = avecEntete([0x50, 0x4b, 0x03, 0x04])
+  assert.deepEqual(D.natureDuDocument('NinjaTrader Grid 2026-11-09 09-50 .xlsx', '', zip), { famille: 'classeur', mime: D.MIME_CLASSEUR })
+  assert.equal(D.natureDuDocument('export.xlsm', '', zip).famille, 'classeur')
+  assert.equal(D.typeCoffre(D.MIME_CLASSEUR), 'application/octet-stream')
+  for (const [nom, o, raison] of [
+    ['ancien.xls', avecEntete([0xd0, 0xcf, 0x11, 0xe0]), /ancien \(\.xls\)/],
+    ['tableur.ods', zip, /LibreOffice ou Numbers/],
+    ['abime.xlsx', octets('ce n est pas un classeur'), /ne commence pas comme un \.xlsx/],
+  ]) {
+    const p = preparer(nom, '', o)
+    assert.equal(p.lecture.type, 'illisible', nom)
+    assert.match(p.lecture.remarque, raison, nom)
+  }
+  // Un classeur que l'appelant n'a pas pu lire : sa raison, sans IA.
+  const p = D.preparerLecture({ nom: 'x.xlsx', nature: { famille: 'classeur', mime: D.MIME_CLASSEUR }, octets: zip, classeur: { erreur: X.MESSAGE_CLASSEUR_VIDE } })
+  assert.equal(p.lecture.type, 'illisible')
+  assert.equal(p.lecture.remarque, X.MESSAGE_CLASSEUR_VIDE)
+})
+
+bloc('fichiers d Alex au depot : ordres, notifications, solde, journal de NinjaTrader = illisible sans IA, la remarque dit quel export faire ; Performance lu', () => {
+  const cas = [
+    ['tradovate-ordres-tout-2026-11-09.csv', 'tradovate-ordres-fr.csv', IT.MESSAGE_ORDRES_TRADOVATE, 'Tradovate'],
+    ['tradovate_journal_des_notifications.csv', 'tradovate-notifications-fr.csv', IT.MESSAGE_NOTIFICATIONS_TRADOVATE, 'Tradovate'],
+    ['tradovate-info-du-compte.csv', 'tradovate-info-compte.csv', /^Ce fichier donne le solde de ton compte Tradovate/, 'Tradovate'],
+    ['NinjaTrader Grid 2026-11-09 09-50 .xlsx', 'ninjatrader-journal-fr.xlsx', IT.MESSAGE_JOURNAL_NINJATRADER, 'NinjaTrader'],
+  ]
+  for (const [nom, fichier, message, plateforme] of cas) {
+    const p = preparerClasseur(nom, fixtureOctets(fichier))
+    assert.ok('lecture' in p, `${nom} : sans IA`)
+    assert.equal(p.lecture.type, 'illisible', nom)
+    assert.equal(p.lecture.methode, 'csv', nom)
+    assert.equal(p.lecture.broker, plateforme, nom)
+    if (message instanceof RegExp) assert.match(p.lecture.remarque, message, nom)
+    else assert.equal(p.lecture.remarque, message, nom)
+    assert.equal(p.lecture.trades, undefined, nom)
+  }
+  const perf = preparerClasseur('Performance (1).csv', fixtureOctets('tradovate-performance.csv'))
+  assert.equal(perf.lecture.type, 'trades')
+  assert.equal(perf.lecture.trades.length, 6)
+})
+
+bloc('Trades de NinjaTrader en .xlsx au depot : lus sans IA, onglet dit, compte lu ; un classeur inconnu part a l IA comme un CSV', () => {
+  const serie = (h, m, s) => 46335 + (h * 3600 + m * 60 + s) / 86400
+  const p = preparerClasseur('NinjaTrader Grid 2026-11-09 Trades.xlsx', xlsxEnLigne([
+    ['Trade number', 'Instrument', 'Account', 'Market pos.', 'Qty', 'Entry price', 'Exit price', 'Entry time', 'Exit time', 'Profit', 'Cum. net profit', 'Commission'],
+    [1, 'MNQ 12-26', 'ESSAI0001', 'Long', 2, 20000.25, 20010.75, { date: serie(9, 31, 5) }, { date: serie(9, 40, 0) }, 42, 42, 1.04],
+  ]))
+  assert.equal(p.lecture.type, 'trades')
+  assert.equal(p.lecture.methode, 'csv')
+  assert.equal(p.lecture.trades.length, 1)
+  assert.equal(p.lecture.trades[0].source, 'ninjatrader-trades')
+  assert.equal(p.lecture.identifiant, 'ESSAI0001')
+  assert.match(p.lecture.remarque, /^Export de trades lu sans IA \(ninjatrader-trades\) : 1 trade\. .*Lu dans l'onglet « Trades » du classeur\.$/)
+  // Un classeur qu'aucun lecteur ne reconnait (ni symbole, ni entree, ni P&L devinables) : son texte part a l'IA, comme un CSV.
+  const inconnu = preparerClasseur('budget.xlsx', xlsxEnLigne([['Poste', 'Montant'], ['Loyer', 800]]))
+  assert.equal(inconnu.ia, 'texte')
+  assert.match(inconnu.texte, /^Poste,Montant\nLoyer,800/)
+})
+
+bloc('routes : le classeur est lu par l appelant (documents/lire et trades/import), refus et plateforme rendus a Pilotage', () => {
+  const route = lire('../src/app/api/pilotage/documents/lire/route.ts')
+  assert.match(route, /const classeur = nature\.famille === 'classeur' \? texteDuClasseur\(octets\) : null\s*const prep = preparerLecture\(\{ nom, nature, octets, textePdf, classeur \}\)/)
+  const imp = lire('../src/app/api/pilotage/trades/import/route.ts')
+  assert.match(imp, /const classeur = texteDuClasseur\(Buffer\.from\(xlsx, 'base64'\)\)\s*if \('erreur' in classeur\) return NextResponse\.json\(\{ error: classeur\.erreur \}, \{ status: 400, headers: cors \}\)\s*csv = classeur\.texte/)
+  assert.match(imp, /const lecture = \{ format, erreurs, \.\.\.\(entetes \? \{ entetes \} : \{\}\), \.\.\.\(proposition \? \{ proposition \} : \{\}\), \.\.\.refus \}/)
+  // Le module qui lit les classeurs n'importe que fflate.
+  const modules = [...lire('../src/lib/classeur-xlsx.ts').matchAll(/^import\b[\s\S]*?from '([^']+)'/gm)].map(m => m[1])
+  assert.deepEqual(modules, ['fflate'])
 })
 
 console.log(`\n${n} blocs verifies, tout est bon.`)

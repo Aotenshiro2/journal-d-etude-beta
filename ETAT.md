@@ -1,5 +1,30 @@
 # ETAT du journal d etudes
 
+## IMPORTS DE PILOTAGE : LES FICHIERS D'ALEX, LES CLASSEURS .XLSX, LES TRADES DE NINJATRADER (10/11/2026, commite NON pousse, branche journal-imports-alex depuis origin/master 946b48d ; aucune migration)
+
+- Brief : D:\7_Agents\briefs\2026-11-10-pilotage-imports-et-retours-cedric.md (option A de Brice) ; rapport :
+  pilotage-retours-rapport.md (notes de Yume Orchestre). Cote Pilotage : son ETAT, section du 10/11 (0.3.1).
+- imports-trades.ts : les exports qui ne portent pas de trades sont RECONNUS (FR et EN) et refuses avec ce que c'est
+  et l'export a faire, chemin du menu compris (refuse: true, plateforme) : liste et rapport des ordres de Tradovate
+  (MESSAGE_ORDRES_TRADOVATE, variante de MESSAGE_ORDRES_SANS_TRADE), journal des notifications, infos du compte (le
+  solde Net Liq dit, rien d'autre), Log, Executions et Orders de NinjaTrader. Un fichier avec une colonne de resultat
+  n'est jamais pris pour des ordres. Lecteur ninjatrader-trades (Trade Performance > Trades, CSV ou classeur, en-tetes
+  EN de la doc et FR par synonymes A CONFIRMER sur un vrai fichier ; « MNQ 12-26 » = MNQZ6 ; heure affichee comme
+  Tradovate ; P&L = Profit, frais = Commission + Clearing/Exchange/IP/NFA Fee ; cle sans le numero du trade).
+- classeur-xlsx.ts (NOUVEAU) : un .xlsx = son premier onglet utile en CSV (dates d'Excel en AAAA-MM-JJ HH:mm:ss),
+  puis les memes lecteurs. Dependance fflate ^0.8.3 (deja dans l'arbre par jspdf en 0.8.2, qui a la faille
+  GHSA-px8p-9vwx-vf98 corrigee en 0.8.3 ; lockfile seul modifie : le node_modules partage des worktrees garde 0.8.2,
+  Vercel installera 0.8.3). Les ZIP64 sont refuses avant fflate. Limites : 25 Mo par partie, 60 Mo, 100 000 lignes.
+- documents-pilotage.ts : famille 'classeur' (xlsx, xlsm) ; .xls, .ods, Numbers refuses avec la marche a suivre ;
+  lireCsv rend 'illisible' (methode csv, sans IA, aucun quota) avec la remarque pour un export refuse.
+  Routes : documents/lire lit le classeur avant preparerLecture ; trades/import accepte { xlsx } a la place de csv
+  et rend refuse et plateforme. /api/imports-trades (ecran du journal) NON touche.
+- Fixtures ANONYMISEES : scripts/fixtures/imports-alex-2026-11 (ni compte, ni nom, ids remplaces, solde invente).
+  Verifs : verifier-imports-trades.mjs 39 blocs (8 nouveaux), verifier-documents.mjs 29 (4 nouveaux),
+  verifier-doublons-compte.mjs 9 ; eslint des fichiers touches ; build OK.
+- Ordre de mise en ligne : ce journal AVANT Pilotage 0.3.1 (sans lui, Pilotage envoie les .xlsx a un journal qui
+  les refuse en « classeur » et ne connait pas refuse).
+
 ## /MOI REND LE RANG VIP ET LE LIVE CLUB SANS STRIPE D'UN ETM OU D'UN VIP (10/11/2026, commite NON pousse, branche mon-espace-etm-vip depuis origin/master f39d3b6 ; aucune migration)
 
 - Brief : D:\7_Agents\briefs\2026-11-10-mon-espace-etm-vip.md ; rapport : mon-espace-etm-vip-rapport.md (notes de

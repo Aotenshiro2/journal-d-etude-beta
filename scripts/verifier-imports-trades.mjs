@@ -5,10 +5,17 @@
 // Carnet sur chaque position (brief A2, 30/10/2026), et le bornage des routes
 // au membre. Fonctions pures, aucune base, aucun reseau ; fixtures
 // SYNTHETIQUES (memes en-tetes que les vrais exports, valeurs inventees).
+// Les fichiers d'Alex (10/11/2026) : fixtures ANONYMISEES tirees de ses exports
+// du 09/11 (scripts/fixtures/imports-alex-2026-11 : ni numero de compte, ni
+// nom, identifiants d'ordres et de fills remplaces, solde invente), et les
+// Trades de NinjaTrader en fixtures SYNTHETIQUES (aucun vrai fichier encore).
 // node scripts/verifier-imports-trades.mjs
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import { parserFichierTrades, proposerColonnes, separerNouveaux, lireColonnes } from '../src/lib/imports-trades.ts'
+import * as IT from '../src/lib/imports-trades.ts'
+import { dateExcel, texteDuClasseur, MESSAGE_CLASSEUR_ILLISIBLE, MESSAGE_CLASSEUR_VIDE } from '../src/lib/classeur-xlsx.ts'
+import { zipSync, strToU8 } from 'fflate'
 import { liensAHarmoniser, planFusion, positionsRecalculees, regrouperEnPositions, totauxParCompte, vuePositions } from '../src/lib/positions.ts'
 import { candidatsPourPosition, candidatsPourUnePosition, proposerLiens, segmentsDesNotes, CANDIDATS_MAX, FENETRE_OUVERTE_MS, PROCHE_MS } from '../src/lib/correspondances-carnet.ts'
 import { appliquerFuseau, decalageMs, fuseauDemande, instantDepuisHeureLocale, nomFuseau } from '../src/lib/fuseau.ts'
@@ -672,6 +679,209 @@ bloc('schema et migration : les six colonnes, quantite decimale, les trois index
     for (const idx of ['positionId', 'compteId', 'segmentRef']) assert.ok(sql.includes(`CREATE INDEX IF NOT EXISTS "TradeImport_userId_${idx}_idx"`), idx)
     assert.match(sql, /ENABLE ROW LEVEL SECURITY;\s*REVOKE ALL ON TABLE "TradeImport" FROM anon, authenticated;/)
   }
+})
+
+
+// ── Les fichiers d'Alex (10/11/2026) ────────────────────────────────────────
+
+const ALEX = 'fixtures/imports-alex-2026-11/'
+const fixture = nom => readFileSync(new URL(ALEX + nom, import.meta.url), 'utf8')
+const fixtureOctets = nom => new Uint8Array(readFileSync(new URL(ALEX + nom, import.meta.url)))
+const refuse = (r, format, plateforme, message) => {
+  assert.equal(r.format, format)
+  assert.equal(r.trades.length, 0)
+  assert.equal(r.refuse, true)
+  assert.equal(r.plateforme, plateforme)
+  if (message instanceof RegExp) assert.match(r.erreurs[0], message)
+  else assert.equal(r.erreurs[0], message)
+  assert.ok(!/non reconnu/i.test(r.erreurs.join(' ')))
+}
+
+/** Un classeur .xlsx minimal (memes parties que NinjaTrader : workbook, rels, sharedStrings, styles a numFmtId 22), cellules en chaines partagees ou en nombres. */
+function classeur(lignes, { feuilles = null, dateStyle = 22, bom = true } = {}) {
+  const xml = s => (bom ? String.fromCharCode(0xfeff) : '') + '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' + s
+  const partages = []
+  const idx = t => { let i = partages.indexOf(t); if (i < 0) { partages.push(t); i = partages.length - 1 } return i }
+  const echappe = t => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  const col = i => String.fromCharCode(65 + i)
+  const feuille = rows => xml('<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>' + rows.map((r, k) => `<row r="${k + 1}">` + r.map((v, i) => {
+    const ref = `${col(i)}${k + 1}`
+    if (v === null || v === '') return ''
+    if (typeof v === 'object' && v.date !== undefined) return `<c r="${ref}" s="1"><v>${v.date}</v></c>`
+    if (typeof v === 'number') return `<c r="${ref}"><v>${v}</v></c>`
+    return `<c r="${ref}" t="s"><v>${idx(v)}</v></c>`
+  }).join('') + '</row>').join('') + '</sheetData></worksheet>')
+  const toutes = feuilles ?? [{ nom: 'Sheet1', lignes }]
+  const parties = {
+    '[Content_Types].xml': strToU8(xml('<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>')),
+    '_rels/.rels': strToU8(xml('<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml" /></Relationships>')),
+    'xl/workbook.xml': strToU8(xml('<workbook xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheets>' + toutes.map((f, i) => `<sheet name="${f.nom}" sheetId="${i + 1}" r:id="rId${i + 1}"${f.cachee ? ' state="hidden"' : ''} />`).join('') + '</sheets></workbook>')),
+    'xl/_rels/workbook.xml.rels': strToU8(xml('<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' + toutes.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml" />`).join('') + '<Relationship Id="rS" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml" /><Relationship Id="rT" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml" /></Relationships>')),
+    'xl/styles.xml': strToU8(xml(`<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><cellXfs count="2"><xf numFmtId="0" /><xf numFmtId="${dateStyle}" applyNumberFormat="1" /></cellXfs></styleSheet>`)),
+  }
+  toutes.forEach((f, i) => { parties[`xl/worksheets/sheet${i + 1}.xml`] = strToU8(feuille(f.lignes)) })
+  parties['xl/sharedStrings.xml'] = strToU8(xml('<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' + partages.map(t => `<si><t>${echappe(t)}</t></si>`).join('') + '</sst>'))
+  return zipSync(parties)
+}
+
+bloc('Alex : les ordres de Tradovate (FR, sans heures) reconnus et refuses avec le rapport Performance et son chemin ; EN aussi', () => {
+  refuse(parserFichierTrades(fixture('tradovate-ordres-fr.csv')), 'tradovate-ordres', 'Tradovate', IT.MESSAGE_ORDRES_TRADOVATE)
+  assert.match(IT.MESSAGE_ORDRES_TRADOVATE, /historique d'ordres Tradovate, pas de trades/)
+  assert.match(IT.MESSAGE_ORDRES_TRADOVATE, /Rapports \(Reports\), onglet Performance/)
+  // La meme liste en anglais, et le rapport Orders (B/S, Contract, avgPrice, filledQty, Status).
+  const en = 'Symbol,Side,Type,Qty,Remaining Qty,Filled Qty,Limit Price,Stop Price,Take Profit,Stop Loss,Avg Fill Price,Status\nMNQZ6,Buy,Market,5,0,5,,,,,20000.25,Filled\n'
+  refuse(parserFichierTrades(en), 'tradovate-ordres', 'Tradovate', IT.MESSAGE_ORDRES_TRADOVATE)
+  const rapport = 'orderId,Account,Order ID,B/S,Contract,Product,Product Description,avgPrice,filledQty,Fill Time,lastCommandId,Status,_priceFormat,_priceFormatType,_tickSize\n1,ESSAI0001,1,Buy,MNQZ6,MNQ,Micro,20000.25,5,10/05/2026 15:30:00,1,Filled,-2,0,0.25\n'
+  refuse(parserFichierTrades(rapport), 'tradovate-ordres', 'Tradovate', IT.MESSAGE_ORDRES_TRADOVATE)
+  // Un export de trades qui porte statut, sens et prix moyen mais AUSSI un resultat n'est jamais pris pour des ordres.
+  const avecPnl = parserFichierTrades('Symbol,Side,Status,Avg Fill Price,PnL,Time\nMNQZ6,Buy,Filled,20000,12.5,2026-10-05 10:00:00\n')
+  assert.equal(avecPnl.format, 'csv-generique')
+})
+
+bloc('Alex : journal des notifications de Tradovate (FR et EN) et infos du compte (le solde dit, rien d autre)', () => {
+  refuse(parserFichierTrades(fixture('tradovate-notifications-fr.csv')), 'tradovate-notifications', 'Tradovate', IT.MESSAGE_NOTIFICATIONS_TRADOVATE)
+  refuse(parserFichierTrades('Symbol,Time,Title,Text\nMNQZ6,2026-11-09 15:30:54,Order filled,Sell 5 at 20000\n'), 'tradovate-notifications', 'Tradovate', IT.MESSAGE_NOTIFICATIONS_TRADOVATE)
+  const compte = parserFichierTrades(fixture('tradovate-info-compte.csv'))
+  refuse(compte, 'tradovate-compte', 'Tradovate', /^Ce fichier donne le solde de ton compte Tradovate \(Net Liq : 50\s250,00\), pas tes trades : rien n'en est écrit\. Pour tes trades, exporte plutôt le rapport Performance\. Dans Tradovate/)
+  assert.equal(IT.messageCompteTradovate(null).includes('Net Liq'), false)
+  // Une valeur illisible : le message sans montant, jamais « NaN ».
+  refuse(parserFichierTrades('Total P/L,Open P/L,Net Liq,Total Margin Used\n0,0,abc,0\n'), 'tradovate-compte', 'Tradovate', IT.messageCompteTradovate(null))
+})
+
+bloc('Alex : le rapport Performance de Tradovate (ses ventes avant achats) se lit toujours, rien ne change', () => {
+  const r = parserFichierTrades(fixture('tradovate-performance.csv'))
+  assert.equal(r.format, 'tradovate-performance')
+  assert.equal(r.trades.length, 6)
+  assert.equal(r.refuse, undefined)
+  assert.equal(r.trades[0].pnl, -287.5)
+  assert.equal(r.trades[0].idExterne, '900000000007-900000000008')
+  // La troisieme ligne : vendu (15:32:10) avant d'acheter (15:33:33), un short.
+  assert.equal(r.trades[2].direction, 'short')
+  assert.equal(r.trades[2].entreLe.toISOString(), '2026-11-06T15:32:10.000Z')
+})
+
+bloc('Alex : le classeur NinjaTrader (onglet Log, FR) se lit comme son premier onglet, reconnu et refuse avec Trade Performance > Trades', () => {
+  const c = texteDuClasseur(fixtureOctets('ninjatrader-journal-fr.xlsx'))
+  assert.ok(!('erreur' in c), c.erreur)
+  assert.equal(c.feuille, 'Sheet1')
+  assert.equal(c.feuilles, 1)
+  assert.equal(c.coupe, false)
+  const lignes = c.texte.split('\n')
+  assert.equal(lignes[0], 'Heure,Catégorie,Message')
+  assert.equal(lignes.length, 31)
+  // Les dates d'Excel (numFmtId 22) rendues a la seconde, en AAAA-MM-JJ HH:mm:ss.
+  assert.match(lignes[1], /^2026-11-09 \d{2}:\d{2}:\d{2},/)
+  refuse(parserFichierTrades(c.texte, 'NinjaTrader Grid.xlsx'), 'ninjatrader-journal', 'NinjaTrader', IT.MESSAGE_JOURNAL_NINJATRADER)
+  assert.match(IT.MESSAGE_JOURNAL_NINJATRADER, /Trade Performance, onglet Trades, puis clic droit dans la liste, Exporter/)
+  // La meme grille en anglais.
+  refuse(parserFichierTrades('Time,Category,Message\n2026-11-09 09:49:39,Default,Connected\n'), 'ninjatrader-journal', 'NinjaTrader', IT.MESSAGE_JOURNAL_NINJATRADER)
+  // Les grilles Executions et Orders de NinjaTrader (en-tetes anglais publics).
+  refuse(parserFichierTrades('Instrument,Action,Quantity,Price,Time,ID,E/X,Position,Order ID,Name,Commission,Rate,Account,Connection\nMNQ 12-26,Buy,1,20000,11/9/2026 9:31:05 AM,1,Entry,1 L,1,Entry,0.5,1,Sim101,Sim\n'), 'ninjatrader-executions', 'NinjaTrader', IT.MESSAGE_EXECUTIONS_NINJATRADER)
+  refuse(parserFichierTrades('Instrument,Action,Type,Quantity,Limit,Stop,State,Filled,Avg. price,Remaining,Name,Strategy,OCO,TIF,Account,ID,Time\nMNQ 12-26,Buy,Market,1,0,0,Filled,1,20000,0,Entry,,,DAY,Sim101,1,11/9/2026 9:31:05 AM\n'), 'ninjatrader-ordres', 'NinjaTrader', IT.MESSAGE_ORDRES_NINJATRADER)
+})
+
+// Trade Performance > Trades de NinjaTrader : SYNTHETIQUE (en-tetes de la doc et des exports connus, valeurs inventees).
+const NT_EN = [
+  'Trade number,Instrument,Account,Strategy,Market pos.,Qty,Entry price,Exit price,Entry time,Exit time,Entry name,Exit name,Profit,Cum. net profit,Commission,Clearing Fee,Exchange Fee,IP Fee,NFA Fee,MAE,MFE,ETD,Bars,',
+  '1,MNQ 12-26,ESSAI0001,,Long,2,20000.25,20010.75,11/9/2026 9:31:05 AM,11/9/2026 9:40:00 AM,Entry,Profit target,$42.00,$42.00,$1.04,$0.40,$0.70,$0.02,$0.04,$5.00,$50.00,$8.00,0,',
+  '2,MNQ 12-26,ESSAI0001,,Short,1,20020.00,20030.00,11/9/2026 10:02:00 AM,11/9/2026 10:05:30 AM,Entry,Stop loss,($20.00),$22.00,$0.52,$0.20,$0.35,$0.01,$0.02,$20.00,$4.00,$24.00,0,',
+  '3,MNQ 12-26,ESSAI0001,,Long,1,20000.00,20000.00,pas une date,11/9/2026 10:05:30 AM,Entry,Exit,$0.00,$22.00,$0.52,,,,,$0.00,$0.00,$0.00,0,',
+].join('\r\n')
+// La version francaise (libelles par synonymes, A CONFIRMER sur un vrai fichier) : point-virgule, virgule decimale, jour d'abord, « Court ».
+const NT_FR = [
+  "Numéro de trade;Instrument;Compte;Stratégie;Position de marché;Qté;Prix d'entrée;Prix de sortie;Heure d'entrée;Heure de sortie;Nom d'entrée;Nom de sortie;Profit;Bénéfice net cumulé;Commission;MAE;MFE;ETD;Barres",
+  '1;MNQ 12-26;ESSAI0001;;Long;2;20000,25;20010,75;09/11/2026 09:31:05;09/11/2026 09:40:00;Entrée;Objectif;42,00 $;42,00 $;1,04 $;5,00 $;50,00 $;8,00 $;0',
+  '2;MNQ 12-26;ESSAI0001;;Court;1;20020,00;20030,00;09/11/2026 10:02:00;09/11/2026 10:05:30;Entrée;Stop;-20,00 $;22,00 $;0,52 $;20,00 $;4,00 $;24,00 $;0',
+].join('\r\n')
+
+bloc('NinjaTrader Trades (EN) : lu comme Tradovate (heure affichee, fuseau null), MNQ 12-26 = MNQZ6, frais additionnes, ligne illisible motivee', () => {
+  const r = parserFichierTrades(NT_EN, 'Trades.csv')
+  assert.equal(r.format, 'ninjatrader-trades')
+  assert.equal(r.plateforme, 'NinjaTrader')
+  assert.equal(r.refuse, undefined)
+  assert.equal(r.trades.length, 2)
+  assert.equal(r.compte, 'ESSAI0001')
+  const [a, b] = r.trades
+  assert.equal(a.source, 'ninjatrader-trades')
+  assert.equal(a.symbole, 'MNQZ6')
+  assert.equal(a.direction, 'long')
+  assert.equal(a.quantite, 2)
+  assert.equal(a.entreLe.toISOString(), '2026-11-09T09:31:05.000Z')
+  assert.equal(a.sortiLe.toISOString(), '2026-11-09T09:40:00.000Z')
+  assert.equal(a.fuseau, null)
+  assert.equal(a.pnl, 42)
+  assert.equal(a.frais, 2.2)
+  assert.equal(a.dureeSec, 535)
+  assert.equal(a.prixEntree, 20000.25)
+  assert.equal(b.direction, 'short')
+  assert.equal(b.pnl, -20)
+  assert.equal(b.frais, 1.1)
+  assert.equal(r.erreurs.length, 1)
+  assert.match(r.erreurs[0], /^Ligne 4 illisible \(heure d'entrée illisible\)/)
+  // AM/PM et jour = mois impossible a trancher : la convention americaine, dite.
+  assert.match(r.remarques.join(' '), /mois d'abord/)
+  // Reimport = 0 nouveau ; la cle ne depend pas du numero du trade (il repart a 1 a chaque rapport).
+  assert.equal(reimport(r), 0)
+  const renumerote = parserFichierTrades(NT_EN.replace('\r\n1,MNQ', '\r\n7,MNQ'))
+  assert.deepEqual(ids(renumerote), ids(r))
+})
+
+bloc('NinjaTrader Trades (FR) : point-virgule, virgule decimale, « 42,00 $ », jour d abord, Court = short', () => {
+  const r = parserFichierTrades(NT_FR)
+  assert.equal(r.format, 'ninjatrader-trades')
+  assert.equal(r.trades.length, 2)
+  assert.equal(r.erreurs.length, 0)
+  assert.equal(r.trades[0].entreLe.toISOString(), '2026-11-09T09:31:05.000Z')
+  assert.equal(r.trades[0].pnl, 42)
+  assert.equal(r.trades[0].prixEntree, 20000.25)
+  assert.equal(r.trades[0].frais, 1.04)
+  assert.equal(r.trades[1].direction, 'short')
+  assert.equal(r.trades[1].pnl, -20)
+  assert.match(r.remarques.join(' '), /jour d'abord/)
+  assert.equal(IT.symboleNinjaTrader('ES 03-27'), 'ESH7')
+  assert.equal(IT.symboleNinjaTrader('EURUSD'), 'EURUSD')
+  assert.equal(IT.symboleNinjaTrader('NQ 13-26'), 'NQ 13-26')
+})
+
+bloc('NinjaTrader Trades en .xlsx : premier onglet utile (onglet vide et onglet cache sautes), dates d Excel, memes trades que le CSV', () => {
+  const serie = (j, h, m, s) => 46335 + (h * 3600 + m * 60 + s) / 86400 + (j - 9)
+  const lignes = [
+    ['Trade number', 'Instrument', 'Account', 'Strategy', 'Market pos.', 'Qty', 'Entry price', 'Exit price', 'Entry time', 'Exit time', 'Entry name', 'Exit name', 'Profit', 'Cum. net profit', 'Commission', 'MAE', 'MFE', 'ETD', 'Bars'],
+    [1, 'MNQ 12-26', 'ESSAI0001', '', 'Long', 2, 20000.25, 20010.75, { date: serie(9, 9, 31, 5) }, { date: serie(9, 9, 40, 0) }, 'Entry', 'Profit target', 42, 42, 1.04, 5, 50, 8, 0],
+    [2, 'MNQ 12-26', 'ESSAI0001', '', 'Short', 1, 20020, 20030, { date: serie(9, 10, 2, 0) }, { date: serie(9, 10, 5, 30) }, 'Entry', 'Stop loss', -20, 22, 0.52, 20, 4, 24, 0],
+  ]
+  const octets = classeur(null, { feuilles: [{ nom: 'Vide', lignes: [['Titre seul']] }, { nom: 'Cachee', cachee: true, lignes }, { nom: 'Trades', lignes }] })
+  const c = texteDuClasseur(octets)
+  assert.equal(c.feuille, 'Trades')
+  assert.equal(c.feuilles, 3)
+  const r = parserFichierTrades(c.texte, 'NinjaTrader Grid.xlsx')
+  assert.equal(r.format, 'ninjatrader-trades')
+  assert.equal(r.trades.length, 2)
+  assert.equal(r.trades[0].entreLe.toISOString(), '2026-11-09T09:31:05.000Z')
+  assert.equal(r.trades[1].sortiLe.toISOString(), '2026-11-09T10:05:30.000Z')
+  assert.equal(r.trades[1].pnl, -20)
+  assert.equal(r.trades[0].frais, 1.04)
+  assert.deepEqual(r.remarques, [])
+})
+
+bloc('classeur : dates d Excel (1900, 1904, heure seule), refus motives (pas un ZIP, ZIP64, vide, mot de passe), virgules et guillemets', () => {
+  assert.equal(dateExcel(46335.5, 'dateheure'), '2026-11-09 12:00:00')
+  assert.equal(dateExcel(46335, 'date'), '2026-11-09')
+  assert.equal(dateExcel(0.25, 'heure'), '06:00:00')
+  assert.equal(dateExcel(44873.5, 'dateheure', true), '2026-11-09 12:00:00')
+  assert.equal(dateExcel(-1, 'date'), null)
+  assert.deepEqual(texteDuClasseur(new TextEncoder().encode('Heure,Message\n')), { erreur: MESSAGE_CLASSEUR_ILLISIBLE })
+  assert.match(texteDuClasseur(new Uint8Array([0xd0, 0xcf, 0x11, 0xe0, 0, 0, 0, 0])).erreur, /mot de passe/)
+  assert.deepEqual(texteDuClasseur(classeur([['Titre seul']])), { erreur: MESSAGE_CLASSEUR_VIDE })
+  // Un ZIP64 (signature de fin « PK\x06\x07 ») est refuse avant fflate (GHSA-px8p-9vwx-vf98).
+  const z = classeur([['a', 'b'], ['1', '2']])
+  const z64 = new Uint8Array(z.length + 20); z64.set(z); z64.set([0x50, 0x4b, 0x06, 0x07], z.length)
+  assert.match(texteDuClasseur(z64).erreur, /trop gros/)
+  // Une cellule qui porte une virgule, un guillemet ou un retour a la ligne reste une seule cellule.
+  const c = texteDuClasseur(classeur([['Symbol', 'Note'], ['NQ', 'a, "b"\nc']]))
+  assert.equal(c.texte, 'Symbol,Note\nNQ,"a, ""b"" c"')
+  // Un nombre garde par Excel avec du bruit binaire est rendu propre.
+  assert.equal(texteDuClasseur(classeur([['x', 'y'], [0.1 + 0.2, 20000.25]])).texte, 'x,y\n0.3,20000.25')
 })
 
 console.log(`\n${n} blocs verifies, tout est bon.`)

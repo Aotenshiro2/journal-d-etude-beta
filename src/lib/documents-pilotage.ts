@@ -5,8 +5,9 @@
 // Un document arrive (CSV, PDF, HTML, image...). Ici on décide, sans réseau ni
 // base :
 // - sa nature, aux octets d'abord (signature), puis à l'extension et au type
-//   MIME. HEIC, RAR, ZIP, vidéos, classeurs : illisibles, avec la raison, sans
-//   appel IA ;
+//   MIME. HEIC, RAR, ZIP, vidéos, classeurs .xls/.ods/Numbers : illisibles, avec
+//   la raison, sans appel IA ; un .xlsx se lit depuis le 10/11/2026 (son premier
+//   onglet utile, rendu en CSV par l'appelant, classeur-xlsx.ts) ;
 // - ce qui se lit sans IA : les CSV de trades connus (parserFichierTrades), le
 //   Cash History de Tradovate (mouvements d'un compte), le Trader Dashboard
 //   (solde par compte), un CSV de trades aux colonnes devinées, les relevés
@@ -237,7 +238,7 @@ export function firmeDuCompte(identifiant: string | null | undefined): string | 
 
 // ── La nature du document ───────────────────────────────────────────────────
 
-export type Famille = 'csv' | 'texte' | 'pdf' | 'html' | 'image' | 'refuse'
+export type Famille = 'csv' | 'texte' | 'pdf' | 'html' | 'image' | 'classeur' | 'refuse'
 export type MediaImage = 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'
 
 export interface Nature {
@@ -249,6 +250,9 @@ export interface Nature {
   raison?: string
 }
 
+/** Le type MIME d'un classeur .xlsx (le coffre le garde en octet-stream, le bucket ne le connaît pas). */
+export const MIME_CLASSEUR = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+
 const ascii = (o: Uint8Array, debut: number, fin: number) => String.fromCharCode(...o.subarray(debut, fin))
 const commencePar = (o: Uint8Array, octets: number[], decalage = 0) => octets.every((b, i) => o[decalage + i] === b)
 
@@ -257,7 +261,9 @@ const REFUS = {
   video: "Vidéo : elle ne se lit pas. Fais une capture de l'écran qui compte.",
   audio: 'Fichier audio : il ne se lit pas.',
   archive: "Archive (ZIP, RAR, 7z) : décompresse-la et dépose les fichiers qu'elle contient.",
-  classeur: 'Classeur (Excel, Numbers) : enregistre la feuille en CSV, ou en PDF, puis dépose-la.',
+  classeur: 'Classeur LibreOffice ou Numbers : enregistre-le en .xlsx, ou la feuille en CSV, puis dépose-le.',
+  classeurAncien: 'Classeur Excel ancien (.xls), ou protégé par un mot de passe : enregistre-le en .xlsx sans mot de passe, ou la feuille en CSV, puis dépose-le.',
+  classeurAbime: "Classeur illisible : le fichier ne commence pas comme un .xlsx. Ouvre-le dans Excel, enregistre-le de nouveau, puis dépose-le.",
   traitement: 'Document Word ou Pages : enregistre-le en PDF puis dépose-le.',
   inconnu: "Format inconnu : dépose un CSV, un PDF, une page HTML ou une image (PNG, JPEG).",
 } as const
@@ -267,7 +273,9 @@ const EXTENSIONS_REFUSEES: [RegExp, string][] = [
   [/^(mov|mp4|m4v|avi|mkv|webm|wmv|flv|3gp)$/, REFUS.video],
   [/^(mp3|wav|m4a|aac|ogg|flac)$/, REFUS.audio],
   [/^(zip|rar|7z|tar|gz|tgz|bz2)$/, REFUS.archive],
-  [/^(xlsx|xlsm|xls|ods|numbers)$/, REFUS.classeur],
+  [/^(xlsx|xlsm)$/, REFUS.classeurAbime],
+  [/^xls$/, REFUS.classeurAncien],
+  [/^(ods|numbers)$/, REFUS.classeur],
   [/^(docx|doc|pages|odt|rtf)$/, REFUS.traitement],
 ]
 
@@ -315,11 +323,13 @@ export function natureDuDocument(nom: string, type: string, octets: Uint8Array):
   if (commencePar(octets, [0x52, 0x61, 0x72, 0x21]) || commencePar(octets, [0x37, 0x7a, 0xbc, 0xaf])) return refus(REFUS.archive)
   if (commencePar(octets, [0x1f, 0x8b])) return refus(REFUS.archive)
   if (commencePar(octets, [0x50, 0x4b, 0x03, 0x04])) {
-    if (/^(xlsx|xlsm|ods|numbers)$/.test(ext)) return refus(REFUS.classeur)
+    // Un .xlsx se lit (10/11/2026) : son premier onglet utile, en CSV, par l'appelant (classeur-xlsx.ts).
+    if (/^(xlsx|xlsm)$/.test(ext) || mime === MIME_CLASSEUR) return { famille: 'classeur', mime: MIME_CLASSEUR }
+    if (/^(ods|numbers)$/.test(ext)) return refus(REFUS.classeur)
     if (/^(docx|odt|pages)$/.test(ext)) return refus(REFUS.traitement)
     return refus(REFUS.archive)
   }
-  if (commencePar(octets, [0xd0, 0xcf, 0x11, 0xe0])) return refus(ext === 'doc' ? REFUS.traitement : REFUS.classeur)
+  if (commencePar(octets, [0xd0, 0xcf, 0x11, 0xe0])) return refus(ext === 'doc' ? REFUS.traitement : REFUS.classeurAncien)
 
   // Extension.
   for (const [re, raison] of EXTENSIONS_REFUSEES) if (re.test(ext)) return refus(raison)
@@ -539,6 +549,8 @@ const BROKERS_FORMAT: Record<string, { broker: string | null; firme: string | nu
   // Quantower est une plateforme : le fichier ne dit ni la firme ni le broker.
   'quantower-executions': { broker: null, firme: null },
   'quantower-orders': { broker: null, firme: null },
+  // NinjaTrader est une plateforme (Apex, Bulenox, MFFU... passent par elle) : le compte dit la firme.
+  'ninjatrader-trades': { broker: null, firme: null },
 }
 
 const jourDe = (d: Date) => d.toISOString().slice(0, 10)
@@ -558,6 +570,9 @@ export function lireCsv(texte: string, nom: string): Lecture | null {
   if (lignes.length === 0) return { ...lectureVide('illisible', 'csv'), remarque: 'Fichier vide.' }
   const propre = lignes.join('\n')
   const lu = parserFichierTrades(propre, nom)
+  // Un export reconnu qui ne porte pas de trades (ordres, notifications, solde, journal de NinjaTrader,
+  // 10/11/2026) : sans IA, rien à écrire, et la remarque dit quel export faire à la place.
+  if (lu.refuse) return { ...lectureVide('illisible', 'csv'), broker: lu.plateforme ?? null, remarque: lu.erreurs[0] ?? 'Ce fichier ne porte pas de trades.' }
   const avecTrades = (trades: TradeNormalise[], format: string, confiance: number, remarque: string, extra: Partial<Lecture> = {}): Lecture => {
     const origine = BROKERS_FORMAT[format] ?? { broker: null, firme: null }
     return {
@@ -1096,12 +1111,15 @@ export type Preparation =
   | { ia: 'texte'; texte: string; prefixe: string; origine: string | null; indice: string | null; coupe: boolean }
   | { ia: 'vision'; bloc: 'pdf' | 'image'; media: 'application/pdf' | MediaImage; prefixe: string; origine: string | null; indice: string | null }
 
+/** Un classeur rendu en CSV par classeur-xlsx.ts (le module pur n'importe pas fflate : l'appelant le lit). */
+export type ClasseurLu = { texte: string; feuille: string; coupe?: boolean } | { erreur: string }
+
 /**
  * Ce qu'on fait d'un document : le lire sans IA (lecture rendue), ou ce qu'on
  * enverra à l'IA (texte d'abord, image seulement quand le texte manque).
  * `textePdf` : le texte extrait du PDF par l'appelant (null si l'extraction a échoué).
  */
-export function preparerLecture(e: { nom: string; nature: Nature; octets: Uint8Array; textePdf?: string | null }): Preparation {
+export function preparerLecture(e: { nom: string; nature: Nature; octets: Uint8Array; textePdf?: string | null; classeur?: ClasseurLu | null }): Preparation {
   const { nom, nature, octets } = e
   const indice = indiceDuNom(nom)
   const origine = origineDuNom(nom)
@@ -1130,6 +1148,16 @@ export function preparerLecture(e: { nom: string; nature: Nature; octets: Uint8A
       const texte = texteDuHtml(html)
       if (caracteresUtiles(texte) === 0) return { lecture: { ...lectureVide('illisible', 'nom'), remarque: 'Page HTML sans texte.' } }
       return versIA(texte, 'html')
+    }
+    case 'classeur': {
+      // Le premier onglet utile, rendu en CSV par l'appelant (classeur-xlsx.ts), puis les mêmes lecteurs que le CSV.
+      const c = e.classeur
+      if (!c || 'erreur' in c) return { lecture: { ...lectureVide('illisible', 'nom'), remarque: c && 'erreur' in c ? c.erreur : REFUS.classeurAbime } }
+      const lu = lireCsv(c.texte, nom)
+      const onglet = `Lu dans l'onglet « ${c.feuille} » du classeur${c.coupe ? ' (coupé : trop de lignes, exporte une période plus courte)' : ''}.`
+      if (lu) return { lecture: lu.type === 'illisible' ? lu : { ...lu, remarque: `${lu.remarque} ${onglet}`.trim() } }
+      if (caracteresUtiles(c.texte) === 0) return { lecture: { ...lectureVide('illisible', 'nom'), remarque: 'Classeur vide.' } }
+      return versIA(c.texte, 'csv')
     }
     case 'csv':
     case 'texte': {

@@ -4,6 +4,7 @@ import { corsHeaders, corsPreflight } from '@/lib/support-cors'
 import { finaliserLecture, lireComptes, natureDuDocument, preparerLecture, type Lecture } from '@/lib/documents-pilotage'
 import { documentSuspect } from '@/lib/documents-pilotage-ia'
 import { extraireTextePdf, garderDocument, lireParIA } from '@/lib/documents-serveur'
+import { texteDuClasseur } from '@/lib/classeur-xlsx'
 import { quotaDuMembre } from '@/lib/pilotage-niveau'
 import { MESSAGE_LECTURES_EPUISEES, apresUneLecture, quotaDe } from '@/lib/pilotage-paliers'
 
@@ -19,7 +20,10 @@ export const maxDuration = 60
  * rend { lecture, empreintes, document?, documentErreur?, quota }
  *
  * Dans l'ordre :
- * 1. sans IA : CSV de trades connus, Cash History de Tradovate (CSV et PDF),
+ * 1. sans IA : CSV de trades connus (et le premier onglet utile d'un .xlsx,
+ *    lu comme un CSV, 10/11/2026 ; Trades de NinjaTrader ; ordres,
+ *    notifications, solde et journal de NinjaTrader reconnus et refusés avec
+ *    l'export à faire à la place), Cash History de Tradovate (CSV et PDF),
  *    rapport Performance de Tradovate en PDF, Trader Dashboard, CSV aux
  *    colonnes devinées, relevé MetaTrader 4 en HTML, exports Quantower
  *    (exécutions et historique d'ordres appariés), relevé annuel d'eToro en
@@ -84,7 +88,9 @@ export async function POST(req: NextRequest) {
     let quota = etat.quota
     const nature = natureDuDocument(nom, type, octets)
     const textePdf = nature.famille === 'pdf' ? await extraireTextePdf(octets) : null
-    const prep = preparerLecture({ nom, nature, octets, textePdf })
+    // Un .xlsx (10/11/2026) : son premier onglet utile en CSV, puis les mêmes lecteurs que le CSV.
+    const classeur = nature.famille === 'classeur' ? texteDuClasseur(octets) : null
+    const prep = preparerLecture({ nom, nature, octets, textePdf, classeur })
 
     let lecture: Lecture
     if ('lecture' in prep) {

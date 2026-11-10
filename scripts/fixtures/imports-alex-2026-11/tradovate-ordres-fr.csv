@@ -1,0 +1,12 @@
+Symbole,Côté,Type,Qté,Quantité restante,Quantité remplie,Limite de Prix,Prix d’arrêt,Prise de profits,Stop Loss,Prix moyen de la transaction,Statut
+MNQZ6,Sell,Prise de profits,5,,,27491,,,,,Annulé
+MNQZ6,Buy,Marché,5,0,5,,,,,27316,Rempli
+MNQZ6,Sell,Stop Loss,5,0,5,,27343,,,27342.5,Rempli
+MNQZ6,Sell,Limite,5,,,27425.25,,,,,Annulé
+MNQZ6,Sell,Limite,5,0,5,27345,,,,27345,Rempli
+MNQZ6,Buy,Marché,5,0,5,,,,,27317.5,Rempli
+MNQZ6,Sell,Stop Loss,5,,,,27300.5,,,,Annulé
+MNQZ6,Sell,Prise de profits,5,,,27490.75,,,,,Annulé
+MNQZ6,Sell,Limite,2,,,27425,,,,,Annulé
+MNQZ6,Sell,Limite,3,,,27345.75,,,,,Annulé
+MNQZ6,Sell,Stop Loss,5,0,5,,27302.5,,,27302.5,Rempli

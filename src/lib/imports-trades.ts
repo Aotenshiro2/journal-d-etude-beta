@@ -53,6 +53,11 @@ export interface ResultatParse {
   compte?: string | null
   /** Ce que la lecture a fait sans que ce soit une erreur (ordres annulés ignorés, exécutions appariées...). */
   remarques?: string[]
+  /** Export reconnu qui ne porte pas de trades (ordres, notifications, solde, journal technique) :
+   *  `erreurs[0]` dit au membre ce que c'est et quel export faire à la place (10/11/2026). */
+  refuse?: boolean
+  /** La plateforme reconnue aux en-têtes (« Tradovate », « NinjaTrader »), quand le format la dit. */
+  plateforme?: string
 }
 
 /** Les colonnes d'un CSV inconnu, désignées par le membre (nom d'en-tête par champ). */
@@ -177,6 +182,14 @@ export function parserFichierTrades(texte: string, fichier?: string, colonnes?: 
   if (entetesSep.includes('Order type') && entetesSep.includes('Average fill price')) {
     return { format: 'quantower-orders', trades: [], erreurs: [MESSAGE_ORDRES_SANS_TRADE] }
   }
+
+  // NinjaTrader, Trade Performance > Trades (10/11/2026) : en-têtes anglais ou français.
+  const ninja = entetesNinjaTrader(lignes[0])
+  if (ninja) return parserNinjaTraderTrades(lignes, ninja)
+  // Les exports reconnus qui ne portent pas de trades (les fichiers d'Alex, 10/11/2026) :
+  // on dit ce que c'est et quel export faire à la place, au lieu de « format non reconnu ».
+  const sansTrades = reconnaitreSansTrades(lignes)
+  if (sansTrades) return sansTrades
 
   return parserCsvGenerique(lignes, sep, colonnes)
 }
@@ -746,6 +759,238 @@ function parserOrdresQuantower(lignes: string[], entetes: string[], sep: string)
   ].filter(Boolean)
   if (trades.length === 0) return sansTrade(erreurs, remarques)
   return { format: 'quantower-orders', trades, erreurs, compte: communUnique(communs), remarques }
+}
+
+// ── Les fichiers d'Alex (10/11/2026) : NinjaTrader, et ce qui n'est pas un export de trades ──
+//
+// Alex (relais) a envoyé cinq exports le 09/11 : le rapport Performance de
+// Tradovate (lu) et quatre fichiers refusés par « Format non reconnu », sans
+// explication. Option A de Brice : les reconnaître, en français comme en
+// anglais, dire au membre ce que c'est et quel export faire à la place, avec le
+// chemin du menu ; et lire le bon export de NinjaTrader (Trade Performance,
+// onglet Trades), en CSV comme en Excel (classeur-xlsx.ts le rend en CSV).
+// Les en-têtes se comparent normalisés (sans casse, accents ni ponctuation) :
+// « Côté » = « cote », « Market pos. » = « marketpos », « E/X » = « ex ».
+
+/** Où trouver le bon export, dit au membre. */
+export const EXPORT_TRADOVATE = 'Dans Tradovate : ouvre les Rapports (Reports), onglet Performance, puis télécharge le rapport en CSV.'
+export const EXPORT_NINJATRADER = 'Dans NinjaTrader : ouvre Trade Performance, onglet Trades, puis clic droit dans la liste, Exporter (en CSV ou en Excel).'
+
+/** La variante de MESSAGE_ORDRES_SANS_TRADE pour la liste des ordres de Tradovate (module Ordres, ou rapport Orders). */
+export const MESSAGE_ORDRES_TRADOVATE = `Ce fichier est un historique d'ordres Tradovate, pas de trades : exporte plutôt le rapport Performance. ${EXPORT_TRADOVATE}`
+export const MESSAGE_NOTIFICATIONS_TRADOVATE = `Ce fichier est le journal des notifications de Tradovate (ordres envoyés, modifiés, exécutés), pas tes trades : exporte plutôt le rapport Performance. ${EXPORT_TRADOVATE}`
+export const MESSAGE_ORDRES_NINJATRADER = `Ce fichier est un historique d'ordres NinjaTrader, pas de trades : exporte plutôt tes trades. ${EXPORT_NINJATRADER}`
+export const MESSAGE_EXECUTIONS_NINJATRADER = `Ce fichier est la liste de tes exécutions NinjaTrader, pas tes trades : exporte plutôt tes trades. ${EXPORT_NINJATRADER}`
+export const MESSAGE_JOURNAL_NINJATRADER = `Ce fichier est le journal (Log) de NinjaTrader : connexions, ordres et exécutions, pas tes trades. Exporte plutôt tes trades. ${EXPORT_NINJATRADER}`
+
+/** Les infos du compte Tradovate : le solde (Net Liq) est dit tel quel, rien d'autre n'en est fait. */
+export function messageCompteTradovate(netLiq: number | null): string {
+  const solde = netLiq === null ? '' : ` (Net Liq : ${netLiq.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`
+  return `Ce fichier donne le solde de ton compte Tradovate${solde}, pas tes trades : rien n'en est écrit. Pour tes trades, exporte plutôt le rapport Performance. ${EXPORT_TRADOVATE}`
+}
+
+/** Les en-têtes normalisés de la première ligne, au séparateur qui en donne le plus (virgule à égalité). */
+function entetesNormalises(ligne: string): { sep: string; normes: string[] } {
+  let sep = ','
+  let entetes = decouperLigneCsv(ligne, ',')
+  for (const autre of [';', '\t']) {
+    const essai = decouperLigneCsv(ligne, autre)
+    if (essai.length > entetes.length) { sep = autre; entetes = essai }
+  }
+  return { sep, normes: entetes.map(normaliserNom) }
+}
+
+/**
+ * Un export reconnu qui ne porte pas de trades : le refus (`refuse`), avec ce
+ * que c'est et quel export faire. Null : ce n'en est pas un (le CSV générique
+ * prend la suite). Un fichier qui a une colonne de résultat n'est jamais pris
+ * pour des ordres ou des exécutions.
+ */
+function reconnaitreSansTrades(lignes: string[]): ResultatParse | null {
+  const { sep, normes } = entetesNormalises(lignes[0])
+  const a = (...noms: string[]) => noms.some(n => normes.includes(n))
+  const refus = (format: string, plateforme: string, message: string): ResultatParse => ({ format, trades: [], erreurs: [message], refuse: true, plateforme })
+  const resultat = a('pnl', 'profit', 'pl', 'netpnl', 'realizedpnl', 'profitloss', 'gainperte', 'resultat', 'benefice', 'grosspl', 'netpl')
+
+  // Tradovate, les infos du compte (Total P/L, Open P/L, Net Liq, marges) : le solde, rien d'autre.
+  const NET_LIQ = /^(netliq|netliquidity|netliquidatingvalue|liquiditenette|liqnette|valeurnetteliquidative|valeurliquidativenette)/
+  if (normes.some(n => NET_LIQ.test(n)) && a('totalpl', 'openpl', 'availablemargin', 'totalmarginused', 'daymargin', 'pltotal', 'plouvert', 'margedisponible', 'margeutilisee')) {
+    const i = normes.findIndex(n => NET_LIQ.test(n))
+    const solde = lignes[1] ? lireMontant(decouperLigneCsv(lignes[1], sep)[i] ?? '') : null
+    return refus('tradovate-compte', 'Tradovate', messageCompteTradovate(solde))
+  }
+  // Tradovate, le journal des notifications (Symbole, Heure, Titre, Texte ; Symbol, Time, Title, Text).
+  if (a('titre', 'title') && a('texte', 'text', 'message') && a('heure', 'time', 'timestamp', 'date', 'dateheure')) {
+    return refus('tradovate-notifications', 'Tradovate', MESSAGE_NOTIFICATIONS_TRADOVATE)
+  }
+  // NinjaTrader, l'onglet Log (Heure, Catégorie, Message ; Time, Category, Message).
+  if (a('categorie', 'category') && a('message') && a('heure', 'time', 'date', 'dateheure', 'horodatage')) {
+    return refus('ninjatrader-journal', 'NinjaTrader', MESSAGE_JOURNAL_NINJATRADER)
+  }
+  if (resultat) return null
+  // NinjaTrader, les exécutions (Instrument, Action, Quantity, Price, Time, ID, E/X, Position, Order ID...).
+  if (a('instrument') && a('action') && a('ex', 'es', 'entreesortie', 'entryexit') && a('position', 'positiondemarche')) {
+    return refus('ninjatrader-executions', 'NinjaTrader', MESSAGE_EXECUTIONS_NINJATRADER)
+  }
+  // NinjaTrader, les ordres (Instrument, Action, Type, Quantity, Limit, Stop, State, Filled, Avg. price...).
+  if (a('instrument') && a('action') && a('state', 'etat') && a('filled', 'rempli', 'remplie', 'avgprice', 'prixmoyen', 'prixmoy')) {
+    return refus('ninjatrader-ordres', 'NinjaTrader', MESSAGE_ORDRES_NINJATRADER)
+  }
+  // Tradovate, les ordres : la liste du module Ordres (Symbole, Côté, Type, Qté, Quantité remplie, Prix moyen
+  // de la transaction, Statut ; Symbol, Side, Qty, Filled Qty, Avg Fill Price, Status) et le rapport Orders
+  // (orderId, B/S, Contract, avgPrice, filledQty, Fill Time, Status).
+  if (a('status', 'statut') && a('side', 'cote', 'bs', 'sens') && a('symbol', 'symbole', 'contract', 'contrat')
+    && a('filledqty', 'fillqty', 'qtyfilled', 'filledquantity', 'quantiteremplie', 'avgfillprice', 'averagefillprice', 'avgprice', 'averageprice', 'prixmoyendelatransaction', 'prixmoyen')) {
+    return refus('tradovate-ordres', 'Tradovate', MESSAGE_ORDRES_TRADOVATE)
+  }
+  return null
+}
+
+// NinjaTrader, Trade Performance > Trades. En anglais (doc publique et exports
+// connus) : Trade number, Instrument, Account, Strategy, Market pos., Qty,
+// Entry price, Exit price, Entry time, Exit time, Entry name, Exit name,
+// Profit, Cum. net profit, Commission, [Clearing Fee, Exchange Fee, IP Fee,
+// NFA Fee,] MAE, MFE, ETD, Bars. En français, les libellés de la version
+// française (« Position de marché », « Prix d'entrée », « Heure d'entrée »,
+// « Court ») sont pris par synonymes : À CONFIRMER sur un vrai fichier.
+// Conventions du lecteur Tradovate : heures telles qu'affichées (fuseau null,
+// le membre donne le sien à l'import), P&L de la colonne Profit et frais à part
+// (commission et frais de bourse additionnés), USD sauf symbole € ou £.
+
+type ChampNinja = 'numero' | 'instrument' | 'compte' | 'position' | 'quantite' | 'prixEntree' | 'prixSortie' | 'entree' | 'sortie' | 'nomEntree' | 'profit' | 'cumul' | 'commission' | 'mae' | 'mfe'
+
+const NOMS_NINJATRADER: [ChampNinja, string[]][] = [
+  ['numero', ['tradenumber', 'tradeno', 'notrade', 'numerodetrade', 'numerodutrade', 'ndetrade', 'ndutrade', 'numerotrade']],
+  ['instrument', ['instrument']],
+  ['compte', ['account', 'compte']],
+  ['position', ['marketpos', 'marketposition', 'positiondemarche', 'posdemarche', 'posmarche', 'positionmarche']],
+  ['quantite', ['qty', 'quantity', 'qte', 'quantite']],
+  ['prixEntree', ['entryprice', 'prixdentree', 'prixentree']],
+  ['prixSortie', ['exitprice', 'prixdesortie', 'prixsortie']],
+  ['entree', ['entrytime', 'heuredentree', 'heureentree', 'tempsdentree', 'datedentree', 'dateheuredentree']],
+  ['sortie', ['exittime', 'heuredesortie', 'heuresortie', 'tempsdesortie', 'datedesortie', 'dateheuredesortie']],
+  ['nomEntree', ['entryname', 'nomdentree', 'nomentree']],
+  ['profit', ['profit', 'benefice', 'pnl', 'profitperte', 'gainperte']],
+  ['cumul', ['cumnetprofit', 'cumprofit', 'cumulnetprofit', 'beneficenetcumule', 'profitnetcumule', 'beneficecumule', 'profitcumule']],
+  ['commission', ['commission', 'commissions']],
+  ['mae', ['mae']],
+  ['mfe', ['mfe']],
+]
+
+/** Les frais à part des versions récentes, ajoutés à la commission. */
+const FRAIS_NINJATRADER = /^(clearingfee|exchangefee|ipfee|nfafee|fraisdecompensation|fraisdechange|fraisdebourse|fraisnfa|fraisip)$/
+
+interface EntetesNinja { sep: string; index: Partial<Record<ChampNinja, number>>; frais: number[] }
+
+/** Les colonnes d'un export Trades de NinjaTrader, ou null. Il faut l'instrument, la position, les deux heures, le prix d'entrée, le profit, et une colonne propre à NinjaTrader (numéro, cumul, MAE, MFE, nom d'entrée). */
+function entetesNinjaTrader(ligne: string): EntetesNinja | null {
+  for (const sep of [',', ';', '\t']) {
+    const normes = decouperLigneCsv(ligne, sep).map(normaliserNom)
+    const index: Partial<Record<ChampNinja, number>> = {}
+    for (const [champ, noms] of NOMS_NINJATRADER) {
+      const i = noms.map(n => normes.indexOf(n)).find(x => x >= 0)
+      if (i !== undefined) index[champ] = i
+    }
+    const requis: ChampNinja[] = ['instrument', 'position', 'entree', 'sortie', 'prixEntree', 'profit']
+    const propre: ChampNinja[] = ['numero', 'cumul', 'mae', 'mfe', 'nomEntree']
+    if (requis.every(c => index[c] !== undefined) && propre.some(c => index[c] !== undefined)) {
+      return { sep, index, frais: normes.flatMap((n, i) => (FRAIS_NINJATRADER.test(n) ? [i] : [])) }
+    }
+  }
+  return null
+}
+
+const MOIS_CONTRAT = 'FGHJKMNQUVXZ'
+
+/** « MNQ 12-26 » (NinjaTrader) donne « MNQZ6 », le nom de Tradovate : le même contrat sous le même nom. Sinon tel quel. */
+export function symboleNinjaTrader(brut: string): string {
+  const m = /^([A-Z0-9]{1,6})\s+(\d{2})-(\d{2})$/.exec(brut.trim().toUpperCase())
+  if (!m || +m[2] < 1 || +m[2] > 12) return brut.trim().slice(0, 40)
+  return `${m[1]}${MOIS_CONTRAT[+m[2] - 1]}${m[3].slice(1)}`
+}
+
+/** « Long » / « Short », « Court » en français. */
+function sensNinjaTrader(brut: string): 'long' | 'short' | null {
+  const s = normaliserNom(brut)
+  if (/^(long|achat|acheter|buy)/.test(s)) return 'long'
+  if (/^(short|court|vente|vendre|sell)/.test(s)) return 'short'
+  return null
+}
+
+function parserNinjaTraderTrades(lignes: string[], e: EntetesNinja): ResultatParse {
+  const format = 'ninjatrader-trades'
+  const plateforme = 'NinjaTrader'
+  const cellules = lignes.slice(1).map(l => decouperLigneCsv(l, e.sep))
+  const val = (c: string[], champ: ChampNinja) => (e.index[champ] === undefined ? '' : (c[e.index[champ]!] ?? '').trim())
+  // L'ordre jour / mois des dates à barres : les valeurs d'abord ; sinon AM/PM dit le format américain, et le
+  // reste (français, britannique : « 09/11/2026 09:31:05 ») se lit jour d'abord. Un classeur rend de l'ISO.
+  const dates = cellules.flatMap(c => [val(c, 'entree'), val(c, 'sortie')]).filter(Boolean)
+  const deduit = ordreDesDates(dates)
+  if ('erreur' in deduit && /incohérentes/.test(deduit.erreur)) return { format, trades: [], erreurs: [deduit.erreur], plateforme }
+  const ampm = dates.some(d => /\d\s*[AP]M$/i.test(d))
+  const ordre: OrdreDate = 'erreur' in deduit ? (ampm ? 'mois' : 'jour') : deduit.ordre
+  const profits = cellules.map(c => val(c, 'profit'))
+  const devise = profits.some(p => p.includes('€')) ? 'EUR' : profits.some(p => p.includes('£')) ? 'GBP' : 'USD'
+
+  const trades: TradeNormalise[] = []
+  const erreurs: string[] = []
+  const comptes: (string | null)[] = []
+  const rangs = new Map<string, number>()
+  cellules.forEach((c, k) => {
+    const ligne = k + 2
+    if (c.every(x => !x.trim())) return
+    const instrument = val(c, 'instrument')
+    const sens = sensNinjaTrader(val(c, 'position'))
+    const quantite = e.index.quantite === undefined ? 1 : lireQuantite(val(c, 'quantite'))
+    const entree = lireHorodatage(val(c, 'entree'), ordre)
+    const sortie = lireHorodatage(val(c, 'sortie'), ordre)
+    const pnl = lireMontant(val(c, 'profit'))
+    const raisons = [
+      instrument ? '' : 'instrument vide', sens ? '' : 'position ni Long ni Short', quantite === null ? 'quantité illisible' : '',
+      entree ? '' : "heure d'entrée illisible", sortie ? '' : 'heure de sortie illisible', pnl === null ? 'profit illisible' : '',
+      entree && sortie && sortie.date.getTime() < entree.date.getTime() ? "sortie avant l'entrée" : '',
+    ].filter(Boolean)
+    if (raisons.length > 0 || !entree || !sortie || pnl === null || quantite === null || !sens) {
+      erreurs.push(`Ligne ${ligne} illisible (${raisons.join(', ')}) : ignorée.`)
+      return
+    }
+    const symbole = symboleNinjaTrader(instrument)
+    const compte = val(c, 'compte').slice(0, 80) || null
+    const colonnesFrais = [e.index.commission, ...e.frais].filter((i): i is number => i !== undefined)
+    const parts = colonnesFrais.map(i => lireMontant(c[i] ?? ''))
+    const frais = parts.some(p => p !== null) ? centimes(parts.reduce<number>((s, p) => s + Math.abs(p ?? 0), 0)) : null
+    const cle = [compte ?? '', symbole, entree.date.toISOString(), sortie.date.toISOString(), quantite, pnl].join('|')
+    const rang = (rangs.get(cle) ?? 0) + 1
+    rangs.set(cle, rang)
+    comptes.push(compte)
+    trades.push({
+      source: format,
+      idExterne: rang === 1 ? cle : `${cle}#${rang}`,
+      compte,
+      symbole,
+      direction: sens,
+      quantite,
+      prixEntree: lireMontant(val(c, 'prixEntree')),
+      prixSortie: lireMontant(val(c, 'prixSortie')),
+      entreLe: entree.date,
+      sortiLe: sortie.date,
+      pnl,
+      devise,
+      frais,
+      dureeSec: Math.round((sortie.date.getTime() - entree.date.getTime()) / 1000),
+      fuseau: entree.fuseau,
+      stopPrix: null,
+    })
+  })
+
+  if (trades.length === 0 && erreurs.length === 0) erreurs.push('Aucun trade dans le fichier.')
+  const remarques: string[] = []
+  if ('erreur' in deduit && trades.length > 0) {
+    remarques.push(ordre === 'mois'
+      ? 'Dates lues mois d\'abord (format américain, AM/PM) : vérifie l\'aperçu.'
+      : 'Dates lues jour d\'abord (« 09/11/2026 » = 9 novembre) : vérifie l\'aperçu.')
+  }
+  return { format, trades, erreurs, compte: communUnique(comptes), remarques, plateforme }
 }
 
 // ── CSV générique ────────────────────────────────────────────────────────────

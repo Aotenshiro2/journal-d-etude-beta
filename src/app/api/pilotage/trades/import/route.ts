@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getUserId } from '@/lib/api-auth'
 import { corsHeaders, corsPreflight } from '@/lib/support-cors'
 import { lireColonnes, parserFichierTrades, separerNouveaux } from '@/lib/imports-trades'
+import { texteDuClasseur } from '@/lib/classeur-xlsx'
 import { appliquerFuseau, fuseauDemande } from '@/lib/fuseau'
 import { clesDejaConnues, confirmerImport, supprimerExecutions } from '@/lib/trades-serveur'
 import { lireTradesEnvoyes } from '@/lib/trades-envoyes'
@@ -36,6 +37,14 @@ export const maxDuration = 60
  *   [{ segmentRef, noteId, noteTitle, ordre, startedAt, closedAt }] }], liees }`
  *   (ordre = place du segment dans sa note, à partir de 1 ; instants en ms,
  *   comme dans le Carnet).
+ *
+ * POST { xlsx (base64), ... } à la place de `csv` (10/11/2026) : un classeur
+ * Excel, lu comme son premier onglet utile rendu en CSV (classeur-xlsx.ts) ;
+ * ensuite tout est pareil. Classeur illisible : 400 avec la raison.
+ *
+ * Un export reconnu qui ne porte pas de trades (ordres, notifications, solde,
+ * journal de NinjaTrader) rend `refuse: true`, `plateforme` et, dans
+ * `erreurs[0]`, ce que c'est et quel export faire à la place.
  *
  * POST { trades, source, compteId, fichier?, confirmer?, fuseau? } à la place
  * de `csv` (brief D1, 30/10/2026) : les trades déjà lus (TradeNormalise, dates
@@ -81,7 +90,15 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => null)
     if (!body || typeof body !== 'object') return NextResponse.json({ error: 'Requête illisible.' }, { status: 400, headers: cors })
-    const csv = typeof body.csv === 'string' ? body.csv : ''
+    let csv = typeof body.csv === 'string' ? body.csv : ''
+    // Un classeur Excel (10/11/2026) : son premier onglet utile, en CSV.
+    const xlsx = typeof body.xlsx === 'string' ? body.xlsx.replace(/^data:[^,]{0,100},/, '').replace(/\s+/g, '') : ''
+    if (!csv && xlsx && !Array.isArray(body.trades)) {
+      if (xlsx.length > 6_800_000) return NextResponse.json({ error: 'Fichier trop gros (5 Mo max).' }, { status: 400, headers: cors })
+      const classeur = texteDuClasseur(Buffer.from(xlsx, 'base64'))
+      if ('erreur' in classeur) return NextResponse.json({ error: classeur.erreur }, { status: 400, headers: cors })
+      csv = classeur.texte
+    }
     // Les trades lus par /api/pilotage/documents/lire, à la place du csv.
     const envoyes = Array.isArray(body.trades) ? lireTradesEnvoyes(body.trades, body.source) : null
     const fichier = texte(body.fichier)
@@ -97,9 +114,10 @@ export async function POST(req: NextRequest) {
 
     const lu = envoyes ?? parserFichierTrades(csv, fichier ?? undefined, colonnes)
     const { format, erreurs, entetes, proposition } = lu
+    const refus = 'refuse' in lu && lu.refuse ? { refuse: true, ...(lu.plateforme ? { plateforme: lu.plateforme } : {}) } : {}
     // Les clés rangées sur le compte de l'import (J1) : le même trade sur un autre compte n'est pas un doublon.
     const trades = rangerSurCompte(fuseau.fuseau ? appliquerFuseau(lu.trades, fuseau.fuseau) : lu.trades, compteId)
-    const lecture = { format, erreurs, ...(entetes ? { entetes } : {}), ...(proposition ? { proposition } : {}) }
+    const lecture = { format, erreurs, ...(entetes ? { entetes } : {}), ...(proposition ? { proposition } : {}), ...refus }
     if (trades.length === 0) {
       return NextResponse.json(
         { ...lecture, lus: 0, nouveaux: 0, dejaConnus: 0, apercu: [], ...(confirmer ? { importes: 0, positions: [], correspondances: [], liees: 0 } : {}) },
