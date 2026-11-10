@@ -40,6 +40,36 @@
   d'essai annulee) pour que B, compte sans programme, le lise encore.
 - Ordre : migration 20261109235900 AVANT ce journal (sinon 503 sur les photos « membres »).
 
+## CLASSEMENT ACTIVITE : LA REGLE DES COMPTES GRATUITS (10/11/2026, commite NON pousse, branche classement-v2 ; migration 20261109234100 du workspace ECRITE, NON appliquee)
+
+- Brief : D:\7_Agents\briefs\2026-11-10-classement-activite-page.md ; rapport : classement-reel-rapport.md (notes
+  de Yume Orchestre). Rien de neuf dans le code du journal : seulement l essai.
+- Essai : AOK_WORKSPACE=<workspace> [AOK_ANNUAIRE=<worktree anciens-membres>] node --env-file=.env --env-file=.env.local
+  scripts/essayer-migration-classement-gratuits.mjs [--empreintes]. Phase A (fonctions seules, aucune table) : md5 de
+  la garde, aok_a_un_programme = aok_annuaire_acces (statut autre que communaute) pour chaque compte. Phase B, UNE
+  fois : 233000, 234000, 234100, premier remplissage, profils rendus publics dans la transaction, vue d un gratuit,
+  d un compte avec programme, de l equipe. 10/11 : 9 etapes ok, 4,5 s du begin au rollback (lock_timeout 5 s).
+- Ordre de mise en ligne : ETAT du site, section « Classement Activite : la vraie page ».
+
+## POINTS PAR JOUR DU CLASSEMENT ACTIVITE (09/11/2026, commite NON pousse, branche classement-v2 depuis origin/master 86bced9 ; migrations 20261109233000 et 20261109234000 du workspace ECRITES, NON appliquees)
+
+- Brief : D:\7_Agents\briefs\2026-11-09-points-jours.md ; rapport : points-jours-rapport.md (notes de la
+  conversation Yume Orchestre). La RPC aok_classement mettait 5 s par appel (aok_points_calcul par compte) :
+  elle lit maintenant la table aok_points_jours (55 ms). Detail et ordre de mise en ligne : ETAT du site, section
+  « Points par jour ».
+- Passage quotidien du Live Club (cron 7 h UTC) : etape points_jours EN DERNIER (apres le resume), budget 285 s,
+  rafraichirPointsJours (src/lib/points-jours.ts) -> aok_points_jours_rafraichir(false, 'cron:liveclub') :
+  incremental, complet au premier passage et chaque semaine. Fonction absente : etat fonction_absente, aucune
+  erreur (le journal peut partir avant la migration). Synthese : points_jours { etat, complet, recalcules,
+  jours_ecrits, jours_retires }. Pas de nouveau cron (plan Hobby : une fois par jour).
+- A la main (ECRIT en base, accord de Brice) : node --env-file=.env.local scripts/rafraichir-points-jours.mjs
+  [--complet]. Sert au PREMIER remplissage juste apres la migration (le script d'application coupe a 5 s).
+- Essai : node --env-file=.env.local scripts/essayer-migration-points-jours.mjs (worktree : AOK_WORKSPACE=...),
+  les deux migrations dans une transaction annulee en lecture repetable, 20 etapes ok le 09/11. Controle statique :
+  scripts/verifier-points-jours.mjs.
+- Mon espace (aok_ma_progression) reste calcule en direct, NON branche sur la table (il doit suivre la seconde) ;
+  il passe de 89 a 35 ms par la migration (fuseau Europe/Paris plus relu dans pg_timezone_names).
+
 ## LE STATUT EQUIPE : BRICE, MELANIE, ADIL, ADRIEN (09/11/2026, commite NON pousse, branche statut-equipe depuis origin/master 2c79f3e ; migration 20261109210000 ECRITE, NON appliquee)
 
 - Brief : D:\7_Agents\briefs\2026-11-09-statut-equipe.md ; rapport : statut-equipe-rapport.md (notes de la

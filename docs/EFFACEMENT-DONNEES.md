@@ -92,6 +92,14 @@ des points. La seule table neuve, `aok_points_bareme`, est le barème (aucune do
   mais plus rien ne les relie à un profil.
 - Export (`aok_exporter_mes_donnees`) : clé `points_et_niveau`.
 - Garde-fou statique : `scripts/verifier-effacement.mjs` (« points du profil »).
+- Depuis la migration `20261109234000_aok_points_jours.sql` (09/11/2026, pour le classement Activité) : une
+  table DÉRIVÉE, `aok_points_jours` (compte, jour, nombres de leçons, notes et messages, aucun contenu),
+  `aok_points_jours_comptes` (une empreinte md5 du fuseau et des comptes Telegram, aucun identifiant) et
+  `aok_points_jours_passages` (des nombres, aucun compte). Les deux premières tombent avec le profil (clé
+  étrangère en cascade vers `profiles`, qui tombe avec `auth.users`) : rien à effacer à la main au niveau 3.
+  Niveau 1 : l'oubli change l'empreinte du compte, le passage quotidien suivant recompte ses jours sans ces
+  messages (au plus un jour de décalage, des nombres seulement). Pour l'appliquer tout de suite :
+  `scripts/rafraichir-points-jours.mjs`. L'export garde le calcul en direct.
 
 ## 4. Comment on retrouve tout ce qui est à elle
 
