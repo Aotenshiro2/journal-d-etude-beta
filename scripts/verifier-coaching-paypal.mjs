@@ -140,7 +140,9 @@ bloc('email du coaching sans lien de reservation : paye, seances, Brice sous 48 
     assert.match(t, /leçons sont bien comprises/)
     assert.match(t, /exercices et des guidelines/)
     assert.match(t, /pas de date limite/)
-    assert.doesNotMatch(t, /8 séances|accès prioritaire|en temps réel|valable|expire|dans les \d+ mois|\b\d+ mois\b/, 'ni seances comptees, ni ancienne promesse, ni duree de validite')
+    // 10/11 (Brice) : l acces prioritaire par message entre les seances revient (5e point de /merci).
+    assert.match(t, /Entre deux séances, vous avez un accès prioritaire par message\./)
+    assert.doesNotMatch(t, /8 séances|en temps réel|valable|expire|dans les \d+ mois|\b\d+ mois\b/, 'ni seances comptees, ni ancienne promesse, ni duree de validite')
     assert.doesNotMatch(t, /garanti|résultats? assurés?|rentab/i, 'aucune promesse de resultat')
     assert.match(t, /Brice vous contacte sous 48 h pour fixer votre première séance\./)
     assert.ok(t.includes('eleve@exemple.fr'))

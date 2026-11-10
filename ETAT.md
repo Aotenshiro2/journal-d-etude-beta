@@ -1,5 +1,20 @@
 # ETAT du journal d etudes
 
+## INTEGRATION DE LA BRANCHE ANCIENS-MEMBRES AVANT SA MISE EN LIGNE (10/11/2026, commite NON pousse)
+
+- Brief : D:\7_Agents\briefs\2026-11-10-mise-en-ligne-anciens-integration.md ; rapport : integration-anciens-rapport.md
+  (notes de Yume Orchestre). Ordre de mise en ligne : ETAT du site, section « Integration de la branche anciens-membres ».
+- origin/master (ffa198e, le classement Activite EN LIGNE : etape points_jours du passage quotidien) fusionne dans
+  anciens-membres (merge) : seul conflit, cet ETAT, resolu en gardant les deux cotes.
+- Mail d'achat du coaching 8 h (modeleEmailCoaching, src/lib/academie/club-paypal-pur.ts) : « Entre deux seances, vous
+  avez un acces prioritaire par message. » revient (Brice, carte coaching-acces-prioritaire, reponse B, 10/11), comme
+  le 5e point de /merci. scripts/verifier-coaching-paypal.mjs l'exige desormais (12 blocs ok).
+- scripts/essayer-migration-statuts-anciens.mjs revu : migrations dans l'ordre de mise en ligne (lot 1, parcours,
+  annuaire, profils ; l'import en dernier, sa renumerotation verrouille profiles), decisions-brice.json tel quel
+  (etm_valide_le pose : 9 ETM), empreintes md5 des fonctions du classement et plafond des lecons (10) compares avant,
+  pendant et apres, sequence relue juste avant l'import (aucun nextval), liste des tables comparee, profils publics
+  nommes s'il y en a. Joue UNE fois le 10/11 : 9 etapes ok, 6,1 s du begin au rollback, rien de reste.
+
 ## STATUTS DES ANCIENS ELEVES ET NOUVELLE NUMEROTATION : LES SCRIPTS (10/11/2026, commite NON pousse, branche anciens-membres ; migrations 20261109234500 (revue) et 20261110010000 du workspace ECRITES, NON appliquees)
 
 - Brief : D:\7_Agents\briefs\2026-11-10-statuts-anciens-eleves.md ; rapport : statuts-anciens-rapport.md (notes de

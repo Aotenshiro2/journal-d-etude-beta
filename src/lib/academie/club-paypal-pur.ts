@@ -516,6 +516,8 @@ export function lienReservation(v: unknown): string | null {
  * que l'eleve parcourt la formation (check-ups, lecons bien comprises,
  * exercices et guidelines), en heures, sans date limite. Aucune promesse de
  * resultat.
+ * 10/11 (Brice, carte coaching-acces-prioritaire, reponse B) : « Remets acces
+ * prioritaire par message entre les seances », comme le 5e point de /merci.
  */
 export function modeleEmailCoaching(p: {
   email: string; essai: boolean; montant?: string | null; prenom?: string | null; reservation: string | null
@@ -527,7 +529,7 @@ export function modeleEmailCoaching(p: {
     paragraphes: [
       p.prenom ? `Bonjour ${p.prenom},` : 'Bonjour,',
       `Merci, ${paiement} : vos 8 h de coaching individuel avec Brice vous attendent. Si vous payez en 4 fois, les échéances sont gérées par PayPal, pas par nous.`,
-      "Ce coaching vous accompagne pendant que vous parcourez la formation. À chaque séance, Brice fait le point avec vous : il vérifie que les leçons sont bien comprises et vous donne des exercices et des guidelines à travailler d'ici la suivante.",
+      "Ce coaching vous accompagne pendant que vous parcourez la formation. À chaque séance, Brice fait le point avec vous : il vérifie que les leçons sont bien comprises et vous donne des exercices et des guidelines à travailler d'ici la suivante. Entre deux séances, vous avez un accès prioritaire par message.",
       "Vos 8 h n'ont pas de date limite : elles suivent votre avancée dans la formation, à votre rythme.",
       reservation
         ? `Pour fixer votre première séance, choisissez votre créneau : {lien:${reservation}|${reservation.replace(/^https:\/\//, '')}}`

@@ -37,6 +37,14 @@
  * Puis la transaction est annulee, et on verifie hors transaction que rien
  * n'est reste. Aucun email ni identifiant complet affiche.
  *
+ * 10/11, integration (classement Activite en ligne, plafond des lecons a 10) :
+ * les migrations dans l'ordre de mise en ligne (lot 1, parcours, annuaire,
+ * profils ; l'import reste en dernier, sa renumerotation verrouille profiles),
+ * l'import avec les decisions telles quelles (etm_valide_le pose par Brice),
+ * et les empreintes des fonctions du classement, le plafond des lecons, les
+ * tables et la sequence compares avant, pendant (aucune migration de la
+ * branche ne les touche, aucun nextval avant la renumerotation) et apres.
+ *
  * Lancement (depuis le worktree du journal) :
  *   AOK_WORKSPACE=<racine du workspace> node --env-file=.env --env-file=.env.local scripts/essayer-migration-statuts-anciens.mjs
  */
@@ -137,6 +145,12 @@ for (const [sig, quoi] of [['public.aok_anciens_activer(uuid)', 'le lot 1'], ['p
   ['public.aok_annuaire_gratuits()', 'les profils par numero'], ['public.cockpit_parcours_de(text, uuid)', 'cette migration']]) {
   if (await existe(sig)) throw new Error(`${sig} existe DEJA : ${quoi} est applique, cet essai le rejouerait. Adapter l essai.`)
 }
+// Les fonctions du classement Activite (en ligne le 10/11) : signature et md5 de leur definition.
+const FONCTIONS_CLASSEMENT = ['aok_classement(text, text, integer)', 'aok_points_calcul(uuid, boolean)', 'aok_activite_par_jour(uuid, text)',
+  'aok_points_du_jour(integer, integer, integer, integer[])', 'aok_points_bareme_tableau()', 'aok_niveau_de(integer)', 'aok_niveaux_seuils()',
+  'aok_telegram_du_compte(uuid)', 'aok_a_un_programme(uuid)', 'aok_points_jours_rafraichir(boolean, text)']
+const CLASSEMENT = `select string_agg(f || '=' || coalesce(md5(pg_get_functiondef(to_regprocedure('public.' || f))), 'absente'), ' ' order by f)
+  from unnest(array[${FONCTIONS_CLASSEMENT.map(f => `'${f}'`).join(', ')}]) as f`
 const ETAT = `select (select last_value from public.member_number_seq) as seq, (select is_called from public.member_number_seq) as appele,
   (select column_default from information_schema.columns where table_schema = 'public' and table_name = 'profiles' and column_name = 'client_number') as defaut,
   (select count(*) from public.profiles) as comptes, (select max(client_number) from public.profiles) as maxi,
@@ -148,9 +162,19 @@ const ETAT = `select (select last_value from public.member_number_seq) as seq, (
   (select count(*) from public.cockpit_arch_notes) as notes,
   (select count(*) from public.cockpit_statut_etm) as etm,
   (select count(*) from public.cockpit_allowlist) as allowlist,
-  to_regclass('public.cockpit_parcours') is not null as parcours_la, to_regclass('public.aok_anciens_membres') is not null as lot1_la`
+  to_regclass('public.cockpit_parcours') is not null as parcours_la, to_regclass('public.aok_anciens_membres') is not null as lot1_la,
+  (${CLASSEMENT}) as classement,
+  (select plafond_jour from public.aok_points_bareme where source = 'lecon_terminee') as plafond_lecons,
+  (select md5(string_agg(c.relname::text || ':' || c.relkind::text, ',' order by c.relname)) from pg_class c
+     where c.relnamespace = 'public'::regnamespace and c.relkind in ('r', 'v', 'm', 'S')) as tables`
 const avantHors = (await prisma.$queryRawUnsafe(ETAT))[0]
-assert.equal(num(avantHors.publics), 0, 'des profils publics existent : la garde du lot 1 refusera, l essai ne peut pas passer')
+if (num(avantHors.publics) !== 0) {
+  const lesquels = (await prisma.$queryRawUnsafe(`select client_number from public.profiles where profil_public order by client_number`)).map(r => num(r.client_number))
+  throw new Error(`${avantHors.publics} profil(s) public(s) (n° ${lesquels.join(', ')}) : la garde du lot 1 refusera, l essai ne peut pas passer`)
+}
+// Le classement est en ligne (10/11) : ses fonctions et le plafond des lecons ne doivent bouger ni pendant ni apres.
+assert.ok(avantHors.classement && !avantHors.classement.includes('absente'), `fonctions du classement : ${avantHors.classement}`)
+assert.equal(num(avantHors.plafond_lecons), 10, 'plafond des lecons attendu a 10 (20261110021000)')
 const auditAvant = await auditer(prisma)
 const brice = (await prisma.$queryRawUnsafe(`select a.user_id::text as id from public.cockpit_allowlist a join public.profiles p on p.id = a.user_id
     where a.acces_fonds and p.client_number = 1 and p.role::text = 'admin'`))[0]?.id
@@ -160,9 +184,11 @@ assert.ok(membreSimon, 'fiche client reliee a p-simon-huilier introuvable')
 
 const liste = JSON.parse(readFileSync(LISTE, 'utf8'))
 const decisions = JSON.parse(readFileSync(DECISIONS, 'utf8'))
-// L'essai pose aussi les ETM, comme si Brice avait valide leur liste (seulement dans la transaction annulee).
-const prep = preparer(liste, { ...decisions, etm_valide_le: '2026-11-10' })
+// Les decisions telles quelles : Brice a valide la liste ETM le 10/11 (etm_valide_le), l'import les pose.
+const prep = preparer(liste, decisions)
 assert.deepEqual(prep.erreurs, [], `la liste ne passe pas les controles de l import : ${prep.erreurs.join(' | ')}`)
+assert.ok(prep.etmValideLe, 'etm_valide_le absent de decisions-brice.json : les ETM ne seraient pas poses')
+assert.equal(prep.etm.length, 9, 'les 9 ETM documentes')
 const refusTrancher = preparer(liste, { ...decisions, a_trancher: { 'p-essai': '10 ou 3' } })
 assert.ok(refusTrancher.erreurs.some(e => /trancher/.test(e)), 'a_trancher non vide doit bloquer l import')
 const refusValide = preparer({ ...liste, valide_le: null }, { ...decisions, valide_le: null })
@@ -231,10 +257,17 @@ try {
     const apresLot1 = await un(`select (select last_value from public.member_number_seq) as seq,
         (select md5(string_agg(id::text || ':' || client_number::text, ',' order by id)) from public.profiles where role::text <> 'admin') as hors_equipe,
         (select array_agg(client_number order by client_number) from public.profiles where role::text = 'admin') as admins`)
+    // L'ordre de mise en ligne : lot 1, parcours, annuaire, profils.
+    for (const o of ordres) await exec(o)
     for (const o of ordres2) await exec(o)
     for (const o of ordres3) await exec(o)
-    for (const o of ordres) await exec(o)
     tMigrations = Date.now() - tm
+    const pendant = await un(`select (${CLASSEMENT}) as classement,
+        (select plafond_jour from public.aok_points_bareme where source = 'lecon_terminee') as plafond_lecons,
+        (select last_value from public.member_number_seq) as seq, (select is_called from public.member_number_seq) as appele`)
+    assert.equal(pendant.classement, avantHors.classement, 'les migrations de la branche ne touchent aucune fonction du classement')
+    assert.equal(num(pendant.plafond_lecons), num(avantHors.plafond_lecons), 'plafond des lecons intact')
+    assert.deepEqual([num(pendant.seq), pendant.appele], [num(avantHors.seq), avantHors.appele], 'aucun nextval apres les migrations')
     // Rejouable : les ordres de definition sont « if not exists » ou « or replace » ,
     // on rejoue ceux qui ecrivent des donnees (referentiel, groupes, exceptions, calcul).
     const lignesAvant = (await un(`select (select count(*) from public.cockpit_parcours)::int as p, (select count(*) from public.cockpit_parcours_groupes)::int as g`))
@@ -245,7 +278,7 @@ try {
     assert.equal(apresLot1.hors_equipe, avantHors.hors_equipe, 'le lot 1 ne renumerote plus les comptes hors equipe')
     assert.equal(num(apresLot1.seq), num(avantHors.seq), 'le lot 1 ne touche plus la sequence')
     assert.deepEqual(apresLot1.admins, [1, 2, 3, 4], 'Adil 3 et Adrien 4')
-    ok(`lot 1 (${ordres1.length} ordres), annuaire (${ordres2.length}), profils (${ordres3.length}), parcours (${ordres.length}) en ${tMigrations} ms ; les ${rejeu.length} ordres de donnees du parcours rejoues sans rien ajouter ; apres le lot 1 : equipe 1, 2, 3, 4, les autres comptes et la sequence intacts (pas de renumerotation dans la migration)`)
+    ok(`lot 1 (${ordres1.length} ordres), parcours (${ordres.length}), annuaire (${ordres2.length}), profils (${ordres3.length}) en ${tMigrations} ms ; les ${rejeu.length} ordres de donnees du parcours rejoues sans rien ajouter ; apres le lot 1 : equipe 1, 2, 3, 4, les autres comptes et la sequence intacts (pas de renumerotation dans la migration) ; fonctions du classement a la meme empreinte, plafond des lecons a ${num(pendant.plafond_lecons)}, sequence non appelee`)
 
     // --- 2. Les statuts calcules = ceux de la liste ---------------------------------
     const parBase = new Map(json(await sql(`select personne_id, array_agg(distinct statut order by statut) as s from public.cockpit_parcours
@@ -345,6 +378,9 @@ try {
     ok(`controles de verifier:rls rejoues apres les quatre migrations : ${auditApres.length} alerte(s), toutes deja la avant (${auditApres.join(' | ') || 'aucune'}), aucune nouvelle`)
 
     // --- 4. L'import reel, puis la renumerotation ------------------------------------
+    // Juste avant : la vraie sequence n a toujours pas ete appelee (rien ne se consomme pour de bon).
+    const avantImport = await un(`select (select last_value from public.member_number_seq) as seq, (select is_called from public.member_number_seq) as appele`)
+    assert.deepEqual([num(avantImport.seq), avantImport.appele], [num(avantHors.seq), avantHors.appele], 'aucun nextval avant la renumerotation')
     const ti = Date.now()
     const bilan = await appliquer(tx, prep, { ecrire: true })
     tImport = Date.now() - ti
@@ -452,6 +488,11 @@ for (const sig of ['public.cockpit_parcours_de(text, uuid)', 'public.aok_numeros
   'public.aok_anciens_activer(uuid)']) assert.equal(await existe(sig), false, sig)
 const restes = num((await prisma.$queryRawUnsafe(`select count(*) as n from auth.users where email like 'essai-statuts-%@exemple.invalid'`))[0].n)
 assert.equal(restes, 0)
-ok(`annule : aucune table ni fonction restee (lot 1, annuaire, profils, parcours), ${avantHors.comptes} comptes aux memes numeros, ${avantHors.publics} public, sequence intacte (last_value ${avantHors.seq}, meme defaut), Marlon inchange, notes, statuts ETM et allowlist intacts, aucun compte d essai`)
+assert.equal(num(apresHors.plafond_lecons), 10)
+for (const t of ['aok_anciens_membres', 'aok_anciens_propositions', 'aok_badges', 'aok_annuaire_appels', 'aok_annuaire_mesures',
+  'cockpit_parcours', 'cockpit_parcours_statuts', 'cockpit_parcours_groupes', 'cockpit_parcours_reglages']) {
+  assert.equal((await prisma.$queryRawUnsafe(`select to_regclass($1) is null as absente`, `public.${t}`))[0].absente, true, `table restee : ${t}`)
+}
+ok(`annule : aucune table ni fonction restee (lot 1, annuaire, profils, parcours ; liste des tables identique), ${avantHors.comptes} comptes aux memes numeros, ${avantHors.publics} public, sequence intacte (last_value ${avantHors.seq}, is_called ${avantHors.appele}, meme defaut), fonctions du classement a la meme empreinte, plafond des lecons a ${apresHors.plafond_lecons}, Marlon inchange, notes, statuts ETM et allowlist intacts, aucun compte d essai`)
 await prisma.$disconnect()
 console.log(`\n${etapes} etapes, ${process.exitCode ? 'ECHEC' : 'tout est bon'}.`)
