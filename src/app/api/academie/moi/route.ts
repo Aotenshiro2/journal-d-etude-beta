@@ -18,14 +18,17 @@ import { messageErreur, relationAbsente } from '@/lib/liveclub/pur'
  * Reponse 200 :
  *   {
  *     ok: true,
- *     compte: { admin, etm, equipe, vip, live_club, live_club_source },   live_club : oui, non, inconnu,
+ *     compte: { admin, etm, equipe, vip, live_club, live_club_source, autres_adresses },   live_club : oui, non, inconnu,
  *                           non_lu (pas demande) ;
  *                           equipe (09/11/2026) : statut equipe AOK (estEquipe), live_club vaut alors 'oui' ;
  *                           etm : statut ETM actif ; vip (10/11/2026) : rang Skool vip d'une fiche du cockpit
  *                           reliee au compte. Deux booleens pour la tete de Mon espace (« Élève ETM »,
  *                           « Membre VIP ») : rien d'autre de la fiche ne part au navigateur ;
  *                           live_club_source (10/11/2026) : exemption, broker ou manuel quand live_club vaut
- *                           'oui' par une source sans Stripe (un ETM ou un VIP y est lu aussi), null sinon
+ *                           'oui' par une source sans Stripe (un ETM ou un VIP y est lu aussi), null sinon ;
+ *                           autres_adresses (10/11/2026, restes) : le NOMBRE d'adresses de la fiche du cockpit
+ *                           reliee au compte confirmees sur aucun compte du site, pour le rappel « Comptes
+ *                           lies » de Mon espace (jamais les adresses)
  *     incomplet,                            true = une source illisible (Stripe) : des contenus sont « inconnu »
  *     continuer: { lecon, module, reprise_s, derniere_vue_le, acces, etat } | null,   la derniere lecon ouverte
  *     questions_entree: { poser, version, questions: [texte, texte] },   les questions d'entree (30/10/2026,
@@ -124,6 +127,7 @@ export async function GET(req: NextRequest) {
       compte: {
         admin: droits.admin, etm: droits.etm, equipe: droits.equipe, vip: droits.vip, live_club: droits.liveClub,
         live_club_source: droits.sourceLiveClub,
+        autres_adresses: droits.autresAdresses,
       },
       incomplet: droits.incomplet,
       continuer,

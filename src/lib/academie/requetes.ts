@@ -61,7 +61,13 @@ select
  * - vip (10/11/2026, Brice : Mon espace dit le statut) : rang Skool vip
  *   (cockpit_membres_etat.tier_skool) d'une fiche reliee a un de ces emails,
  *   comme 'skool-vip' de checkMentoratAccess. Un statut AFFICHE : il n'ouvre
- *   rien de plus dans l'academie (preparerDroits l'ignore).
+ *   rien de plus dans l'academie (preparerDroits l'ignore) ;
+ * - autres_adresses (10/11/2026, restes du 10/11 : Cedric ne trouvait pas
+ *   Comptes lies) : le NOMBRE d'adresses des fiches reliees a ces emails qui ne
+ *   sont confirmees sur AUCUN compte du site (ni email d'auth confirme, ni
+ *   profile_emails verifie). Ce sont celles qu'il peut encore relier dans Mon
+ *   espace ; une adresse deja confirmee sur un autre compte ne compte pas (le
+ *   rattachement la refuserait). Un nombre, jamais les adresses.
  */
 export const SQL_FAITS_COCKPIT = `
 select
@@ -107,7 +113,23 @@ select
       select 1 from public."MentoratGrant" g
        where g."revokedAt" is null and lower(btrim(g.email)) = any($1::text[])
     )
-  ) as secours_essai
+  ) as secours_essai,
+  (
+    select count(distinct lower(btrim(autre.email)))::int
+      from public.cockpit_membre_emails me
+      join public.cockpit_membre_emails autre on autre.membre_id = me.membre_id
+     where lower(me.email) = any($1::text[])
+       and position('@' in autre.email) > 1
+       and lower(btrim(autre.email)) <> all($1::text[])
+       and not exists (
+         select 1 from public.profile_emails pe
+          where pe.verified = true and lower(btrim(pe.email)) = lower(btrim(autre.email))
+       )
+       and not exists (
+         select 1 from auth.users u
+          where u.email_confirmed_at is not null and lower(btrim(u.email)) = lower(btrim(autre.email))
+       )
+  ) as autres_adresses
 `
 
 /**

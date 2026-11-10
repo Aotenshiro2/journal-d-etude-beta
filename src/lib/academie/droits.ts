@@ -72,6 +72,13 @@ export type DroitsAcademie = Droits & {
    * pour que Mon espace dise « accès offert ».
    */
   sourceLiveClub: SourceLiveClub | null
+  /**
+   * (10/11/2026, restes du 10/11) Le nombre d'adresses des fiches du cockpit
+   * reliees au compte, confirmees sur aucun compte du site
+   * (SQL_FAITS_COCKPIT.autres_adresses). /moi le rend (compte.autres_adresses)
+   * pour que Mon espace rappelle Comptes lies. N'ouvre rien.
+   */
+  autresAdresses: number
 }
 
 // ---------------------------------------------------------------------------
@@ -140,7 +147,7 @@ async function liveClubParEmail(email: string): Promise<'oui' | 'non' | 'inconnu
 type LigneIdentite = { role: string | null; emails: string[] | null }
 type LigneCockpit = {
   etm: boolean; vip: boolean; broker_jusquau: string | null; manuel_jusquau: string | null; exempte: boolean
-  secours_essai: boolean
+  secours_essai: boolean; autres_adresses: number | null
 }
 type LigneAccesSql = {
   origine: 'acces' | 'base' | 'essai'; source: string | null; slug: string | null; ouvre_tout: boolean
@@ -200,6 +207,8 @@ export async function droitsAcademie(userId: string): Promise<DroitsAcademie> {
     ...preparerDroits({ ...faits, liveClub }),
     erreurs,
     sourceLiveClub: liveClub === 'oui' && !equipe ? source : null,
+    // (10/11/2026) Les adresses de sa fiche encore a relier : un nombre pour le rappel de Mon espace.
+    autresAdresses: Math.max(0, Number(c?.autres_adresses ?? 0) || 0),
   }
 }
 
@@ -226,7 +235,10 @@ export async function droitsVisiteur(): Promise<DroitsAcademie> {
     .map(l => ({
       origine: l.origine, source: l.source, slug: l.slug, ouvreTout: l.ouvre_tout === true, moduleId: l.module_id, sectionId: l.section_id,
     }))
-  return { ...preparerDroits({ admin: false, etm: false, secoursEssai: false, liveClub: 'non_lu', lignes }), erreurs: [], sourceLiveClub: null }
+  return {
+    ...preparerDroits({ admin: false, etm: false, secoursEssai: false, liveClub: 'non_lu', lignes }),
+    erreurs: [], sourceLiveClub: null, autresAdresses: 0,
+  }
 }
 
 // ---------------------------------------------------------------------------

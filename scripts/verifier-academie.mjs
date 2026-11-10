@@ -196,6 +196,26 @@ bloc('Live Club d un ETM ou d un VIP (10/11) : exemption, broker ou manuel sans 
   assert.match(droits, /sourceLiveClub: liveClub === 'oui' && !equipe \? source : null/)
 })
 
+bloc('Adresses a relier (10/11, restes) : /moi rend un NOMBRE, lu sur la fiche reliee, jamais les adresses', () => {
+  const sql = readFileSync(new URL('../src/lib/academie/requetes.ts', import.meta.url), 'utf8')
+  const bloc = /\(\s*select count\(distinct lower\(btrim\(autre\.email\)\)\)::int[\s\S]*?\) as autres_adresses/.exec(sql)?.[0]
+  assert.ok(bloc, 'colonne autres_adresses de SQL_FAITS_COCKPIT')
+  // La fiche est trouvee par un email VERIFIE du compte ($1), comme etm et vip.
+  assert.match(bloc, /join public\.cockpit_membre_emails autre on autre\.membre_id = me\.membre_id/)
+  assert.match(bloc, /where lower\(me\.email\) = any\(\$1::text\[\]\)/)
+  // Ne comptent ni les adresses du compte, ni celles deja confirmees sur un compte du site (le rattachement les refuserait).
+  assert.match(bloc, /lower\(btrim\(autre\.email\)\) <> all\(\$1::text\[\]\)/)
+  assert.match(bloc, /from public\.profile_emails pe\s+where pe\.verified = true/)
+  assert.match(bloc, /from auth\.users u\s+where u\.email_confirmed_at is not null/)
+  assert.ok(!/autre\.email\s+as\b|array_agg|string_agg|json/.test(bloc), 'un nombre, aucune adresse ne sort')
+  // droits.ts le passe tel quel (0 par defaut), /moi le rend dans compte, le visiteur a 0.
+  const droits = readFileSync(new URL('../src/lib/academie/droits.ts', import.meta.url), 'utf8')
+  assert.match(droits, /autresAdresses: Math\.max\(0, Number\(c\?\.autres_adresses \?\? 0\) \|\| 0\)/)
+  assert.match(droits, /erreurs: \[\], sourceLiveClub: null, autresAdresses: 0,/)
+  const route = readFileSync(new URL('../src/app/api/academie/moi/route.ts', import.meta.url), 'utf8')
+  assert.match(route, /live_club_source: droits\.sourceLiveClub,\s+autres_adresses: droits\.autresAdresses,/)
+})
+
 bloc('compte gratuit : offre gratuite, usage externe_compte, apercu ; le reste ferme', () => {
   const d = droitsDe()
   assert.deepEqual(ouvertureLecon(d, N1), { acces: 'ouvert', raisons: ['compte'] })
