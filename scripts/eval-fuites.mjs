@@ -206,7 +206,7 @@ const ACCES_BROKER = {
 // sur son texte BRUT (brutSans), pas sur la reponse du serveur.
 const SANS_CONDITIONS_DEPOT = [
   /raise/i, /https?:\/\//i, /(?<!\p{L})lots?(?!\p{L})/iu, /(?<!\p{L})nas(?:daq)?(?!\p{L})/iu,
-  /minimum/i, /au moins \d/i, /30 secondes/i, /3 semaines|21 jours/i,
+  /minimum[^.\n]{0,20}\d/i, /au moins \d/i, /30 secondes/i, /3 semaines|21 jours/i,
   /(?<![\d.,])(?!139(?![\d.,]))\d+(?:[.,\s]\d{3})*(?:[.,]\d+)?\s?(?:€|eur(?:os?)?(?!\p{L})|usd(?!\p{L})|\$|dollars?)/iu,
 ]
 const AUJOURDHUI_PARIS = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' }).format(new Date())
