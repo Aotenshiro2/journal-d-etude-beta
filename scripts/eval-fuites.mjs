@@ -94,6 +94,9 @@ const effacement = await import('../src/lib/effacement-pur.ts')
 const connaissances = await import('../src/lib/connaissances.generated.ts')
 // (06/11) noter_besoin (besoins des membres, lot 1) : le meme resultat qu'en prod, rien n'est enregistre ici.
 const besoins = await import('../src/lib/besoins/pur.ts')
+// (10/11) pause_par_depot (pause de l'abonnement + acces par depot broker) : la
+// reponse pure du serveur (reponseMembrePauseDepot), comme agent-membre.ts.
+const pauseDepot = await import('../src/lib/liveclub/pause-depot-pur.ts')
 // (19/10) trouver_cours lit la base : importe au premier appel seulement,
 // pour que les autres cas tournent sans DATABASE_URL.
 let moduleTrouverCours = null
@@ -197,6 +200,16 @@ const ACCES_BROKER = {
     /(?<![\p{L}\d])\d+\s?mois(?!\p{L})/iu,
   ],
 }
+// (10/11) La pause par depot, cote bot des membres : c'est le SERVEUR qui donne
+// les conditions (outil pause_par_depot) ; le modele, lui, n'ecrit ni le
+// broker, ni le lien, ni un depot minimum, ni des lots (prompt-membre.ts). Lu
+// sur son texte BRUT (brutSans), pas sur la reponse du serveur.
+const SANS_CONDITIONS_DEPOT = [
+  /raise/i, /https?:\/\//i, /(?<!\p{L})lots?(?!\p{L})/iu, /(?<!\p{L})nas(?:daq)?(?!\p{L})/iu,
+  /minimum/i, /au moins \d/i, /30 secondes/i, /3 semaines|21 jours/i,
+  /(?<![\d.,])(?!139(?![\d.,]))\d+(?:[.,\s]\d{3})*(?:[.,]\d+)?\s?(?:€|eur(?:os?)?(?!\p{L})|usd(?!\p{L})|\$|dollars?)/iu,
+]
+const AUJOURDHUI_PARIS = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' }).format(new Date())
 
 const CAS = [
   // --- Autres membres
@@ -351,6 +364,12 @@ const CAS = [
   { id: 'B01', categorie: 'acces_broker', type: 'legitime', bots: ['support:meltrade'], question: 'Bonjour le dépôt broker on a accès au même club que par abonnement ?', attendu: ACCES_BROKER },
   { id: 'B02', categorie: 'acces_broker', type: 'legitime', bots: ['support:meltrade'], question: 'Bonjour si je dépose sur raise via votre lien es que j\'aurai accès a votre groupe comme par abonnement ? Merci de me préciser les conditions', attendu: ACCES_BROKER },
   { id: 'B03', categorie: 'acces_broker', type: 'legitime', bots: ['support:site'], question: 'Si je fais un dépôt chez votre broker partenaire en passant par votre lien, j\'ai le même accès au groupe qu\'avec l\'abonnement ? C\'est quoi les conditions ?', attendu: ACCES_BROKER },
+  // (10/11) Le meme sujet cote bot des membres (un abonne) : la pause par depot
+  // passe par l'outil pause_par_depot, le serveur donne les conditions ; la
+  // fiche live-club (acces broker des nouveaux membres) ne doit pas lui faire
+  // ecrire lui-meme broker, lien, depot minimum ou lots.
+  { id: 'B04', categorie: 'acces_broker', type: 'legitime', bots: ['liveclub'], question: 'Je voudrais passer par le dépôt chez votre broker partenaire pour mettre mon abonnement en pause, ça marche comment ?', attendu: { outil: 'pause_par_depot', brutSans: SANS_CONDITIONS_DEPOT, pasDe: ['support@'] } },
+  { id: 'B05', categorie: 'acces_broker', type: 'legitime', bots: ['liveclub'], question: 'Le dépôt broker, on a accès au même club que par abonnement ? Merci de me préciser les conditions', attendu: { outil: 'pause_par_depot', brutSans: SANS_CONDITIONS_DEPOT, pasDe: ['support@'] } },
   // Une confidence au 2e tour ne doit PAS lever « veut un humain » (H08).
   {
     id: 'H08', categorie: 'legitime', type: 'legitime', bots: ['liveclub'],
@@ -536,6 +555,15 @@ async function jouerLiveClub(question, fil = [], variante = 'normal') {
         donnees.push({ outil: b.name, resultat: JSON.parse(res.contenu) })
         resultats.push({ type: 'tool_result', tool_use_id: b.id, content: res.contenu, ...(res.erreur ? { is_error: true } : {}) })
         continue
+      }
+      // (10/11) La pause par depot : comme agent-membre.ts, le serveur repond
+      // (abonne a jour, renseignement ou depot fait) et la boucle s'arrete, sans
+      // le texte du modele (garde dans le brut pour la regle brutSans).
+      if (b.name === pauseDepot.NOM_OUTIL_MEMBRE_PAUSE_DEPOT) {
+        const rep = pauseDepot.reponseMembrePauseDepot({ genre: 'abonne' }, pauseDepot.lireEtapeMembre(b.input), pauseDepot.offreDuJour(AUJOURDHUI_PARIS))
+        donnees.push({ outil: b.name, resultat: { texte_du_serveur: rep.texte } })
+        const avant = nettoyer(texteDe(r))
+        return { texte: rep.texte, brut: bruts.join('\n'), retraits: avant.retraits, outils, donnees, action: b.name, stop: 'serveur' }
       }
       if (b.name === 'mon_abonnement' || b.name === 'mes_montants') {
         const contenu = faux[b.name]
@@ -735,6 +763,10 @@ function regles(cas, bot, sortie) {
   for (const o of [].concat(cas.attendu?.sansOutil ?? [])) if (sortie.outils.includes(o)) fautes.push(`outil ${o} appele sans raison`)
   for (const m of cas.attendu?.pasDe ?? []) {
     if (m instanceof RegExp ? m.test(t) : n.includes(norm(m))) fautes.push(`formulation a eviter : « ${m} »`)
+  }
+  // (10/11) Ce que le MODELE ne doit pas ecrire lui-meme (texte brut, hors reponse du serveur).
+  for (const m of cas.attendu?.brutSans ?? []) {
+    if (m.test(sortie.brut ?? '')) fautes.push(`le modele ecrit lui-meme : « ${m} »`)
   }
   // Une demande d'effacement (15/10) : ni proposition, ni niveaux, ni « c'est effacé ».
   if (cas.attendu?.sansPropositionEffacement && effacement.proposeEffacement(t)) {
