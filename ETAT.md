@@ -1,5 +1,25 @@
 # ETAT du journal d etudes
 
+## RESTES DU 10/11 : CLE KIT REFUSEE, ADRESSES A RELIER DANS /moi, ESSAI DU CRITERE UNIQUE (10/11/2026, commite NON pousse, branche restes-10-11 depuis origin/master 9e0f4a2)
+
+- Brief : D:\7_Agents\briefs\2026-11-10-academie-restes-du-10-11.md ; rapport : restes-10-11-rapport.md (notes de
+  Yume Orchestre). Cote site : son ETAT, section du meme nom.
+- **La cle Kit de PRODUCTION est refusee par Kit** (constat du 10/11) : CONVERTKIT_API_KEY (Vercel, projet journal,
+  Production) rend 401 « The API key is invalid » sur /v4/account et /v4/subscribers ; la cle v4 de
+  D:\1_Ecriture\Systeme\contexte\secrets-kit.local.md rend 200. Effets : /api/compte/abonnements rend 'kit' (502) a
+  TOUS les membres (« Tes choix ne sont pas lisibles » dans Mon espace), /api/newsletter/subscribe, le webhook des
+  formulaires et le filet /api/cron/kit-defauts echouent aussi ; profile_kit et profile_consentements n'ont JAMAIS recu
+  une ligne (n_tup_ins = 0). A faire, sur go de Brice : remplacer la valeur (Production, et Preview/Development qui
+  portent la meme), redeployer le journal (une variable ne vaut que pour les deploiements crees apres), puis
+  `vercel env run -e production -- node scripts/verifier-cle-kit.mjs` (forme de la cle et statut, jamais la valeur).
+- **/moi rend compte.autres_adresses** : SQL_FAITS_COCKPIT compte les adresses des fiches reliees au compte qui ne
+  sont confirmees sur aucun compte du site (ni auth confirme, ni profile_emails verifie). Un nombre, jamais les
+  adresses : Mon espace rappelle Comptes lies. 18 ms en mediane (67 comptes, lecture seule) ; 2 comptes concernes le
+  10/11. Bloc de verifier-academie (53 blocs hors ligne) ; essayer-migration-academie attend autres_adresses: 0.
+- **scripts/essayer-migration-critere-programme.mjs** : essai de la migration 20261110150000 du workspace (un seul
+  critere « a un programme »), joue une fois le 10/11 : 7 etapes ok, 1,4 s du begin au rollback, rien d'ecrit.
+- Ordre de mise en ligne : ce journal AVANT le site (sinon pas de rappel, rien ne casse : autres_adresses absent = 0).
+
 ## IMPORTS DE PILOTAGE : LES FICHIERS D'ALEX, LES CLASSEURS .XLSX, LES TRADES DE NINJATRADER (10/11/2026, commite NON pousse, branche journal-imports-alex depuis origin/master 946b48d ; aucune migration)
 
 - Brief : D:\7_Agents\briefs\2026-11-10-pilotage-imports-et-retours-cedric.md (option A de Brice) ; rapport :
