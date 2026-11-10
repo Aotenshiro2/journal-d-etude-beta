@@ -18,6 +18,10 @@
   10/11. Bloc de verifier-academie (53 blocs hors ligne) ; essayer-migration-academie attend autres_adresses: 0.
 - **scripts/essayer-migration-critere-programme.mjs** : essai de la migration 20261110150000 du workspace (un seul
   critere « a un programme »), joue une fois le 10/11 : 7 etapes ok, 1,4 s du begin au rollback, rien d'ecrit.
+- **scripts/essayer-migration-anciens-telegram.mjs** : essai de la migration 20261110160000 du workspace (le prefixe
+  « u » des tg_ids dans aok_anciens_correspondances), joue une fois le 10/11 : 6 etapes ok, 6,7 s, rien d'ecrit. Il
+  simule aussi le prochain aok_anciens_activer de chaque compte (points de sauvegarde defaits) : 3 activations apres la
+  correction, 0 avant.
 - Ordre de mise en ligne : ce journal AVANT le site (sinon pas de rappel, rien ne casse : autres_adresses absent = 0).
 
 ## IMPORTS DE PILOTAGE : LES FICHIERS D'ALEX, LES CLASSEURS .XLSX, LES TRADES DE NINJATRADER (10/11/2026, commite NON pousse, branche journal-imports-alex depuis origin/master 946b48d ; aucune migration)
