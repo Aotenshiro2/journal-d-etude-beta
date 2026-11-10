@@ -115,6 +115,13 @@ export type FaitsCompte = {
    * tout ouvert et Live Club 'oui', sans Stripe ni abonnement. Absent = faux.
    */
   equipe?: boolean
+  /**
+   * (10/11/2026) Rang Skool vip d'une fiche du cockpit reliee au compte
+   * (SQL_FAITS_COCKPIT). Statut AFFICHE par Mon espace (« Membre VIP ») : il
+   * n'ouvre rien ici (les acces VIP passent par academie_acces, vip-skool) et
+   * ne touche pas au Live Club. Absent = faux.
+   */
+  vip?: boolean
 }
 
 export type Droits = {
@@ -122,6 +129,8 @@ export type Droits = {
   etm: boolean
   /** (09/11/2026) Le compte est de l'equipe AOK (estEquipe). */
   equipe: boolean
+  /** (10/11/2026) Rang Skool vip (FaitsCompte.vip) : un statut affiche, aucune ouverture. */
+  vip: boolean
   liveClub: EtatLiveClub
   ouvertures: Ouverture[]
   /** Une source illisible pouvait ouvrir quelque chose : un 'ferme' peut etre faux. */
@@ -189,7 +198,7 @@ export function preparerDroits(f: FaitsCompte): Droits {
   // (09/11) L'equipe a le Live Club sans abonnement : 'oui', jamais « tu n'es pas membre ».
   const liveClub: EtatLiveClub = equipe ? 'oui' : f.liveClub
   const incomplet = liveClub === 'inconnu' && ouvertures.some(o => o.siLiveClub)
-  return { admin: f.admin, etm: f.etm, equipe, liveClub, ouvertures, incomplet }
+  return { admin: f.admin, etm: f.etm, equipe, vip: f.vip === true, liveClub, ouvertures, incomplet }
 }
 
 type Niveau = 'module' | 'section' | 'lecon'

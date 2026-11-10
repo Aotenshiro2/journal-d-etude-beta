@@ -1,5 +1,19 @@
 # ETAT du journal d etudes
 
+## /MOI REND LE RANG VIP POUR MON ESPACE (10/11/2026, commite NON pousse, branche mon-espace-etm-vip depuis origin/master f39d3b6 ; aucune migration)
+
+- Brief : D:\7_Agents\briefs\2026-11-10-mon-espace-etm-vip.md ; rapport : mon-espace-etm-vip-rapport.md (notes de
+  Yume Orchestre). Le site dit « Eleve ETM » ou « Membre VIP » en tete de Mon espace (ETAT du site, section du 10/11).
+- SQL_FAITS_COCKPIT (requetes.ts) rend une colonne vip : cockpit_membres_etat.tier_skool = 'vip' sur une fiche reliee
+  par cockpit_membre_emails a un email verifie du compte (meme lecture que etm, meme critere que 'skool-vip' de
+  checkMentoratAccess). Droits.vip, /moi : compte.vip a cote de compte.etm. Un statut AFFICHE : preparerDroits ne
+  l'ouvre a rien, le Live Club n'en depend pas.
+- LE BOT N'OUVRE PAS LE GROUPE A UN ETM NI A UN VIP (droitLiveClub : abonnement, exemption, broker, acces manuel).
+  Question posee a Brice dans le rapport ; droits du bot NON changes. Note : liveClubUtile ne lit pas le Live Club
+  d'un ETM, /moi rend alors 'non_lu' meme avec une exemption active (le cas de Cedric le 10/11).
+- verifier-academie.mjs : bloc VIP (51 blocs hors ligne). essayer-migration-academie.mjs attend vip: false (non rejoue).
+- Ordre : ce journal avant le site (sans lui, le site affiche l'ETM mais pas le VIP).
+
 ## INTEGRATION DE LA BRANCHE ANCIENS-MEMBRES AVANT SA MISE EN LIGNE (10/11/2026, commite NON pousse)
 
 - Brief : D:\7_Agents\briefs\2026-11-10-mise-en-ligne-anciens-integration.md ; rapport : integration-anciens-rapport.md

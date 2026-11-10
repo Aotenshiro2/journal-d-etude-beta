@@ -142,6 +142,29 @@ bloc('ETM : tout, raison etm', () => {
   assert.equal(liveClubUtile({ admin: false, etm: true, secoursEssai: false, lignes: BASE }), false)
 })
 
+bloc('VIP (10/11) : un statut affiche par /moi, aucune ouverture de plus, Live Club inchange', () => {
+  // Rang Skool vip (SQL_FAITS_COCKPIT, colonne vip) : Mon espace dit « Membre VIP ». Il n'ouvre rien ici.
+  const vip = droitsDe({ vip: true })
+  const membre = droitsDe()
+  assert.equal(vip.vip, true)
+  assert.equal(membre.vip, false)
+  assert.deepEqual(vip.ouvertures, membre.ouvertures)
+  for (const l of [L1, L2, L3, L4, N1, E1]) assert.equal(acces(l, vip), acces(l, membre))
+  assert.equal(vip.liveClub, 'non')
+  assert.equal(liveClubUtile({ admin: false, etm: false, vip: true, secoursEssai: false, lignes: BASE }),
+    liveClubUtile({ admin: false, etm: false, secoursEssai: false, lignes: BASE }))
+  // Le cas de Cedric (10/11) : ETM et VIP, l'ETM ouvre tout, les deux drapeaux sortent.
+  const cedric = droitsDe({ etm: true, vip: true })
+  assert.equal(cedric.etm, true)
+  assert.equal(cedric.vip, true)
+  assert.equal(ouvertureLecon(cedric, L2).raisons[0], 'etm')
+  // /moi rend les deux drapeaux, la requete lit le rang vip sur la fiche reliee par cockpit_membre_emails.
+  const route = readFileSync(new URL('../src/app/api/academie/moi/route.ts', import.meta.url), 'utf8')
+  assert.match(route, /compte: \{ admin: droits\.admin, etm: droits\.etm, equipe: droits\.equipe, vip: droits\.vip, live_club: droits\.liveClub \}/)
+  const sql = readFileSync(new URL('../src/lib/academie/requetes.ts', import.meta.url), 'utf8')
+  assert.match(sql, /join public\.cockpit_membres_etat e on e\.membre_id = me\.membre_id\s+where lower\(me\.email\) = any\(\$1::text\[\]\) and e\.tier_skool::text = 'vip'\s+\) as vip,/)
+})
+
 bloc('compte gratuit : offre gratuite, usage externe_compte, apercu ; le reste ferme', () => {
   const d = droitsDe()
   assert.deepEqual(ouvertureLecon(d, N1), { acces: 'ouvert', raisons: ['compte'] })

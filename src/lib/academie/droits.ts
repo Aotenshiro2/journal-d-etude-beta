@@ -8,6 +8,8 @@
 //     09/11/2026 c'est LE statut equipe (estEquipe, pur.ts) : Live Club 'oui'
 //     sans Stripe, pour que Mon espace ne dise plus « tu n'es pas membre » ;
 //   - le statut ETM actif (cockpit_statut_etm, par un email verifie) : tout ;
+//     /moi le rend (compte.etm), avec le rang Skool vip (compte.vip, 10/11/2026),
+//     que Mon espace affiche (« Élève ETM », « Membre VIP ») : le vip n'ouvre rien ;
 //   - tout compte : l'offre « compte gratuit », les lecons d'usage
 //     externe_compte ou externe_libre, les lecons d'apercu ;
 //   - les acces actifs (academie_acces) par user_id OU par un email VERIFIE
@@ -128,7 +130,7 @@ async function liveClubParEmail(email: string): Promise<'oui' | 'non' | 'inconnu
 
 type LigneIdentite = { role: string | null; emails: string[] | null }
 type LigneCockpit = {
-  etm: boolean; broker_jusquau: string | null; manuel_jusquau: string | null; exempte: boolean
+  etm: boolean; vip: boolean; broker_jusquau: string | null; manuel_jusquau: string | null; exempte: boolean
   secours_essai: boolean
 }
 type LigneAccesSql = {
@@ -164,6 +166,8 @@ export async function droitsAcademie(userId: string): Promise<DroitsAcademie> {
     admin,
     equipe,
     etm: c?.etm === true,
+    // (10/11/2026) Rang Skool vip : statut affiche par Mon espace, n'ouvre rien (preparerDroits).
+    vip: c?.vip === true,
     secoursEssai: c?.secours_essai === true,
     lignes,
   }

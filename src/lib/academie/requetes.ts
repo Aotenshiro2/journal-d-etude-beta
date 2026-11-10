@@ -57,7 +57,11 @@ select
  *   20261026100000. Compte comme Live Club actif, comme broker et manuel ;
  * - secours_essai : la decision B de la page d'essai sans Stripe (rang Skool
  *   vip ou premium, abonnement en cours vu par le cockpit, acces mentorat
- *   manuel MentoratGrant).
+ *   manuel MentoratGrant) ;
+ * - vip (10/11/2026, Brice : Mon espace dit le statut) : rang Skool vip
+ *   (cockpit_membres_etat.tier_skool) d'une fiche reliee a un de ces emails,
+ *   comme 'skool-vip' de checkMentoratAccess. Un statut AFFICHE : il n'ouvre
+ *   rien de plus dans l'academie (preparerDroits l'ignore).
  */
 export const SQL_FAITS_COCKPIT = `
 select
@@ -66,6 +70,11 @@ select
       join public.cockpit_membre_emails me on me.membre_id = s.membre_id
      where s.retire_le is null and lower(me.email) = any($1::text[])
   ) as etm,
+  exists (
+    select 1 from public.cockpit_membre_emails me
+      join public.cockpit_membres_etat e on e.membre_id = me.membre_id
+     where lower(me.email) = any($1::text[]) and e.tier_skool::text = 'vip'
+  ) as vip,
   (
     select max(a.jusquau)::text from public.cockpit_liveclub_acces a
      where a.retire_le is null and a.sorti_le is null and a.jusquau >= current_date
