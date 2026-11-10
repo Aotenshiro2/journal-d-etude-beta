@@ -10,6 +10,8 @@
 //   - le statut ETM actif (cockpit_statut_etm, par un email verifie) : tout ;
 //     /moi le rend (compte.etm), avec le rang Skool vip (compte.vip, 10/11/2026),
 //     que Mon espace affiche (« Élève ETM », « Membre VIP ») : le vip n'ouvre rien ;
+//     pour eux, le Live Club se lit aussi SANS Stripe (exemption, broker, manuel :
+//     liveClubDuStatut, pur.ts), et /moi dit laquelle (compte.live_club_source) ;
 //   - tout compte : l'offre « compte gratuit », les lecons d'usage
 //     externe_compte ou externe_libre, les lecons d'apercu ;
 //   - les acces actifs (academie_acces) par user_id OU par un email VERIFIE
@@ -55,14 +57,21 @@ import { abonnementsLiveClubParEmail } from '@/lib/liveclub/stripe'
 import { lireProduitsLiveClub } from '@/lib/liveclub/produits'
 import { meilleurAbonnement } from '@/lib/liveclub/pur'
 import {
-  CacheCourt, conclureLiveClub, estAdmin, estEquipe, liveClubUtile, preparerDroits,
-  type Droits, type EtatLiveClub, type FaitsCompte, type LigneAcces,
+  CacheCourt, conclureLiveClub, estAdmin, estEquipe, liveClubDuStatut, liveClubUtile, preparerDroits, sourceSansStripe,
+  type Droits, type EtatLiveClub, type FaitsCompte, type LigneAcces, type SourceLiveClub,
 } from './pur'
 import { SQL_ACCES, SQL_FAITS_COCKPIT, SQL_IDENTITE } from './requetes'
 
 export type DroitsAcademie = Droits & {
   /** Sources illisibles (codes courts, sans donnee personnelle), pour les logs. */
   erreurs: string[]
+  /**
+   * (10/11/2026) Quand le Live Club est 'oui' par une source SANS Stripe
+   * (exemption, acces broker, acces manuel) : laquelle. null sinon (abonnement
+   * Stripe, equipe, Live Club non actif). /moi la rend (compte.live_club_source)
+   * pour que Mon espace dise « accès offert ».
+   */
+  sourceLiveClub: SourceLiveClub | null
 }
 
 // ---------------------------------------------------------------------------
@@ -173,16 +182,25 @@ export async function droitsAcademie(userId: string): Promise<DroitsAcademie> {
   }
 
   const erreurs: string[] = []
+  // Exemption active, acces broker ou acces manuel : Live Club actif sans Stripe (ordre de droitLiveClub).
+  const source = sourceSansStripe(c)
   let liveClub: EtatLiveClub = 'non_lu'
   if (liveClubUtile(faits)) {
-    // Broker, manuel ou exemption active : Live Club actif sans Stripe.
-    const brokerOuManuel = Boolean(c?.broker_jusquau || c?.manuel_jusquau || c?.exempte === true)
+    const brokerOuManuel = source !== null
     const stripe = brokerOuManuel ? [] : await Promise.all(emails.map(liveClubParEmail))
     liveClub = conclureLiveClub({ brokerOuManuel, stripe })
     if (liveClub === 'inconnu') erreurs.push('liveclub: stripe illisible')
+  } else {
+    // (10/11/2026) Un ETM ou un VIP dont le Live Club n'etait pas lu : les trois sources sans Stripe,
+    // pour Mon espace (« Live Club actif »). Sans source : non_lu. Le statut seul n'ouvre pas le Live Club.
+    liveClub = liveClubDuStatut(faits, source)
   }
 
-  return { ...preparerDroits({ ...faits, liveClub }), erreurs }
+  return {
+    ...preparerDroits({ ...faits, liveClub }),
+    erreurs,
+    sourceLiveClub: liveClub === 'oui' && !equipe ? source : null,
+  }
 }
 
 /**
@@ -208,7 +226,7 @@ export async function droitsVisiteur(): Promise<DroitsAcademie> {
     .map(l => ({
       origine: l.origine, source: l.source, slug: l.slug, ouvreTout: l.ouvre_tout === true, moduleId: l.module_id, sectionId: l.section_id,
     }))
-  return { ...preparerDroits({ admin: false, etm: false, secoursEssai: false, liveClub: 'non_lu', lignes }), erreurs: [] }
+  return { ...preparerDroits({ admin: false, etm: false, secoursEssai: false, liveClub: 'non_lu', lignes }), erreurs: [], sourceLiveClub: null }
 }
 
 // ---------------------------------------------------------------------------

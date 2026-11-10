@@ -302,6 +302,38 @@ export function conclureLiveClub(o: { brokerOuManuel: boolean; stripe: readonly 
   return 'non'
 }
 
+/**
+ * (10/11/2026) Les trois sources du Live Club lues en base, SANS Stripe, dans
+ * l'ordre de droitLiveClub (liveclub/droits.ts) : exemption active, acces
+ * broker, acces manuel du cockpit. Memes lectures que SQL_FAITS_COCKPIT
+ * (exempte, broker_jusquau, manuel_jusquau). null : aucune des trois.
+ */
+export type SourceLiveClub = 'exemption' | 'broker' | 'manuel'
+
+export function sourceSansStripe(
+  c: { exempte?: boolean | null; broker_jusquau?: string | null; manuel_jusquau?: string | null } | null | undefined,
+): SourceLiveClub | null {
+  if (!c) return null
+  if (c.exempte === true) return 'exemption'
+  if (c.broker_jusquau) return 'broker'
+  if (c.manuel_jusquau) return 'manuel'
+  return null
+}
+
+/**
+ * (10/11/2026, Brice par Yume) Le Live Club d'un ETM ou d'un VIP que
+ * liveClubUtile ne lit pas (l'ETM ouvre deja tout) : une des trois sources
+ * sans Stripe suffit pour 'oui', pour que Mon espace dise « Live Club actif »
+ * (le cas de Cedric, ETM exempte). Sans source : 'non_lu', Stripe n'est pas
+ * appele, jamais un faux 'non'. L'equipe et les autres comptes : 'non_lu',
+ * comme avant (preparerDroits rend 'oui' a l'equipe). Le statut seul n'ouvre
+ * JAMAIS le Live Club (regle de Brice du 09/09, entitlements.ts).
+ */
+export function liveClubDuStatut(f: { etm: boolean; vip?: boolean; equipe?: boolean }, source: SourceLiveClub | null): EtatLiveClub {
+  if (f.equipe === true) return 'non_lu'
+  return (f.etm || f.vip === true) && source !== null ? 'oui' : 'non_lu'
+}
+
 // ---------------------------------------------------------------------------
 // Cache court (par instance)
 // ---------------------------------------------------------------------------

@@ -36,6 +36,7 @@ import {
   ECART_MIN_S, INTERVALLE_MAX_S, JETON_MAX, MARGE_S, MAX_RESSOURCES, SEUIL_VU, VITESSE_MAX,
   colonneAbsente, tempsActifMinimum, texteLu, LECTURE_PLANCHER_S, MOTS_PAR_MINUTE, PART_LECTURE, PLAFOND_TEXTE_S, PROFONDEUR_LUE,
   autoriserEdition, champsModifies, estAdmin, estEquipe, fusionImport, lireCibleEdition, lireDemandeEdition, planEdition, LIMITES_EDITION,
+  liveClubDuStatut, sourceSansStripe,
 } from '../src/lib/academie/pur.ts'
 import { configBibliotheque, configBunny, jetonLecture, lienLecture, signerLecture, DUREE_LIEN_S } from '../src/lib/academie/bunny.ts'
 import { configPdfBunny, jetonPdf, lienPdf, signerPdf, DUREE_URL_PDF_S } from '../src/lib/academie/pdf-bunny.ts'
@@ -160,9 +161,39 @@ bloc('VIP (10/11) : un statut affiche par /moi, aucune ouverture de plus, Live C
   assert.equal(ouvertureLecon(cedric, L2).raisons[0], 'etm')
   // /moi rend les deux drapeaux, la requete lit le rang vip sur la fiche reliee par cockpit_membre_emails.
   const route = readFileSync(new URL('../src/app/api/academie/moi/route.ts', import.meta.url), 'utf8')
-  assert.match(route, /compte: \{ admin: droits\.admin, etm: droits\.etm, equipe: droits\.equipe, vip: droits\.vip, live_club: droits\.liveClub \}/)
+  assert.match(route, /admin: droits\.admin, etm: droits\.etm, equipe: droits\.equipe, vip: droits\.vip, live_club: droits\.liveClub,\s+live_club_source: droits\.sourceLiveClub,/)
   const sql = readFileSync(new URL('../src/lib/academie/requetes.ts', import.meta.url), 'utf8')
   assert.match(sql, /join public\.cockpit_membres_etat e on e\.membre_id = me\.membre_id\s+where lower\(me\.email\) = any\(\$1::text\[\]\) and e\.tier_skool::text = 'vip'\s+\) as vip,/)
+})
+
+bloc('Live Club d un ETM ou d un VIP (10/11) : exemption, broker ou manuel sans Stripe ; le statut seul n ouvre rien', () => {
+  // L'ordre de droitLiveClub : exemption, puis broker, puis acces manuel.
+  assert.equal(sourceSansStripe({ exempte: true, broker_jusquau: '2026-12-01', manuel_jusquau: '2026-12-01' }), 'exemption')
+  assert.equal(sourceSansStripe({ exempte: false, broker_jusquau: '2026-12-01', manuel_jusquau: '2026-12-01' }), 'broker')
+  assert.equal(sourceSansStripe({ exempte: false, broker_jusquau: null, manuel_jusquau: '2026-12-01' }), 'manuel')
+  for (const c of [undefined, null, {}, { exempte: false, broker_jusquau: null, manuel_jusquau: null }]) assert.equal(sourceSansStripe(c), null)
+  // Le cas de Cedric (10/11) : ETM exempte -> Live Club oui. ETM sans source : non_lu (pas de faux non, pas de Stripe).
+  assert.equal(liveClubDuStatut({ etm: true, vip: true }, 'exemption'), 'oui')
+  for (const s of ['exemption', 'broker', 'manuel']) {
+    assert.equal(liveClubDuStatut({ etm: true }, s), 'oui')
+    assert.equal(liveClubDuStatut({ etm: false, vip: true }, s), 'oui')
+    // Ni ETM ni VIP : rien ne change (non_lu) ; l'equipe : preparerDroits rend oui.
+    assert.equal(liveClubDuStatut({ etm: false }, s), 'non_lu')
+    assert.equal(liveClubDuStatut({ etm: true, equipe: true }, s), 'non_lu')
+  }
+  assert.equal(liveClubDuStatut({ etm: true }, null), 'non_lu', 'le statut ETM seul n ouvre pas le Live Club')
+  assert.equal(liveClubDuStatut({ etm: false, vip: true }, null), 'non_lu', 'le rang VIP seul n ouvre pas le Live Club')
+  // Le Live Club oui d'un ETM n'ouvre rien de plus ni ne rend les droits incomplets.
+  const d = droitsDe({ etm: true, liveClub: liveClubDuStatut({ etm: true }, 'exemption') })
+  assert.equal(d.liveClub, 'oui')
+  assert.equal(d.incomplet, false)
+  assert.equal(ouvertureLecon(d, L2).raisons[0], 'etm')
+  // droits.ts : une seule regle pour les deux chemins, et la source ne sort que pour un oui hors equipe.
+  const droits = readFileSync(new URL('../src/lib/academie/droits.ts', import.meta.url), 'utf8')
+  assert.match(droits, /const source = sourceSansStripe\(c\)/)
+  assert.match(droits, /const brokerOuManuel = source !== null/)
+  assert.match(droits, /\} else \{[\s\S]{0,300}liveClub = liveClubDuStatut\(faits, source\)/)
+  assert.match(droits, /sourceLiveClub: liveClub === 'oui' && !equipe \? source : null/)
 })
 
 bloc('compte gratuit : offre gratuite, usage externe_compte, apercu ; le reste ferme', () => {

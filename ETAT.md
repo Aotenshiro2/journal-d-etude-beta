@@ -1,6 +1,6 @@
 # ETAT du journal d etudes
 
-## /MOI REND LE RANG VIP POUR MON ESPACE (10/11/2026, commite NON pousse, branche mon-espace-etm-vip depuis origin/master f39d3b6 ; aucune migration)
+## /MOI REND LE RANG VIP ET LE LIVE CLUB SANS STRIPE D'UN ETM OU D'UN VIP (10/11/2026, commite NON pousse, branche mon-espace-etm-vip depuis origin/master f39d3b6 ; aucune migration)
 
 - Brief : D:\7_Agents\briefs\2026-11-10-mon-espace-etm-vip.md ; rapport : mon-espace-etm-vip-rapport.md (notes de
   Yume Orchestre). Le site dit « Eleve ETM » ou « Membre VIP » en tete de Mon espace (ETAT du site, section du 10/11).
@@ -9,9 +9,16 @@
   checkMentoratAccess). Droits.vip, /moi : compte.vip a cote de compte.etm. Un statut AFFICHE : preparerDroits ne
   l'ouvre a rien, le Live Club n'en depend pas.
 - LE BOT N'OUVRE PAS LE GROUPE A UN ETM NI A UN VIP (droitLiveClub : abonnement, exemption, broker, acces manuel).
-  Question posee a Brice dans le rapport ; droits du bot NON changes. Note : liveClubUtile ne lit pas le Live Club
-  d'un ETM, /moi rend alors 'non_lu' meme avec une exemption active (le cas de Cedric le 10/11).
-- verifier-academie.mjs : bloc VIP (51 blocs hors ligne). essayer-migration-academie.mjs attend vip: false (non rejoue).
+  Tranche le 10/11 (Yume, regle de Brice du 09/09, entitlements.ts) : droits du bot NON changes.
+- Live Club d'un ETM ou d'un VIP que liveClubUtile ne lit pas : les trois sources SANS Stripe de droitLiveClub
+  (exemption, acces broker, acces manuel ; sourceSansStripe et liveClubDuStatut, pur.ts) donnent 'oui' ; sans
+  source, 'non_lu' (Stripe jamais appele pour un ETM). /moi rend compte.live_club_source (exemption, broker ou
+  manuel) quand le 'oui' vient d'elles, null sinon : le site dit « Live Club actif : accès offert ». Joue en
+  lecture seule le 10/11 sur le compte de Cedric : etm, vip, live_club 'oui', source exemption.
+  Ecart connu, comme pour tout membre : l'acces broker est lu par sa date (SQL_FAITS_COCKPIT), sans la pause des
+  lots en retard ni le depot perdu que droitLiveClub applique.
+- verifier-academie.mjs : blocs VIP et Live Club d'un ETM ou d'un VIP (52 blocs hors ligne).
+  essayer-migration-academie.mjs attend vip: false (non rejoue).
 - Ordre : ce journal avant le site (sans lui, le site affiche l'ETM mais pas le VIP).
 
 ## INTEGRATION DE LA BRANCHE ANCIENS-MEMBRES AVANT SA MISE EN LIGNE (10/11/2026, commite NON pousse)
