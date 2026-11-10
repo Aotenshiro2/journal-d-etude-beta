@@ -11,7 +11,7 @@
 import type Anthropic from '@anthropic-ai/sdk'
 import { consignesPolitique } from './politique-information'
 import { lienBotAccueil } from './liveclub/config'
-import { NOM_OUTIL_CONNAISSANCES, OUTIL_CONNAISSANCES, resultatConnaissances } from './connaissances-outil'
+import { NOM_OUTIL_CONNAISSANCES, OUTIL_CONNAISSANCES_SUPPORT, resultatConnaissances } from './connaissances-outil'
 import { NOM_OUTIL_TROUVER_COURS, OUTIL_TROUVER_COURS } from './trouver-cours-pur'
 // (06/11) Besoins des membres, lot 1 : l'outil noter_besoin (module pur, commun au bot Live Club).
 import { CONSIGNE_NOTER_BESOIN, NOM_OUTIL_NOTER_BESOIN, OUTIL_NOTER_BESOIN, resultatNoterBesoin, type BesoinPropose } from './besoins/pur'
@@ -107,7 +107,7 @@ export function versMessagesSupport(fil: readonly MessageFilSupport[], message: 
  * (06/11, apres-midi) noter_limite (src/lib/besoins/signaux-pur.ts) : ce que
  * l'agent n'a pas su faire, trie par le serveur (tri de Brice) apres le fil.
  */
-export const OUTILS_SUPPORT: Anthropic.Tool[] = [OUTIL_CONNAISSANCES, OUTIL_TROUVER_COURS, OUTIL_NOTER_BESOIN, OUTIL_NOTER_LIMITE]
+export const OUTILS_SUPPORT: Anthropic.Tool[] = [OUTIL_CONNAISSANCES_SUPPORT, OUTIL_TROUVER_COURS, OUTIL_NOTER_BESOIN, OUTIL_NOTER_LIMITE]
 
 /** La lecture en direct de trouver_cours (src/lib/trouver-cours.ts), passee par la route et par l'eval : ce module reste pur. */
 export type TrouverCoursSupport = (entree: unknown) => Promise<Record<string, unknown>>
