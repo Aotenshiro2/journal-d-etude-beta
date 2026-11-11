@@ -223,6 +223,14 @@ await bloc('soutien : le remerciement de Brice, tutoiement, signe Brice, sans ti
   assert.match(M.rendreMail('soutien', { ...VIDE, soutien: 'aok' }).texte, /aoknowledge\.com\/soutenir, « Gérer mon soutien »\./)
   assert.ok(M.rendreMail('soutien', { ...PLEIN, soutien: 'aok' }).texte.includes(`Ou directement ici : ${PORTAIL}`))
   assert.equal(M.rendreMail('soutien', { ...PLEIN, soutien: 'carnet', essai: true }).objet, '[Essai] Merci pour ton soutien')
+  // /soutenir est ouvert a tout compte : pas de « Tu avais deja tout » pour soutien=aok ; les apps le gardent.
+  const DEJA_TOUT = "Tu avais déjà tout ce qu'il te fallait, et tu as choisi de soutenir quand même. Ça compte vraiment pour moi."
+  for (const v of [PLEIN, VIDE]) {
+    const aok = M.rendreMail('soutien', { ...v, soutien: 'aok' })
+    assert.equal(aok.modele.paragraphes[2], 'Tu as choisi de soutenir le projet, et ça compte vraiment pour moi.')
+    assert.ok(!aok.texte.includes('Tu avais déjà tout'))
+    for (const app of ['carnet', 'pilotage']) assert.equal(M.rendreMail('soutien', { ...v, soutien: app }).modele.paragraphes[2], DEJA_TOUT, app)
+  }
   // Les autres mails gardent la signature de Brice et Melanie et le vouvoiement sous le bouton.
   assert.ok(M.rendreMail('carnet-premium', PLEIN).html.includes('copiez ce lien'))
 })

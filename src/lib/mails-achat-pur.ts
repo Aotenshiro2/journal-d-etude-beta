@@ -250,7 +250,10 @@ export function modeleSoutien(v: VariablesMail): ModeleMail {
     paragraphes: [
       v.prenom ? `Salut ${v.prenom},` : 'Salut,',
       `Merci pour ton soutien ${SOUTENU[app]}.`,
-      "Tu avais déjà tout ce qu'il te fallait, et tu as choisi de soutenir quand même. Ça compte vraiment pour moi.",
+      // Le Carnet et Pilotage ne proposent le soutien que si tout est deja compris ; /soutenir est ouvert a tout compte.
+      app === 'aok'
+        ? 'Tu as choisi de soutenir le projet, et ça compte vraiment pour moi.'
+        : "Tu avais déjà tout ce qu'il te fallait, et tu as choisi de soutenir quand même. Ça compte vraiment pour moi.",
       "Ton soutien aide à couvrir ce que coûtent les outils au quotidien, l'IA et les serveurs, et leur développement. On continue de construire avec ou sans soutien : le tien nous permet d'aller plus vite.",
       'Ton badge « Soutien » est déjà sur ton compte, dans Mon espace.',
       arret,
