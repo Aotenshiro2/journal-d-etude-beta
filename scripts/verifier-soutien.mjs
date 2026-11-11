@@ -173,6 +173,8 @@ bloc('routes : achat de Pilotage (soutien Premium seul, decision avant Stripe), 
   assert.match(carnet, /getUserId\(req\)/)
   assert.ok(carnet.indexOf('decisionSoutien(') < carnet.indexOf("appeler(cle, '/v1/checkout/sessions'"), 'decision avant la session')
   assert.match(carnet, /if \(!e\.carnet\) return refus\('indisponible', 503\)/)
+  // L'essai de l'admin avant l'ouverture : la ligne se montre a son compte, plus apres.
+  assert.match(carnet, /compris: e\.compris \|\| \(e\.admin && !ouvertATous\)/)
   // Route NON publique : le middleware exige un Bearer (aucune entree dans publicPaths).
   assert.ok(!/'\/api\/carnet/.test(lire('../middleware.ts')))
 

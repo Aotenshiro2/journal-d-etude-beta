@@ -59,10 +59,12 @@ export async function GET(req: NextRequest) {
   try {
     const e = await etatDuCompte(userId)
     const portail = e.carnet?.soutien ? await portailDuClient(cleSoutienCarnet(), e.carnet.client, RETOUR_SOUTIEN) : null
+    const ouvertATous = soutienOuvert(process.env)
     return json({
       ok: true,
-      compris: e.compris,
-      ouvert: soutienOuvert(process.env) || e.admin,
+      // Avant l'ouverture, un compte admin ou de l'equipe voit la ligne pour l'essayer (sa raison n'est pas une formule).
+      compris: e.compris || (e.admin && !ouvertATous),
+      ouvert: ouvertATous || e.admin,
       soutien: e.carnet ? e.carnet.soutien : null,
       actif: e.carnet ? e.carnet.actif : null,
       portail,
