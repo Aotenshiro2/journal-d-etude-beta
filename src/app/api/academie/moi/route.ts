@@ -30,8 +30,9 @@ import { soutienDuCompte, type SoutienDuCompte } from '@/lib/soutien'
  *                           autres_adresses (10/11/2026, restes) : le NOMBRE d'adresses de la fiche du cockpit
  *                           reliee au compte confirmees sur aucun compte du site, pour le rappel « Comptes
  *                           lies » de Mon espace (jamais les adresses) ;
- *                           soutien (11/11/2026, src/lib/soutien.ts) : { carnet, pilotage }, true = un abonnement
- *                           de soutien actif sur l'app (badge « Soutien » de Mon espace), null = Stripe illisible,
+ *                           soutien (11/11/2026, src/lib/soutien.ts) : { carnet, pilotage, aok }, true = un abonnement
+ *                           de soutien actif sur l'app (badge « Soutien » de Mon espace), aok = un soutien
+ *                           AOKnowledge actif (/soutenir, soutien-aok.ts), null = Stripe illisible,
  *                           null entier = lecture en echec ; jamais un identifiant Stripe
  *     incomplet,                            true = une source illisible (Stripe) : des contenus sont « inconnu »
  *     continuer: { lecon, module, reprise_s, derniere_vue_le, acces, etat } | null,   la derniere lecon ouverte

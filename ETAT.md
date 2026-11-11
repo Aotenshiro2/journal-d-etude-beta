@@ -1,5 +1,24 @@
 # ETAT du journal d etudes
 
+## SOUTIEN AOKNOWLEDGE : LA ROUTE DE LA PAGE /SOUTENIR ET LE BADGE (11/11/2026, commite NON pousse, branche soutien-page ; AUCUNE migration ; RIEN cree dans Stripe)
+
+- Brief : D:\7_Agents\briefs\2026-11-11-soutien-mail-et-page-soutenir.md (partie 2, go de Brice). Le site : branche
+  soutien-page du workspace (page /soutenir).
+- Stripe (deja cree le 11/11, compte Ao Knowledge, mode reel) : produit prod_VboqdWtBxA9SnV « Soutien AOKnowledge »,
+  prix mensuels 5 / 10 / 20 EUR (price_1UabCf..., price_1UabCg..., price_1UabCh...), en constantes (soutien-pur.ts).
+  Montant au choix (2 a 200 EUR entiers) : price_data sur le meme produit, recurring month.
+- Route /api/academie/soutien (Bearer du site, NON publique, CORS de l'academie) : GET { soutien, portail } ; POST
+  { montant } = session Checkout HEBERGEE, soutien=aok + app=aok + user_id + montant sur la session ET l'abonnement,
+  AUCUNE metadata source (le webhook de Pilotage la traite hors Pilotage : aucun droit, le remerciement « a
+  AOKnowledge »), conditions a accepter, retour /mon-espace?soutien=aok, annulation /soutenir. Regles pures :
+  sessionSoutienAok (401 compte, 400 montant, 409 email, 503 indisponible si Stripe illisible, 409 deja, 502 stripe).
+  Aucune formule exigee : tout compte peut soutenir.
+- Cle : cleSoutienAok (soutien-aok.ts) = STRIPE_CARNET_CHECKOUT_KEY_AOKNOWLEDGE, sinon celle de Pilotage. Elle lit aussi
+  Customers et Subscriptions (abonnementAokDe : clients de l'email confirme, abonnements du produit ; cache 5 min oui,
+  1 min non, vide a la creation d'une session).
+- Badge : /moi rend compte.soutien.aok (soutien.ts, borne a 4 s comme le Carnet et Pilotage).
+- Verif : node scripts/verifier-soutien-aok.mjs (11 blocs, dont la route rejouee avec un faux Stripe), tsc, eslint.
+
 ## SOUTIEN : LE MAIL DE REMERCIEMENT (CORRECTIF) (11/11/2026, commite NON pousse, branche soutien-page depuis origin/master a83f48f ; AUCUNE migration)
 
 - Brief : D:\7_Agents\briefs\2026-11-11-soutien-mail-et-page-soutenir.md (partie 1) ; rapport : soutien-page-rapport.md

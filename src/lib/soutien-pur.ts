@@ -199,3 +199,127 @@ export function raisonAvecSoutien(o: { raison: string | null; soutien: boolean; 
   if (o.soutien && estRaisonComprise(o.raisonClub)) return o.raisonClub
   return o.raison
 }
+
+// ---------------------------------------------------------------------------
+// Le soutien AOKnowledge : la page aoknowledge.com/soutenir (11/11/2026, go de
+// Brice, brief soutien-mail-et-page-soutenir, partie 2)
+// ---------------------------------------------------------------------------
+//
+// Un abonnement mensuel au produit « Soutien AOKnowledge » (cree chez Stripe le
+// 11/11, compte Ao Knowledge, mode reel ; rien d'autre n'est cree). Trois
+// paliers a prix fixe (5, 10, 20 EUR) et un montant au choix (2 a 200 EUR, en
+// euros entiers, price_data sur le meme produit). Les quatre donnent la meme
+// chose : le badge « Soutien ». Il faut un compte (le badge se pose dessus),
+// aucune formule n'est exigee. Un seul soutien AOK actif par compte.
+// La session porte soutien=aok (session et abonnement) et AUCUNE metadata
+// source : le webhook de Pilotage la prend pour une session hors Pilotage et
+// envoie le remerciement (mails-achat-pur.ts, planMailHorsPilotage).
+
+/** Le produit « Soutien AOKnowledge » (metadonnee soutien=aok chez Stripe). */
+export const PRODUIT_SOUTIEN_AOK = 'prod_VboqdWtBxA9SnV'
+
+/** La marque des sessions et abonnements de /soutenir. */
+export const MARQUE_SOUTIEN_AOK = 'aok'
+
+/** Les prix mensuels deja crees (lookup_key soutien_aok_<n>_mois). */
+export const PRIX_SOUTIEN_AOK: Readonly<Record<number, string>> = {
+  5: 'price_1UabCfEAT4qWdUNVCALk05Fc',
+  10: 'price_1UabCgEAT4qWdUNV7J6fxGes',
+  20: 'price_1UabChEAT4qWdUNVFKUjkAT1',
+}
+
+export const MONTANT_SOUTIEN_MIN = 2
+export const MONTANT_SOUTIEN_MAX = 200
+
+/** Un montant mensuel en euros entiers, de 2 a 200, sinon null (ni texte, ni decimale, ni hors bornes). */
+export function montantSoutienAok(v: unknown): number | null {
+  if (typeof v !== 'number' || !Number.isInteger(v)) return null
+  return v >= MONTANT_SOUTIEN_MIN && v <= MONTANT_SOUTIEN_MAX ? v : null
+}
+
+export const RETOUR_SOUTIEN_AOK = 'https://aoknowledge.com/mon-espace?soutien=aok'
+export const PAGE_SOUTIEN_AOK = 'https://aoknowledge.com/soutenir'
+
+/** L'abonnement de /soutenir porte la marque soutien=aok. */
+export const estMarqueSoutienAok = (metadata: unknown): boolean => objet(metadata)[META_SOUTIEN] === MARQUE_SOUTIEN_AOK
+
+/**
+ * La session Checkout HEBERGEE du soutien AOKnowledge : abonnement mensuel,
+ * prix existant pour 5, 10 et 20 EUR, sinon price_data sur le produit. Les
+ * conditions a accepter, comme Pilotage. Marque soutien=aok sur la session et
+ * l'abonnement, sans metadata source.
+ */
+export function corpsSessionSoutienAok(o: { montant: number; userId: string; email: string }): URLSearchParams {
+  const c = new URLSearchParams()
+  c.set('mode', 'subscription')
+  c.set('success_url', RETOUR_SOUTIEN_AOK)
+  c.set('cancel_url', PAGE_SOUTIEN_AOK)
+  const prix = PRIX_SOUTIEN_AOK[o.montant]
+  if (prix) {
+    c.set('line_items[0][price]', prix)
+  } else {
+    c.set('line_items[0][price_data][currency]', 'eur')
+    c.set('line_items[0][price_data][product]', PRODUIT_SOUTIEN_AOK)
+    c.set('line_items[0][price_data][recurring][interval]', 'month')
+    c.set('line_items[0][price_data][unit_amount]', String(o.montant * 100))
+  }
+  c.set('line_items[0][quantity]', '1')
+  c.set('locale', 'fr')
+  c.set('consent_collection[terms_of_service]', 'required')
+  c.set('custom_text[terms_of_service_acceptance][message]',
+    `J'accepte les [conditions générales](${URL_CGV_SOUTIEN}) et je demande que mon soutien commence tout de suite : je renonce à mon droit de rétractation de 14 jours.`)
+  c.set('client_reference_id', o.userId)
+  c.set('customer_email', o.email)
+  for (const cle of ['metadata', 'subscription_data[metadata]']) {
+    c.set(`${cle}[${META_SOUTIEN}]`, MARQUE_SOUTIEN_AOK)
+    c.set(`${cle}[app]`, 'aok')
+    c.set(`${cle}[user_id]`, o.userId)
+    c.set(`${cle}[montant]`, String(o.montant))
+  }
+  c.set('subscription_data[description]', 'Soutien AOKnowledge')
+  return c
+}
+
+/**
+ * compte      : pas de compte (le badge se pose sur le compte) ;
+ * montant     : ni 5, 10, 20, ni un entier de 2 a 200 ;
+ * email       : le compte n'a pas d'adresse confirmee (Checkout l'exige, et le doublon se cherche par elle) ;
+ * indisponible: l'abonnement ne se lit pas chez Stripe (on ne vend pas a l'aveugle : deux soutiens seraient pires qu'un refus) ;
+ * deja        : un soutien AOKnowledge est deja actif ;
+ * stripe      : Stripe n'a pas rendu d'URL de Checkout.
+ */
+export type RefusSoutienAok = 'compte' | 'montant' | 'email' | 'indisponible' | 'deja' | 'stripe'
+
+export const STATUT_REFUS_SOUTIEN_AOK: Record<RefusSoutienAok, number> = {
+  compte: 401, montant: 400, email: 409, indisponible: 503, deja: 409, stripe: 502,
+}
+
+export type DepsSoutienAok = {
+  /** Le compte du jeton et son email confirme, ou null. Peut jeter (Supabase injoignable). */
+  compte: () => Promise<{ userId: string; email: string | null } | null>
+  /** Les abonnements AOK de l'email (lireAbonnementsApp), null = illisible. */
+  abonnement: (email: string) => Promise<AbonnementsApp | null>
+  /** POST /v1/checkout/sessions (Stripe). Peut jeter. */
+  creerSession: (corps: URLSearchParams) => Promise<Record<string, unknown>>
+}
+
+export type ReponseSoutienAok = { status: number; corps: { ok: true; url: string } | { ok: false; erreur: RefusSoutienAok } }
+
+/**
+ * POST /api/academie/soutien, sans Next ni Stripe : le compte, le montant, le
+ * doublon, puis la session. Le meme ordre que les refus de la route.
+ */
+export async function sessionSoutienAok(corps: unknown, d: DepsSoutienAok): Promise<ReponseSoutienAok> {
+  const refus = (erreur: RefusSoutienAok): ReponseSoutienAok => ({ status: STATUT_REFUS_SOUTIEN_AOK[erreur], corps: { ok: false, erreur } })
+  const compte = await d.compte()
+  if (!compte) return refus('compte')
+  const montant = montantSoutienAok(objet(corps).montant)
+  if (montant === null) return refus('montant')
+  if (!compte.email) return refus('email')
+  const ab = await d.abonnement(compte.email)
+  if (!ab) return refus('indisponible')
+  if (ab.actif) return refus('deja')
+  const s = await d.creerSession(corpsSessionSoutienAok({ montant, userId: compte.userId, email: compte.email }))
+  const url = urlCheckoutSure(s.url)
+  return url ? { status: 200, corps: { ok: true, url } } : refus('stripe')
+}
