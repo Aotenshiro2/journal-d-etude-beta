@@ -30,6 +30,7 @@ import {
 import {
   SQL_ABONNEMENTS_DU_MEMBRE, SQL_FERMER_ABONNEMENT, SQL_POSER_ABONNEMENT, SQL_PRIX, SQL_RETIRER_ABONNEMENT,
 } from '@/lib/pilotage-requetes'
+import { estMarqueSoutien } from '@/lib/soutien-pur'
 
 export const ventePubliquePilotage = () => process.env.PILOTAGE_ACHAT_PUBLIC?.trim() === '1'
 export const secretWebhookPilotage = () => process.env.STRIPE_WEBHOOK_SECRET_PILOTAGE?.trim() || null
@@ -53,7 +54,7 @@ export async function prixDesOffres(): Promise<Map<SlugOffrePilotage, string>> {
 }
 
 export async function creerSessionAbonnement(cle: string, p: {
-  slug: SlugOffrePilotage; prix: string; retourUrl: string; userId: string | null; email: string | null; essai: boolean
+  slug: SlugOffrePilotage; prix: string; retourUrl: string; userId: string | null; email: string | null; essai: boolean; soutien?: boolean
 }): Promise<{ id: string; clientSecret: string }> {
   const s = await appeler(cle, '/v1/checkout/sessions', corpsSessionAbonnement(p))
   if (typeof s.id !== 'string' || typeof s.client_secret !== 'string') throw new ErreurStripe(502, 'reponse', false)
@@ -162,17 +163,69 @@ export async function abonnementsDuMembre(userId: string, emails: string[]): Pro
  * configure chez Stripe), sinon null.
  */
 export async function portailDe(cle: string | null, reference: string | null): Promise<string | null> {
+  return (await abonnementVu(cle, reference)).portail
+}
+
+/** Le lien de connexion du portail (PILOTAGE_PORTAIL_LIEN), quand la session ne se cree pas. */
+export function portailSecours(): string | null {
   const lien = process.env.PILOTAGE_PORTAIL_LIEN?.trim()
-  const secours = lien && /^https:\/\/billing\.stripe\.com\//.test(lien) ? lien : null
-  if (!cle || !reference?.startsWith('sub_')) return secours
+  return lien && /^https:\/\/billing\.stripe\.com\//.test(lien) ? lien : null
+}
+
+/** Une session du portail client Stripe pour ce client (Customer portal en ecriture), sinon le secours. */
+export async function portailDuClient(cle: string | null, client: string | null, retour: string): Promise<string | null> {
+  const secours = portailSecours()
+  if (!cle || !client?.startsWith('cus_')) return secours
   try {
-    const ab = await appeler(cle, `/v1/subscriptions/${encodeURIComponent(reference)}`)
-    const client = typeof ab.customer === 'string' ? ab.customer : null
-    if (!client) return secours
-    const s = await appeler(cle, '/v1/billing_portal/sessions', new URLSearchParams({ customer: client, return_url: `${SITE_PILOTAGE}/offres`, locale: 'fr' }))
+    const s = await appeler(cle, '/v1/billing_portal/sessions', new URLSearchParams({ customer: client, return_url: retour, locale: 'fr' }))
     return typeof s.url === 'string' ? s.url : secours
   } catch (err) {
-    console.warn(`[pilotage/niveau] portail indisponible : ${err instanceof ErreurStripe ? err.message : messageErreur(err)}`)
+    console.warn(`[soutien] portail indisponible : ${err instanceof ErreurStripe ? err.message : messageErreur(err)}`)
     return secours
   }
+}
+
+/**
+ * L'abonnement relu chez Stripe (une lecture, deja faite pour le portail) :
+ * le portail, et la marque soutien (11/11/2026, soutien-pur.ts). Stripe
+ * illisible : le secours du portail, soutien inconnu (false).
+ */
+export async function abonnementVu(cle: string | null, reference: string | null): Promise<{ portail: string | null; soutien: boolean }> {
+  const secours = portailSecours()
+  if (!cle || !reference?.startsWith('sub_')) return { portail: secours, soutien: false }
+  let soutien = false
+  try {
+    const ab = await appeler(cle, `/v1/subscriptions/${encodeURIComponent(reference)}`)
+    soutien = estMarqueSoutien(ab.metadata)
+    const client = typeof ab.customer === 'string' ? ab.customer : null
+    if (!client) return { portail: secours, soutien }
+    const s = await appeler(cle, '/v1/billing_portal/sessions', new URLSearchParams({ customer: client, return_url: `${SITE_PILOTAGE}/offres`, locale: 'fr' }))
+    return { portail: typeof s.url === 'string' ? s.url : secours, soutien }
+  } catch (err) {
+    console.warn(`[pilotage/niveau] portail indisponible : ${err instanceof ErreurStripe ? err.message : messageErreur(err)}`)
+    return { portail: secours, soutien }
+  }
+}
+
+/**
+ * Pilotage soutenu (badge « Soutien », /moi) : un abonnement Pilotage actif du
+ * compte marque soutien=1 chez Stripe. Sans abonnement en base : false, sans
+ * appel a Stripe. Stripe illisible : null (inconnu).
+ */
+export async function soutientPilotage(userId: string, emails: string[]): Promise<boolean | null> {
+  const abonnements = (await abonnementsDuMembre(userId, emails)).filter(a => a.reference?.startsWith('sub_'))
+  if (!abonnements.length) return false
+  const cle = clePilotage()
+  if (!cle) return null
+  let illisible = false
+  for (const a of abonnements.slice(0, 3)) {
+    try {
+      const ab = await appeler(cle, `/v1/subscriptions/${encodeURIComponent(a.reference as string)}`)
+      if (estMarqueSoutien(ab.metadata)) return true
+    } catch (err) {
+      illisible = true
+      console.warn(`[soutien] abonnement Pilotage illisible : ${err instanceof ErreurStripe ? err.message : messageErreur(err)}`)
+    }
+  }
+  return illisible ? null : false
 }

@@ -9,13 +9,15 @@ import { niveauDuMembre } from '@/lib/pilotage-niveau'
  *
  * { palier: 'libre' | 'premium' | 'equipe', raison,
  *   lectures: { utilisees, limite: number | null, offertes, jusquAu },
- *   coffre: { octets, limite }, portail: url | null,
+ *   coffre: { octets, limite }, portail: url | null, soutien: boolean, soutienOuvert: boolean,
  *   offres: { premiumMensuel: 5.99, premiumAnnuel: 57, duoMensuel: 8.99, duoAnnuel: 79 } }
  *
  * raison : 'equipe', 'premium-duo', 'pilotage-premium', une raison Club du
  * Carnet (liveclub, formation, etm, manuel, skool-vip, skool-premium), null en
  * libre. portail : une session du portail client Stripe (URL de courte duree)
  * quand le membre a un abonnement Pilotage, sinon null.
+ * soutien (11/11/2026) : l'abonnement Pilotage est marque soutien chez Stripe ;
+ * tant que la formule court, raison reste la raison Club (soutien-pur.ts).
  */
 
 export const dynamic = 'force-dynamic'

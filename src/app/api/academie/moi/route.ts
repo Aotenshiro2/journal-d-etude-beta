@@ -7,6 +7,7 @@ import { compteDuJeton, corsAcademie, entetesAcademie, origineDeLaRequete, refus
 import { etatQuestions, vueQuestions, type EtatQuestions } from '@/lib/academie/questions-entree'
 import { noterConnexion, progressionDuCompte, type ProgressionLecon } from '@/lib/academie/suivi'
 import { messageErreur, relationAbsente } from '@/lib/liveclub/pur'
+import { soutienDuCompte, type SoutienDuCompte } from '@/lib/soutien'
 
 /**
  * GET /api/academie/moi : tout ce dont les ecrans de l'academie ont besoin,
@@ -28,7 +29,10 @@ import { messageErreur, relationAbsente } from '@/lib/liveclub/pur'
  *                           'oui' par une source sans Stripe (un ETM ou un VIP y est lu aussi), null sinon ;
  *                           autres_adresses (10/11/2026, restes) : le NOMBRE d'adresses de la fiche du cockpit
  *                           reliee au compte confirmees sur aucun compte du site, pour le rappel « Comptes
- *                           lies » de Mon espace (jamais les adresses)
+ *                           lies » de Mon espace (jamais les adresses) ;
+ *                           soutien (11/11/2026, src/lib/soutien.ts) : { carnet, pilotage }, true = un abonnement
+ *                           de soutien actif sur l'app (badge « Soutien » de Mon espace), null = Stripe illisible,
+ *                           null entier = lecture en echec ; jamais un identifiant Stripe
  *     incomplet,                            true = une source illisible (Stripe) : des contenus sont « inconnu »
  *     continuer: { lecon, module, reprise_s, derniere_vue_le, acces, etat } | null,   la derniere lecon ouverte
  *     questions_entree: { poser, version, questions: [texte, texte] },   les questions d'entree (30/10/2026,
@@ -93,6 +97,9 @@ export async function GET(req: NextRequest) {
   }
   if (!userId) return refus('jeton', 401)
 
+  // Le badge « Soutien » (11/11/2026) : relu chez Stripe en parallele, borne a 4 s, jamais bloquant.
+  const soutien: Promise<SoutienDuCompte | null> = soutienDuCompte(userId).catch(() => null)
+
   // Les questions d'entree : une panne ou la table absente ne fait jamais tomber /moi (rien n'est pose).
   const questions: Promise<EtatQuestions> = etatQuestions(prisma, userId).catch((err: unknown) => {
     if (!relationAbsente(err)) console.warn(`[academie/moi] questions d'entree illisibles compte=${tronquer(userId)} : ${messageErreur(err)}`)
@@ -132,6 +139,7 @@ export async function GET(req: NextRequest) {
         admin: droits.admin, etm: droits.etm, equipe: droits.equipe, vip: droits.vip, live_club: droits.liveClub,
         live_club_source: droits.sourceLiveClub,
         autres_adresses: droits.autresAdresses,
+        soutien: await soutien,
       },
       incomplet: droits.incomplet,
       continuer,

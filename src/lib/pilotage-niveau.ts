@@ -14,7 +14,8 @@ import { SQL_IDENTITE } from '@/lib/academie/requetes'
 import { checkMentoratAccess } from '@/lib/entitlements'
 import { estSansPlafond } from '@/lib/ia-budget'
 import { octetsDuCoffre } from '@/lib/documents-serveur'
-import { abonnementsDuMembre, portailDe, type AbonnementActif, clePilotage } from '@/lib/pilotage-abonnement'
+import { abonnementsDuMembre, abonnementVu, type AbonnementActif, clePilotage, ventePubliquePilotage } from '@/lib/pilotage-abonnement'
+import { raisonAvecSoutien, soutienOuvert } from '@/lib/soutien-pur'
 import {
   COFFRE_PAR_PALIER, TARIFS, compterLectures, debutDesLectures, quotaDe, resoudrePalier,
   type Compteur, type Palier,
@@ -77,17 +78,29 @@ export async function quotaDuMembre(userId: string) {
 /** La reponse de GET /api/pilotage/niveau. */
 export async function niveauDuMembre(userId: string) {
   const p = await palierDuMembre(userId)
-  const [{ compteur }, octets, portail] = await Promise.all([
+  const [{ compteur }, octets, vu] = await Promise.all([
     compteurDuMembre(userId, p.palier),
     octetsDuCoffre(userId),
-    p.abonnement ? portailDe(clePilotage(), p.abonnement.reference) : Promise.resolve(null),
+    p.abonnement ? abonnementVu(clePilotage(), p.abonnement.reference) : Promise.resolve({ portail: null, soutien: false }),
   ])
+  // Le soutien (11/11/2026) : l'abonnement est marque soutien chez Stripe. Tant que la formule court,
+  // la raison reste la sienne (« Inclus dans ton Live Club ») ; la lire coute une verification de plus,
+  // seulement pour ces abonnes-la.
+  let raison = p.raison
+  if (vu.soutien) {
+    const club = await checkMentoratAccess(userId).then(a => a.reason as string | null).catch(() => null)
+    raison = raisonAvecSoutien({ raison: p.raison, soutien: true, raisonClub: club })
+  }
   return {
     palier: p.palier,
-    raison: p.raison,
+    raison,
     lectures: compteur.lectures,
     coffre: { octets, limite: COFFRE_PAR_PALIER[p.palier] },
-    portail,
+    portail: vu.portail,
+    /** Un abonnement Pilotage de soutien actif : le badge et « Tu soutiens Pilotage. Merci. » */
+    soutien: vu.soutien,
+    /** La vente du soutien est ouverte (SOUTIEN_APPS_PUBLIC et PILOTAGE_ACHAT_PUBLIC) : « Soutenir Pilotage » se montre. */
+    soutienOuvert: soutienOuvert(process.env) && ventePubliquePilotage(),
     offres: { ...TARIFS },
   }
 }

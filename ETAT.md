@@ -1,5 +1,32 @@
 # ETAT du journal d etudes
 
+## SOUTIEN DANS LES APPS : ABONNEMENT EXISTANT EN MODE SOUTIEN, BADGE (11/11/2026, commite NON pousse, branche soutien-apps depuis origin/master 24523c0 ; AUCUNE migration)
+
+- Brief : D:\7_Agents\briefs\2026-11-11-soutien-dans-les-apps.md ; labo D:\6_Societe\Pilotage\soutien\labo ; rapport :
+  soutien-apps-rapport.md (notes de Yume Orchestre). Nouvelle fonction : mise en ligne = go de Brice. Rien dans Stripe.
+- Regle (pure, src/lib/soutien-pur.ts) : un membre dont le Premium est COMPRIS (raisons Club sans 'equipe' : liveclub,
+  skool-vip, skool-premium, formation, etm, manuel) peut prendre l'abonnement EXISTANT (memes prix, aucun produit neuf)
+  marque soutien=1 sur la session ET l'abonnement. decisionSoutien : 401 compte, 403 ferme (SOUTIEN_APPS_PUBLIC != 1,
+  sauf admin), 409 deja (un abonnement de l'app actif : jamais deux), 409 pas_compris (achat normal). Le droit ne change
+  pas ; si la formule s'arrete, l'abonnement ouvre le Premium comme un autre.
+- Pilotage : POST /api/pilotage/achat { soutien: true } (Premium seul, pas le Duo ; admin = essai d'un admin), la
+  session porte metadata soutien=1, le webhook pose le droit comme d'habitude. /api/pilotage/niveau rend soutien
+  (abonnement relu chez Stripe, la lecture du portail deja faite : abonnementVu) et soutienOuvert ; un abonne de soutien
+  garde sa raison Club tant que la formule court (raisonAvecSoutien).
+- Carnet : NOUVELLE route /api/carnet/soutien (Bearer, non publique). GET { compris, ouvert, soutien, actif, portail,
+  offres } ; POST { periode: mois|an } = session Checkout HEBERGEE sur les prix existants (price_1U9QK... 5,99/mois,
+  price_1UAR2C... 57,50/an, surchargeables CARNET_PRIX_MENSUEL/ANNUEL), sans metadata source (le webhook de Pilotage
+  envoie le mail du Carnet, aucun droit ecrit), retour aoknowledge.com/mon-espace?soutien=carnet. Cle :
+  STRIPE_CARNET_CHECKOUT_KEY_AOKNOWLEDGE sinon celle de Pilotage. Abonnement lu par abonnementCarnetDe (entitlements.ts,
+  STRIPE_KEY_CARNET_AOK, liste par email, cache 5 min) ; Stripe illisible = 503, on ne vend pas a l'aveugle.
+- Badge : /api/academie/moi rend compte.soutien { carnet, pilotage } (src/lib/soutien.ts, borne a 4 s, null = illisible,
+  jamais bloquant). Mon espace l'affiche (site, branche site-soutien).
+- A FAIRE SUR GO : pousser le journal AVANT le site, Pilotage 0.5 et le Carnet 1.9.0 ; poser SOUTIEN_APPS_PUBLIC=1
+  (et PILOTAGE_ACHAT_PUBLIC=1 si ce n'est deja fait) ; verifier que la cle Checkout a Checkout Sessions + Customer
+  portal en ecriture sur le compte Ao Knowledge et que le portail client permet l'annulation. Verif :
+  node scripts/verifier-soutien.mjs (15 blocs). verifier-pilotage-paliers echoue DEJA au bloc 11 (assertion perimee sur
+  publicPaths du middleware), verifier-mails-achat ne trouve pas les migrations depuis un worktree : non repare ici.
+
 ## REDIFFUSION DES LIVES : DONNEES DU LIVE DANS /moi, IMPORT DU MODULE RENOMME (11/11/2026, commite NON pousse, branche rediffusion-des-lives depuis origin/master b9e4fa4 ; migration 20261111010000 du workspace ECRITE, NON appliquee)
 
 - Brief : D:\7_Agents\briefs\2026-11-11-rediffusion-des-lives-module.md ; rapport : rediffusion-des-lives-rapport.md

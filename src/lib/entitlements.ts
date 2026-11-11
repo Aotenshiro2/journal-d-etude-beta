@@ -16,6 +16,7 @@
 // avec son deuxième email est quand même reconnu. Le backend décide, jamais
 // l'extension.
 import { prisma } from './db'
+import { CARNET_PREMIUM_PRODUIT, lireAbonnementsApp, type AbonnementsApp } from './soutien-pur'
 import { estEquipe } from './academie/pur'
 
 // 'duo' (brief E1, 30/10/2026) : l'abonnement Premium Duo (Carnet + Pilotage,
@@ -207,6 +208,48 @@ async function hasCarnetPremium(email: string): Promise<boolean> {
   }
   if (reponseSure) ecrireCacheCarnet(cle, false)
   return false
+}
+
+// Le soutien du Carnet (11/11/2026, soutien-pur.ts) : l'abonnement Carnet
+// Premium du compte, et s'il est marque soutien=1. Lu a part de
+// hasCarnetPremium, qui ne tourne pas pour un membre du Club (son acces vient
+// de sa formule) : ici on regarde l'abonnement meme quand le Premium est
+// compris. La liste par email seulement (le soutien s'achete depuis le compte,
+// email pre-rempli en minuscules). Memes garde-fous : 3 s par appel, cache 5
+// min des reponses sures (500 entrees), null quand Stripe ne repond pas.
+const CACHE_SOUTIEN_MS = 5 * 60 * 1000
+const cacheSoutienCarnet = new Map<string, { vu: AbonnementsApp; expire: number }>()
+
+export function oublierSoutienCarnet(email: string) {
+  cacheSoutienCarnet.delete(email.toLowerCase().trim())
+}
+
+export async function abonnementCarnetDe(email: string | null): Promise<AbonnementsApp | null> {
+  const key = stripeKeyCarnet()
+  if (!key || !email) return null
+  const cle = email.toLowerCase().trim()
+  const enCache = cacheSoutienCarnet.get(cle)
+  if (enCache && enCache.expire > Date.now()) return enCache.vu
+  try {
+    const clients = await lireStripe<ClientStripe>(`/v1/customers?email=${encodeURIComponent(cle)}&limit=10`, key, 'customers')
+    if (!clients) return null
+    let vu: AbonnementsApp = { actif: false, soutien: false, abonnement: null, client: null }
+    for (const c of clients) {
+      if ((c.email ?? '').toLowerCase().trim() !== cle) continue
+      const subs = await lireStripe<unknown>(`/v1/subscriptions?customer=${c.id}&limit=20`, key, 'subscriptions')
+      if (!subs) return null
+      const lu = lireAbonnementsApp(subs, CARNET_PREMIUM_PRODUIT)
+      if (lu.soutien) { vu = lu; break }
+      if (lu.actif && !vu.actif) vu = lu
+    }
+    if (cacheSoutienCarnet.size >= CACHE_MAX) cacheSoutienCarnet.clear()
+    cacheSoutienCarnet.set(cle, { vu, expire: Date.now() + CACHE_SOUTIEN_MS })
+    return vu
+  } catch (err) {
+    const nom = (err as { name?: string } | null)?.name
+    console.warn(`[entitlements] soutien du Carnet illisible (${nom === 'TimeoutError' || nom === 'AbortError' ? 'delai' : 'erreur'})`)
+    return null
+  }
 }
 
 export interface MentoratAccess {

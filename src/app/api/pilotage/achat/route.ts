@@ -4,8 +4,9 @@ import { compteDuJeton, tronquer } from '@/lib/academie/http'
 import { messageErreur } from '@/lib/liveclub/pur'
 import { corsHeaders, corsPreflight } from '@/lib/support-cors'
 import { creerSessionAbonnement, prixDesOffres, ventePubliquePilotage, clePilotage } from '@/lib/pilotage-abonnement'
-import { estAdminPilotage } from '@/lib/pilotage-niveau'
+import { estAdminPilotage, palierDuMembre } from '@/lib/pilotage-niveau'
 import { offreDemandee, retourPilotage } from '@/lib/pilotage-paliers'
+import { decisionSoutien, estRaisonComprise, soutienOuvert } from '@/lib/soutien-pur'
 
 /**
  * POST /api/pilotage/achat : la session Stripe Embedded Checkout d'un
@@ -21,8 +22,18 @@ import { offreDemandee, retourPilotage } from '@/lib/pilotage-paliers'
  * Tant que PILOTAGE_ACHAT_PUBLIC n'est pas a 1, seule une demande essai d'un
  * compte admin (profiles.role ou compte de l'equipe) passe : l'achat test de Brice.
  *
+ * Soutien (11/11/2026, soutien-pur.ts) : `soutien: true` avec une offre Premium
+ * (pas le Duo) vend le MEME abonnement a un membre dont le Premium est deja
+ * compris (Live Club, Formation, ETM, VIP, acces manuel), marque soutien=1 sur la
+ * session et l'abonnement. Le droit ne change pas ; si la formule s'arrete,
+ * l'abonnement ouvre le Premium comme un autre. Exige un compte ; ferme tant que
+ * SOUTIEN_APPS_PUBLIC n'est pas a 1 (sauf essai d'un admin) ; refuse si un
+ * abonnement Pilotage est deja actif (409 'deja') ou si rien n'est compris
+ * (409 'pas_compris' : c'est un achat normal).
+ *
  * 200 { ok, client_secret, session_id, cle_publique }
- * 400 'corps' | 403 'ferme' | 503 'config' (cle absente, sans permission, prix pas crees) | 'indisponible' | 502 'stripe'
+ * 400 'corps' | 401 'compte' | 403 'ferme' | 409 'deja' | 'pas_compris'
+ * 503 'config' (cle absente, sans permission, prix pas crees) | 'indisponible' | 502 'stripe'
  */
 
 export const dynamic = 'force-dynamic'
@@ -68,6 +79,26 @@ export async function POST(req: NextRequest) {
     if (!admin) return refus('ferme', 403)
   }
 
+  const soutien = corps.soutien === true
+  if (soutien) {
+    if (slug !== 'pilotage-premium-mensuel' && slug !== 'pilotage-premium-annuel') return refus('corps', 400)
+    let p: Awaited<ReturnType<typeof palierDuMembre>> | null = null
+    if (userId) {
+      try { p = await palierDuMembre(userId) } catch (err) {
+        console.warn(`[pilotage/achat] palier illisible (soutien) : ${messageErreur(err)}`)
+        return refus('indisponible', 503)
+      }
+    }
+    const d = decisionSoutien({
+      connecte: Boolean(userId),
+      ouvert: soutienOuvert(process.env),
+      admin: essai && Boolean(p?.admin),
+      dejaAbonne: Boolean(p?.abonnement),
+      compris: estRaisonComprise(p?.raison),
+    })
+    if (!d.ok) return refus(d.erreur, d.status)
+  }
+
   const cle = clePilotage()
   const publique = clePublique()
   if (!cle || !publique) {
@@ -88,8 +119,8 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const s = await creerSessionAbonnement(cle, { slug, prix, retourUrl, userId, email, essai })
-    console.info(`[pilotage/achat] session creee offre=${slug} compte=${userId ? tronquer(userId) : 'aucun'}${essai ? ' essai' : ''}`)
+    const s = await creerSessionAbonnement(cle, { slug, prix, retourUrl, userId, email, essai, soutien })
+    console.info(`[pilotage/achat] session creee offre=${slug} compte=${userId ? tronquer(userId) : 'aucun'}${essai ? ' essai' : ''}${soutien ? ' soutien' : ''}`)
     return NextResponse.json({ ok: true, client_secret: s.clientSecret, session_id: s.id, cle_publique: publique }, { headers })
   } catch (err) {
     if (err instanceof ErreurStripe && (err.permission || err.statut === 401)) {

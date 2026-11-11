@@ -232,6 +232,8 @@ export function texteRetractation(produit: ProduitPilotage): string {
  */
 export function corpsSessionAbonnement(o: {
   slug: SlugOffrePilotage; prix: string; retourUrl: string; userId: string | null; email: string | null; essai: boolean
+  /** Le soutien (11/11/2026, soutien-pur.ts) : Premium deja compris, l'abonnement existant marque soutien=1. */
+  soutien?: boolean
 }): URLSearchParams {
   const produit = produitDe(o.slug)
   const c = new URLSearchParams()
@@ -257,6 +259,10 @@ export function corpsSessionAbonnement(o: {
   c.set('subscription_data[metadata][source]', 'pilotage')
   c.set('subscription_data[metadata][pilotage_offre]', o.slug)
   c.set('subscription_data[metadata][essai]', o.essai ? '1' : '0')
+  if (o.soutien) {
+    c.set('metadata[soutien]', '1')
+    c.set('subscription_data[metadata][soutien]', '1')
+  }
   return c
 }
 
