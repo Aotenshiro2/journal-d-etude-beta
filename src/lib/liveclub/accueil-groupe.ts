@@ -71,13 +71,32 @@ const JOUR_MS = 86_400_000
 const STATUTS_DEDANS = ['member', 'administrator', 'creator', 'restricted']
 
 /**
+ * (11/11, Brice : « Encore une entree sans message du bot ») La levee d'un ban
+ * (statut 'kicked' -> 'left') n'est PAS une sortie : le compte etait deja
+ * dehors, il le reste. Cas de Niko D (1763552109), 10/11 19:50:59 : un payeur
+ * banni avant le suivi du groupe, le bot leve son ban (leverBanSiBanni,
+ * bot-membre.ts) avant de lui envoyer le lien ; Telegram envoie un chat_member
+ * kicked -> left, que la route ecrivait comme une sortie (present = false,
+ * sorti_le = l'instant de la levee). Son entree, 12 secondes plus tard, lisait
+ * « sorti il y a 12 s » = retour rapide = 'connu' : ni ligne d'Accueil, ni mot,
+ * ni tour en prive (geste 480, genre 'connu'). La route ne touche plus la
+ * presence sur une levee de ban (date de sortie gardee, aucune ligne creee).
+ */
+export function estLeveeDeBan(ancienStatut: string | null | undefined, nouveauStatut: string | null | undefined): boolean {
+  return ancienStatut === 'kicked' && nouveauStatut === 'left'
+}
+
+/**
  * La ligne de cockpit_telegram_membres AVANT l'evenement (null = jamais vu).
  * (03/11) `retraitPour` : la regle du geste « retrait » (cockpit_liveclub_gestes)
  * qui a fait cette sortie, si c'est le bot ou l'equipe qui l'a sorti
  * ('impaye_5j', 'manuel', 'desabonne'...) ; null ou absent = sortie d'elle-meme
  * ou inconnue (avant-entree.ts, lireAvantEntree).
+ * (11/11) `banLeve` : un ban de ce compte vient d'etre leve (geste
+ * « reintegration », sans sortie depuis) ; vrai aussi pour un compte sans
+ * ligne (present null), banni avant le suivi du groupe.
  */
-export type AvantEntree = { present: boolean | null; sortiLe: Date | null; retraitPour?: string | null } | null
+export type AvantEntree = { present: boolean | null; sortiLe: Date | null; retraitPour?: string | null; banLeve?: boolean } | null
 
 /**
  * (03/11) Le retrait qui ne fait pas un « retour » quand il revient vite : un
@@ -99,7 +118,12 @@ export type GenreEntree = 'nouveau' | 'retour' | 'connu'
 
 export function genreEntree(avant: AvantEntree, quand: Date): GenreEntree {
   if (!avant) return 'nouveau'
-  if (avant.present === true || !avant.sortiLe) return 'connu'
+  if (avant.present === true) return 'connu'
+  // (11/11) Un ban leve juste avant l'entree : il etait dans le groupe, et
+  // depuis le 06/10 aucun impaye ne fait de ban (sorties sans ban) : ce
+  // n'est pas un retour rapide, c'est un retour (Niko D, 10/11).
+  if (avant.banLeve) return 'retour'
+  if (!avant.sortiLe) return 'connu'
   const absence = quand.getTime() - avant.sortiLe.getTime()
   if (absence >= JOURS_ABSENCE_RETOUR * JOUR_MS) return 'retour'
   // (03/11) Sorti par le bot ou l'equipe pour autre chose qu'un impaye : il revient avec un nouveau droit.

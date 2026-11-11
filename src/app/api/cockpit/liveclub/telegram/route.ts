@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { traiterBouton, traiterDemandeAdhesion, traiterMessagePrive } from '@/lib/liveclub/bot-membre'
 import {
-  JOURS_ABSENCE_RETOUR, accueilAPublier, envoisAccueil, genreEntree, nomPourAccueil, texteAlerteAccueilNonPublie, type AvantEntree,
+  JOURS_ABSENCE_RETOUR, accueilAPublier, envoisAccueil, estLeveeDeBan, genreEntree, nomPourAccueil, texteAlerteAccueilNonPublie, type AvantEntree,
 } from '@/lib/liveclub/accueil-groupe'
 import { lireAvantEntree } from '@/lib/liveclub/avant-entree'
 import { alerterEquipeTexte } from '@/lib/alerte-equipe-telegram'
@@ -152,7 +152,14 @@ export async function POST(req: NextRequest) {
     console.warn('[liveclub/telegram] accueil non decide : presence avant l\'entree illisible')
   }
 
-  await prisma.$executeRaw`
+  // (11/11) Une levee de ban (kicked -> left) n'est pas une sortie : le compte
+  // etait deja dehors. La presence n'est pas touchee (date de sortie gardee,
+  // aucune ligne creee pour un banni d'avant le suivi), sinon l'entree qui
+  // suit lisait « sorti il y a quelques secondes » = retour rapide, sans
+  // accueil (Niko D, 10/11). Seul le statut brut (plus bas) passe a 'left'.
+  const leveeDeBan = estLeveeDeBan(cm.old_chat_member?.status, nouveau.status)
+  if (leveeDeBan) console.log('[liveclub/telegram] levee de ban : presence inchangee (pas une sortie)')
+  else await prisma.$executeRaw`
     insert into public.cockpit_telegram_membres
       (telegram_id, pseudo, nom_affiche, present, entre_le, sorti_le, source, par_qui, maj_le)
     values (${u.id}, ${pseudo}, ${nomAffiche}, ${present},

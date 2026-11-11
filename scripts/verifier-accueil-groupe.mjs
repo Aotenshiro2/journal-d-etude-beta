@@ -14,7 +14,7 @@ import './resoudre-ts.mjs'
 // Import dynamique : accueil-groupe.ts importe './config' sans extension (resoudre-ts.mjs).
 const {
   JOURS_ABSENCE_RETOUR, accueilAPublier, genreEntree, genreAvecReconnaissance, nomPourAccueil, texteAccueil, texteMotNouveau, envoisAccueil,
-  texteAdmission, lienSujet, SUJETS_LIVECLUB, SUJETS_HORS_TOUR, SUJET_MOT_NOUVEAU, SUJETS_DU_TOUR, texteAlerteAccueilNonPublie,
+  texteAdmission, lienSujet, SUJETS_LIVECLUB, SUJETS_HORS_TOUR, SUJET_MOT_NOUVEAU, SUJETS_DU_TOUR, texteAlerteAccueilNonPublie, estLeveeDeBan,
 } = await import('../src/lib/liveclub/accueil-groupe.ts')
 const { URL_FORMATION_LIVECLUB } = await import('../src/lib/liveclub/config.ts')
 
@@ -103,6 +103,48 @@ bloc("(03/11) EarvinSaintus : sorti par un retrait (sans abonnement) il y a 28 j
   assert.match(bot, /genre = genreEntree\(await lireAvantEntree\(telegramId\), new Date\(\)\)/)
   assert.match(lecteur, /g\.geste = 'retrait' and g\.resultat = 'fait'/)
   assert.match(lecteur, /g\.fait_le between m\.sorti_le - interval '1 hour' and m\.sorti_le \+ interval '1 hour'/)
+})
+
+bloc("(11/11) Niko D : ban leve par le bot 12 s avant l'entree = bon retour, plus un retour rapide sans accueil", () => {
+  const leve = new Date('2026-11-10T19:50:59Z')
+  const quand = new Date('2026-11-10T19:51:11Z')
+  // Ce qui s'est passe : la levee du ban (kicked -> left) ecrite comme une sortie,
+  // l'entree lisait « sorti il y a 12 s » = 'connu' (geste 480) : rien dans Accueil, rien en prive.
+  assert.equal(genreEntree({ present: false, sortiLe: leve, retraitPour: null }, quand), 'connu')
+  assert.equal(accueilAPublier({ present: false, sortiLe: leve, retraitPour: null }, 'left', true, quand), null)
+  // La levee d'un ban n'est pas une sortie ; tout le reste en est une, ou une entree.
+  assert.equal(estLeveeDeBan('kicked', 'left'), true)
+  for (const [a, b] of [['member', 'left'], ['member', 'kicked'], ['restricted', 'left'], ['left', 'member'], ['kicked', 'member'], [undefined, 'left'], [null, null]]) {
+    assert.equal(estLeveeDeBan(a, b), false, `${a} -> ${b}`)
+  }
+  // Avec le ban leve lu avant l'entree : bon retour, que le compte ait une ligne (sortie de son ban gardee) ou non.
+  for (const avant of [
+    { present: null, sortiLe: null, retraitPour: null, banLeve: true },
+    { present: false, sortiLe: null, retraitPour: null, banLeve: true },
+    { present: false, sortiLe: new Date('2026-11-08T10:00:00Z'), retraitPour: null, banLeve: true },
+    { present: false, sortiLe: leve, retraitPour: 'impaye_5j', banLeve: true },
+  ]) {
+    assert.equal(genreEntree(avant, quand), 'retour', JSON.stringify(avant))
+    assert.equal(accueilAPublier(avant, 'left', true, quand), 'retour', JSON.stringify(avant))
+  }
+  assert.deepEqual(envoisAccueil('retour', nomPourAccueil('NikoDEBACHY', 'Niko')).map(e => [e.ou, e.texte]), [['Accueil', 'Bon retour dans le Live Club, NikoDEBACHY !']])
+  assert.match(texteAdmission('retour', { chat: CHAT, accesOffert: false }), /^Bon retour dans le Live Club !/)
+  // Sans doublon : deja present (rejeu de l'update), rien, meme avec un ban leve.
+  assert.equal(genreEntree({ present: true, sortiLe: null, banLeve: true }, quand), 'connu')
+  assert.equal(accueilAPublier({ present: true, sortiLe: null, banLeve: true }, 'left', true, quand), null)
+  assert.equal(accueilAPublier({ present: false, sortiLe: null, banLeve: true }, 'member', true, quand), null)
+  // Sans ban leve : les regles du 13/10 et du 03/11, inchangees.
+  assert.equal(genreEntree({ present: false, sortiLe: ilYa(5), retraitPour: 'impaye_5j', banLeve: false }, maintenant), 'connu')
+  assert.equal(genreEntree({ present: false, sortiLe: null, banLeve: false }, maintenant), 'connu')
+  // Le code : la route ne touche pas la presence sur une levee de ban ; la lecture voit le ban leve, ligne ou pas.
+  const route = lire('src/app/api/cockpit/liveclub/telegram/route.ts')
+  assert.match(route, /const leveeDeBan = estLeveeDeBan\(cm\.old_chat_member\?\.status, nouveau\.status\)/)
+  assert.match(route, /if \(leveeDeBan\) console\.log\('[^']*'\)\s*else await prisma\.\$executeRaw`\s*insert into public\.cockpit_telegram_membres/)
+  const lecteur = lire('src/lib/liveclub/avant-entree.ts')
+  assert.match(lecteur, /g\.geste = 'reintegration' and g\.resultat = 'fait'/)
+  assert.match(lecteur, /g\.regle = 'payeur_banni' or g\.details->>'statut_tg' = 'kicked'/)
+  assert.match(lecteur, /m\.sorti_le > g\.fait_le \+ interval '1 minute'/)
+  assert.match(lecteur, /if \(!l\) return banLeve \? \{ present: null, sortiLe: null, retraitPour: null, banLeve \} : null/)
 })
 
 bloc("(03/11) un accueil refuse par Telegram : alerte a l'equipe, avec le geste pour un sujet ferme", () => {
