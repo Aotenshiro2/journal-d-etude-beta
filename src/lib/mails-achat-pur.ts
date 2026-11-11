@@ -14,8 +14,17 @@
 //   la cle anti-doublon, le prefixe [Essai], le prenom, le montant, la date.
 //
 // Le Live Club n'a pas de modele ici : son texte attend Melanie.
+//
+// Le soutien (11/11/2026, brief soutien-mail-et-page-soutenir) : un achat marque
+// soutien=1 (l'abonnement d'une app pris en soutien) ou soutien=aok (la page
+// /soutenir), sur la session ou sur l'abonnement, recoit le mail de
+// remerciement (modeleSoutien, tutoiement, signe Brice) A LA PLACE du mail
+// ordinaire. Un seul des deux part.
 
-export type ProduitMail = 'pilotage-premium' | 'premium-duo' | 'carnet-premium' | 'module' | 'formation'
+export type ProduitMail = 'pilotage-premium' | 'premium-duo' | 'carnet-premium' | 'module' | 'formation' | 'soutien'
+
+/** Ce que soutient un achat de soutien : une app (soutien=1) ou AOKnowledge (soutien=aok, /soutenir). */
+export type AppSoutien = 'carnet' | 'pilotage' | 'aok'
 
 /** Le produit « Carnet Premium » sur le Stripe Ao Knowledge (meme valeur que CARNET_PREMIUM_PRODUCT, entitlements.ts). */
 export const PRODUIT_STRIPE_CARNET_PREMIUM = 'prod_V9jniZCCbIJsmV'
@@ -40,6 +49,8 @@ export type VariablesMail = {
   lienPortail?: string | null
   titreModule?: string | null
   lienModule?: string | null
+  /** Le mail de soutien : ce que l'achat soutient (soutienDeLAchat). */
+  soutien?: AppSoutien | null
   email: string
   essai: boolean
 }
@@ -50,6 +61,10 @@ export type ModeleMail = {
   /** Le corps sans la signature. Un « \n » dans un paragraphe = retour a la ligne. */
   paragraphes: string[]
   bouton: { texte: string; url: string }
+  /** La signature, si ce n'est pas SIGNATURE (le soutien : « Merci encore, Brice »). */
+  signature?: string
+  /** Le mail tutoie (le soutien) : la ligne sous le bouton aussi. */
+  tutoiement?: boolean
 }
 
 export type MailRendu = { objet: string; texte: string; html: string }
@@ -200,12 +215,72 @@ export function modeleFormation(v: VariablesMail): ModeleMail {
   }
 }
 
+// ---------------------------------------------------------------------------
+// 6. Le soutien (11/11/2026) : le remerciement, a la place du mail d'achat
+// ---------------------------------------------------------------------------
+
+export const URL_MON_ESPACE = 'https://aoknowledge.com/mon-espace'
+export const SIGNATURE_SOUTIEN = 'Merci encore,\nBrice'
+
+const SOUTENU: Record<AppSoutien, string> = {
+  carnet: 'au Carnet du Trader',
+  pilotage: 'à Pilotage',
+  aok: 'à AOKnowledge',
+}
+
+/**
+ * Ou l'arreter, vraiment (verifie le 11/11/2026) : Mon espace n'a pas de lien
+ * vers le portail Stripe. Le Carnet : « Gérer mon soutien » dans Mon forfait
+ * (1.9.0) ; Pilotage : « Gérer mon abonnement » dans le menu du compte ;
+ * AOKnowledge : « Gérer mon soutien » sur /soutenir.
+ */
+const ARRET: Record<AppSoutien, string> = {
+  carnet: 'Tu arrêtes quand tu veux, en un clic, depuis le Carnet : Mon forfait, « Gérer mon soutien ».',
+  pilotage: 'Tu arrêtes quand tu veux, en un clic, depuis Pilotage : le menu de ton compte, « Gérer mon abonnement ».',
+  aok: 'Tu arrêtes quand tu veux, en un clic, depuis la page du soutien : aoknowledge.com/soutenir, « Gérer mon soutien ».',
+}
+
+/** Le texte de Brice (chat du 11/11/2026), mis au gabarit : tutoiement, signe Brice. */
+export function modeleSoutien(v: VariablesMail): ModeleMail {
+  const app: AppSoutien = v.soutien ?? 'aok'
+  const arret = v.lienPortail ? `${ARRET[app]} Ou directement ici : ${v.lienPortail}` : ARRET[app]
+  return {
+    objet: objetDe(v, 'Merci pour ton soutien'),
+    preheader: 'Ton badge « Soutien » est déjà sur ton compte.',
+    paragraphes: [
+      v.prenom ? `Salut ${v.prenom},` : 'Salut,',
+      `Merci pour ton soutien ${SOUTENU[app]}.`,
+      "Tu avais déjà tout ce qu'il te fallait, et tu as choisi de soutenir quand même. Ça compte vraiment pour moi.",
+      "Ton soutien aide à couvrir ce que coûtent les outils au quotidien, l'IA et les serveurs, et leur développement. On continue de construire avec ou sans soutien : le tien nous permet d'aller plus vite.",
+      'Ton badge « Soutien » est déjà sur ton compte, dans Mon espace.',
+      arret,
+    ],
+    bouton: { texte: 'Ouvrir Mon espace', url: URL_MON_ESPACE },
+    signature: SIGNATURE_SOUTIEN,
+    tutoiement: true,
+  }
+}
+
 export const MODELES: Record<ProduitMail, (v: VariablesMail) => ModeleMail> = {
   'pilotage-premium': modelePilotagePremium,
   'premium-duo': modelePremiumDuo,
   'carnet-premium': modeleCarnetPremium,
   module: modeleModule,
   formation: modeleFormation,
+  soutien: modeleSoutien,
+}
+
+/**
+ * Un achat de soutien ? La marque se lit sur la session OU sur l'abonnement
+ * (metadata) : soutien=aok (/soutenir) donne 'aok' ; soutien=1 donne l'app de
+ * l'achat (`app`, celle dont le produit a ete vendu), sinon rien. Aucune marque :
+ * null, le mail ordinaire part.
+ */
+export function soutienDeLAchat(app: 'carnet' | 'pilotage' | null, ...metadatas: unknown[]): AppSoutien | null {
+  const marques = metadatas.map(m => objet(m).soutien)
+  if (marques.includes('aok')) return 'aok'
+  if (app && marques.includes('1')) return app
+  return null
 }
 
 // ---------------------------------------------------------------------------
@@ -342,6 +417,36 @@ export function lireSessionPayee(s: Record<string, unknown>): SessionPayee | nul
   }
 }
 
+/** Le mail a envoyer : son modele, sa reference anti-doublon (sub_...) et ses variables. */
+export type PlanMail = { produit: ProduitMail; reference: string; variables: VariablesMail }
+
+/**
+ * Une session d'abonnement du compte Ao Knowledge qui n'est pas de Pilotage
+ * (aucune metadata source) et son abonnement relu chez Stripe : le soutien
+ * (soutien=1 sur un Carnet Premium, ou soutien=aok de /soutenir) recoit le
+ * remerciement ; un Carnet Premium ordinaire (lien de paiement), le mail du
+ * Carnet ; le reste, rien. Un seul des deux mails, jamais les deux.
+ */
+export function planMailHorsPilotage(
+  session: Record<string, unknown>, abonnement: Record<string, unknown>, lienPortail: string | null,
+): PlanMail | 'pas_concerne' | 'sans_email' {
+  if (session.mode !== 'subscription') return 'pas_concerne'
+  const s = lireSessionPayee(session)
+  if (!s?.abonnementId) return 'pas_concerne'
+  const ab = lireAbonnementCarnet(abonnement)
+  const soutien = soutienDeLAchat(ab ? 'carnet' : null, session.metadata, abonnement.metadata)
+  if (!ab && !soutien) return 'pas_concerne'
+  if (!s.email) return 'sans_email'
+  const base = { prenom: s.prenom, montant: formaterEuros(s.centimes), lienPortail, email: s.email, essai: s.test }
+  if (soutien) return { produit: 'soutien', reference: s.abonnementId, variables: { ...base, soutien } }
+  if (!ab) return 'pas_concerne'
+  return {
+    produit: 'carnet-premium',
+    reference: ab.id,
+    variables: { ...base, offre: offreCarnet(ab.rythme), prochaineEcheance: formaterDateLongue(ab.finPeriode) },
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Le rendu (meme gabarit que les mails du Live Club, liveclub/emails.ts)
 // ---------------------------------------------------------------------------
@@ -383,18 +488,19 @@ export function paragrapheHtml(p: string): string {
 }
 
 export function texteMail(m: ModeleMail): string {
-  return [...m.paragraphes, `${m.bouton.texte} : ${m.bouton.url}`, SIGNATURE].join('\n\n')
+  return [...m.paragraphes, `${m.bouton.texte} : ${m.bouton.url}`, m.signature ?? SIGNATURE].join('\n\n')
 }
 
 export function htmlMail(m: ModeleMail): string {
   const corps = m.paragraphes.map(p => `<p style="margin:0 0 16px;line-height:1.5">${paragrapheHtml(p)}</p>`).join('\n')
+  const copier = m.tutoiement ? 'Si le bouton ne marche pas, copie ce lien' : 'Si le bouton ne marche pas, copiez ce lien'
   return `<!doctype html><html lang="fr"><body style="margin:0;padding:24px;background:#ffffff;color:#111827;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:15px">
 <div style="display:none;max-height:0;overflow:hidden;opacity:0">${echapper(m.preheader)}</div>
 <div style="max-width:560px;margin:0 auto">
 ${corps}
 <p style="margin:24px 0"><a href="${echapper(m.bouton.url)}" style="display:inline-block;padding:12px 20px;border-radius:8px;background:#111827;color:#ffffff;text-decoration:none;font-weight:600">${echapper(m.bouton.texte)}</a></p>
-<p style="margin:0 0 16px;font-size:13px;color:#6b7280">Si le bouton ne marche pas, copiez ce lien : ${echapper(m.bouton.url)}</p>
-<p style="margin:32px 0 0;line-height:1.5">${paragrapheHtml(SIGNATURE)}</p>
+<p style="margin:0 0 16px;font-size:13px;color:#6b7280">${copier} : ${echapper(m.bouton.url)}</p>
+<p style="margin:32px 0 0;line-height:1.5">${paragrapheHtml(m.signature ?? SIGNATURE)}</p>
 </div></body></html>`
 }
 

@@ -26,6 +26,11 @@ import { evenementEnvoieMail } from '@/lib/mails-achat-pur'
  * session d'abonnement sans metadata source dont l'abonnement porte le produit
  * du Carnet Premium (liens de paiement) envoie le mail du Carnet, sans toucher
  * aux droits. Un mail rate ne fait jamais echouer le webhook.
+ *
+ * Soutien (11/11/2026) : un achat marque soutien=1 (Carnet ou Pilotage pris en
+ * soutien) ou soutien=aok (/soutenir, session sans source), sur la session ou
+ * sur l'abonnement, recoit le mail de remerciement A LA PLACE du mail d'achat
+ * (mailAchatPilotage, mailAchatCarnet). Meme anti-doublon : un rejeu ne renvoie rien.
  */
 
 export const dynamic = 'force-dynamic'
@@ -82,7 +87,7 @@ export async function POST(req: NextRequest) {
     if (!r.ok) return NextResponse.json({ ok: true, ignore: r.raison === 'pas_pilotage', etat: r.raison })
     if (r.etat !== 'ouvert' || r.cree) console.info(`[pilotage/achat/webhook] ${type} : droit ${r.etat} offre=${r.slug}`)
     if (r.etat === 'ouvert' && session && evenementEnvoieMail(type)) {
-      const mail = await mailAchatPilotage({ session, abonnementId: abonnement, slug: r.slug, email: r.email, essai: r.essai, fin: r.fin })
+      const mail = await mailAchatPilotage({ session, abonnementId: abonnement, slug: r.slug, email: r.email, essai: r.essai, fin: r.fin, soutien: r.soutien })
       return NextResponse.json({ ok: true, etat: r.etat, mail })
     }
     return NextResponse.json({ ok: true, etat: r.etat })

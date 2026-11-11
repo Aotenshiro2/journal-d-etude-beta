@@ -148,8 +148,10 @@ export const URL_CGV_SOUTIEN = 'https://aoknowledge.com/conditions-generales'
  * La session Checkout HEBERGEE (l'extension ouvre un onglet : pas de formulaire
  * integre dans le panneau) de l'abonnement Carnet Premium existant, marquee
  * soutien. Pas de metadata `source` sur la session : le webhook de Pilotage
- * l'ignore pour les droits et envoie le mail du Carnet, comme un lien de
- * paiement. L'abonnement porte soutien=1, app=carnet et le compte.
+ * l'ignore pour les droits et, voyant soutien=1, envoie le mail de
+ * remerciement a la place du mail du Carnet (mails-achat-pur.ts,
+ * planMailHorsPilotage, 11/11/2026). L'abonnement porte soutien=1, app=carnet
+ * et le compte.
  */
 export function corpsSessionSoutienCarnet(o: {
   prix: string; userId: string; email: string | null; essai: boolean

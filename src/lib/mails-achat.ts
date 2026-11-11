@@ -24,7 +24,7 @@ import { messageErreur, relationAbsente } from '@/lib/liveclub/pur'
 import { CATALOGUE, MARGE_FIN_JOURS, type SlugOffrePilotage } from '@/lib/pilotage-paliers'
 import {
   SQL_LIBERER_MAIL, SQL_MAIL_PARTI, SQL_RESERVER_MAIL, SUPPORT_MAIL, cleMailAchat, envoyerUneFois, formaterDateLongue, formaterEuros,
-  lienDuModule, lienPortailPropre, lireAbonnementCarnet, lireSessionPayee, offreCarnet, produitDeOffrePilotage, rendreMail,
+  lienDuModule, lienPortailPropre, lireSessionPayee, planMailHorsPilotage, produitDeOffrePilotage, rendreMail, soutienDeLAchat,
   type IssueMail, type ProduitMail, type VariablesMail,
 } from '@/lib/mails-achat-pur'
 
@@ -95,12 +95,21 @@ export async function envoyerMailAchat(produit: ProduitMail, reference: string, 
  */
 export async function mailAchatPilotage(p: {
   session: Record<string, unknown>; abonnementId: string; slug: SlugOffrePilotage; email: string | null; essai: boolean; fin: Date | null
+  /** L'abonnement relu porte soutien=1 (synchroniserAbonnement). */
+  soutien?: boolean
 }): Promise<IssueMail> {
   const produit = produitDeOffrePilotage(p.slug)
   const s = lireSessionPayee(p.session)
   if (!produit || !s) return 'pas_concerne'
   const email = s.email ?? p.email
   if (!email) return 'sans_email'
+  // Le soutien (11/11/2026) : soutien=1 sur la session ou l'abonnement = le remerciement, A LA PLACE du mail de Premium.
+  const soutien = soutienDeLAchat('pilotage', p.session.metadata, p.soutien ? { soutien: '1' } : null)
+  if (soutien) {
+    return envoyerMailAchat('soutien', p.abonnementId, {
+      prenom: s.prenom, montant: formaterEuros(s.centimes), lienPortail: lienPortail(), soutien, email, essai: p.essai || s.test,
+    })
+  }
   const finPeriode = p.fin ? new Date(p.fin.getTime() - MARGE_FIN_JOURS * 86400 * 1000) : null
   return envoyerMailAchat(produit, p.abonnementId, {
     prenom: s.prenom,
@@ -114,33 +123,28 @@ export async function mailAchatPilotage(p: {
 }
 
 /**
- * Carnet Premium : une session d'abonnement du compte Ao Knowledge qui n'est
- * pas de Pilotage (liens de paiement du Carnet). L'abonnement est relu chez
- * Stripe ; seul un abonnement sur le produit du Carnet envoie le mail. Les
+ * Une session d'abonnement du compte Ao Knowledge qui n'est pas de Pilotage
+ * (aucune metadata source) : un lien de paiement du Carnet Premium, le soutien
+ * du Carnet (soutien=1, /api/carnet/soutien) ou le soutien AOKnowledge
+ * (soutien=aok, /soutenir). L'abonnement est relu chez Stripe ; le choix du
+ * mail est planMailHorsPilotage (mails-achat-pur.ts) : le remerciement pour un
+ * soutien, le mail du Carnet pour un Carnet Premium ordinaire, rien sinon. Les
  * droits ne bougent pas (entitlements.ts lit Stripe en direct).
  */
 export async function mailAchatCarnet(cle: string, session: Record<string, unknown>): Promise<IssueMail> {
   if (session.mode !== 'subscription') return 'pas_concerne'
   const s = lireSessionPayee(session)
   if (!s?.abonnementId) return 'pas_concerne'
-  let ab: ReturnType<typeof lireAbonnementCarnet> = null
+  let abonnement: Record<string, unknown>
   try {
-    ab = lireAbonnementCarnet(await appeler(cle, `/v1/subscriptions/${encodeURIComponent(s.abonnementId)}`))
+    abonnement = await appeler(cle, `/v1/subscriptions/${encodeURIComponent(s.abonnementId)}`)
   } catch (err) {
     console.warn(`[mails-achat] abonnement illisible pour le Carnet : ${messageErreur(err)}`)
     return 'echec'
   }
-  if (!ab) return 'pas_concerne'
-  if (!s.email) return 'sans_email'
-  return envoyerMailAchat('carnet-premium', ab.id, {
-    prenom: s.prenom,
-    offre: offreCarnet(ab.rythme),
-    montant: formaterEuros(s.centimes),
-    prochaineEcheance: formaterDateLongue(ab.finPeriode),
-    lienPortail: lienPortail(),
-    email: s.email,
-    essai: s.test,
-  })
+  const plan = planMailHorsPilotage(session, abonnement, lienPortail())
+  if (typeof plan === 'string') return plan
+  return envoyerMailAchat(plan.produit, plan.reference, plan.variables)
 }
 
 /** Un module a l'unite : apres l'acces pose par le webhook de l'academie. */

@@ -185,8 +185,126 @@ await bloc('anti-doublon : deux fois le meme evenement (meme en meme temps) = un
   // La cle : une par abonnement (sub_) pour Pilotage, Duo et Carnet, une par session (cs_) pour un module.
   const s = lire('../src/lib/mails-achat.ts')
   assert.match(s, /envoyerMailAchat\(produit, p\.abonnementId, \{/)
-  assert.match(s, /envoyerMailAchat\('carnet-premium', ab\.id, \{/)
+  // (11/11/2026) Le Carnet passe par planMailHorsPilotage : reference = l'abonnement (ab.id), ou sub_ du soutien.
+  assert.match(s, /envoyerMailAchat\(plan\.produit, plan\.reference, plan\.variables\)/)
+  assert.match(lire('../src/lib/mails-achat-pur.ts'), /produit: 'carnet-premium',\n\s+reference: ab\.id,/)
   assert.match(s, /envoyerMailAchat\('module', p\.sessionId, \{/)
+})
+
+// ── Le soutien (11/11/2026) : le remerciement a la place du mail d'achat ────
+
+const APPS_SOUTIEN = { carnet: 'au Carnet du Trader', pilotage: 'à Pilotage', aok: 'à AOKnowledge' }
+
+await bloc('soutien : le remerciement de Brice, tutoiement, signe Brice, sans tiret long ni vouvoiement, Salut sans prenom', () => {
+  for (const [app, soutenu] of Object.entries(APPS_SOUTIEN)) {
+    for (const v of [PLEIN, VIDE]) {
+      const r = M.rendreMail('soutien', { ...v, soutien: app })
+      assert.equal(r.objet, 'Merci pour ton soutien', app)
+      assert.equal(r.modele.paragraphes[0], v.prenom ? 'Salut Camille,' : 'Salut,', app)
+      assert.equal(r.modele.paragraphes[1], `Merci pour ton soutien ${soutenu}.`, app)
+      for (const t of [r.objet, r.texte, r.modele.preheader, ...r.modele.paragraphes]) {
+        assert.doesNotMatch(t, TROUS, `${app} : trou dans « ${t.slice(0, 120)} »`)
+        assert.doesNotMatch(t, INTERDITS, `${app} : typographie`)
+        assert.doesNotMatch(t, /(?<![\p{L}])(vous|votre|vos|copiez)(?![\p{L}])/iu, `${app} : vouvoiement`)
+        assert.doesNotMatch(t, /jamais|obligatoire|attendu/i, `${app} : doctrine`)
+      }
+      assert.ok(r.texte.endsWith('Merci encore,\nBrice'), app)
+      assert.ok(r.html.includes('Merci encore,<br>Brice') && !r.html.includes('Mélanie'), app)
+      assert.ok(r.html.includes('Si le bouton ne marche pas, copie ce lien') && !r.html.includes('copiez'), app)
+      assert.ok(r.texte.includes('Ouvrir Mon espace : https://aoknowledge.com/mon-espace'), app)
+      // Le fond de Brice : les couts, et « on construit de toute facon ».
+      assert.ok(r.texte.includes("l'IA et les serveurs, et leur développement. On continue de construire avec ou sans soutien"), app)
+      assert.ok(r.texte.includes('Ton badge « Soutien » est déjà sur ton compte, dans Mon espace.'), app)
+    }
+  }
+  // Le chemin reel pour arreter (Mon espace n'a pas le portail) ; le lien du portail s'ajoute s'il est connu.
+  assert.match(M.rendreMail('soutien', { ...VIDE, soutien: 'carnet' }).texte, /depuis le Carnet : Mon forfait, « Gérer mon soutien »\./)
+  assert.match(M.rendreMail('soutien', { ...VIDE, soutien: 'pilotage' }).texte, /depuis Pilotage : le menu de ton compte, « Gérer mon abonnement »\./)
+  assert.match(M.rendreMail('soutien', { ...VIDE, soutien: 'aok' }).texte, /aoknowledge\.com\/soutenir, « Gérer mon soutien »\./)
+  assert.ok(M.rendreMail('soutien', { ...PLEIN, soutien: 'aok' }).texte.includes(`Ou directement ici : ${PORTAIL}`))
+  assert.equal(M.rendreMail('soutien', { ...PLEIN, soutien: 'carnet', essai: true }).objet, '[Essai] Merci pour ton soutien')
+  // Les autres mails gardent la signature de Brice et Melanie et le vouvoiement sous le bouton.
+  assert.ok(M.rendreMail('carnet-premium', PLEIN).html.includes('copiez ce lien'))
+})
+
+const sessionPayee = (meta = {}, extra = {}) => ({
+  id: 'cs_live_abcdefghijkl', mode: 'subscription', status: 'complete', payment_status: 'paid', livemode: true,
+  customer_details: { email: 'Eleve@Exemple.fr', name: 'camille martin' }, amount_total: 599, subscription: 'sub_SOUTIEN123',
+  metadata: meta, ...extra,
+})
+const abonnement = (produit, meta = {}) => ({
+  id: 'sub_SOUTIEN123', metadata: meta,
+  items: { data: [{ price: { id: 'price_x', product: produit, recurring: { interval: 'month' } }, current_period_end: 1767225600 }] },
+})
+const AOK = 'prod_VboqdWtBxA9SnV'
+
+await bloc('soutien : quel mail. Un achat soutien = le remerciement, un achat ordinaire = le mail ordinaire, jamais les deux', () => {
+  const C1 = M.PRODUIT_STRIPE_CARNET_PREMIUM
+  // Carnet pris en soutien : la marque sur la session, ou seulement sur l'abonnement.
+  for (const [s, a] of [[sessionPayee({ soutien: '1', app: 'carnet' }), abonnement(C1, { soutien: '1' })], [sessionPayee(), abonnement(C1, { soutien: '1' })], [sessionPayee({ soutien: '1' }), abonnement(C1)]]) {
+    const p = M.planMailHorsPilotage(s, a, null)
+    assert.equal(p.produit, 'soutien')
+    assert.equal(p.variables.soutien, 'carnet')
+    assert.equal(p.reference, 'sub_SOUTIEN123')
+    assert.equal(p.variables.prenom, 'Camille')
+    assert.equal(p.variables.email, 'eleve@exemple.fr')
+    assert.equal(M.cleMailAchat(p.produit, p.reference), 'soutien:sub_SOUTIEN123')
+  }
+  // Carnet Premium ordinaire (lien de paiement) : le mail du Carnet, comme avant.
+  const o = M.planMailHorsPilotage(sessionPayee(), abonnement(C1), null)
+  assert.equal(o.produit, 'carnet-premium')
+  assert.equal(o.reference, 'sub_SOUTIEN123')
+  assert.equal(o.variables.offre, 'Carnet Premium (mensuel)')
+  assert.equal(o.variables.montant, '5,99 euros')
+  assert.equal(o.variables.prochaineEcheance, '1er janvier 2026')
+  assert.equal(o.variables.soutien, undefined)
+  // Le soutien AOKnowledge (/soutenir) : soutien=aok, sur la session ou l'abonnement.
+  for (const [s, a] of [[sessionPayee({ soutien: 'aok', app: 'aok' }), abonnement(AOK, { soutien: 'aok' })], [sessionPayee(), abonnement(AOK, { soutien: 'aok' })]]) {
+    const p = M.planMailHorsPilotage(s, a, null)
+    assert.equal(p.produit, 'soutien')
+    assert.equal(p.variables.soutien, 'aok')
+  }
+  // Un autre abonnement sans marque, une session qui n'est pas un abonnement, pas payee : rien.
+  assert.equal(M.planMailHorsPilotage(sessionPayee(), abonnement('prod_AUTRE'), null), 'pas_concerne')
+  assert.equal(M.planMailHorsPilotage(sessionPayee({ soutien: '1' }), abonnement('prod_AUTRE'), null), 'pas_concerne', 'soutien=1 sans app connue')
+  assert.equal(M.planMailHorsPilotage(sessionPayee({ soutien: 'aok' }, { mode: 'payment' }), abonnement(AOK), null), 'pas_concerne')
+  assert.equal(M.planMailHorsPilotage(sessionPayee({ soutien: 'aok' }, { payment_status: 'unpaid' }), abonnement(AOK), null), 'pas_concerne')
+  assert.equal(M.planMailHorsPilotage(sessionPayee({ soutien: 'aok' }, { customer_details: {}, customer_email: null }), abonnement(AOK), null), 'sans_email')
+  // Pilotage : soutien=1 sur la session OU sur l'abonnement relu donne Pilotage ; rien = le mail de Premium.
+  assert.equal(M.soutienDeLAchat('pilotage', { source: 'pilotage', soutien: '1' }, null), 'pilotage')
+  assert.equal(M.soutienDeLAchat('pilotage', { source: 'pilotage' }, { soutien: '1' }), 'pilotage')
+  assert.equal(M.soutienDeLAchat('pilotage', { source: 'pilotage' }, null), null)
+  assert.equal(M.soutienDeLAchat('pilotage', { soutien: 'true' }), null)
+  assert.equal(M.soutienDeLAchat(null, { soutien: '1' }), null)
+  assert.equal(M.soutienDeLAchat(null, {}, { soutien: 'aok' }), 'aok')
+  // Le code : dans mailAchatPilotage, le remerciement part AVANT (et a la place de) l'envoi du mail de Premium.
+  const s = lire('../src/lib/mails-achat.ts')
+  const i = s.indexOf("const soutien = soutienDeLAchat('pilotage', p.session.metadata, p.soutien ? { soutien: '1' } : null)")
+  assert.ok(i > 0 && i < s.indexOf('envoyerMailAchat(produit, p.abonnementId, {'))
+  assert.match(s, /if \(soutien\) \{\n\s+return envoyerMailAchat\('soutien', p\.abonnementId, \{/)
+  // La marque de l'abonnement relu remonte au webhook.
+  assert.match(lire('../src/lib/pilotage-abonnement.ts'), /soutien: estMarqueSoutien\(brut\.metadata\) \}/)
+  assert.match(lire('../src/app/api/pilotage/achat/webhook/route.ts'), /fin: r\.fin, soutien: r\.soutien \}\)/)
+})
+
+await bloc('soutien : un rejeu du webhook ne renvoie rien (meme cle soutien:sub_...), un envoi rate peut reessayer', async () => {
+  const base = new Set()
+  const partis = []
+  const livrer = async ({ echoue = false } = {}) => {
+    const p = M.planMailHorsPilotage(sessionPayee({ soutien: 'aok' }), abonnement(AOK, { soutien: 'aok' }), null)
+    const cle = M.cleMailAchat(p.produit, p.reference)
+    return M.envoyerUneFois({
+      reserver: async () => { await null; if (base.has(cle)) return false; base.add(cle); return true },
+      envoyer: async () => (echoue ? { ok: false, erreur: 'Resend : test' } : (partis.push(M.rendreMail(p.produit, p.variables).objet), { ok: true, id: 'id-test' })),
+      liberer: async () => { base.delete(cle) },
+      noter: async () => {},
+    })
+  }
+  assert.equal(await livrer({ echoue: true }), 'echec')
+  assert.equal(await livrer(), 'envoye')
+  assert.equal(await livrer(), 'deja_envoye')
+  assert.deepEqual((await Promise.all([livrer(), livrer()])).sort(), ['deja_envoye', 'deja_envoye'])
+  assert.deepEqual(partis, ['Merci pour ton soutien'])
 })
 
 await bloc('migration : la table de l anti-doublon, fermee, sans point-virgule dans les commentaires', () => {

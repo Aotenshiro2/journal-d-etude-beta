@@ -1,5 +1,21 @@
 # ETAT du journal d etudes
 
+## SOUTIEN : LE MAIL DE REMERCIEMENT (CORRECTIF) (11/11/2026, commite NON pousse, branche soutien-page depuis origin/master a83f48f ; AUCUNE migration)
+
+- Brief : D:\7_Agents\briefs\2026-11-11-soutien-mail-et-page-soutenir.md (partie 1) ; rapport : soutien-page-rapport.md
+  (notes de Yume Orchestre). Avant : un soutien recevait le mail d'achat ordinaire (Carnet ou Pilotage Premium, vouvoiement).
+- Un achat marque soutien=1 (app) ou soutien=aok (/soutenir), sur la session OU sur l'abonnement, recoit le remerciement
+  (modeleSoutien, mails-achat-pur.ts : texte de Brice, tutoiement, signe « Merci encore, Brice », bouton Mon espace) A LA
+  PLACE du mail ordinaire. Pilotage : mailAchatPilotage lit la session et soutien de synchroniserAbonnement (abonnement
+  relu). Sessions sans source (Carnet, soutien AOK) : planMailHorsPilotage (pur) choisit soutien, Carnet ou rien.
+- Anti-doublon inchange : cle soutien:sub_... dans mails_achat_envoyes ; un rejeu ne renvoie rien.
+- La session de soutien du Carnet portait deja sa marque (metadata soutien=1 sur la session et l'abonnement) : rien ajoute.
+- « Tu arretes quand tu veux, depuis Mon espace » etait faux (Mon espace n'a pas le portail Stripe) : le mail donne le
+  chemin reel (Carnet : Mon forfait, « Gerer mon soutien » ; Pilotage : menu du compte, « Gerer mon abonnement » ;
+  AOK : aoknowledge.com/soutenir, « Gerer mon soutien »), plus PILOTAGE_PORTAIL_LIEN s'il est pose.
+- Verif : node scripts/verifier-mails-achat.mjs (13 blocs, dont 3 du soutien ; depuis un worktree, le bloc migration lit
+  ../../../sites : lien provisoire ~/Projects/sites), verifier-soutien (15), tsc, eslint.
+
 ## SOUTIEN DANS LES APPS : ABONNEMENT EXISTANT EN MODE SOUTIEN, BADGE (11/11/2026, commite NON pousse, branche soutien-apps depuis origin/master 24523c0 ; AUCUNE migration)
 
 - Brief : D:\7_Agents\briefs\2026-11-11-soutien-dans-les-apps.md ; labo D:\6_Societe\Pilotage\soutien\labo ; rapport :
