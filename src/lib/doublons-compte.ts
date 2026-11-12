@@ -56,13 +56,27 @@ export function rangerSurCompte<T extends { source: string; idExterne: string }>
 
 type Empreintable = { idExterne: string; symbole: string; entreLe: Date; quantite: number; pnl: number }
 
+/**
+ * Les sources des trades LUS par l'IA sur une image ou un document (Carnet
+ * 1.10.0, 12/11/2026) : « ia:<identifiant> » (documents/lire) et
+ * « capture:<plateforme> » (la capture intelligente d'une page dans le
+ * Carnet). Le même trade n'y a pas toujours la même source : l'identifiant du
+ * compte lu sur une capture et pas sur la suivante, une capture puis l'export
+ * CSV du même jour. Sur un compte donné, leur empreinte (symbole, instant
+ * d'entrée, quantité, P&L) se cherche donc parmi TOUTES les sources de ce
+ * compte, et celle d'un export parmi ses propres lignes ET celles lues par
+ * l'IA. Les exports entre eux ne changent pas (même source seulement).
+ */
+export const PREFIXES_LUS_PAR_IA = ['ia:', 'capture:'] as const
+export const sourceLueParIA = (source: string) => PREFIXES_LUS_PAR_IA.some(p => source.startsWith(p))
+
 /** Un filtre Prisma de TradeImport, écrit sans Prisma (module pur) ; l'appelant y ajoute userId EN DERNIER. */
 export interface FiltreDoublons {
-  source: string
+  source?: string
   compteId?: string
   idExterne?: { in: string[] }
   entreLe?: { in: Date[] }
-  OR?: ({ idExterne: { in: string[] } } | { entreLe: { in: Date[] } })[]
+  OR?: ({ idExterne: { in: string[] } } | { entreLe: { in: Date[] } } | { source: string | { startsWith: string } })[]
 }
 
 /**
@@ -87,7 +101,11 @@ export function recherchesDoublons(compteId: string | null, trades: (Empreintabl
     parCle: sourceDitLeCompte(source)
       ? { source, idExterne: { in: cles } }
       : { source, compteId, idExterne: { in: [...new Set([...cles, ...bases])] } },
-    parEntree: { source, compteId, entreLe: { in: entrees } },
+    // L'empreinte sur ce compte : toutes sources pour des trades lus par l'IA,
+    // la sienne et celles lues par l'IA pour un export (PREFIXES_LUS_PAR_IA).
+    parEntree: sourceLueParIA(source)
+      ? { compteId, entreLe: { in: entrees } }
+      : { compteId, entreLe: { in: entrees }, OR: [{ source }, ...PREFIXES_LUS_PAR_IA.map(p => ({ source: { startsWith: p } }))] },
   }
 }
 
@@ -96,17 +114,26 @@ export function recherchesDoublons(compteId: string | null, trades: (Empreintabl
  * recherches ont rendues : celles trouvées par leur clé (ramenée à la forme
  * de l'import : rangée sur le compte, ou de base sans compte), puis celles
  * reconnues à l'empreinte (connusParEmpreinte). `parEntree` vide = pas
- * d'empreinte (l'écran /imports n'en a jamais fait).
+ * d'empreinte (l'écran /imports n'en a jamais fait). Une ligne d'une AUTRE
+ * source (Carnet 1.10.0) ne se reconnaît qu'à l'empreinte : sa clé, propre à
+ * sa source, est mise à part pour ne jamais passer pour celle de l'import.
  */
 export function clesConnues(
   trades: (Empreintable & { source: string })[],
   compteId: string | null,
   parCle: { idExterne: string }[],
-  parEntree: Empreintable[],
+  parEntree: (Empreintable & { source?: string })[],
 ): Set<string> {
   const source = trades[0]?.source ?? ''
   const forme = (id: string) => (compteId === null ? cleDeBase(id) : cleSurCompte(id, source, compteId))
   const connues = new Set(parCle.map(e => forme(e.idExterne)))
   if (parEntree.length === 0) return connues
-  return connusParEmpreinte(trades, connues, parEntree.map(e => ({ ...e, idExterne: forme(e.idExterne) })))
+  return connusParEmpreinte(trades, connues, parEntree.map(e => (
+    e.source !== undefined && e.source !== source
+      ? { ...e, idExterne: `${e.source}${MARQUE_AUTRE_SOURCE}${e.idExterne}` }
+      : { ...e, idExterne: forme(e.idExterne) }
+  )))
 }
+
+/** Ce qui met à part la clé d'une ligne d'une autre source (jamais dans une clé d'import). */
+export const MARQUE_AUTRE_SOURCE = '|source-autre|'

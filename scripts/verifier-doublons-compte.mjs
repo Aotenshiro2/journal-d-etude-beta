@@ -46,6 +46,8 @@ function correspond(ligne, where) {
       if (!cond.some(w => correspond(ligne, w))) return false
     } else if (cond !== null && typeof cond === 'object' && !(cond instanceof Date) && 'in' in cond) {
       if (!cond.in.some(v => egal(ligne[champ], v))) return false
+    } else if (cond !== null && typeof cond === 'object' && !(cond instanceof Date) && 'startsWith' in cond) {
+      if (typeof ligne[champ] !== 'string' || !ligne[champ].startsWith(cond.startsWith)) return false
     } else if (!egal(ligne[champ] ?? null, cond)) {
       return false
     }
@@ -187,6 +189,72 @@ bloc('deux trades identiques (deux partiels au meme prix) : une ligne d avant ne
   assert.deepEqual(importer(base, { compteId: 'cA' }, deux), { nouveaux: 0, dejaConnus: 2, importes: 0 })
 })
 
+// ── Carnet 1.10.0 (12/11/2026) : les trades lus par l'IA (capture d'une page, image, document) ──
+
+// Le meme trade lu trois fois : sur une capture du Carnet, sur une image deposee
+// (source « ia:<identifiant lu> », ou « ia:inconnu » quand rien n'est lu), et
+// dans l'export CSV de la plateforme (source du lecteur, ids de fills).
+const lu = (source, idExterne, champs = {}) => ({
+  source, idExterne, compte: null, symbole: 'MNQZ6', direction: 'long', quantite: 2, prixEntree: 21450.25, prixSortie: 21462.5,
+  entreLe: new Date('2026-11-12T08:31:12.000Z'), sortiLe: new Date('2026-11-12T08:44:50.000Z'), pnl: 49, devise: 'USD', frais: 1.48, dureeSec: 818, fuseau: 'Europe/Paris', stopPrix: null,
+  ...champs,
+})
+const EMPREINTE = 'MNQZ6-2026-11-12T08:31:12.000Z-2-49'
+const capture = () => [lu('capture:topstepx', EMPREINTE)]
+const imageLue = identifiant => [lu(`ia:${identifiant}`, EMPREINTE)]
+const exportCsv = () => [lu('topstepx-trades', 'fill-7001')]
+
+bloc('recherches : une source lue par l IA cherche son empreinte dans toutes les sources du compte, un export aussi dans celles lues par l IA', () => {
+  assert.ok(D.sourceLueParIA('capture:topstepx') && D.sourceLueParIA('ia:inconnu') && D.sourceLueParIA('ia:pp000123'))
+  assert.ok(!D.sourceLueParIA('tradovate-performance') && !D.sourceLueParIA('quantower-executions') && !D.sourceLueParIA('iax'))
+  const c = D.recherchesDoublons('cA', D.rangerSurCompte(capture(), 'cA'))
+  assert.equal(c.parCle.source, 'capture:topstepx')
+  assert.deepEqual(Object.keys(c.parEntree).sort(), ['compteId', 'entreLe'])
+  const e = D.recherchesDoublons('cA', D.rangerSurCompte(exportCsv(), 'cA'))
+  assert.equal(e.parEntree.source, undefined)
+  assert.deepEqual(e.parEntree.OR, [{ source: 'topstepx-trades' }, { source: { startsWith: 'ia:' } }, { source: { startsWith: 'capture:' } }])
+  // Sans compte (apercu sans compte, ecran /imports) : rien ne change, meme source.
+  assert.equal(D.recherchesDoublons(null, capture()).parEntree.source, 'capture:topstepx')
+})
+
+bloc('(e) une capture puis l export du meme trade, sur le meme compte : 0 nouveau, dans les deux sens', () => {
+  const base = []
+  assert.deepEqual(importer(base, { compteId: 'cA' }, capture()), { nouveaux: 1, dejaConnus: 0, importes: 1 })
+  assert.deepEqual(importer(base, { compteId: 'cA' }, exportCsv()), { nouveaux: 0, dejaConnus: 1, importes: 0 })
+  const base2 = []
+  importer(base2, { compteId: 'cA' }, exportCsv())
+  assert.deepEqual(importer(base2, { compteId: 'cA' }, capture()), { nouveaux: 0, dejaConnus: 1, importes: 0 })
+  assert.equal(base.length + base2.length, 2)
+})
+
+bloc('(f) le meme trade lu sous deux sources de l IA (compte lu une fois, pas l autre ; image puis capture) : 0 nouveau', () => {
+  const base = []
+  importer(base, { compteId: 'cA' }, imageLue('pp000123'))
+  assert.deepEqual(importer(base, { compteId: 'cA' }, imageLue('inconnu')), { nouveaux: 0, dejaConnus: 1, importes: 0 })
+  assert.deepEqual(importer(base, { compteId: 'cA' }, capture()), { nouveaux: 0, dejaConnus: 1, importes: 0 })
+  // La meme capture deux fois : reconnue par sa cle, comme avant.
+  const base2 = []
+  importer(base2, { compteId: 'cA' }, capture())
+  assert.deepEqual(importer(base2, { compteId: 'cA' }, capture()), { nouveaux: 0, dejaConnus: 1, importes: 0 })
+})
+
+bloc('(g) copy trading inchange : la capture du meme trade sur un autre compte est rangee ; deux exports entre eux, meme source seulement', () => {
+  const base = []
+  importer(base, { compteId: 'cA' }, exportCsv())
+  assert.deepEqual(importer(base, { compteId: 'cB' }, capture()), { nouveaux: 1, dejaConnus: 0, importes: 1 })
+  // Deux exports de plateformes differentes au meme instant : rien de change (meme source seulement).
+  assert.deepEqual(importer(base, { compteId: 'cA' }, [lu('tradovate-performance', 'f-1')]), { nouveaux: 1, dejaConnus: 0, importes: 1 })
+  // Une ligne d'une autre source ne reconnait qu'un trade, et jamais par sa cle.
+  const deux = [lu('capture:topstepx', EMPREINTE), lu('capture:topstepx', `${EMPREINTE}#2`)]
+  const base2 = []
+  importer(base2, { compteId: 'cA' }, exportCsv())
+  assert.deepEqual(importer(base2, { compteId: 'cA' }, deux), { nouveaux: 1, dejaConnus: 1, importes: 1 })
+  // Une ligne d'une autre source a la MEME cle que l'import : elle compte a l'empreinte, sans passer pour la cle.
+  const base3 = [{ ...lu('ia:inconnu', `${EMPREINTE}|compte:cA`), userId: 'u1', compteId: 'cA' }]
+  assert.deepEqual(importer(base3, { compteId: 'cA' }, capture()), { nouveaux: 0, dejaConnus: 1, importes: 0 })
+  assert.ok(!D.clesConnues(D.rangerSurCompte(capture(), 'cA'), 'cA', [], []).size)
+})
+
 // ── Le code des routes : les memes etapes que la base simulee ───────────────
 
 bloc('routes : Pilotage range puis cherche sur son compte, l ecran /imports tous comptes sans empreinte, userId en dernier', () => {
@@ -202,7 +270,7 @@ bloc('routes : Pilotage range puis cherche sur son compte, l ecran /imports tous
   const fonction = serveur.slice(debut, serveur.indexOf('\n}\n', debut))
   assert.match(fonction, /const \{ parCle, parEntree \} = recherchesDoublons\(compteId, trades\)/)
   assert.match(fonction, /where: \{ \.\.\.parCle, userId \}/)
-  assert.match(fonction, /where: \{ \.\.\.parEntree, userId \}/)
+  assert.match(fonction, /where: \{ \.\.\.parEntree, userId \}, select: \{ idExterne: true, source: true,/)
   assert.match(fonction, /return clesConnues\(trades, compteId, cle, entree\)/)
   // Le module pur n'importe que des modules purs, et aucune migration : la contrainte unique ne change pas.
   const pur = lire('../src/lib/doublons-compte.ts')

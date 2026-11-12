@@ -700,7 +700,8 @@ bloc('controle statique : chaque acces a DocumentPilotage et au coffre est borne
   assert.match(imp, /const connus = await clesDejaConnues\(userId, compteId, trades\)\s*const nouveaux = separerNouveaux\(trades, connus\)/)
   const serveurTrades = lire('../src/lib/trades-serveur.ts')
   assert.match(serveurTrades, /prisma\.tradeImport\.findMany\(\{ where: \{ \.\.\.parCle, userId \}, select: \{ idExterne: true \} \}\)/)
-  assert.match(serveurTrades, /prisma\.tradeImport\.findMany\(\{ where: \{ \.\.\.parEntree, userId \}, select: \{ idExterne: true, symbole: true, entreLe: true, quantite: true, pnl: true \} \}\)/)
+  // La source de chaque ligne (Carnet 1.10.0) : l'empreinte d'un trade lu par l'IA se cherche parmi toutes les sources du compte.
+  assert.match(serveurTrades, /prisma\.tradeImport\.findMany\(\{ where: \{ \.\.\.parEntree, userId \}, select: \{ idExterne: true, source: true, symbole: true, entreLe: true, quantite: true, pnl: true \} \}\)/)
   assert.match(lire('../src/lib/doublons-compte.ts'), /return connusParEmpreinte\(trades, connues, parEntree\.map/)
   // La lecture rendue : compte rapproche et empreintes.
   assert.match(route, /const fin = finaliserLecture\(lecture, comptes\)/)

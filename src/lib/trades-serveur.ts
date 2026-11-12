@@ -38,6 +38,9 @@ export const dansLesPositions = (ids: string[]): Prisma.TradeImportWhereInput =>
  * le même document sur CE compte (clé sous ses deux formes, puis empreinte) ;
  * sans, tous comptes confondus comme avant. Les filtres viennent de
  * doublons-compte.ts (pur), le userId passe après : il ne se contourne pas.
+ * Depuis le Carnet 1.10.0 (12/11/2026), l'empreinte d'un trade lu par l'IA
+ * (sources « ia: » et « capture: ») se cherche parmi toutes les sources du
+ * compte : la `source` de chaque ligne trouvée en est rendue.
  * @param empreinte false pour l'écran /imports, qui ne cherchait que la clé.
  */
 export async function clesDejaConnues(
@@ -51,7 +54,7 @@ export async function clesDejaConnues(
   const [cle, entree] = await Promise.all([
     prisma.tradeImport.findMany({ where: { ...parCle, userId }, select: { idExterne: true } }),
     empreinte
-      ? prisma.tradeImport.findMany({ where: { ...parEntree, userId }, select: { idExterne: true, symbole: true, entreLe: true, quantite: true, pnl: true } })
+      ? prisma.tradeImport.findMany({ where: { ...parEntree, userId }, select: { idExterne: true, source: true, symbole: true, entreLe: true, quantite: true, pnl: true } })
       : [],
   ])
   return clesConnues(trades, compteId, cle, entree)
