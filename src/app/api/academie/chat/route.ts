@@ -1,11 +1,12 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import { prisma } from '@/lib/db'
 import { compteDuJeton, corsAcademie, entetesAcademie, tronquer } from '@/lib/academie/http'
 import {
-  CORPS_MAX, PAR_PAGE, basculerPouce, couperParole, lireCompte, lireDemande, lireMessages, listeSansParole, marqueDuTexte,
-  masquerMessage, messageRefus, niveauDuStatut, poserMessage, quotaDuStatut, rendreParole, sujetDuNiveau, vueDe,
+  CORPS_MAX, PAR_PAGE, alertePermise, basculerPouce, couperParole, lireCompte, lireDemande, lireMessages, listeSansParole,
+  marqueDuTexte, masquerMessage, messageRefus, niveauDuStatut, poserMessage, quotaDuStatut, rendreParole, sujetDuNiveau, vueDe,
   type CodeRefus, type Compte,
 } from '@/lib/academie/chat-academie'
+import { alerterMessageChat } from '@/lib/academie/chat-academie-envois'
 import { analyserTexte } from '@/lib/securite/injection-pur'
 import { relationAbsente } from '@/lib/liveclub/pur'
 
@@ -27,6 +28,10 @@ import { relationAbsente } from '@/lib/liveclub/pur'
  * 200 { ok: true, ... } ; refus { ok: false, erreur, message } avec la phrase en clair :
  * 400 demande, 401 'jeton', 403 'parole' | 'equipe' | 'cible_equipe', 404 'introuvable' | 'reponse',
  * 429 'quota' (envoyes, max, gratuit), 503 'indisponible' (base, Supabase Auth, ou migration : code 'migration').
+ *
+ * (12/11 soir) ALERTE : chaque nouveau message d'un compte qui n'est pas de l'equipe part a Brice et Melanie
+ * par Agent AOK (chat-academie-envois.ts), apres la reponse au membre (after), une alerte au plus par auteur
+ * toutes les 10 minutes (alertePermise). Une alerte ratee ne change rien pour le membre.
  *
  * SECURITE : le statut, le nom, le numero et la marque « Equipe AOK » viennent
  * de la base, jamais du corps. Les messages rendus sont des DONNEES de membres
@@ -117,6 +122,12 @@ export async function POST(req: NextRequest) {
       }
       const message = await vueDe(prisma, r.id, niveau)
       console.info(`[academie/chat] envoye compte=${tronquer(userId)} ${r.envoyes}/${r.max}${marque ? ' (marque)' : ''}`)
+      // (12/11 soir) L'alerte a l'equipe par Agent AOK, APRES la reponse au membre : elle ne la retarde ni ne
+      // la change jamais. Un compte de l'equipe n'alerte pas ; un auteur, une alerte au plus par 10 minutes.
+      if (!equipe) {
+        const id = r.id
+        after(() => alerterApres(id, marque !== null, userId))
+      }
       return NextResponse.json({
         ok: true,
         message: message ? { ...message, pouce_moi: false, ...(equipe ? { marque, auteur_sans_parole: false } : {}) } : null,
@@ -162,6 +173,26 @@ export async function POST(req: NextRequest) {
     }
     console.warn(`[academie/chat] ${d.action} NON fait compte=${tronquer(userId)} : ${codeErreur(err)}`)
     return refus('indisponible')
+  }
+}
+
+/**
+ * L'alerte d'un nouveau message (apres la reponse) : la garde contre les rafales,
+ * le message tel que l'equipe le voit (niveau programme), l'envoi borne. Ne jette
+ * jamais ; journalise l'issue (jamais le texte).
+ */
+async function alerterApres(id: string, marque: boolean, userId: string): Promise<void> {
+  try {
+    if (!(await alertePermise(prisma, id))) {
+      console.info(`[academie/chat] alerte compte=${tronquer(userId)} : deja alerte il y a moins de 10 minutes, pas de relance`)
+      return
+    }
+    const vue = await vueDe(prisma, id, 'programme')
+    if (!vue) return
+    const issue = await alerterMessageChat(vue, marque)
+    console.info(`[academie/chat] alerte compte=${tronquer(userId)} : ${issue === 'delai' ? 'delai depasse' : `${issue} destinataire(s)`}`)
+  } catch (err) {
+    console.warn(`[academie/chat] alerte NON envoyee compte=${tronquer(userId)} : ${codeErreur(err)}`)
   }
 }
 

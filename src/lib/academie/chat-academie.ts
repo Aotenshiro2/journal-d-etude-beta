@@ -350,6 +350,91 @@ export function vueMessage(x: unknown): MessageVue | null {
 }
 
 // ---------------------------------------------------------------------------
+// L'alerte a l'equipe par Agent AOK (12/11/2026 soir, Brice : « Les questions
+// remonte par les agent aok de moi et Mel ? »)
+// ---------------------------------------------------------------------------
+//
+// Chaque nouveau message d'un compte qui n'est pas de l'equipe (reponses
+// comprises) part en message prive aux comptes diffusion = 'equipe' de
+// cockpit_telegram_comptes (Brice et Melanie), par alerterEquipeTexte (texte
+// brut, aucun parse_mode, apercu des liens coupe). Garde contre les rafales :
+// l'alerte ne part que si l'auteur n'a ecrit AUCUN autre message dans les 10
+// minutes d'avant (SQL_ALERTE_PERMISE) : au plus une alerte par auteur toutes
+// les 10 minutes, sans table de plus. Ni email ni identifiant de compte : le
+// nom affiche dans le salon (ou « Membre 1204 ») et son statut.
+
+export const LIEN_SALON = 'https://aoknowledge.com/academie/chat'
+/** Extrait du message dans l'alerte. */
+export const MAX_EXTRAIT_ALERTE = 300
+/** Pas plus d'une alerte par auteur dans cette fenetre. */
+export const FENETRE_ALERTE_MIN = 10
+
+export const LIBELLE_STATUT: Record<StatutAuteur, string> = {
+  equipe: 'Équipe AOK',
+  live_club: 'Live Club',
+  club_10: '10% Club',
+  eleve: "Élève de l'académie",
+  communaute: 'Communauté',
+}
+
+/** Le nom tel que le salon l'affiche a l'equipe : le nom de l'annuaire, sinon le numero. Jamais un email. */
+export function nomAffiche(a: AuteurVue): string {
+  if (a.equipe) return 'Équipe AOK'
+  return a.nom ?? (a.numero !== null ? `Membre ${a.numero}` : 'Un membre')
+}
+
+/**
+ * Les adresses du membre desamorcees : Telegram rend cliquable toute adresse
+ * d'un texte brut, meme sans parse_mode. « https://x.fr » devient
+ * « https[:]//x.fr », « www.x.fr » devient « www[.]x.fr » : lisible par
+ * l'equipe, jamais un lien a cliquer depuis l'alerte.
+ */
+export function desamorcerLiens(t: string): string {
+  return t.replace(/\b([a-z][a-z0-9+.-]{1,15}):\/\//gi, '$1[:]//').replace(/\bwww\./gi, 'www[.]').replace(/\bt\.me\//gi, 't[.]me/')
+}
+
+/** L'extrait : sur une ligne, MAX_EXTRAIT_ALERTE caracteres au plus (points de code), points de suite si coupe. */
+export function extraitAlerte(texte: string, max = MAX_EXTRAIT_ALERTE): string {
+  const ligne = texte.replace(/\s+/g, ' ').trim()
+  const cps = Array.from(ligne)
+  return cps.length > max ? `${cps.slice(0, max - 3).join('').trimEnd()}...` : ligne
+}
+
+/**
+ * Le texte de l'alerte, sobre, sans emoji ni tiret long. `extrait` arrive deja
+ * rendu visible par l'appelant si l'analyse de securite l'a trouve suspect, et
+ * `securite` dit alors pourquoi. Texte brut (aucun parse_mode) : rien a echapper.
+ */
+export function texteAlerteChat(a: {
+  nom: string; statut: StatutAuteur; extrait: string; reponse: boolean; marque: boolean; securite?: string | null
+}): string {
+  return [
+    "Nouvelle question dans le salon de l'académie",
+    `De : ${a.nom} (${LIBELLE_STATUT[a.statut]})${a.reponse ? ', en réponse à un message' : ''}`,
+    `Son message : « ${desamorcerLiens(a.extrait)} »`,
+    a.marque ? "Texte caché retiré à l'envoi." : null,
+    a.securite?.trim() || null,
+    `Pour répondre : ${LIEN_SALON}`,
+  ].filter(Boolean).join('\n')
+}
+
+/**
+ * L'alerte part-elle : l'auteur n'est pas de l'equipe, et il n'a ecrit aucun
+ * AUTRE message dans les 10 minutes d'avant (ordre (cree_le, id) : de deux
+ * envois simultanes, seul le premier alerte).
+ */
+export const SQL_ALERTE_PERMISE = `
+select exists (select 1 from public.aok_chat_messages x where x.id = $1::uuid)
+   and not exists (
+  select 1 from public.aok_chat_messages m, public.aok_chat_messages c
+   where c.id = $1::uuid
+     and m.user_id = c.user_id and m.id <> c.id
+     and (m.cree_le, m.id) < (c.cree_le, c.id)
+     and m.cree_le > c.cree_le - make_interval(mins => $2::int)
+) as permise
+`
+
+// ---------------------------------------------------------------------------
 // La base
 // ---------------------------------------------------------------------------
 
@@ -475,6 +560,12 @@ export async function poserMessage(c: ClientSql, userId: string, texte: string, 
   const id = lireUuid(r.id)
   if (!id) return { ok: false, refus: 'compte' }
   return { ok: true, id, envoyes: entier(r.envoyes) ?? 0, max: entier(r.max) ?? quotaDuStatut(statut) }
+}
+
+/** La garde contre les rafales (SQL_ALERTE_PERMISE). En cas de doute (ligne absente), pas d'alerte. */
+export async function alertePermise(c: ClientSql, messageId: string): Promise<boolean> {
+  const l = await c.$queryRawUnsafe<{ permise: boolean }[]>(SQL_ALERTE_PERMISE, messageId, FENETRE_ALERTE_MIN)
+  return l[0]?.permise === true
 }
 
 export async function vueDe(c: ClientSql, id: string, niveau: Niveau): Promise<MessageVue | null> {

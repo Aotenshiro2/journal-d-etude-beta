@@ -204,8 +204,8 @@ bloc('la route : jeton, statut lu en base, gestes de l equipe gardes, texte jama
   assert.match(r, /compteDuJeton\(req\)/)
   assert.match(r, /const compte: Compte = await lireCompte\(prisma, userId\)/)
   assert.match(r, /const equipe = compte\.statut === 'equipe'/)
-  assert.match(r, /if \(!equipe\) \{[\s\S]*?return refus\('equipe'\)/)
-  assert.ok(r.indexOf("if (!equipe)") < r.indexOf("d.action === 'masquer'"), 'masquer apres la garde de l equipe')
+  assert.match(r, /if \(!equipe\) \{\s*console\.info\(`\[academie\/chat\] \$\{d\.action\} refuse \(pas equipe\)[^\n]*\n\s*return refus\('equipe'\)/)
+  assert.ok(r.indexOf('refuse (pas equipe)') < r.indexOf("d.action === 'masquer'"), 'masquer apres la garde de l equipe')
   assert.match(r, /marqueDuTexte\(analyserTexte\(d\.brut, \{ niveau: 'cache' \}\)\.signaux\)/)
   for (const l of r.split('\n').filter(x => /console\.(info|warn|log|error)/.test(x))) {
     assert.ok(!/d\.texte|d\.brut|\btexte\b|message\.|email|raison/.test(l), `journal : ${l.trim()}`)
@@ -217,6 +217,87 @@ bloc('la route : jeton, statut lu en base, gestes de l equipe gardes, texte jama
   }
   assert.ok(!/^import /m.test(lib), 'chat-academie.ts n importe rien')
   assert.match(lib, /SI UN BOT LIT UN JOUR CE SALON/)
+})
+
+// ---------------------------------------------------------------------------
+// (12/11 soir) L'alerte a l'equipe par Agent AOK
+// ---------------------------------------------------------------------------
+
+const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
+
+bloc('alerte : le texte (titre, nom affiche et statut, extrait, lien du salon, texte cache) sans email ni identifiant', () => {
+  const t = C.texteAlerteChat({ nom: 'Zoé Martin', statut: 'communaute', extrait: 'On attend la clôture ?', reponse: false, marque: false })
+  assert.equal(t, [
+    "Nouvelle question dans le salon de l'académie",
+    'De : Zoé Martin (Communauté)',
+    'Son message : « On attend la clôture ? »',
+    'Pour répondre : https://aoknowledge.com/academie/chat',
+  ].join('\n'))
+  const r = C.texteAlerteChat({ nom: 'Membre 1204', statut: 'live_club', extrait: 'Oui', reponse: true, marque: true, securite: 'Attention (sécurité) : x.' })
+  assert.match(r, /^De : Membre 1204 \(Live Club\), en réponse à un message$/m)
+  assert.match(r, /^Texte caché retiré à l'envoi\.$/m)
+  assert.match(r, /^Attention \(sécurité\) : x\.$/m)
+  assert.ok(r.endsWith('Pour répondre : https://aoknowledge.com/academie/chat'), 'le lien du salon reste un lien')
+  for (const s of ['equipe', 'live_club', 'club_10', 'eleve', 'communaute']) assert.ok(C.LIBELLE_STATUT[s])
+  assert.equal(C.nomAffiche({ equipe: false, numero: 1204, nom: null, statut: 'communaute' }), 'Membre 1204')
+  assert.equal(C.nomAffiche({ equipe: false, numero: 7, nom: 'Léa F.', statut: 'club_10' }), 'Léa F.')
+  for (const x of [t, r]) {
+    assert.ok(!INTERDITS.test(x.replace(/[«»]/g, '')), 'ni tiret long, ni guillemet courbe, ni points de suspension en un caractere')
+    assert.ok(!/@/.test(x) && !UUID.test(x), 'ni email ni identifiant de compte')
+  }
+})
+
+bloc('alerte : extrait de 300 caracteres au plus (points de code), sur une ligne', () => {
+  assert.equal(C.extraitAlerte('a\n\n  b   c'), 'a b c')
+  const long = C.extraitAlerte('x'.repeat(1000))
+  assert.equal(Array.from(long).length, 300)
+  assert.ok(long.endsWith('...'))
+  const emojis = C.extraitAlerte(c(0x1f600).repeat(400))
+  assert.equal(Array.from(emojis).length, 300, 'un emoji compte pour un caractere, jamais coupe en deux')
+  assert.ok(!/[\ud800-\udbff]$/.test(emojis.slice(0, -3)), 'aucune moitie d emoji')
+  assert.equal(C.extraitAlerte('x'.repeat(300)), 'x'.repeat(300), '300 tout juste : rien de coupe')
+  assert.ok(Array.from(C.texteAlerteChat({ nom: 'A', statut: 'eleve', extrait: C.extraitAlerte('y'.repeat(2000)), reponse: false, marque: false })).length < 500)
+})
+
+bloc('alerte : echappement (texte brut, aucun parse_mode, liens du membre desamorces, apercu coupe)', () => {
+  assert.equal(C.desamorcerLiens('va sur https://exemple.fr/x et http://y.fr'), 'va sur https[:]//exemple.fr/x et http[:]//y.fr')
+  assert.equal(C.desamorcerLiens('www.exemple.fr ou t.me/canal'), 'www[.]exemple.fr ou t[.]me/canal')
+  assert.equal(C.desamorcerLiens('JavaScript://alert(1)'), 'JavaScript[:]//alert(1)')
+  assert.equal(C.desamorcerLiens('Prix : 5,99 EUR. Fin.'), 'Prix : 5,99 EUR. Fin.', 'le texte ordinaire ne bouge pas')
+  const t = C.texteAlerteChat({ nom: '<b>Moi</b>', statut: 'communaute', extrait: '*gras* _x_ <a href="https://piege.fr">clic</a> [lien](https://piege.fr)', reponse: false, marque: false })
+  assert.ok(t.includes('<b>Moi</b>') && t.includes('*gras* _x_'), 'les signes restent du texte : rien n est interprete')
+  assert.ok(!/https:\/\/piege/.test(t), 'aucune adresse du membre cliquable dans l alerte')
+  assert.ok(t.includes('https://aoknowledge.com/academie/chat'))
+  // L'envoi : alerterEquipeTexte (sendMessage sans parse_mode, apercu coupe), aux comptes diffusion = 'equipe' seulement.
+  const aide = lire('../src/lib/alerte-equipe-telegram.ts')
+  const fonction = aide.slice(aide.indexOf('export async function alerterEquipeTexte'))
+  assert.ok(!/parse_mode/.test(fonction), 'alerterEquipeTexte n envoie aucun parse_mode')
+  assert.match(fonction, /link_preview_options: \{ is_disabled: true \}/)
+  assert.match(fonction, /where diffusion = 'equipe' or \$\{o\.support === true\}::boolean/)
+  const envois = lire('../src/lib/academie/chat-academie-envois.ts')
+  assert.match(envois, /alerterEquipeTexte\(texte, \{ journal: '\[academie\/chat\] alerte a l equipe' \}\)/, 'sans support: true : Brice et Melanie seulement')
+  assert.match(envois, /analyserTexte\(m\.texte, \{ niveau: 'injection' \}\)/, 'le texte du membre passe par l analyse de securite')
+  const code = envois.split('\n').filter(l => !l.trim().startsWith('//')).join('\n')
+  assert.ok(!/parse_mode|email/i.test(code), 'ni parse_mode ni email dans le code de l envoi')
+})
+
+bloc('alerte : garde contre les rafales (une par auteur et par 10 minutes), apres la reponse, jamais bloquante', () => {
+  assert.equal(C.FENETRE_ALERTE_MIN, 10)
+  const s = C.SQL_ALERTE_PERMISE
+  assert.match(s, /exists \(select 1 from public\.aok_chat_messages x where x\.id = \$1::uuid\)/, 'message absent : pas d alerte')
+  assert.match(s, /m\.user_id = c\.user_id and m\.id <> c\.id/)
+  assert.match(s, /\(m\.cree_le, m\.id\) < \(c\.cree_le, c\.id\)/, 'de deux envois simultanes, seul le premier alerte')
+  assert.match(s, /m\.cree_le > c\.cree_le - make_interval\(mins => \$2::int\)/)
+  const r = lire('../src/app/api/academie/chat/route.ts')
+  assert.match(r, /if \(!equipe\) \{\s*const id = r\.id\s*after\(\(\) => alerterApres\(id, marque !== null, userId\)\)\s*\}\s*return NextResponse\.json/, 'apres la reponse, jamais pour l equipe')
+  const apres = r.slice(r.indexOf('async function alerterApres'))
+  assert.ok(apres.indexOf('alertePermise(prisma, id)') < apres.indexOf('alerterMessageChat(vue, marque)'), 'la garde avant l envoi')
+  assert.match(apres, /vueDe\(prisma, id, 'programme'\)/, 'le nom tel que l equipe le voit')
+  assert.match(apres, /catch \(err\) \{\s*console\.warn/, 'une erreur est journalisee, jamais jetee')
+  const envois = lire('../src/lib/academie/chat-academie-envois.ts')
+  const delai = Number(/DELAI_ALERTE_MS = (\d+)/.exec(envois)?.[1])
+  assert.ok(delai > 0 && delai <= 5000, `attente bornee (${delai} ms)`)
+  assert.ok(!/setInterval/.test(envois))
 })
 
 console.log(`\n${blocs} blocs ok`)

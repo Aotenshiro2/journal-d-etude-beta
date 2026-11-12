@@ -1,6 +1,27 @@
 # ETAT du journal d etudes
 
-## SALON « QUESTIONS DE L'ACADEMIE » : POST /api/academie/chat (12/11/2026, commite NON pousse, branche chat-academie depuis origin/master 9f97699 ; migration 20261112210000 du workspace ECRITE, NON appliquee)
+## SALON DE L'ACADEMIE : L'ALERTE A L'EQUIPE PAR AGENT AOK (12/11/2026 soir, commite NON pousse, branche chat-academie-alerte depuis origin/master 3830ac1 ; AUCUNE migration)
+
+- Brice, chat de l'orchestre : « Les questions remonte par les agent aok de moi et Mel ? ». Rapport : chat-academie-rapport.md,
+  section « Suite du 12/11 soir » (notes de Yume Orchestre).
+- Chaque nouveau message d'un compte qui n'est PAS de l'equipe (reponses comprises) part en prive aux comptes
+  diffusion = 'equipe' de cockpit_telegram_comptes (Brice, Melanie) par alerterEquipeTexte (pas de nouveau bot ni de
+  cle ; sans support: true, donc pas Adil). Texte : « Nouvelle question dans le salon de l'académie », « De : <nom du
+  salon> (<statut>) », l'extrait (300 caracteres au plus), « Texte caché retiré à l'envoi. » si marque, le lien
+  https://aoknowledge.com/academie/chat. Texte brut, aucun parse_mode, apercu coupe ; les adresses du membre
+  desamorcees (« https[:]//x.fr ») ; le message passe par l'analyse de securite au niveau 'injection' (il entre dans
+  l'historique d'Agent AOK) ; ni email ni identifiant de compte.
+- Jamais bloquant : la route l'envoie APRES la reponse au membre (after de Next), attente bornee a 4 s
+  (chat-academie-envois.ts), erreur journalisee sans le texte. Garde contre les rafales SANS table : l'alerte ne part que
+  si l'auteur n'a ecrit aucun autre message dans les 10 minutes d'avant (SQL_ALERTE_PERMISE ; de deux envois simultanes,
+  seul le premier). Une conversation suivie (un message toutes les 9 minutes) ne donne qu'une alerte, au debut.
+- Verifs : verifier-chat-academie.mjs (13 blocs : texte, extrait, echappement, rafale) ;
+  `node --env-file=.env.local scripts/essayer-alerte-chat-academie.mjs` (requete compilee sur la vraie table en lecture
+  seule, logique sur une table temporaire dans une transaction annulee : 3 etapes ok le 12/11).
+- Mise en ligne : push du journal seul (le site n'en depend pas). A verifier au premier message d'un membre : l'alerte
+  arrive chez Brice et Melanie, une seule par rafale.
+
+## SALON « QUESTIONS DE L'ACADEMIE » : POST /api/academie/chat (12/11/2026, EN LIGNE le 12/11 au soir sur le go de Brice : journal 3830ac1, migration 20261112210000 appliquee)
 
 - Brief : D:\7_Agents\briefs\2026-11-12-chat-academie.md ; rapport : chat-academie-rapport.md (notes de Yume Orchestre).
   Page du site : /academie/chat (ETAT du site, section du 12/11).
