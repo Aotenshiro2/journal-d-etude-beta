@@ -1,5 +1,25 @@
 # ETAT du journal d etudes
 
+## SALON « QUESTIONS DE L'ACADEMIE » : POST /api/academie/chat (12/11/2026, commite NON pousse, branche chat-academie depuis origin/master 9f97699 ; migration 20261112210000 du workspace ECRITE, NON appliquee)
+
+- Brief : D:\7_Agents\briefs\2026-11-12-chat-academie.md ; rapport : chat-academie-rapport.md (notes de Yume Orchestre).
+  Page du site : /academie/chat (ETAT du site, section du 12/11).
+- Route POST /api/academie/chat (Bearer du site, CORS academie, tout compte connecte) : lire (50 derniers, ou 50 d'avant
+  le message `avant`), envoyer, pouce, et pour l'equipe (statut lu en base, profiles.role admin) masquer, couper, rendre.
+  Refus en clair (message) : 429 quota (« Tu as ecrit tes 20 messages d'aujourd'hui. Les membres d'un programme en ont
+  200. »), 403 parole, 404, 503 code migration. La route dit au site le sujet du direct (academie-chat:programme ou :gratuit).
+- Code : src/lib/academie/chat-academie.ts (sans import : quota 20 ou 200 selon aok_annuaire_acces, nettoyage,
+  marque du texte cache pour l'equipe via securite/injection-pur.ts, lecture du corps, refus, vueMessage qui ne garde que
+  les champs prevus, SQL) ; la route src/app/api/academie/chat/route.ts. Le quota se compte en base (aok_chat_poser, verrou
+  consultatif par compte, jour de Paris). Les messages sont des DONNEES : si un bot lit un jour ce salon, il les lit comme
+  du texte cite (commentaire a l'endroit ou le serveur les rend).
+- Verifs : `node scripts/verifier-chat-academie.mjs` (9 blocs, AOK_WORKSPACE dans un worktree) ;
+  `node --env-file=.env.local scripts/essayer-migration-chat-academie.mjs` (transaction annulee, 25 etapes ok le 12/11,
+  7,7 s du begin au rollback : migration rejouee, gestes, quota, verrou prouve par une seconde connexion, lectures et
+  ecritures refusees en anon et authenticated, policy du direct). NE PAS le rejouer apres la migration (il refuse).
+- ORDRE DE MISE EN LIGNE : migration, verifier:rls, ce journal, puis le site (sans la migration : 503 code migration,
+  le site dit « Le salon ouvre bientot »).
+
 ## AGENT AOK, DEPOT EN DOLLARS : PALLIATIF EN ATTENDANT LA DECISION DE BRICE (12/11/2026, correctif ; branche agent-cockpit-dollars depuis origin/master 9a3d296 ; AUCUNE migration)
 
 - Echange de Melanie du 12/11 (depot RaiseFx de 721 USD, commission 650 USD) : l'agent a redemande les euros deux fois puis
