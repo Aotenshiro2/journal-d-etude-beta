@@ -18,6 +18,7 @@
 import { prisma } from './db'
 import { CARNET_PREMIUM_PRODUIT, lireAbonnementsApp, type AbonnementsApp } from './soutien-pur'
 import { estEquipe } from './academie/pur'
+import { creerIndexReferences, reconnaitreCarnet, type Lecture } from './carnet-premium-pur'
 
 // 'duo' (brief E1, 30/10/2026) : l'abonnement Premium Duo (Carnet + Pilotage,
 // Stripe aoknowledge) ouvre le même palier que 'carnet-premium'.
@@ -25,10 +26,15 @@ import { estEquipe } from './academie/pur'
 // estEquipe), qui ouvre ce qu'ouvre un abonnement actif, sans abonnement.
 export type MentoratReason = 'equipe' | 'etm' | 'manuel' | 'liveclub' | 'skool-vip' | 'skool-premium' | 'formation' | 'duo' | 'carnet-premium'
 
-// Le produit « Carnet Premium » (5,99 €/mois) sur le Stripe aoknowledge —
+// Le produit « Carnet Premium » (5,99 €/mois) sur le Stripe aoknowledge,
 // créé le 28/08/2026. La vérification en direct donne l'accès IMMÉDIAT après
 // paiement, sans attendre la synchro cockpit du lendemain matin.
 const CARNET_PREMIUM_PRODUCT = 'prod_V9jniZCCbIJsmV'
+//
+// Reconnaissance (12/11/2026, correctif Payment Link, carnet-premium-pur.ts) :
+// d'abord le compte posé par l'extension en client_reference_id sur le lien de
+// paiement, puis l'email en repli. Avant, l'email seul : un acheteur qui
+// changeait d'email dans Stripe payait sans avoir l'accès.
 
 // Nom de la variable (constat du 29/09/2026) : c'est STRIPE_KEY_CARNET_AOK qui
 // est posée dans Vercel (production, depuis le 28/08) ; le code lisait
@@ -46,6 +52,24 @@ function stripeKeyCarnet(): string | null {
   }
   return key
 }
+
+// Les sessions Checkout des liens de paiement (lues pour le client_reference_id) :
+// la clé des sessions du Carnet (STRIPE_CARNET_CHECKOUT_KEY_AOKNOWLEDGE, celle
+// de /api/carnet/soutien), sinon celle de Pilotage puis de l'académie (même
+// chaîne que clePilotage, recopiée ici : l'importer ferait une boucle
+// d'imports par academie/droits), sinon celle du Carnet. Même compte Stripe.
+function cleSessionsCarnet(): string | null {
+  return (
+    process.env.STRIPE_CARNET_CHECKOUT_KEY_AOKNOWLEDGE?.trim() ||
+    process.env.STRIPE_PILOTAGE_KEY_AOKNOWLEDGE?.trim() ||
+    process.env.STRIPE_CHECKOUT_KEY_AOKNOWLEDGE?.trim() ||
+    process.env.STRIPE_AGENT_KEY_AOKNOWLEDGE?.trim() ||
+    stripeKeyCarnet()
+  )
+}
+
+// L'index compte -> clients Stripe des liens de paiement, un par instance.
+const indexReferencesCarnet = creerIndexReferences()
 
 // Garde-fous de la vérif en direct (relecture du 29/09/2026). Elle tourne à
 // chaque appel IA d'un non-abonné (capture, mentorat, via ia-niveau.ts) : sans
@@ -103,33 +127,45 @@ function ecrireCacheCarnet(email: string, oui: boolean) {
 
 const codesStripeSignales = new Set<string>()
 
+// Une fois par appel et par code (12/11/2026 : par appel aussi, pour qu'un 403
+// des sessions Checkout ne soit pas tu par un 403 deja signale ailleurs).
 function signalerErreurStripe(appel: string, status: number) {
   const code = status >= 500 ? '5xx' : String(status)
-  if (codesStripeSignales.has(code)) return
-  codesStripeSignales.add(code)
+  if (codesStripeSignales.has(`${appel}:${code}`)) return
+  codesStripeSignales.add(`${appel}:${code}`)
   console.error(
     `[entitlements] Stripe ${appel} a répondu ${status} : vérif Carnet Premium en échec (code ${code} signalé une seule fois par instance).`
   )
 }
 
 type ClientStripe = { id: string; email?: string | null }
-type AbonnementStripe = { status: string; items: { data: { price: { product: string } }[] } }
 
-// La liste `data` de la réponse, ou null si Stripe répond une erreur HTTP. Un
-// délai dépassé remonte en exception (TimeoutError), traitée par l'appelant.
-async function lireStripe<T>(chemin: string, key: string, appel: string): Promise<T[] | null> {
+// La liste `data` de la réponse, ou le code de l'erreur HTTP. Un délai dépassé
+// remonte en exception (TimeoutError), traitée par l'appelant.
+async function lireStripeBrut(chemin: string, key: string, appel: string): Promise<Lecture> {
   const res = await fetch(`https://api.stripe.com${chemin}`, {
     headers: { Authorization: `Bearer ${key}` },
     signal: AbortSignal.timeout(STRIPE_DELAI_MS),
   })
   if (!res.ok) {
     signalerErreurStripe(appel, res.status)
-    return null
+    return { ok: false, statut: res.status }
   }
-  return ((await res.json()).data ?? []) as T[]
+  const data = (await res.json()).data
+  return { ok: true, data: Array.isArray(data) ? data : [] }
 }
 
-async function hasCarnetPremium(email: string): Promise<boolean> {
+// La liste `data` de la réponse, ou null si Stripe répond une erreur HTTP.
+async function lireStripe<T>(chemin: string, key: string, appel: string): Promise<T[] | null> {
+  const r = await lireStripeBrut(chemin, key, appel)
+  return r.ok ? (r.data as T[]) : null
+}
+
+// Le compte (client_reference_id des liens de paiement) d'abord, l'email en
+// repli : reconnaitreCarnet (carnet-premium-pur.ts). Le cache reste par email
+// (un compte = un email) ; un « non » ne s'y garde que si toutes les lectures
+// ont abouti.
+async function hasCarnetPremium(userId: string, email: string): Promise<boolean> {
   const key = stripeKeyCarnet()
   if (!key) return false // clé absente : les autres voies d'accès suffisent
   const cle = email.toLowerCase().trim()
@@ -138,63 +174,19 @@ async function hasCarnetPremium(email: string): Promise<boolean> {
 
   let reponseSure = true // passe à false dès qu'une lecture Stripe échoue
   try {
-    const clientsVus = new Set<string>()
-    // Seuls les clients dont l email est EXACTEMENT celui de l utilisateur
-    // comptent (casse ignoree) : la recherche Stripe n est pas une egalite
-    // (bob@gmail.com peut remonter jean.bob@gmail.com), et ouvrir le
-    // Premium au mauvais compte serait pire que de le refuser.
-    const abonneParmi = async (clients: ClientStripe[]): Promise<boolean> => {
-      for (const c of clients) {
-        if ((c.email ?? '').toLowerCase().trim() !== cle) continue
-        if (clientsVus.has(c.id)) continue
-        clientsVus.add(c.id)
-        const subs = await lireStripe<AbonnementStripe>(
-          `/v1/subscriptions?customer=${c.id}&limit=20`,
-          key,
-          'subscriptions'
-        )
-        if (!subs) {
-          reponseSure = false
-          continue
-        }
-        if (
-          subs.some(
-            s =>
-              (s.status === 'active' || s.status === 'trialing' || s.status === 'past_due') &&
-              s.items.data.some(i => i.price.product === CARNET_PREMIUM_PRODUCT)
-          )
-        ) {
-          return true
-        }
-      }
-      return false
+    const cleSessions = cleSessionsCarnet() ?? key
+    const r = await reconnaitreCarnet({
+      compte: userId,
+      email,
+      index: indexReferencesCarnet,
+      produit: CARNET_PREMIUM_PRODUCT,
+      lire: (chemin, appel, quelle) => lireStripeBrut(chemin, quelle === 'sessions' ? cleSessions : key, appel),
+    })
+    if (r.oui) {
+      ecrireCacheCarnet(cle, true)
+      return true
     }
-
-    const liste = await lireStripe<ClientStripe>(
-      `/v1/customers?email=${encodeURIComponent(email)}&limit=10`,
-      key,
-      'customers'
-    )
-    if (!liste) {
-      reponseSure = false // clé fausse, quota, panne : inutile d'insister avec la recherche
-    } else {
-      if (await abonneParmi(liste)) {
-        ecrireCacheCarnet(cle, true)
-        return true
-      }
-      const requete = `email:'${email.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`
-      const trouves = await lireStripe<ClientStripe>(
-        `/v1/customers/search?query=${encodeURIComponent(requete)}&limit=10`,
-        key,
-        'customers/search'
-      )
-      if (!trouves) {
-        reponseSure = false
-      } else if (await abonneParmi(trouves)) {
-        ecrireCacheCarnet(cle, true)
-        return true
-      }
-    }
+    reponseSure = r.sur
   } catch (err) {
     const nom = (err as { name?: string } | null)?.name
     if (nom === 'TimeoutError' || nom === 'AbortError') {
@@ -338,8 +330,9 @@ export async function checkMentoratAccess(userId: string): Promise<MentoratAcces
   if (duo.length > 0) return { entitled: true, reason: 'duo', email }
 
   // 3. Abonnement Carnet Premium (Stripe aoknowledge, vérif en direct :
-  // l'accès s'ouvre dans la minute qui suit le paiement)
-  if (await hasCarnetPremium(email)) {
+  // l'accès s'ouvre dans la minute qui suit le paiement). Le compte d'abord
+  // (client_reference_id du lien de paiement), l'email en repli.
+  if (await hasCarnetPremium(userId, email)) {
     return { entitled: true, reason: 'carnet-premium', email }
   }
 
