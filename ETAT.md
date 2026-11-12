@@ -1,5 +1,46 @@
 # ETAT du journal d etudes
 
+## CARNET PREMIUM RECONNU PAR LE COMPTE (client_reference_id) ; MAIL DU SOUTIEN : MON ESPACE A LE PORTAIL (12/11/2026, correctif ; branche carnet-client-reference depuis origin/master e36d895 ; AUCUNE migration ; Stripe lu seulement)
+
+- Brief : D:\7_Agents\briefs\2026-11-12-correctif-payment-link-carnet.md (trouve par l'Orchestre Prix). Avant :
+  checkMentoratAccess ne reconnaissait le Carnet Premium que par l'email du client Stripe. Le lien de paiement de
+  l'extension pre-remplit l'email du compte, mais l'acheteur peut le changer dans Stripe : il payait sans l'acces. Le
+  client_reference_id (uuid du compte, pose par l'extension, offres.ts lienPaiement) n'etait lu nulle part.
+- Correction (src/lib/carnet-premium-pur.ts, branche dans entitlements.ts hasCarnetPremium(userId, email)) : le compte
+  d'abord, l'email en repli, comme Pilotage (lireSessionPilotage : client_reference_id puis email). Pilotage ecrit le
+  droit en base au webhook ; le Carnet n'a pas de table de droits, donc sans migration : les sessions TERMINEES des deux
+  liens de paiement (plink_1U9QKN... mensuel, plink_1UAR2D... annuel, LIENS_PAIEMENT_CARNET) sont lues chez Stripe et
+  rangees par compte dans la memoire de l'instance (creerIndexReferences : tout a la premiere lecture, puis au plus une
+  fois par minute les sessions creees depuis la derniere lecture reussie moins 25 h). L'abonnement du client trouve est
+  relu a chaque verification (actif, essai, impaye en relance, produit du Carnet), exactement comme par email.
+- Cles : les sessions avec STRIPE_CARNET_CHECKOUT_KEY_AOKNOWLEDGE, sinon la chaine de clePilotage (recopiee : l'importer
+  bouclait par academie/droits), sinon STRIPE_KEY_CARNET_AOK ; clients et abonnements avec STRIPE_KEY_CARNET_AOK comme
+  avant. Une cle sans droit sur les sessions (400, 401, 403) = signale une fois dans les journaux
+  (« Stripe checkout/sessions a repondu ... »), l'email decide comme avant, le cache des « non » reste. Une panne
+  passagere (reseau, 429, 5xx, delai) = reponse pas sure, le « non » n'est pas garde.
+- Duo et soutien : le Duo passe par Pilotage (session du serveur, client_reference_id du jeton, droit academie_acces lu
+  par user_id OU email) : deja reconnu par le compte. Le soutien du Carnet et d'AOKnowledge : sessions creees par le
+  serveur avec customer_email (adresse du compte, imposee a Checkout) ; elles n'ouvrent aucun acces (le soutien n'est
+  propose que quand tout est compris) ; badge et portail lus par email, coherent avec ces sessions.
+- Rattrapage (Stripe, lecture seule, 12/11) : aucun abonnement Carnet Premium n'a jamais existe sur les deux prix
+  (status=all : 0 et 0) ; une seule session de lien de paiement, expiree sans paiement. Personne a rattraper.
+- Mail du soutien (mails-achat-pur.ts, modeleSoutien) : la phrase d'arret dit maintenant « Tu arretes quand tu veux, en
+  un clic, depuis Mon espace, rubrique Achats : « Gerer mon abonnement ». », puis le chemin de l'app en second
+  (« C'est aussi possible depuis ... ») et le lien du portail s'il est pose. Le commentaire « Mon espace n'a pas de lien
+  vers le portail » est retire.
+- Verifs : node scripts/verifier-carnet-reference.mjs (10 blocs, faux Stripe, dont email different + client_reference_id
+  = acces ouvert), verifier-mails-achat (13), verifier-soutien (15), verifier-soutien-aok (11),
+  verifier-portail-abonnements (9), verifier-effacement (21), tsc, eslint des fichiers touches, next build.
+  verifier-pilotage-paliers echoue DEJA sur origin/master (assertion du middleware), son bloc Duo passe.
+- Limites : la portee Mon espace > Achats (portail) et le badge lisent toujours le Carnet par email (abonnementCarnetDe) :
+  un acheteur par lien de paiement qui a change d'email a l'acces, mais ne voit pas cet abonnement dans « Mes
+  abonnements » (il le gere par le lien de connexion du portail Stripe ou le recu). L'index vit par instance : une
+  instance neuve relit tout (aujourd'hui une session). Le cache des « non » (5 min par email) inchange. Piste cote
+  extension (non touchee ici, un autre chantier y travaille) : locked_prefilled_email au lieu de prefilled_email
+  verrouille l'adresse sur le lien de paiement (documentation Stripe des Payment Links).
+- Mise en ligne : non verifie en vrai qu'une cle des sessions est posee en prod avec Checkout Sessions en lecture ; sinon
+  le journal Vercel montre « Stripe checkout/sessions a repondu 403 » et seul l'email reconnait (comme avant).
+
 ## GERER MON ABONNEMENT DEPUIS MON ESPACE : /api/compte/portail (12/11/2026, correctif ; branche portail-abonnement depuis origin/master 56cbeaf ; AUCUNE migration ; RIEN cree dans Stripe)
 
 - Brief : D:\7_Agents\briefs\2026-11-12-correctifs-lier-abonnement.md (partie 2). Le site : branche

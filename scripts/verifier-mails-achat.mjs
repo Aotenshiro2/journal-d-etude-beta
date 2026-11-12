@@ -217,10 +217,19 @@ await bloc('soutien : le remerciement de Brice, tutoiement, signe Brice, sans ti
       assert.ok(r.texte.includes('Ton badge « Soutien » est déjà sur ton compte, dans Mon espace.'), app)
     }
   }
-  // Le chemin reel pour arreter (Mon espace n'a pas le portail) ; le lien du portail s'ajoute s'il est connu.
-  assert.match(M.rendreMail('soutien', { ...VIDE, soutien: 'carnet' }).texte, /depuis le Carnet : Mon forfait, « Gérer mon soutien »\./)
-  assert.match(M.rendreMail('soutien', { ...VIDE, soutien: 'pilotage' }).texte, /depuis Pilotage : le menu de ton compte, « Gérer mon abonnement »\./)
+  // Ou arreter (12/11/2026) : Mon espace a le portail (« Gérer mon abonnement », rubrique Achats, journal e36d895),
+  // l'app garde son chemin en second ; le lien du portail s'ajoute s'il est connu. Plus de « Mon espace n'a pas ».
+  const MON_ESPACE = 'Tu arrêtes quand tu veux, en un clic, depuis Mon espace, rubrique Achats : « Gérer mon abonnement ».'
+  for (const app of Object.keys(APPS_SOUTIEN)) {
+    for (const v of [PLEIN, VIDE]) {
+      const arret = M.rendreMail('soutien', { ...v, soutien: app }).modele.paragraphes.at(-1)
+      assert.ok(arret.startsWith(`${MON_ESPACE} C'est aussi possible depuis `), `${app} : « ${arret} »`)
+    }
+  }
+  assert.match(M.rendreMail('soutien', { ...VIDE, soutien: 'carnet' }).texte, /aussi possible depuis le Carnet : Mon forfait, « Gérer mon soutien »\./)
+  assert.match(M.rendreMail('soutien', { ...VIDE, soutien: 'pilotage' }).texte, /aussi possible depuis Pilotage : le menu de ton compte, « Gérer mon abonnement »\./)
   assert.match(M.rendreMail('soutien', { ...VIDE, soutien: 'aok' }).texte, /aoknowledge\.com\/soutenir, « Gérer mon soutien »\./)
+  assert.doesNotMatch(lire('../src/lib/mails-achat-pur.ts'), /Mon espace n'a pas/)
   assert.ok(M.rendreMail('soutien', { ...PLEIN, soutien: 'aok' }).texte.includes(`Ou directement ici : ${PORTAIL}`))
   assert.equal(M.rendreMail('soutien', { ...PLEIN, soutien: 'carnet', essai: true }).objet, '[Essai] Merci pour ton soutien')
   // /soutenir est ouvert a tout compte : pas de « Tu avais deja tout » pour soutien=aok ; les apps le gardent.

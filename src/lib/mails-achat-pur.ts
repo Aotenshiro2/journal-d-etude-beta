@@ -229,21 +229,26 @@ const SOUTENU: Record<AppSoutien, string> = {
 }
 
 /**
- * Ou l'arreter, vraiment (verifie le 11/11/2026) : Mon espace n'a pas de lien
- * vers le portail Stripe. Le Carnet : « Gérer mon soutien » dans Mon forfait
- * (1.9.0) ; Pilotage : « Gérer mon abonnement » dans le menu du compte ;
- * AOKnowledge : « Gérer mon soutien » sur /soutenir.
+ * Ou l'arreter. Depuis le 12/11/2026, Mon espace a le portail Stripe :
+ * « Gérer mon abonnement » dans Mon espace > Achats (journal e36d895,
+ * /api/compte/portail ; il liste le soutien du Carnet, de Pilotage et
+ * d'AOKnowledge). Le chemin de chaque app reste vrai, il vient en second :
+ * le Carnet, « Gérer mon soutien » dans Mon forfait (1.9.0) ; Pilotage,
+ * « Gérer mon abonnement » dans le menu du compte ; AOKnowledge, « Gérer mon
+ * soutien » sur /soutenir.
  */
+const ARRET_MON_ESPACE = 'Tu arrêtes quand tu veux, en un clic, depuis Mon espace, rubrique Achats : « Gérer mon abonnement ».'
 const ARRET: Record<AppSoutien, string> = {
-  carnet: 'Tu arrêtes quand tu veux, en un clic, depuis le Carnet : Mon forfait, « Gérer mon soutien ».',
-  pilotage: 'Tu arrêtes quand tu veux, en un clic, depuis Pilotage : le menu de ton compte, « Gérer mon abonnement ».',
-  aok: 'Tu arrêtes quand tu veux, en un clic, depuis la page du soutien : aoknowledge.com/soutenir, « Gérer mon soutien ».',
+  carnet: "C'est aussi possible depuis le Carnet : Mon forfait, « Gérer mon soutien ».",
+  pilotage: "C'est aussi possible depuis Pilotage : le menu de ton compte, « Gérer mon abonnement ».",
+  aok: "C'est aussi possible depuis la page du soutien : aoknowledge.com/soutenir, « Gérer mon soutien ».",
 }
 
 /** Le texte de Brice (chat du 11/11/2026), mis au gabarit : tutoiement, signe Brice. */
 export function modeleSoutien(v: VariablesMail): ModeleMail {
   const app: AppSoutien = v.soutien ?? 'aok'
-  const arret = v.lienPortail ? `${ARRET[app]} Ou directement ici : ${v.lienPortail}` : ARRET[app]
+  const chemins = `${ARRET_MON_ESPACE} ${ARRET[app]}`
+  const arret = v.lienPortail ? `${chemins} Ou directement ici : ${v.lienPortail}` : chemins
   return {
     objet: objetDe(v, 'Merci pour ton soutien'),
     preheader: 'Ton badge « Soutien » est déjà sur ton compte.',
