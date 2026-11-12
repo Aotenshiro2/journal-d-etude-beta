@@ -1,5 +1,29 @@
 # ETAT du journal d etudes
 
+## GERER MON ABONNEMENT DEPUIS MON ESPACE : /api/compte/portail (12/11/2026, correctif ; branche portail-abonnement depuis origin/master 56cbeaf ; AUCUNE migration ; RIEN cree dans Stripe)
+
+- Brief : D:\7_Agents\briefs\2026-11-12-correctifs-lier-abonnement.md (partie 2). Le site : branche
+  site-portail-abonnement du workspace (carte « Mes abonnements » de Mon espace > Achats). Ordre : le journal d'abord.
+- Avant : aucune route ne rendait le portail client Stripe a Mon espace (seulement /api/pilotage/niveau pour Pilotage,
+  /api/carnet/soutien et /api/academie/soutien pour un soutien). Le mail de remerciement le disait (« Mon espace n'a pas
+  le portail Stripe »).
+- GET /api/compte/portail (Bearer du site, CORS de l'academie) : les abonnements EN COURS du compte AOKnowledge, ranges
+  par client Stripe (un portail ne montre que les abonnements d'UN client ; deux Checkout = souvent deux clients) :
+  { ok, abonnements: [{ client: 'cus_...', abonnements: ['Pilotage Premium', 'Carnet Premium'] }], incomplet }.
+  Sources, aucune neuve : academie_acces (Pilotage, Duo) relu chez Stripe avec la cle de Pilotage ; abonnementCarnetDe
+  (Carnet Premium et son soutien) ; abonnementAokDe (soutien AOKnowledge) ; jusqu'a 3 adresses confirmees du compte
+  (SQL_IDENTITE), chaque lecture bornee a 6 s ; une source illisible donne incomplet: true, jamais une erreur.
+- POST { client } : le client est RELU (jamais cru sur parole), 403 'abonnement' s'il ne porte pas un abonnement du
+  compte ; sinon portailDuClient(clePilotage(), client, https://aoknowledge.com/mon-espace/parametres/achats), repli
+  PILOTAGE_PORTAIL_LIEN, sinon 503 'portail'. Libelles : Premium Duo (Carnet et Pilotage), Pilotage Premium, Soutien de
+  Pilotage, Carnet Premium, Soutien du Carnet, Soutien AOKnowledge.
+- Le Live Club (compte Stripe de Melanie) n'y est JAMAIS : il se gere depuis son bot ; la page le dit.
+- Fichiers : src/lib/portail-abonnements-pur.ts (pur), src/lib/portail-abonnements.ts, src/app/api/compte/portail/route.ts.
+  Verif : node scripts/verifier-portail-abonnements.mjs (9 blocs), verifier-soutien.mjs (15), tsc, eslint, next build.
+- Non verifie : un vrai portail ouvert (aucun compte de test abonne) ; que la cle de Pilotage ouvre bien le portail d'un
+  client cree par la cle du Carnet (meme compte Stripe, donc attendu) ; la configuration du portail chez Stripe (ce
+  qu'un membre peut y changer) est celle du compte, pas touchee.
+
 ## SOUTIEN AOKNOWLEDGE : LA ROUTE DE LA PAGE /SOUTENIR ET LE BADGE (11/11/2026, commite NON pousse, branche soutien-page ; AUCUNE migration ; RIEN cree dans Stripe)
 
 - Brief : D:\7_Agents\briefs\2026-11-11-soutien-mail-et-page-soutenir.md (partie 2, go de Brice). Le site : branche
