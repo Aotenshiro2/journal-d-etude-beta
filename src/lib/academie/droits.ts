@@ -147,6 +147,7 @@ async function liveClubParEmail(email: string): Promise<'oui' | 'non' | 'inconnu
 type LigneIdentite = { role: string | null; emails: string[] | null }
 type LigneCockpit = {
   etm: boolean; vip: boolean; broker_jusquau: string | null; manuel_jusquau: string | null; exempte: boolean
+  abonnement_cockpit: boolean
   secours_essai: boolean; autres_adresses: number | null
 }
 type LigneAccesSql = {
@@ -196,6 +197,8 @@ export async function droitsAcademie(userId: string): Promise<DroitsAcademie> {
     const brokerOuManuel = source !== null
     const stripe = brokerOuManuel ? [] : await Promise.all(emails.map(liveClubParEmail))
     liveClub = conclureLiveClub({ brokerOuManuel, stripe })
+    // (12/11/2026) Stripe par email ne retrouve pas toujours l abonnement : le cockpit, qui l a relie au membre, fait foi.
+    if (liveClub !== 'oui' && c?.abonnement_cockpit === true) liveClub = 'oui'
     if (liveClub === 'inconnu') erreurs.push('liveclub: stripe illisible')
   } else {
     // (10/11/2026) Un ETM ou un VIP dont le Live Club n'etait pas lu : les trois sources sans Stripe,

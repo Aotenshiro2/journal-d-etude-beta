@@ -58,6 +58,11 @@ select
  * - secours_essai : la decision B de la page d'essai sans Stripe (rang Skool
  *   vip ou premium, abonnement en cours vu par le cockpit, acces mentorat
  *   manuel MentoratGrant) ;
+ * - abonnement_cockpit (12/11/2026, replays Premium introuvables) : abonnement
+ *   live-club actif ou en essai du membre dans cockpit_abonnements, sans impaye
+ *   ni pause, non echu. Filet quand Stripe, interroge par email, ne retrouve pas
+ *   l abonnement (adresse de paiement differente de celle du compte) : le
+ *   cockpit relie l abonnement au membre. N ouvre que si Stripe dit non ou inconnu ;
  * - vip (10/11/2026, Brice : Mon espace dit le statut) : rang Skool vip
  *   (cockpit_membres_etat.tier_skool) d'une fiche reliee a un de ces emails,
  *   comme 'skool-vip' de checkMentoratAccess. Un statut AFFICHE : il n'ouvre
@@ -102,6 +107,14 @@ select
          )
        )
   ) as exempte,
+  exists (
+    select 1 from public.cockpit_abonnements ab
+      join public.cockpit_membre_emails me on me.membre_id = ab.membre_id
+     where ab.offre_id = 'live-club' and ab.statut in ('active', 'trialing')
+       and coalesce(ab.impaye, false) = false and ab.pause_jusquau is null
+       and (ab.fin_periode is null or ab.fin_periode >= current_date)
+       and lower(me.email) = any($1::text[])
+  ) as abonnement_cockpit,
   (
     exists (
       select 1 from public.cockpit_membre_emails me
