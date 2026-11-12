@@ -1,5 +1,21 @@
 # ETAT du journal d etudes
 
+## AGENT AOK, DEPOT EN DOLLARS : PALLIATIF EN ATTENDANT LA DECISION DE BRICE (12/11/2026, correctif ; branche agent-cockpit-dollars depuis origin/master 9a3d296 ; AUCUNE migration)
+
+- Echange de Melanie du 12/11 (depot RaiseFx de 721 USD, commission 650 USD) : l'agent a redemande les euros deux fois puis
+  refuse de convertir ; Melanie a converti a la main (650,93 et 586,48 EUR inscrits, les dollars perdus). Brice : « Il refuse
+  de prendre les info en dollars ». Cause : la consigne du 31/10 « LES MONTANTS SONT EN EUROS » et le modele sans devise
+  (cockpit_commissions n'a aucune colonne devise ; 70/30, Repartition et Revenus du cockpit en euros).
+- Palliatif (consigne seulement) : une seule question pour les euros de TOUS les montants en dollars (depot ET commission),
+  une ligne sans explication si on demande de convertir, les dollars donnes gardes dans note (« 721 USD, commission 650 USD »).
+  Descriptions montant et note de proposer_depot_broker et proposer_pause_depot. verifier-suivi-lots.mjs suit le texte.
+- Eval : scripts/eval-depot-dollars.mjs D1|D2|D3 (un cas par lancement, essai) : D1 une demande, sans taux ; D2 carte
+  depot_broker 650,93 / 586,48 / 5 mois, note « 721 USD, commission 650 USD » ; D3 une ligne. Les trois ok le 12/11.
+- EN ATTENTE DE BRICE : garder les dollars en dollars (colonne devise sur cockpit_commissions et cockpit_partenaire_taux,
+  journal ET cockpit). Options et plan : D:\6_Societe\Pilotage\Data-Performance\agent-cockpit\rapport-2026-11-12.md.
+- Constat : le depot du 12/11 est stocke 650.9299999999999 (nombre JS a virgule passe a ::numeric) ; invisible a l'ecran,
+  a corriger dans le chantier devise (montants passes en texte a 2 decimales).
+
 ## CARNET PREMIUM RECONNU PAR LE COMPTE (client_reference_id) ; MAIL DU SOUTIEN : MON ESPACE A LE PORTAIL (12/11/2026, correctif ; branche carnet-client-reference depuis origin/master e36d895 ; AUCUNE migration ; Stripe lu seulement)
 
 - Brief : D:\7_Agents\briefs\2026-11-12-correctif-payment-link-carnet.md (trouve par l'Orchestre Prix). Avant :

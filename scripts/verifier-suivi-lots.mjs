@@ -335,8 +335,12 @@ bloc('Agent AOK : ton de Mel, euros, commission de CE depot, note « a confirmer
   const src = lire('src/lib/agent-cockpit.ts')
   assert.match(src, /AVEC ELLE, DES MESSAGES COURTS, en francais simple : elle n'a pas la patience des messages detailles\./)
   assert.match(src, /Le detail ne le gene pas, mais une demande complete appelle la carte tout de suite/)
-  assert.match(src, /LES MONTANTS SONT EN EUROS \(31\/10\) : « 650 EUR \(655 USD\) »/)
-  assert.match(src, /Un montant en dollars SEULEMENT : une question courte, « Combien en euros \? »/)
+  // (12/11) Palliatif en attendant la decision de Brice sur les dollars : une
+  // seule question pour tous les montants en dollars, les dollars dans note.
+  assert.match(src, /LES MONTANTS \(31\/10, revu le 12\/11 en attendant la décision de Brice sur les dollars\) : la base n'a encore que des euros\. « 650 EUR \(655 USD\) »/)
+  assert.match(src, /UNE seule question courte qui demande d'un coup les euros de TOUS les montants en dollars, le dépôt ET la commission de ce dépôt/)
+  assert.match(src, /Tu ne convertis pas toi-même ; si on te le demande, une seule ligne, sans explication/)
+  assert.match(src, /mets-les dans note, tels quels \(« 721 USD, commission 650 USD »\)/)
   assert.match(src, /passe-la telle quelle \(commission de proposer_depot_broker\) et c'est tout, sans AUCUNE question/)
   assert.ok(!/demande si c'est la règle de ce broker pour tous ses clients ou seulement pour ce dépôt/.test(src), 'plus de debat sur la regle generale')
   assert.match(src, /« \.\.\. à confirmer par Mel »\) n'est PAS un accord/)
