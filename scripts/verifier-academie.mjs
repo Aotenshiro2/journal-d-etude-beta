@@ -36,7 +36,7 @@ import {
   ECART_MIN_S, INTERVALLE_MAX_S, JETON_MAX, MARGE_S, MAX_RESSOURCES, SEUIL_VU, VITESSE_MAX,
   colonneAbsente, tempsActifMinimum, texteLu, LECTURE_PLANCHER_S, MOTS_PAR_MINUTE, PART_LECTURE, PLAFOND_TEXTE_S, PROFONDEUR_LUE,
   autoriserEdition, champsModifies, estAdmin, estEquipe, fusionImport, lireCibleEdition, lireDemandeEdition, planEdition, LIMITES_EDITION,
-  liveClubDuStatut, sourceSansStripe,
+  liveClubDuStatut, prixImport, sourceSansStripe,
 } from '../src/lib/academie/pur.ts'
 import { configBibliotheque, configBunny, jetonLecture, lienLecture, signerLecture, DUREE_LIEN_S } from '../src/lib/academie/bunny.ts'
 import { configPdfBunny, jetonPdf, lienPdf, signerPdf, DUREE_URL_PDF_S } from '../src/lib/academie/pdf-bunny.ts'
@@ -1040,6 +1040,20 @@ bloc('importeur : une edition de l app est gardee, --ecraser-editions la remplac
   })
   // Forcee sans edition : rien a effacer.
   assert.equal(fusionImport({ edite: false, textes: base }, fichier, true).effacerEdition, false)
+})
+
+bloc('importeur (13/11, correctif) : un prix_eur null ou absent ne remet JAMAIS le prix du module a null', () => {
+  // Le Journaling, vendu a l'unite 49 EUR : le fichier sans prix garde celui de la base.
+  assert.deepEqual(prixImport(49, null), { prix: 49, garde: true, change: false })
+  assert.deepEqual(prixImport(49, undefined), { prix: 49, garde: true, change: false })
+  // Seul un prix explicite le change.
+  assert.deepEqual(prixImport(49, 59), { prix: 59, garde: false, change: true })
+  assert.deepEqual(prixImport(49, 49), { prix: 49, garde: false, change: false })
+  assert.deepEqual(prixImport(null, 39), { prix: 39, garde: false, change: true })
+  // Ni prix en base ni dans le fichier : rien.
+  assert.deepEqual(prixImport(null, null), { prix: null, garde: false, change: false })
+  // Une valeur douteuse arrete l'import (rien n'est ecrit), elle n'efface rien.
+  for (const v of ['49', 0, -1, Number.NaN, Infinity, {}, [], true]) assert.throws(() => prixImport(49, v), /prix_eur invalide/)
 })
 
 // ---------------------------------------------------------------------------

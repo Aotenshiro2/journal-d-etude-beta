@@ -1179,3 +1179,22 @@ export function fusionImport(
   if (!ecraser) return { valeurs: { ...base.textes }, garde: true, effacerEdition: false, historique: [] }
   return { valeurs: { ...fichier }, garde: false, effacerEdition: true, historique: champsModifies(base.textes, fichier) }
 }
+
+/**
+ * Le prix d'un module a l'import du catalogue (13/11/2026, correctif). Presque tous les fichiers
+ * modules/*.json portent « prix_eur »: null, et la vente a l'unite (ouverte le 13/11) lit le prix du
+ * module en premier : un prix_eur null ou absent du fichier ne doit JAMAIS effacer un prix present en
+ * base (garde). Seul un prix explicite le change : un nombre fini strictement positif (un module
+ * gratuit passe par ses offres, pas par un prix a 0). Toute autre valeur jette : l'import s'arrete,
+ * rien n'est ecrit.
+ */
+export function prixImport(
+  base: number | null,
+  fichier: unknown,
+): { prix: number | null; garde: boolean; change: boolean } {
+  if (fichier === undefined || fichier === null) return { prix: base, garde: base !== null, change: false }
+  if (typeof fichier !== 'number' || !Number.isFinite(fichier) || fichier <= 0) {
+    throw new Error(`prix_eur invalide dans le fichier : ${JSON.stringify(fichier)} (un nombre positif, ou null pour garder la base)`)
+  }
+  return { prix: fichier, garde: false, change: base !== fichier }
+}

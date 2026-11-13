@@ -64,13 +64,18 @@
 // colonne : le module s'importe, le quiz non (avertissement « migration a appliquer »). Un quiz invalide arrete
 // l'import. Pour ne poser QUE le quiz : scripts/importer-quiz-academie.mjs.
 //
+// Le prix du module (13/11/2026, correctif, prixImport de src/lib/academie/pur.ts) : un « prix_eur » null ou absent
+// du fichier GARDE le prix de la base (la vente a l'unite lit ce prix en premier ; presque tous les fichiers portent
+// null) ; seul un nombre positif explicite le change ; une autre valeur arrete l'import. Le bilan dit « prix » : garde,
+// change ou inchange, avec le prix relu en base apres l'ecriture (dans la transaction, essai compris).
+//
 // importerModule(tx, donnees, dossier, options) est exportee pour les scripts essayer-migration-*
 // (memes ordres, dans une transaction toujours annulee).
 import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { PrismaClient } from '@prisma/client'
-import { fusionImport, lireOffresSections } from '../src/lib/academie/pur.ts'
+import { fusionImport, lireOffresSections, prixImport } from '../src/lib/academie/pur.ts'
 import { lireQuiz } from '../src/lib/academie/quiz-academie.ts'
 import { SQL_EDITION_HISTORIQUE_IMPORT } from '../src/lib/academie/requetes.ts'
 import { planImportLecon, planImportModule, planImportSection } from '../src/lib/academie/arbre.ts'
@@ -182,9 +187,12 @@ export async function importerModule(tx, donnees, dossier, { ecraserEditions = f
   // Le module tel qu'il est en base (verrouille jusqu'a la fin de l'import) : une edition, un rangement dans l'app ?
   const [modBase] = await tx.$queryRawUnsafe(
     `select id::text as id, titre, resume, ordre, statut, edite_le is not null as edite, deplace_le is not null as deplace,
-            statut_le is not null as statut_modifie
+            statut_le is not null as statut_modifie, prix_eur::text as prix_eur
        from public.academie_modules where slug = $1 for update`,
     m.slug)
+  // Le prix : null ou absent dans le fichier = celui de la base (jamais efface) ; jette sur une valeur invalide.
+  const prixBase = modBase?.prix_eur == null ? null : Number(modBase.prix_eur)
+  const prix = prixImport(prixBase, m.prix_eur)
   const fm = fusionImport(
     modBase ? { edite: modBase.edite, textes: { titre: modBase.titre, resume: modBase.resume } } : null,
     { titre: m.titre, resume: m.resume ?? null },
@@ -200,16 +208,21 @@ export async function importerModule(tx, donnees, dossier, { ecraserEditions = f
      values ($1, $2, $3, $4, $5, $6, $7, $8, $9::numeric)
      on conflict (slug) do update set titre = excluded.titre, resume = excluded.resume, ordre = excluded.ordre,
        parcours = excluded.parcours, statut = excluded.statut, auteur = excluded.auteur, image = excluded.image,
-       prix_eur = excluded.prix_eur,
+       prix_eur = coalesce(excluded.prix_eur, academie_modules.prix_eur),
        edite_le = case when $10::boolean then null else academie_modules.edite_le end,
        edite_par = case when $10::boolean then null else academie_modules.edite_par end,
        deplace_le = case when $11::boolean then null else academie_modules.deplace_le end,
        statut_le = case when $12::boolean then null else academie_modules.statut_le end
-     returning id::text as id`,
+     returning id::text as id, prix_eur::text as prix_eur`,
     m.slug, fm.valeurs.titre, fm.valeurs.resume, pm.ordre, m.parcours ?? null, pm.statut,
-    m.auteur ?? null, m.image ?? null, m.prix_eur ?? null, fm.effacerEdition, pm.effacerPlace, pm.effacerStatut,
+    m.auteur ?? null, m.image ?? null, prix.prix, fm.effacerEdition, pm.effacerPlace, pm.effacerStatut,
   )
   const moduleId = mod.id
+  const prixEcrit = mod.prix_eur == null ? null : Number(mod.prix_eur)
+  if (prix.garde && prixEcrit !== prixBase) throw new Error(`prix du module ${m.slug} : ${prixBase} en base, ${prixEcrit} apres l'import (garde attendue)`)
+  bilan.prix = prix.garde ? `garde ${prixEcrit} EUR (en base ; le fichier n'en donne pas)`
+    : prix.change ? `change ${prixBase ?? 'aucun'} -> ${prixEcrit} EUR (fichier)`
+      : prixEcrit === null ? 'aucun' : `inchange ${prixEcrit} EUR`
   if (quizFichier.present) bilan.quiz = await poserQuiz(tx, moduleId, quizFichier.quiz)
   if (fm.garde) bilan.gardees.push(`module ${m.slug} (titre et resume)`)
   if (fm.effacerEdition) {
@@ -401,6 +414,7 @@ if (estLanceDirectement) {
   let bilan = { module: donnees.module?.slug }
   // Ce que l'import a garde (modifie dans l'app) ou ecrase (--ecraser-editions), ligne par ligne.
   const dire = () => {
+    if (bilan.prix) console.log(`prix du module : ${bilan.prix}`)
     for (const g of bilan.gardees ?? []) console.log(`garde : modifie dans l'app : ${g}`)
     for (const e of bilan.editions_ecrasees ?? []) console.log(`ecrase (--ecraser-editions) : ${e}, l'ancienne version est dans academie_editions`)
     for (const g of bilan.places_gardees ?? []) console.log(`garde : deplace dans le cockpit : ${g}`)
