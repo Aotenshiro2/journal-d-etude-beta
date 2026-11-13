@@ -224,7 +224,7 @@ Jette : les blocs « à lire aussi », les fils d’ariane, les encarts d’insc
 
 Si la page vend quelque chose, note-le comme un fait dans le résumé, en une clause, sans commentaire.`,
 
-  maison: `OÙ REGARDER : contenu Ao Knowledge (aoknowledge.com et son blog, journal.aoknowledge.com, la masterclass, le classroom Skool).
+  maison: `OÙ REGARDER : contenu Ao Knowledge (aoknowledge.com et son blog, l’académie sur aoknowledge.com/academie, journal.aoknowledge.com, la masterclass ; avant sa fermeture en novembre 2026, le classroom Skool).
 
 C’est notre propre contenu. Retiens : le titre exact, la catégorie, la date de publication, le corps du texte, et les exercices ou étapes proposés s’il y en a.
 
