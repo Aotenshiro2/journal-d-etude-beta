@@ -2097,6 +2097,32 @@ Tab (assistant IA de Brice, WhatsApp) lit le cockpit par `GET /api/tab/v1/...` (
   vers_claude = message du bot Agent AOK a Brice. Code : `src/lib/tab/notes.ts`, `notes-pur.ts`. L'Agent AOK
   refuse `cockpit_perso_*` (il tourne en postgres pour Mel et Adil). Verif : `node scripts/verifier-perso-rls.mjs`.
 
+## Les @handles des reseaux rapproches des fiches (13/11/2026, go de Brice, carte ontologie-handles-sociaux)
+
+Demande de Brice (10/11, note de Tab 50cdb878) : chaque @handle qui interagit avec nous (commentaires TikTok...)
+remonte dans le cockpit, rapproche de la fiche client. INTERNE : le membre ne voit jamais qu'on l'a.
+- Table `cockpit_handles_sociaux` (migration 20261113235500 du workspace, APPLIQUEE le 13/11) : plateforme + handle
+  (sans @, minuscules, unique), membre_id, personne_id, numero_membre, equipe, statut (sur, probable,
+  a_identifier), preuve, source, note, interactions, premier_vu, dernier_vu, pose_par (tab, tache, claude,
+  main:<prenom>), maj_le. RLS forcee, lecture `is_cockpit_member()`, aucune ecriture navigateur : ecrite ICI
+  seulement. Aucune route de l'espace membre ni du site ne la lit (bloc 13 du verificateur).
+- API de Tab : `POST /handles { lignes, a_blanc? }` (cles tab et tache, outil `pousser_handles` du connecteur
+  de Tache) et `GET /handles?statut=&plateforme=&membre=`. Format d'une ligne : plateforme, handle, statut, qui
+  (numero de membre, « equipe : prenom », membre:<uuid>, p-..., ou vide), preuve, source, interactions,
+  dernier_echange. Jamais d'email : ligne refusee, erreur sans recopie, corps journalise par masquerEmails.
+- Regles (`src/lib/tab/handles-pur.ts`, decider) : idempotent (meme handle = meme ligne, interactions remplacees,
+  pas additionnees) ; un « sur » pose a la main (pose_par main:...) n'est jamais retrograde par un lot ; une ligne
+  sans qui n'efface jamais un rapprochement ; numero -> fiche par les adresses VERIFIEES du compte (pont de
+  aok_badges_fiche), plusieurs fiches = probable + note, sans choisir ; equipe -> une seule personne du fonds
+  d'une nature d'equipe, sinon le prenom seul ; la fiche d'une personne du fonds ne suit que sur un lien certain.
+- Serveur : `src/lib/tab/handles.ts` (traiterLot sous verrou, recevoirLot, handlesTab). Cockpit : ligne
+  « Reseaux (interne) » de la fiche membre, onglet Membres > Reseaux (handles a identifier et probables).
+- Premier lot (TikTok @bricedlb, 30 jours, pose_par claude) : 5 lignes, alextraderft sur (fiche par le compte
+  Telegram « Alex ;-) » du Live Club et le compte n° 248, la meme), mel.mom.trader sur (equipe : Melanie,
+  p-melanie), david19691969, momo.chez97, jonathanguersoni a_identifier.
+- Verifs : `node scripts/verifier-handles-sociaux.mjs` (13 blocs, hors ligne),
+  `node scripts/essayer-migration-handles-sociaux.mjs <migration>` (transaction annulee, avant application).
+
 ## Vente a l'unite des modules de l'academie (19/10/2026, PUBLIC FERME)
 
 Decision de Brice (19/10) : le moins de friction. Stripe Embedded Checkout dans une fenetre du site, sans

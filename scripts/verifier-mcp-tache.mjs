@@ -97,9 +97,9 @@ await cas('droits : un outil par route de l aide de Tache, aucun en plus', () =>
     assert.ok(o.description.length > 40, `${o.name} : description vide`)
     assert.equal(o.inputSchema.additionalProperties, false, `${o.name} : champs libres`)
   }
-  // Les seules ecritures sont celles de la cle (notes, lu, reponse preparee, brouillon).
+  // Les seules ecritures sont celles de la cle (notes, lu, reponse preparee, brouillon, lot de handles du 13/11).
   const ecritures = liste.filter((o) => !o.annotations.readOnlyHint).map((o) => o.name).sort()
-  assert.deepEqual(ecritures, ['ecrire_note', 'generer_post', 'marquer_note_lue', 'preparer_reponse_membre'])
+  assert.deepEqual(ecritures, ['ecrire_note', 'generer_post', 'marquer_note_lue', 'pousser_handles', 'preparer_reponse_membre'])
   const posts = P.ROUTES_DES_OUTILS.filter((r) => r.methode === 'POST').map((r) => r.outil).sort()
   assert.deepEqual(posts, ecritures)
 })

@@ -135,7 +135,7 @@ export function bearerAccepte(portee: unknown): boolean {
 // Les outils : chacun = une route de l'API de Tab (aide('tache').routes)
 // ---------------------------------------------------------------------------
 
-type Prop = { type: 'string' | 'integer' | 'object' | 'array'; description: string; items?: Record<string, unknown>; additionalProperties?: unknown }
+type Prop = { type: 'string' | 'integer' | 'object' | 'array' | 'boolean'; description: string; items?: Record<string, unknown>; additionalProperties?: unknown }
 
 type DefOutil = {
   name: string
@@ -270,6 +270,34 @@ const DEFS: DefOutil[] = [
       autres_parametres: P_AUTRES,
     },
     appel: lectureSimple('besoins', ['statut', 'outil', 'id', 'limite', 'curseur']),
+  },
+  // (13/11/2026) Les @handles des reseaux rapproches des fiches (GET et POST /handles de l'API de Tab).
+  {
+    name: 'handles', title: 'Handles des réseaux rapprochés des fiches', aide: { route: '/handles', methode: 'GET' }, lecture: true,
+    props: {
+      statut: { type: 'string', description: 'Facultatif : sur, probable ou a_identifier (liste séparée par des virgules).' },
+      plateforme: { type: 'string', description: 'Facultatif : tiktok, instagram, youtube, x...' },
+      membre: { type: 'string', description: 'Facultatif : membre:<uuid>, les handles d\'une fiche.' },
+      limite: P_LIMITE,
+      curseur: P_CURSEUR,
+    },
+    appel: (a) => {
+      const q = lireQuery(a, ['statut', 'plateforme', 'membre', 'limite', 'curseur'], null)
+      return typeof q === 'string' ? q : { methode: 'GET', chemin: ['handles'], query: q, corps: null }
+    },
+  },
+  {
+    name: 'pousser_handles', title: 'Pousser un lot de handles', aide: { route: '/handles', methode: 'POST' }, lecture: false,
+    props: {
+      lignes: {
+        type: 'array',
+        description: 'Une ligne par handle : { plateforme, handle, statut, qui, preuve, source, interactions, dernier_echange } (voir handles_des_reseaux dans l\'aide). Jamais d\'email.',
+        items: { type: 'object' },
+      },
+      a_blanc: { type: 'boolean', description: 'Facultatif : true = tout est vérifié et calculé, rien n\'est écrit.' },
+    },
+    required: ['lignes'],
+    appel: (a) => ({ methode: 'POST', chemin: ['handles'], query: [], corps: { lignes: a.lignes, ...(a.a_blanc !== undefined ? { a_blanc: a.a_blanc } : {}) } }),
   },
   { name: 'depense_ia', title: 'Dépense IA', aide: { route: '/depense-ia', methode: 'GET' }, lecture: true, props: periode(false, false), appel: lectureSimple('depense-ia', ['du', 'au']) },
   { name: 'pubs', title: 'Publicité', aide: { route: '/pubs', methode: 'GET' }, lecture: true, props: periode(false), appel: lectureSimple('pubs', ['du', 'au', 'limite']) },

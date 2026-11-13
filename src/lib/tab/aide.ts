@@ -9,6 +9,7 @@ import type { PorteeApi } from '@/lib/tab/pur'
 import {
   DOMAINES_AOK, DUREE_PROPOSITION_HEURES, FENETRE_FIL_JOURS, MAX_PROPOSITIONS_PAR_CLE_HEURE, MAX_PROPOSITIONS_PAR_FIL_HEURE, MAX_TEXTE_REPONSE,
 } from '@/lib/tab/repondre-pur'
+import { MAX_LIGNES as MAX_LIGNES_HANDLES, MAX_PREUVE as MAX_PREUVE_HANDLES } from '@/lib/tab/handles-pur'
 
 export const BASE = 'https://journal-d-etude-beta.vercel.app/api/tab/v1'
 
@@ -32,13 +33,15 @@ const ROUTES: Route[] = [
   { route: '/reseaux', methode: 'GET', sert_a: 'Instagram LU (bloc instagram : en_bref = la lecture de la période en 5 lignes ; abonnements gagnés et perdus, comptes touchés UNIQUES sur 7 ou 30 jours et part de non-abonnés, visites du profil, clics vers le site, messages reçus (comptés pour tout le compte, ni texte ni expéditeur), comparés à la période d\'avant et, sur 7 ou 30 jours, à ses périodes de même durée (niveaux_du_bilan) ; chaque publication avec ses taux pour 100 comptes touchés, sa part vue, ses clics sur le lien du profil (posts), son niveau face aux repères de Brice (bon = mieux que 3 reels sur 4), son objectif, la grille « regarder d\'abord » et une action proposée ; comment_lire_chaque_indicateur = la section 4 du plan de Tab ; période recalée sur le dernier jour complet chez Meta), la Page Facebook (abonnés, couverture, vues, interactions, publications les plus engageantes), Telegram (abonnés et activité des 4 chats suivis), newsletter Kit (inscrits par mois, envois).', periode_par_defaut: '7 derniers jours', parametres: ['du', 'au', 'limite'] },
   { route: '/contenus', methode: 'GET', sert_a: 'Ce qui est prévu et produit : annonces de lives du Live Club, sessions programmées, lives par intervenant, découpages de l\'onglet Création, brouillons de posts générés, vidéos publiées, production par mois.', periode_par_defaut: 'semaine en cours (lundi à dimanche)', parametres: ['du', 'au', 'limite'] },
   { route: '/personne?q=', methode: 'GET', sert_a: 'Tout sur une personne : nom actuel et anciens noms, statut Live Club (abonnement, pause, exemption, accès broker), présence dans le groupe, messages récents, archive Telegram, fils de support, paiements. q = nom, ancien nom, @pseudo, numéro Telegram (u123...) ou email. Plusieurs candidats : la liste revient, rappelle avec l\'identifiant choisi.', parametres: ['q'] },
+  { route: '/handles', methode: 'GET', sert_a: 'Les @handles des réseaux (TikTok, Instagram, YouTube, X...) rapprochés des fiches du cockpit : plateforme, handle, statut (a_identifier d\'abord, puis probable, puis sur), fiche (membre:<uuid> et son nom), numéro de membre, équipe, personne du fonds, preuve, source, interactions, premier et dernier vu, qui l\'a posé. Information INTERNE.', parametres: ['statut (liste séparée par des virgules)', 'plateforme', 'membre (membre:<uuid>)', 'limite', 'curseur'] },
+  { route: '/handles', methode: 'POST', sert_a: 'Pousser un LOT de handles (une ligne par handle) : corps JSON { lignes: [...], a_blanc? }. Le même handle met à jour sa ligne, jamais une deuxième. Voir handles_des_reseaux pour le format exact.' },
   { route: '/avatars', methode: 'GET', sert_a: 'Les avatars clients (monday, zumadog, tucker, bob, visionnaire) : définition, liens dans le graphe du business (offres, contenus, méthodes qui les visent), nombre de membres classés dans chacun.' },
   { route: '/connaissances?q=', methode: 'GET', sert_a: 'Recherche dans toute la matière de création : inspirations de posts, PDF, leçons de l\'académie (transcriptions comprises), règles du générateur et fiche de style de Brice, manifeste, banque de contenus, brouillons, découpages 5 x 5, graphe du business, décisions, vidéos, publications, publicités. sources=telegram pour ajouter les messages des groupes.', parametres: ['q', 'sources (liste séparée par des virgules)', 'limite (par source, 50 au plus)', 'texte_max'] },
   { route: '/schema', methode: 'GET', sert_a: 'Toutes les tables et vues lisibles, leurs colonnes et une phrase de description. q= filtre par mot, colonnes=non pour la liste seule.', parametres: ['q', 'colonnes'] },
   { route: '/donnees/<table>', methode: 'GET', sert_a: 'Lire n\'importe quelle table ou vue du schéma, avec filtres, tri, colonnes choisies et pagination (voir filtres_de_donnees).', parametres: ['colonnes', 'tri', 'du', 'au', 'date', 'q', 'eq.<col>', 'ne.<col>', 'contient.<col>', 'dans.<col>', 'min.<col>', 'max.<col>', 'nul.<col>', 'limite', 'curseur', 'texte_max'] },
   { route: '/images-belrive', methode: 'GET', sert_a: 'Les images du jeu Belrive déposées par ChatGPT (visuels, décors, leurres), les plus récentes d\'abord : id (img:...), titre, rôle ou légende, nom de fichier, type, taille, origine, date. ChatGPT cite ces ids dans ses notes du projet belrive.', parametres: ['limite (200 au plus)'] },
   { route: '/images-belrive/<image_id>/url', methode: 'GET', sert_a: 'Une URL signée pour voir ou télécharger une image de Belrive, valable 5 minutes (le fichier reste dans un stockage privé). image_id avec ou sans le préfixe img:.' },
-  { route: '/generer-post', methode: 'POST', sert_a: 'Écrire un BROUILLON de post dans la voix de Brice ou de Mel avec le générateur du cockpit (inspirations, fiche de style, PDF, référence ICT). Coût : environ 0,07 à 0,19 euro par brouillon sans image, environ 0,23 euro avec une capture (modèle Opus), compté dans la dépense IA (poste « Générateur, demandé par Tab »). Rien n\'est publié : le brouillon est rangé dans le cockpit et rendu ici. Avec /notes et /support/<fil_id>/repondre, une des seules routes qui écrivent (en plus du journal d\'accès).' },
+  { route: '/generer-post', methode: 'POST', sert_a: 'Écrire un BROUILLON de post dans la voix de Brice ou de Mel avec le générateur du cockpit (inspirations, fiche de style, PDF, référence ICT). Coût : environ 0,07 à 0,19 euro par brouillon sans image, environ 0,23 euro avec une capture (modèle Opus), compté dans la dépense IA (poste « Générateur, demandé par Tab »). Rien n\'est publié : le brouillon est rangé dans le cockpit et rendu ici. Avec /notes, /support/<fil_id>/repondre et /handles, une des seules routes qui écrivent (en plus du journal d\'accès).' },
   { route: '/notes', methode: 'GET', sert_a: 'Les notes que Claude Code (ou Brice) t\'a laissées, les plus récentes d\'abord. statut=nouvelle par défaut (lue, traitee, toutes). C\'est le canal recommandé entre toi et Claude, à la place du Google Doc « Notes Tab → Claude ». Chaque nouvelle note pour toi t\'arrive aussi par email (objet « Note de Claude : <sujet> »).', parametres: ['statut', 'limite (200 au plus)'] },
   { route: '/notes', methode: 'POST', sert_a: 'Laisser une note à Claude Code : corps JSON { sujet, texte, projet?, liens?, pour? } (voir notes). Écris à Sora, à Umi, à Sekai, ou aux trois (pour = sora, umi, sekai ou toutes, par défaut toutes). Depuis le 01/11/2026, aussi à Tache, l\'autre assistant de Brice (pour = tache) ; une note pour toutes va aussi à Tache. Brice est prévenu sur Telegram, Claude la lit au démarrage de sa prochaine session.' },
   { route: '/notes/<id>/lu', methode: 'POST', sert_a: 'Marquer lue une note que Claude t\'a laissée (corps vide). À faire dès que tu l\'as lue : sinon elle reste « nouvelle » dans le cockpit de Brice.' },
@@ -203,6 +206,35 @@ function aideCommune(): Record<string, unknown> {
           donnees: { proposition_id: '<uuid>', statut: 'proposee', fil_id: '<uuid>', reference: 'fil 1a2b3c4d', qui: 'Arthur (@arthur)', cartes_envoyees_a: ['Brice', 'Mélanie'], expire_le_paris: '03/11/2026 à 14:05', '...': '...' },
         },
       },
+    },
+    // (13/11/2026, go de Brice, note 50cdb878) Les @handles des reseaux rapproches des fiches.
+    handles_des_reseaux: {
+      le_principe: 'Chaque @handle qui interagit avec AOK (commentaires TikTok, Instagram...) remonte dans le cockpit, rapproché de la fiche client. Information INTERNE : le membre ne voit jamais qu\'on l\'a (aucune page du site ni de son espace ne la lit). L\'équipe la voit sur la fiche membre (« Réseaux (interne) ») et dans la liste des handles à identifier (onglet Membres).',
+      la_requete: `POST /handles, corps JSON { "lignes": [ ... ], "a_blanc": false }. ${MAX_LIGNES_HANDLES} lignes au plus par lot. a_blanc = true (ou ?a_blanc=1) : tout est vérifié et calculé, la réponse dit ce qui serait écrit, et rien n'est écrit.`,
+      une_ligne: {
+        plateforme: 'tiktok, instagram, youtube, x, facebook, threads... (twitter = x).',
+        handle: 'Le @handle, avec ou sans @, ou l\'adresse du profil. Rangé sans @, en minuscules.',
+        statut: 'sur (identifié sans doute, par exemple il se présente lui-même), probable (à confirmer), a_identifier (personne derrière pour l\'instant).',
+        qui: 'Le numéro de membre (248, n°248), « équipe : prénom » (équipe : Mélanie), ou vide pour a_identifier. Acceptés aussi : membre:<uuid> et p-... (les identifiants que rend /personne). JAMAIS d\'email. sur et probable demandent un qui, a_identifier n\'en prend pas. Ne devine jamais : un prénom qui ressemble à quelqu\'un de la base reste a_identifier.',
+        preuve: `Ce qui fonde le rapprochement, en une ligne (${MAX_PREUVE_HANDLES} caractères au plus), par exemple « se présente lui-même en commentaire ».`,
+        source: 'D\'où vient l\'observation : « commentaires TikTok @bricedlb, 30 jours ».',
+        interactions: 'Le nombre d\'interactions sur la source (un entier). Il remplace le précédent : renvoyer le même lot ne double rien.',
+        dernier_echange: 'La date du dernier échange, AAAA-MM-JJ.',
+      },
+      ce_qui_se_passe: [
+        'Le même handle (même plateforme) met à jour sa ligne : jamais de doublon, et renvoyer un lot identique ne change rien (inchange).',
+        'Un statut « sûr » posé à la main par l\'équipe n\'est jamais changé par un lot : seules les observations (interactions, source, dates) suivent.',
+        'Une ligne sans qui n\'efface jamais un rapprochement déjà posé.',
+        'Le numéro de membre mène à la fiche par les adresses vérifiées du compte. Si plusieurs fiches sont possibles, aucune n\'est choisie et le statut est ramené à probable, avec une note.',
+        'Chaque ligne refusée revient avec son rang et sa raison ; les autres sont écrites. Un lot dont toutes les lignes sont refusées répond 400.',
+      ],
+      exemple: {
+        lignes: [
+          { plateforme: 'tiktok', handle: '@exemple.trader', statut: 'sur', qui: '248', preuve: 'Se présente lui-même en commentaire', source: 'commentaires TikTok @bricedlb, 30 jours', interactions: 5, dernier_echange: '2026-11-08' },
+          { plateforme: 'tiktok', handle: 'quelquun', statut: 'a_identifier', qui: '', preuve: 'Commentaire sur la discipline', source: 'commentaires TikTok @bricedlb, 30 jours', interactions: 1, dernier_echange: '2026-11-02' },
+        ],
+      },
+      reponse: 'resume (crees, mis_a_jour, inchanges, refusees), lignes (rang, handle, action, statut, rattache_a : le nom de la fiche ou de la personne, jamais d\'email ; remarques), refusees (rang, raison).',
     },
     notes: {
       ce_que_c_est: 'L\'espace perso de Brice dans le cockpit (écran « Perso », visible par Brice et toi seulement, ni Mélanie ni Adil) : un fil de notes entre toi et Claude Code, l\'assistant de développement de Brice sur son PC. Brice a TROIS instances de Claude Code, toutes sur son PC : Umi (sous Linux, WSL), Sora (l\'application de bureau, sous Windows) et Sekai (le terminal Windows, depuis le 22/10/2026). Écris à l\'une d\'elles, ou aux trois. Il remplace le Google Doc « Notes Tab → Claude ».',

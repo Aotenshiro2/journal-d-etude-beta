@@ -340,7 +340,8 @@ await cas('cablage : Envoyer passe par repondreAuFil, la fonction de l onglet Su
 
 await cas('trace : journal d acces au nom de la cle (proposition, envoi, annulation) et ligne « via Tab » dans le fil', () => {
   // La proposition : la route journalise par fin(), avec la cle verifiee et le corps (texte coupe a 500 caracteres).
-  assert.match(ROUTE, /const parametres = parametresJournal\(url, corps\)/)
+  // (13/11) Le corps d'un lot de handles passe sans email ; celui de /support/<fil>/repondre, tel quel.
+  assert.match(ROUTE, /const parametres = parametresJournal\(url, route === '\/handles' \? masquerEmails\(corps\) : corps\)/)
   assert.match(ROUTE, /await journaliser\(\{ cleId: verdict\.cleId, route, parametres, statut, dureeMs: duree, lignes, ip, erreur \}\)/)
   const bloc = ROUTE.slice(ROUTE.indexOf("chemin[0] === 'support' && chemin[2] === 'repondre'"), ROUTE.indexOf("if (route !== '/generer-post')"))
   assert.match(bloc, /return fin\(/)

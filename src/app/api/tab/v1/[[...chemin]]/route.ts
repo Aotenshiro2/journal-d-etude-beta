@@ -18,6 +18,8 @@ import { lireImage as lireImageBelrive, listerImages as listerImagesBelrive, typ
 import { urlSigneeImage } from '@/lib/mcp-gpt/stockage-images'
 import { listerPropositions, proposerReponseTab } from '@/lib/tab/repondre'
 import { besoinsTab } from '@/lib/besoins/tab'
+import { handlesTab, recevoirLot } from '@/lib/tab/handles'
+import { masquerEmails } from '@/lib/tab/handles-pur'
 
 /**
  * L'API DE TAB (20/10/2026) : /api/tab/v1/... , JSON, LECTURE SEULE.
@@ -50,6 +52,12 @@ import { besoinsTab } from '@/lib/besoins/tab'
  * chacune. Regles et controles : src/lib/tab/repondre-pur.ts ; serveur :
  * src/lib/tab/repondre.ts. Ouvert aux cles 'tab' et 'tache' (les seules que
  * verifierCle laisse passer).
+ *
+ * LES @HANDLES DES RESEAUX (13/11/2026, go de Brice, carte
+ * ontologie-handles-sociaux) : POST /handles { lignes, a_blanc? } pousse un lot
+ * (une ligne par handle) dans cockpit_handles_sociaux, idempotent ; GET
+ * /handles le relit. Information INTERNE. Regles : src/lib/tab/handles-pur.ts ;
+ * serveur : src/lib/tab/handles.ts. Le corps est journalise sans email.
  */
 
 export const maxDuration = 300
@@ -75,6 +83,8 @@ const LECTURES: Record<string, Lecture> = {
   schema: { f: schema, defaut: 'tout' },
   // (06/11/2026) Les besoins des membres (cartes, compteurs ; ?id= : les demandes), lecture seule.
   besoins: { f: besoinsTab, defaut: 'tout' },
+  // (13/11/2026) Les @handles des reseaux rapproches des fiches (POST /handles pour en pousser un lot).
+  handles: { f: handlesTab, defaut: 'tout' },
 }
 
 const ENTETES = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }
@@ -268,7 +278,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ chemin?: s
   const route = `/${chemin.join('/')}`
   const ip = ipDe(req)
   const corps = await req.json().catch(() => null) as Record<string, unknown> | null
-  const parametres = parametresJournal(url, corps)
+  // (13/11) Un lot de handles ne passe jamais une adresse email au journal d'acces (elle y serait refusee de toute facon).
+  const parametres = parametresJournal(url, route === '/handles' ? masquerEmails(corps) : corps)
 
   const verdict = await verifierCle(req.headers.get('authorization'))
   if (!verdict.ok) {
@@ -333,7 +344,13 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ chemin?: s
     const s = await proposerReponseTab({ portee: verdict.portee, cleId: verdict.cleId, fil: chemin[1], corps })
     return fin({ ...s.corps, ...(s.status >= 400 ? { aide: `${url.origin}/api/tab/v1/aide` } : {}) }, s.status, s.lignes, s.erreur)
   }
-  if (route !== '/generer-post') return fin({ ok: false, erreur: `${route} : seules /generer-post, /notes, /notes/<id>/lu et /support/<fil_id>/repondre acceptent POST. Les lectures sont en GET.` }, 405, null)
+  // (13/11/2026) Les @handles des reseaux : un lot, idempotent, a blanc avec { a_blanc: true } ou ?a_blanc=1.
+  if (route === '/handles') {
+    const aBlancForce = ['1', 'oui', 'true'].includes((url.searchParams.get('a_blanc') ?? '').toLowerCase())
+    const s = await recevoirLot(corps, { posePar: verdict.portee, aujourdhui: jourParis(), aBlancForce })
+    return fin({ ...s.corps, ...(s.status >= 400 ? { aide: `${url.origin}/api/tab/v1/aide` } : {}) }, s.status, s.lignes, s.erreur)
+  }
+  if (route !== '/generer-post') return fin({ ok: false, erreur: `${route} : seules /generer-post, /notes, /notes/<id>/lu, /support/<fil_id>/repondre et /handles acceptent POST. Les lectures sont en GET.` }, 405, null)
 
   const demande = lireDemandeGeneration(corps)
   if (typeof demande === 'string') return fin({ ok: false, erreur: demande, aide: `${url.origin}/api/tab/v1/aide` }, 400, null, demande)
