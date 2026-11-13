@@ -7,10 +7,14 @@
 //
 // Sans --texte : une annonce d'exemple (texte invente, avec un lien et du Markdown pour voir
 // le desamorcage). Le jeton de desinscription est signe avec un secret factice.
+// Voie Broadcast (13/11) : ecrit aussi email-broadcast.html et .txt (l'email du Broadcast,
+// lien de desinscription = variable {{{RESEND_UNSUBSCRIBE_URL}}} que Resend remplit) et
+// broadcast-payload.json (le brouillon qui serait cree, ids de segment et de sujet factices).
 
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import * as E from '../src/lib/academie/emails-annonces.ts'
+import * as B from '../src/lib/academie/emails-broadcast.ts'
 
 const args = process.argv.slice(2)
 const val = (nom) => { const i = args.indexOf(nom); return i >= 0 ? args[i + 1] : undefined }
@@ -60,5 +64,15 @@ const lot = ids.map((id, i) => {
 const res = await envoyeur(lot, E.cleLot(ids[0], ids), ids[0].slice(0, 8))
 writeFileSync(join(sortie, 'journal-simulation.txt'), `${journal.join('\n')}\n\nResultat : ${res.map((r) => r.statut).join(', ')}\n`)
 
-console.log(`ecrit dans ${resolve(sortie)} : email-membre.html, email-membre.txt, email-essai.html, journal-simulation.txt`)
+const broadcast = E.construireEmail({ objet: OBJET, texte: TEXTE, lien: lienBillet, lienDesinscription: B.VARIABLE_DESINSCRIPTION, essai: false })
+writeFileSync(join(sortie, 'email-broadcast.html'), broadcast.html)
+writeFileSync(join(sortie, 'email-broadcast.txt'), `Sujet : ${broadcast.sujet}\n\n${broadcast.texte}\n`)
+const payload = B.payloadBroadcast({
+  segmentId: '<id du segment « Académie : tous les membres »>', sujetId: '<id du sujet « Annonces de l\'académie »>',
+  expediteur: E.EXPEDITEUR_DEFAUT, repondreA: E.REPONSE_A, sujet: broadcast.sujet, html: broadcast.html,
+  texte: broadcast.texte, nom: B.nomBroadcast(ids[0], new Date('2026-11-19T08:00:00Z')),
+})
+writeFileSync(join(sortie, 'broadcast-payload.json'), `${JSON.stringify({ ...payload, html: '<voir email-broadcast.html (variable de désinscription présente)>', text: '<voir email-broadcast.txt>' }, null, 2)}\n`)
+
+console.log(`ecrit dans ${resolve(sortie)} : email-membre.html, email-membre.txt, email-essai.html, journal-simulation.txt, email-broadcast.html, email-broadcast.txt, broadcast-payload.json`)
 console.log(`liens cliquables de l'email : ${[...membre.html.matchAll(/href="([^"]*)"/g)].length} (bouton + desinscription)`)
