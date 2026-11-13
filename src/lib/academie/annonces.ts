@@ -275,11 +275,21 @@ export async function noterAnnoncesVues(c: ClientSql, ids: string[], userId: str
   return c.$executeRawUnsafe(SQL_NOTER_VUES, ids, userId)
 }
 
-/** Ce que la barre et l'accueil demandent (GET ?resume=1) : le nombre de non lues et la derniere annonce. */
-export function resumer(annonces: Annonce[]): { non_lues: number; derniere: Pick<Annonce, 'id' | 'titre' | 'publie_le' | 'non_lue' | 'origine'> | null } {
+/** Les dernieres annonces que la barre de gauche montre sous « Annonces » (v2 du 13/11 : « les 2 ou 3 dernieres »). */
+export const DERNIERES_BARRE = 3
+
+type Breve = Pick<Annonce, 'id' | 'titre' | 'publie_le' | 'non_lue' | 'origine'>
+const breve = (d: Annonce): Breve => ({ id: d.id, titre: d.titre, publie_le: d.publie_le, non_lue: d.non_lue, origine: d.origine })
+
+/**
+ * Ce que la barre et l'accueil demandent (GET ?resume=1) : le nombre de non lues, la derniere annonce (bandeau
+ * de l'accueil) et les DERNIERES_BARRE dernieres (barre de gauche). Titres et dates seulement, jamais le texte.
+ */
+export function resumer(annonces: Annonce[]): { non_lues: number; derniere: Breve | null; dernieres: Breve[] } {
   const d = annonces[0]
   return {
     non_lues: annonces.filter(a => a.non_lue).length,
-    derniere: d ? { id: d.id, titre: d.titre, publie_le: d.publie_le, non_lue: d.non_lue, origine: d.origine } : null,
+    derniere: d ? breve(d) : null,
+    dernieres: annonces.slice(0, DERNIERES_BARRE).map(breve),
   }
 }

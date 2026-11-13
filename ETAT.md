@@ -18,6 +18,8 @@
   cockpit_annonces_envoyees). ESSAYE le 13/11 en transaction annulee : 15 etapes ok (migration jouee deux fois,
   75 creees, 66 images, 2 PDF, rejouable, rien de reste). --ecrire seulement sur le go de Brice, APRES la migration
   et la mise en ligne des images (--images-base). Test pur : scripts/verifier-annonces.mjs (6 blocs).
+- v2 du 13/11 (relecture de Brice) : ?resume=1 rend aussi dernieres (les 3 dernieres annonces, titres et dates),
+  montrees dans la barre de gauche du site sous ANNONCES.
 - Mise en ligne : migration, images, import --ecrire, push du journal, PUIS push du site (sans la route, la page
   du site lit une 404 sans CORS et dit « reseau »).
 

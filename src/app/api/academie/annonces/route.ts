@@ -17,9 +17,9 @@ import { messageErreur, relationAbsente } from '@/lib/liveclub/pur'
  * GET : publie d'abord les billets programmes dont l'heure est passee (comme la
  *   route du billet du jour), puis rend
  *   200 { ok: true, annonces: [{ id, titre, contenu (Markdown), publie_le, origine: 'cockpit' | 'skool',
- *         categorie, epingle, non_lue, lien, video, ressources }], non_lues, derniere }
+ *         categorie, epingle, non_lue, lien, video, ressources }], non_lues, derniere, dernieres }
  *   les plus recentes d'abord ; une annonce Skool n'est jamais non lue.
- * GET ?resume=1 : { ok: true, non_lues, derniere: { id, titre, publie_le, non_lue, origine } | null }
+ * GET ?resume=1 : { ok: true, non_lues, derniere: { id, titre, publie_le, non_lue, origine } | null, dernieres: [3 au plus] }
  *   (la barre de navigation et l'accueil : pas de texte).
  * POST { vues: [id, ...] } (100 au plus) : le compte a vu ces annonces (page ouverte) ;
  *   plus de point, et le pop-up du billet du jour ne revient pas.
@@ -68,7 +68,7 @@ export async function GET(req: NextRequest) {
     annonces = await lireAnnonces(prisma, userId)
   } catch (err) {
     if (relationAbsente(err)) {
-      return NextResponse.json(resume ? { ok: true, non_lues: 0, derniere: null } : { ok: true, annonces: [], non_lues: 0, derniere: null }, { headers })
+      return NextResponse.json(resume ? { ok: true, non_lues: 0, derniere: null, dernieres: [] } : { ok: true, annonces: [], non_lues: 0, derniere: null, dernieres: [] }, { headers })
     }
     console.warn(`[academie/annonces] lecture impossible compte=${tronquer(userId)} : ${messageErreur(err)}`)
     return refus('indisponible', 503)

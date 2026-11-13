@@ -81,7 +81,10 @@ bloc('route : une annonce Skool, un billet du cockpit, rien d autre ne sort', ()
   const r = resumer([b, a])
   assert.equal(r.non_lues, 1)
   assert.deepEqual(Object.keys(r.derniere).sort(), ['id', 'non_lue', 'origine', 'publie_le', 'titre'])
-  assert.deepEqual(resumer([]), { non_lues: 0, derniere: null })
+  assert.equal(r.dernieres.length, 2)
+  assert.deepEqual(r.dernieres.map(x => x.id), [b.id, a.id])
+  assert.equal(resumer([b, a, a, a, a]).dernieres.length, 3, "la barre en montre 3 au plus")
+  assert.deepEqual(resumer([]), { non_lues: 0, derniere: null, dernieres: [] })
 })
 
 bloc('POST : corps des vues', () => {
