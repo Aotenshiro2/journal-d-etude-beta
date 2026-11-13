@@ -1,5 +1,20 @@
 # ETAT du journal d etudes
 
+## FUSION ACADEMIE-LUNDI (13/11/2026, branche academie-lundi depuis origin/master 4fda59b, puis d653a57 fusionne ; NON poussee)
+
+- Brief : D:\7_Agents\briefs\2026-11-13-academie-lundi-fusion.md. Rapport : academie-lundi-rapport.md (notes de Yume
+  Orchestre). Le site, le Cockpit et les migrations : branche academie-lundi du workspace (ETAT du site).
+- Un commit de fusion par chantier : annonces (navigation v2), cloche et recherche, quiz, calendrier des lives, email a
+  tous (en simulation : ANNONCES_EMAIL_MODE non pose, aucun envoi reel). Conflits : ETAT (sections gardees) et
+  middleware.ts (les deux chemins publics exacts : /api/academie/lives et /api/academie/emails/desinscription).
+- La migration de l'email est RENOMMEE 20261113210000_academie_emails_annonces.sql (meme horodatage que celle des
+  lives) : references mises a jour (route du cockpit, emails-annonces.ts, essayer- et verifier-emails-annonces.mjs).
+- Essai commun : AOK_WORKSPACE=~/Projects/_worktrees/academie-lundi node --env-file=.env.local
+  scripts/essayer-migrations-academie-lundi.mjs : les 4 migrations dans l'ordre (chacune deux fois), l'import des 75
+  annonces, les 2 quiz en brouillon, RLS et droits, dans UNE transaction annulee (16 etapes ok le 13/11, 6,2 s).
+  --etat : lecture seule, dit quelles migrations sont appliquees (mode verifier du script de mise en ligne).
+- Mise en ligne : scripts/mise-en-ligne-academie-lundi.sh du workspace (journal pousse AVANT le site).
+
 ## SALON DE L'ACADEMIE : LES NOMS ET LA SIGNATURE DE L'EQUIPE (13/11/2026, correctif, commite NON pousse, branche chat-noms depuis origin/master 4491b52 ; migration 20261113120000 ECRITE NON appliquee)
 
 - Brief : D:\7_Agents\briefs\2026-11-13-chat-noms-signature.md (cartes chat-academie-noms et chat-academie-signature : A, A).
