@@ -14,6 +14,9 @@
   annonces, les 2 quiz en brouillon, RLS et droits, dans UNE transaction annulee (16 etapes ok le 13/11, 6,2 s).
   --etat : lecture seule, dit quelles migrations sont appliquees (mode verifier du script de mise en ligne).
 - Mise en ligne : scripts/mise-en-ligne-academie-lundi.sh du workspace (journal pousse AVANT le site).
+- 13/11 soir : email-a-tous 5c6ef0d (voie Resend Broadcasts, emails-broadcast.ts) fusionne. L essai commun prend
+  --bloc-email <fichier> (ecrit par essayer-migration-emails-annonces.mjs --imprimer) et le joue dans la meme
+  transaction annulee : 18 etapes ok, ESSAI_OK. La synchro Resend n est PAS dans le go (autre go de Brice, 19/11 au plus tot).
 
 ## INVITATIONS SKOOL APRES LA FERMETURE : LES MODELES PASSENT AU PASSE LE 16/11 (13/11/2026, correctif pousse sur master ; AUCUNE migration)
 
