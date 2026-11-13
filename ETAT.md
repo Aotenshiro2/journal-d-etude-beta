@@ -1,5 +1,15 @@
 # ETAT du journal d etudes
 
+## EMAIL A TOUS LES MEMBRES DEPUIS LE COCKPIT (13/11/2026, commite NON pousse, branche email-a-tous depuis origin/master 4491b52 ; migration 20261113200000 du workspace ECRITE, essayee en bloc annule, NON appliquee)
+
+- Brief D:\7_Agents\briefs\2026-11-13-email-a-tous-cockpit.md (inventaire H2, PASS B5) : Skool ferme le 16/11 et emporte son email a tous. Rapport : email-a-tous-rapport.md (notes de la conversation local_8f8ccb0c).
+- Code : src/lib/academie/emails-annonces.ts (PUR, n'importe que node:crypto : groupes, rendu, jeton, garde, droits, requetes, envoyeur de simulation), emails-annonces-serveur.ts (base, Resend batch), POST /api/cockpit/academie/emails (etat, apercu, essai, envoyer, reprendre, detail ; allowlist), GET/POST /api/academie/emails/desinscription (publique en chemin exact dans middleware.ts, jeton signe = id de la ligne, jamais l'adresse).
+- SIMULATION PAR DEFAUT : rien ne part tant que ANNONCES_EMAIL_MODE ne vaut pas exactement « reel » (essais compris) ; lignes notees « simule », email ecrit dans le journal du serveur (texte, lien personnel remplace, aucune adresse).
+- Groupes (base, 13/11) : tous 301, comptes 78, programmes 118 (avec ou sans compte), gratuits 24, sans_compte 223. Statut d'un compte = aok_annuaire_acces ; adresses sans compte = acces actif pose par email, puis invitation de Skool envoyee.
+- Regles : HTML du texte echappe, aucun lien du texte cliquable (desamorces), seuls le bouton (https://aoknowledge.com/...) et la desinscription sont des liens ; List-Unsubscribe en un clic ; garde un envoi reel par 72 h par transport (forcage : admin ET acces_perso = Brice seul) ; envoi reel : profiles.role = admin (pas le compte de Tab) ; confirmation = le nombre exact (409 sinon) ; billet publie exige ; un envoi reel s'inscrit dans cockpit_annonces_envoyees (canal email, source email-academie:<id>).
+- Verifs : node scripts/verifier-emails-annonces.mjs (17 blocs ok) ; node scripts/essayer-email-annonce.mjs --sortie <dossier> (rendu local, aucune base) ; scripts/essayer-migration-emails-annonces.mjs (bloc DO termine par une exception : migration deux fois, requetes exactes, ESSAI_OK le 13/11 par l'outil SQL de Supabase, tables absentes apres) ; tsc --noEmit ok.
+- AVANT LA MISE EN LIGNE (go de Brice) : appliquer la migration, choisir le plan Resend (gratuit = 100 par jour partages), poser ANNONCES_EMAIL_MODE=reel (et au besoin RESEND_API_KEY_ANNONCES, ANNONCES_FROM_EMAIL), pousser journal puis cockpit.
+
 ## SALON DE L'ACADEMIE : L'ALERTE A L'EQUIPE PAR AGENT AOK (12/11/2026 soir, commite NON pousse, branche chat-academie-alerte depuis origin/master 3830ac1 ; AUCUNE migration)
 
 - Brice, chat de l'orchestre : « Les questions remonte par les agent aok de moi et Mel ? ». Rapport : chat-academie-rapport.md,
