@@ -57,15 +57,10 @@ export const SUPPORT = 'support@aoknowledge.com'
  */
 export const URL_FORMATION_LIVECLUB = 'https://aoknowledge.com/academie'
 
-/**
- * L'email de bienvenue garde Skool tant que Brice n'a pas repasse lui-meme
- * sur les modules de l'academie (decision du 18/10 au soir : il part a
- * chaque nouvel abonne sans question, un module qui ne s'ouvre pas toucherait
- * tout le monde). A basculer sur URL_FORMATION_LIVECLUB apres sa verification.
- * (30/10, brief F1) Bascule faite : l'email de bienvenue lit
- * URL_FORMATION_LIVECLUB. Cette constante ne sert plus, gardee pour l'historique.
- */
-export const URL_FORMATION_EMAIL_BIENVENUE = 'https://www.skool.com/ao-knowledge-trading-5563/about?ref=8d5bde6137124c10a3abe0535ca5f6ec'
+// (13/11/2026, fermeture de Skool le 16/11) URL_FORMATION_EMAIL_BIENVENUE est
+// retiree : elle gardait l'adresse Skool de l'email de bienvenue d'avant le
+// 30/10 (brief F1), sans plus aucun lecteur. L'email de bienvenue lit
+// URL_FORMATION_LIVECLUB.
 
 /**
  * La phrase « abonne-toi », avec les deux adresses, reprise partout (bot,
