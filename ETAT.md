@@ -20,6 +20,23 @@
 - Mise en ligne : push du journal seul sur master (deploiement automatique), au go de Brice. Puis, dans le checkout
   principal, le travail du 20/09 (src/app/versions/ non suivi, CanvasShell.tsx et NoteMapCanvas.tsx, tete de TODO.md)
   bloquera le pull : a jeter sur accord, il est remplace par cette branche.
+## FUSION ACADEMIE-LUNDI (13/11/2026, branche academie-lundi depuis origin/master 4fda59b, puis d653a57 fusionne ; NON poussee)
+
+- Brief : D:\7_Agents\briefs\2026-11-13-academie-lundi-fusion.md. Rapport : academie-lundi-rapport.md (notes de Yume
+  Orchestre). Le site, le Cockpit et les migrations : branche academie-lundi du workspace (ETAT du site).
+- Un commit de fusion par chantier : annonces (navigation v2), cloche et recherche, quiz, calendrier des lives, email a
+  tous (en simulation : ANNONCES_EMAIL_MODE non pose, aucun envoi reel). Conflits : ETAT (sections gardees) et
+  middleware.ts (les deux chemins publics exacts : /api/academie/lives et /api/academie/emails/desinscription).
+- La migration de l'email est RENOMMEE 20261113210000_academie_emails_annonces.sql (meme horodatage que celle des
+  lives) : references mises a jour (route du cockpit, emails-annonces.ts, essayer- et verifier-emails-annonces.mjs).
+- Essai commun : AOK_WORKSPACE=~/Projects/_worktrees/academie-lundi node --env-file=.env.local
+  scripts/essayer-migrations-academie-lundi.mjs : les 4 migrations dans l'ordre (chacune deux fois), l'import des 75
+  annonces, les 2 quiz en brouillon, RLS et droits, dans UNE transaction annulee (16 etapes ok le 13/11, 6,2 s).
+  --etat : lecture seule, dit quelles migrations sont appliquees (mode verifier du script de mise en ligne).
+- Mise en ligne : scripts/mise-en-ligne-academie-lundi.sh du workspace (journal pousse AVANT le site).
+- 13/11 soir : email-a-tous 5c6ef0d (voie Resend Broadcasts, emails-broadcast.ts) fusionne. L essai commun prend
+  --bloc-email <fichier> (ecrit par essayer-migration-emails-annonces.mjs --imprimer) et le joue dans la meme
+  transaction annulee : 18 etapes ok, ESSAI_OK. La synchro Resend n est PAS dans le go (autre go de Brice, 19/11 au plus tot).
 
 ## INVITATIONS SKOOL APRES LA FERMETURE : LES MODELES PASSENT AU PASSE LE 16/11 (13/11/2026, correctif pousse sur master ; AUCUNE migration)
 
@@ -50,6 +67,116 @@
 - Essai : node --env-file=.env.local scripts/essayer-migration-chat-noms.mjs (transaction annulee ; AOK_WORKSPACE en
   worktree) : PAS LANCE le 13/11 (lecture de la base de prod refusee au codeur). A lancer avant d'appliquer.
 - Liste « Comptes sans parole » de l'equipe (SQL_SANS_PAROLE) : inchangee (nom_affiche ou prenom et nom).
+
+## CLOCHE ET RECHERCHE DANS LES LECONS : /api/academie/cloche ET /api/academie/recherche (13/11/2026, FEATURE, commite NON pousse, branche academie-cloche-recherche depuis academie-navigation 9b10de7 ; AUCUNE migration)
+
+- Brief : D:\7_Agents\briefs\2026-11-13-cloche-et-recherche.md. Rapport : cloche-recherche-rapport.md (notes de Yume
+  Orchestre). Le site : branche academie-cloche-recherche du workspace (ETAT du site). Pousser le journal AVANT le site.
+- CLOCHE (src/lib/academie/cloche.ts, pur, n'importe rien ; route src/app/api/academie/cloche/route.ts) : SANS TABLE.
+  Les notifications se calculent sur 30 jours : billets du cockpit (lecon et module publies), messages du salon qui
+  repondent a un message du compte (autre auteur, non masques, lus par aok_chat_vue au niveau du lecteur), questions
+  du compte sous une lecon repondues (publiee ou privee). Lu : annonce = academie_billets_vus (la table de la page
+  Annonces et du pop-up) ; reponse = user_metadata.aok_cloche = { lu_le, lues } du compte Supabase (comme
+  aok_accueil_vu_le du site), relue fraiche par getUser et ecrite avec le jeton du compte lui-meme (PUT /auth/v1/user,
+  jamais de cle de service) ; lues = 40 cles courtes au plus (c|q + 12 chiffres), gardees seulement si la reponse est
+  encore dans la fenetre. GET : { non_lues, notifications: [{ cle, type, le, titre, extrait, qui, lien, lue }] } ;
+  POST { lues: [...] } ou { tout: true }. Aucun email ni push.
+- RECHERCHE (src/lib/academie/recherche.ts, pur ; route src/app/api/academie/recherche/route.ts) : GET ?q=, jeton
+  facultatif (sans : droitsVisiteur). Lecons lisibles (lecon et module publies) : titre, titre et resume du module,
+  texte (Markdown en texte brut). Chaque mot (sans accents, sans mots vides) dans le titre, le texte ou le titre du
+  module, un au moins dans le titre ou le texte. Extrait SEULEMENT si ouvertureLecon dit 'ouvert' (visiteur : apercu
+  seulement) ; une lecon fermee sort avec son titre et acces 'ferme', sans extrait. 60 lecons, 8 par module au plus.
+  Caches par instance : droits 2 min, textes 5 min (965 lecons, 477 textes, 1 Mo, indexes en moins de 100 ms ; une
+  recherche en 1 a 6 ms). Les logs ne disent jamais la recherche.
+- Verifie : scripts/verifier-cloche-recherche.mjs (15 blocs, pur) ; scripts/essayer-cloche-recherche.mjs contre la
+  vraie base (18 etapes ok le 13/11 : requetes de la cloche en transaction ANNULEE avec messages, questions et billet de
+  test, aok_chat_diffuser neutralisee le temps de la transaction, rien n'est reste ; recherche en lecture seule, aucun
+  extrait quand tout est ferme). tsc et eslint ok.
+
+## QUIZ DE FIN DE MODULE : /api/academie/quiz ET LE CHAMP « quiz » DU CATALOGUE (13/11/2026, FEATURE, commite NON pousse, branche academie-quiz-suite depuis academie-navigation 9b10de7 ; migration 20261113231500 du workspace ECRITE NON appliquee)
+
+- Brief : D:\7_Agents\briefs\2026-11-13-quiz-et-module-suivant.md (inventaire B9). Rapport : quiz-module-suivant-rapport.md
+  (notes de Yume Orchestre). Le site : branche academie-quiz-suite du workspace (ecran « Fin du module », ETAT du site).
+- Les questions vivent dans le fichier du module (D:\6_Societe\Pilotage\Academie\catalogue\modules\<slug>.json, champ
+  « quiz » : version, statut brouillon|publie, note, questions { id, question, lecon, choix, bonne, explication }),
+  recopiees dans academie_modules.quiz. Deux quiz BROUILLONS (a relire par Brice) : novice-en-trading et
+  les-bases-smart-money, 7 questions chacun. Brouillon = montre a l'equipe seulement, jamais garde.
+- Code sans import : src/lib/academie/quiz-academie.ts (lireQuiz, vueQuiz sans la reponse, corriger, droitAuQuiz, et
+  les requetes : quizDuModule, dernierResultat, envoisSurUneHeure, noterResultat ; avant la migration : pas de quiz,
+  rien de garde, aucune erreur). Route GET ?module= et POST { module, version, reponses } : jeton, module publie, droit
+  sur le module (meme regle que /moi, pas seulement apercu ou billet du jour), correction au serveur, 30 envois par
+  heure, 409 si la version a change. Table academie_quiz_resultats (un membre lit les siens, l'equipe tout, aucune
+  ecriture directe).
+- Import : importer-catalogue-academie.mjs lit le champ « quiz » (verifie AVANT toute ecriture ; sans la colonne, le
+  module s'importe et le quiz attend, avertissement ; un fichier sans le champ ne touche pas a la colonne).
+  scripts/importer-quiz-academie.mjs pose SEULEMENT le quiz (essai a blanc par defaut, --ecrire sur le go de Brice).
+- ESSAYE le 13/11 en transaction annulee : scripts/essayer-migration-quiz-academie.mjs, 18 etapes ok (avant la
+  migration, migration jouee deux fois, import du vrai fichier Novice avec son quiz, resultats, lectures rejouees sous
+  authenticated et anon, contraintes, rien de reste). Test pur : scripts/verifier-quiz-academie.mjs (9 blocs).
+- Mise en ligne (chaque geste sur le go de Brice) : migration, verifier:rls, push du journal AVANT le site, puis
+  importer-quiz-academie.mjs --ecrire sur les deux fichiers ; publier = statut « publie » dans le fichier apres
+  relecture par Brice, puis relancer le script.
+
+## ANNONCES DE L'ACADEMIE : /api/academie/annonces ET L'IMPORT DES 75 ANNONCES SKOOL (13/11/2026, FEATURE, commite NON pousse, branche academie-navigation depuis origin/master 4491b52 ; migration 20261113160000 du workspace ECRITE NON appliquee)
+
+- Brief : D:\7_Agents\briefs\2026-11-13-academie-accueil-navigation.md (Brice, 13/11 : « Billets » devient « Annonces »,
+  une vraie page, « recuperer les annonces de School pour les mettre ici »). Rapport : academie-navigation-rapport.md
+  (notes de Yume Orchestre). Le site : branche academie-navigation du workspace (ETAT du site).
+- Le stockage ne change pas : une annonce EST un billet (billets.ts : lecon + academie_billets). La migration ajoute
+  origine ('cockpit' | 'skool'), source (unique, cle d'import), categorie, epingle_le, et le module d'archive
+  « annonces-skool » (statut archive, jamais dans le catalogue).
+- Route GET /api/academie/annonces (tout compte connecte) : billets du cockpit publies + annonces Skool, les plus
+  recentes d'abord ; non_lue = billet du cockpit de moins de 30 jours absent de academie_billets_vus (une annonce
+  Skool n'est jamais non lue) ; ?resume=1 = nombre de non lues et derniere annonce (barre et accueil). POST
+  { vues } = note vues (100 au plus ; le pop-up du billet du jour ne revient pas). Avant la migration : billets du
+  cockpit seulement (colonnes absentes, repli sans erreur). Code pur sans import : src/lib/academie/annonces.ts.
+- Import : scripts/importer-annonces-skool.mjs (cockpit_annonces_envoyees canal skool + export Skool pour slug et
+  pieces jointes ; categorie par categorieDe ; publication_faite_le = date Skool : ni pop-up ni ligne de plus dans
+  cockpit_annonces_envoyees). ESSAYE le 13/11 en transaction annulee : 15 etapes ok (migration jouee deux fois,
+  75 creees, 66 images, 2 PDF, rejouable, rien de reste). --ecrire seulement sur le go de Brice, APRES la migration
+  et la mise en ligne des images (--images-base). Test pur : scripts/verifier-annonces.mjs (6 blocs).
+- v2 du 13/11 (relecture de Brice) : ?resume=1 rend aussi dernieres (les 3 dernieres annonces, titres et dates),
+  montrees dans la barre de gauche du site sous ANNONCES.
+- Mise en ligne : migration, images, import --ecrire, push du journal, PUIS push du site (sans la route, la page
+  du site lit une 404 sans CORS et dit « reseau »).
+
+## CALENDRIER DES LIVES : POST /api/academie/lives ET /api/cockpit/lives (13/11/2026, FEATURE commitee NON poussee, branche academie-lives depuis origin/master 4491b52 ; migration du workspace 20261113200000 ECRITE NON appliquee)
+
+- Brief : D:\7_Agents\briefs\2026-11-13-calendrier-des-lives.md ; rapport : calendrier-des-lives-rapport.md (notes de
+  Yume Orchestre). Skool ferme le 16/11 et son calendrier avec lui (inventaire A5).
+- Logique pure et requetes : src/lib/academie/lives.ts. Les series (lives de Brice, mardi et jeudi 20 h de Paris) sont
+  depliees par la base (aok_lives_entre, heure de Paris, changement d'heure juste) ; une date annulee, deplacee, son lien
+  ou son titre = une exception (serie_id + date_serie), la serie n'est jamais cassee. Ponctuels = lives partenaires.
+- REGLE DU LIEN (reco a Brice, construite dessus) : liste lisible par tous, connecte ou non ; le lien ne part qu'a un
+  compte qui y a droit selon le niveau du live (tous, programme, live_club = Live Club actif, ETM, VIP, equipe :
+  lecteurDe, depuis droitsAcademie et aok_annuaire_acces) et seulement de 30 min avant le debut jusqu'a la fin
+  (etatLien). Stripe illisible : etat 'inconnu', jamais un faux non.
+- /api/academie/lives : chemin public EXACT dans middleware.ts (sans jeton : la liste, aucun lien ; jeton refuse : 401).
+  /api/cockpit/lives : cockpit_allowlist, gestes lister, creer/modifier/arreter/supprimer_serie, creer/modifier/
+  supprimer_live, et sur une date lien, annuler, retablir, deplacer (null = horaire de la serie), texte_date.
+- Verifs : scripts/verifier-lives.mjs (12 blocs), scripts/essayer-migration-lives.mjs (46 etapes, transaction annulee,
+  rien n'est reste), tsc, eslint, build ; verifier:rls = les 2 alertes connues.
+- Ordre de mise en ligne : migration (appliquer-migration.sh 20261113200000_academie_lives.sql), verifier:rls, journal,
+  puis site et cockpit. Avant la migration, la page dit « le calendrier arrive bientot » et l'onglet du cockpit « a brancher ».
+
+## EMAIL A TOUS LES MEMBRES DEPUIS LE COCKPIT (13/11/2026, commite NON pousse, branche email-a-tous depuis origin/master 4491b52 ; migration 20261113210000 du workspace (renommee a la fusion academie-lundi, 20261113200000 etant pris par le calendrier) ECRITE, essayee en bloc annule, NON appliquee)
+
+- Brief D:\7_Agents\briefs\2026-11-13-email-a-tous-cockpit.md (inventaire H2, PASS B5) : Skool ferme le 16/11 et emporte son email a tous. Rapport : email-a-tous-rapport.md (notes de la conversation local_8f8ccb0c).
+- Code : src/lib/academie/emails-annonces.ts (PUR, n'importe que node:crypto : groupes, rendu, jeton, garde, droits, requetes, envoyeur de simulation), emails-annonces-serveur.ts (base, Resend batch pour les essais, Broadcast pour l'envoi aux membres), POST /api/cockpit/academie/emails (etat, apercu, essai, envoyer, reprendre, detail ; allowlist), GET/POST /api/academie/emails/desinscription (publique en chemin exact dans middleware.ts, jeton signe = id de la ligne, jamais l'adresse).
+- SIMULATION PAR DEFAUT : rien ne part tant que ANNONCES_EMAIL_MODE ne vaut pas exactement « reel » (essais compris) ; lignes notees « simule », email ecrit dans le journal du serveur (texte, lien personnel remplace, aucune adresse).
+- Groupes (base, 13/11) : tous 301, comptes 78, programmes 118 (avec ou sans compte), gratuits 24, sans_compte 223. Statut d'un compte = aok_annuaire_acces ; adresses sans compte = acces actif pose par email, puis invitation de Skool envoyee.
+- Regles : HTML du texte echappe, aucun lien du texte cliquable (desamorces), seuls le bouton (https://aoknowledge.com/...) et la desinscription sont des liens ; List-Unsubscribe en un clic ; garde un envoi reel par 72 h par transport (forcage : admin ET acces_perso = Brice seul) ; envoi reel : profiles.role = admin (pas le compte de Tab) ; confirmation = le nombre exact (409 sinon) ; billet publie exige ; un envoi reel s'inscrit dans cockpit_annonces_envoyees (canal email, source email-academie:<id>).
+- Verifs : node scripts/verifier-emails-annonces.mjs (17 blocs ok) ; node scripts/essayer-email-annonce.mjs --sortie <dossier> (rendu local, aucune base) ; scripts/essayer-migration-emails-annonces.mjs (bloc DO termine par une exception : migration deux fois, requetes exactes, ESSAI_OK le 13/11 par l'outil SQL de Supabase, tables absentes apres) ; tsc --noEmit ok.
+- AVANT LA MISE EN LIGNE (go de Brice) : voir la voie Broadcast ci-dessous (l'ordre de mise en ligne y est).
+
+### Voie d'envoi : les Broadcasts gratuits de Resend (13/11/2026, Brice : « Ok B » ; brief 2026-11-13-email-a-tous-resend-broadcasts.md ; rapport email-a-tous-resend-rapport.md)
+- Pourquoi : l'envoi un par un (/emails batch) compte dans le quota transactionnel du plan gratuit (100 par jour, 3 000 par mois, partages avec les comptes et les invitations) ; les Broadcasts n'y comptent pas, le plan gratuit compte les contacts (1 000) et les segments (3).
+- Code : src/lib/academie/emails-broadcast.ts (n'importe RIEN : constantes, LecteurResend / EcrivainResend injectes, cadence 8 appels par seconde avec reprise sur 429, verifierCle, lireEtatResend, planifierSynchro (pur), appliquerPlan, payloadBroadcast, requetes). emails-annonces-serveur.ts : synchroniser, simulerBroadcast, envoyerParBroadcast (brouillon puis envoi, id garde avant l'envoi, brouillon retrouve par [id de l'envoi] dans son nom : jamais deux Broadcasts). Route : action « synchro » (lecture ; appliquer: true seulement en mode reel, admin), « envoyer » = garde lue, synchronisation (reelle en mode reel, lue seulement en simulation), confirmation du nombre, Broadcast (ou sa simulation).
+- Resend : segments « Académie : tous les membres » et « Académie : comptes », sujet (Topic) « Annonces de l'académie » (defaut opt_in), lien de desinscription {{{RESEND_UNSUBSCRIBE_URL}}} (le texte de l'equipe ne peut pas injecter de variable : « {{ » devient « { { »). Seuls « tous » et « comptes » s'envoient (GROUPES_ENVOI). Les ESSAIS restent des emails transactionnels (lien signe de notre route).
+- SENS DE LA SYNCHRONISATION : base -> Resend pour les contacts et segments (un nouveau contact : segments + sujet opt_in, ou opt_out s'il est desinscrit ; un existant : ajouts et retraits de segment, opt_out du sujet pour nos desinscrits pas encore pousses ; JAMAIS d'opt_in sur un existant ni de « unsubscribed: false », import en lot en on_conflict « skip »). Resend -> base pour les desinscriptions seulement (desinscrits globaux, clics « unsubscribed » et plaintes de nos Broadcasts : source « resend », une reinscription de chez nous est annulee). Notre table reste la reference du cockpit ; Resend reste le dernier filtre a l'envoi. Reinscription : par le membre sur la page de Resend seulement (non relue chez nous).
+- Migration 20261113210000 (ECRITE NON appliquee) : transport « broadcast », resend_broadcast_id, synchro (jsonb, nombres), statut de ligne « confie », source « resend », resend_le.
+- Verifs du 13/11 : verifier-emails-annonces.mjs 29 blocs ok ; tsc, eslint (0 erreur), next build ok ; scripts/simuler-synchro-resend.mjs (base en transaction « read only », Resend en lectures seules, n'importe aucune ecriture) : cle Full access, domaine aoknowledge.com verifie, Resend vide (0 contact, segment General seul, 0 sujet, 0 Broadcast), plan = 301 contacts a creer (78 comptes) en 2 imports, 2 segments et le sujet a creer, 3 segments sur 3 apres. Le bloc DO de essayer-migration (etendu a la voie Broadcast) n'a PAS pu etre rejoue le 13/11 : execution contre la base de production refusee par le controle des permissions.
+- ORDRE DE MISE EN LIGNE (go ecrit de Brice, premier Broadcast le 19/11 au plus tot) : 1. rejouer le bloc annule puis appliquer la migration 20261113210000 ; 2. pousser le journal et deployer le cockpit (simulation : rien ne part) ; 3. dans le cockpit, « Verifier » (lecture) ; 4. poser ANNONCES_EMAIL_MODE=reel sur Vercel, redeployer, « Synchroniser pour de vrai » (2 segments, le sujet, 301 contacts en import ; attendre la fin de l'import) ; 5. essai a moi (transactionnel) ; 6. premier envoi, le 19/11 au plus tot.
 
 ## SALON DE L'ACADEMIE : L'ALERTE A L'EQUIPE PAR AGENT AOK (12/11/2026 soir, commite NON pousse, branche chat-academie-alerte depuis origin/master 3830ac1 ; AUCUNE migration)
 
