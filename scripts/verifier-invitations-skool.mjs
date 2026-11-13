@@ -11,6 +11,7 @@
 
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   CHEMIN_PAGE_INVITATION, MAX_DEFAUT, RELANCE_APRES_JOURS, RELANCE_SEUIL_JOURS, URL_CONNEXION, URL_ROUTE_DEFAUT, VALIDITE_JOURS,
@@ -19,7 +20,7 @@ import {
   masquerEmails, nettoyerPrenom, nomModele, ouvrirInvitation, planifier, remplir, urlConnexionRepere, urlPageInvitation,
   verifierModele, versionPour,
 } from '../src/lib/academie/invitations-pur.ts'
-import { derouler, lireArguments, lireModeles } from './inviter-membres-skool.mjs'
+import { DOSSIER_APRES_FERMETURE, FERMETURE_SKOOL, derouler, dossierModeles, lireArguments, lireModeles } from './inviter-membres-skool.mjs'
 import { masquerSecretMcp } from '../src/lib/sentry-masque.ts'
 
 let n = 0
@@ -248,19 +249,68 @@ bloc('modeles : marques, BROUILLON, prenom absent, HTML echappe, adresses de tes
 
 // Depuis le 08/11 au soir, les modeles du depot portent les textes VALIDES par Brice (« je valide tel quel »,
 // avec le mot sur le site de Melanie) : ils ne sont plus des brouillons et doivent pouvoir partir.
-bloc('modeles du depot : textes valides, complets, plus aucun BROUILLON, sans tiret long', () => {
+bloc('modeles du depot : textes valides, complets, plus aucun BROUILLON, sans tiret long (avant et apres la fermeture)', () => {
   const dossier = fileURLToPath(new URL('./modeles-invitation-skool/', import.meta.url))
   const noms = ['payant', 'payant-compte', 'gratuit', 'relance-payant', 'relance-gratuit']
-  const { modeles, defauts } = lireModeles(dossier, noms)
-  assert.deepEqual(defauts, [])
-  for (const nom of noms) {
-    const m = modeles.get(nom)
-    assert.ok(!estBrouillon(m), `${nom} ne doit plus etre marque BROUILLON`)
-    assert.deepEqual(verifierModele(m), [], `${nom} : modele incomplet`)
-    assert.ok(!INTERDITS.test(m.sujet + m.corps), `${nom} : caractere interdit (tiret long...)`)
+  const fichiers = noms.flatMap(nm => [`${nm}.corps.txt`, `${nm}.sujet.txt`]).sort()
+  for (const d of [dossier, join(dossier, DOSSIER_APRES_FERMETURE)]) {
+    const { modeles, defauts } = lireModeles(d, noms)
+    assert.deepEqual(defauts, [])
+    for (const nom of noms) {
+      const m = modeles.get(nom)
+      assert.ok(!estBrouillon(m), `${nom} ne doit plus etre marque BROUILLON`)
+      assert.deepEqual(verifierModele(m), [], `${nom} : modele incomplet`)
+      assert.ok(!INTERDITS.test(m.sujet + m.corps), `${nom} : caractere interdit (tiret long...)`)
+    }
   }
-  assert.deepEqual(readdirSync(dossier).sort(), noms.flatMap(nm => [`${nm}.corps.txt`, `${nm}.sujet.txt`]).sort())
+  assert.deepEqual(readdirSync(dossier).sort(), [...fichiers, DOSSIER_APRES_FERMETURE].sort())
+  assert.deepEqual(readdirSync(join(dossier, DOSSIER_APRES_FERMETURE)).sort(), fichiers)
   assert.match(lireModeles(dossier, ['inconnu']).defauts[0], /fichier manquant/)
+})
+
+// Skool ferme le 16/11/2026 et les invitations continuent apres (un lot par jour jusqu'a ce que tout le monde soit
+// contacte et relance). A partir de ce jour (minuit, heure de Paris), le passage lit apres-fermeture/ : les memes
+// textes, seule la phrase sur la fermeture passe au passe.
+bloc('fermeture de Skool : le 15/11 les textes d avant, a partir du 16/11 (Paris) la phrase au passe, rien d autre', () => {
+  const dossier = fileURLToPath(new URL('./modeles-invitation-skool/', import.meta.url))
+  const apres = join(dossier, DOSSIER_APRES_FERMETURE)
+  assert.equal(FERMETURE_SKOOL.toISOString(), '2026-11-15T23:00:00.000Z', 'minuit a Paris le 16/11 (UTC+1)')
+  // Les bords : 23 h 59 a Paris le 15/11, puis minuit le 16/11.
+  assert.equal(dossierModeles(dossier, new Date('2026-11-15T22:59:59.999Z')), dossier)
+  assert.equal(dossierModeles(dossier, new Date('2026-11-15T23:00:00.000Z')), apres)
+  const noms = ['payant', 'payant-compte', 'gratuit', 'relance-payant', 'relance-gratuit']
+  const rendu = quand => {
+    const { modeles, defauts } = lireModeles(dossierModeles(dossier, quand), noms)
+    assert.deepEqual(defauts, [])
+    return new Map(noms.map(nm => [nm, emailDepuisModele(modeles.get(nm), { prenom: 'Anne', lien: 'https://exemple.invalid/lien' })]))
+  }
+  // Cas avant : le passage du 15/11 a 19 h 07 (Paris). Cas apres : celui du 17/11 a 19 h 07.
+  const le15 = rendu(new Date('2026-11-15T18:07:00Z'))
+  const le17 = rendu(new Date('2026-11-17T18:07:00Z'))
+  const FUTUR = /Skool ferme |avant la fermeture/
+  for (const nm of noms) {
+    const [a, b] = [le15.get(nm), le17.get(nm)]
+    assert.match(`${a.sujet}\n${a.texte}`, FUTUR, `${nm} : le 15/11, le texte d avant`)
+    assert.ok(!/a fermé/.test(`${a.sujet}\n${a.texte}`), `${nm} : le 15/11, rien au passe`)
+    assert.ok(!FUTUR.test(`${b.sujet}\n${b.texte}`), `${nm} : le 17/11, plus rien au futur`)
+    assert.match(b.sujet, /a fermé/, `${nm} : le 17/11, sujet au passe`)
+    assert.match(b.texte, /Skool a fermé (ses portes )?le 16 novembre/, `${nm} : le 17/11, corps au passe`)
+  }
+  // Une seule ligne change par fichier, et c'est celle de la fermeture.
+  for (const nm of noms) {
+    for (const p of ['sujet', 'corps']) {
+      const f = `${nm}.${p}.txt`
+      const l1 = readFileSync(join(dossier, f), 'utf8').split('\n')
+      const l2 = readFileSync(join(apres, f), 'utf8').split('\n')
+      assert.equal(l2.length, l1.length, `${f} : meme nombre de lignes`)
+      const changees = l1.map((l, i) => [l, l2[i]]).filter(([x, y]) => x !== y)
+      assert.equal(changees.length, 1, `${f} : une seule ligne changee`)
+      assert.match(changees[0][0], /Skool ferme |fermeture de Skool/, f)
+      assert.match(changees[0][1], /Skool a fermé/, f)
+    }
+  }
+  // Un fichier absent apres le 16/11 arrete le passage : jamais de retour au texte d'avant.
+  assert.match(lireModeles(join(dossier, 'absent'), ['payant']).defauts[0], /fichier manquant/)
 })
 
 bloc('arguments : essai a blanc par defaut, gardes', () => {

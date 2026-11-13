@@ -1,0 +1,5 @@
+Salut {{prenom}},
+
+Petit rappel : notre Skool a fermé le 16 novembre. Ton compte gratuit sur l'Académie se crée en une minute, avec cette adresse : {{lien}}
+
+Brice
