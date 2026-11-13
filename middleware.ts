@@ -51,7 +51,8 @@ export async function middleware(request: NextRequest) {
   // /api/academie/invitation : le lien personnel de l'email d'invitation des payants de Skool, sans session ; le jeton est verifie dans la route ; chemin EXACT (08/11/2026).
   // /api/academie/lives : le calendrier des lives, lisible sans compte (titres et horaires seulement) ; le lien ne part
   // qu'avec un jeton valide, au compte qui y a droit, dans la fenetre (route) ; chemin EXACT (13/11/2026).
-  const isPublic = pathname === '/' || pathname === '/api/besoins/signal' || pathname === '/api/academie/invitation' || pathname === '/api/academie/lives' || publicPaths.some(p => pathname.startsWith(p))
+  // /api/academie/emails/desinscription : le lien de desinscription des emails aux membres envoyes depuis le cockpit, sans session ; le jeton signe est verifie dans la route ; chemin EXACT (13/11/2026).
+  const isPublic = pathname === '/' || pathname === '/api/besoins/signal' || pathname === '/api/academie/invitation' || pathname === '/api/academie/lives' || pathname === '/api/academie/emails/desinscription' || publicPaths.some(p => pathname.startsWith(p))
   if (isPublic) return supabaseResponse
 
   // API routes — allow Bearer token through (handled in route handlers)
