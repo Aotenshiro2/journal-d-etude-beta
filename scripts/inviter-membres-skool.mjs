@@ -31,7 +31,8 @@
 // Modeles (--modeles <dossier>) : <nom>.sujet.txt et <nom>.corps.txt, avec {{prenom}} et {{lien}} ;
 // nom = payant, payant-compte, gratuit, puis relance-payant et relance-gratuit pour la relance. Le corps est
 // du texte : le HTML en est tire (paragraphes, liens). Un modele qui contient « BROUILLON » ne part a aucun
-// membre (--test-vers l'accepte).
+// membre (--test-vers l'accepte). A partir du 16/11/2026 (minuit, heure de Paris), le passage lit les memes noms
+// dans le sous-dossier apres-fermeture/ : les memes textes, la phrase sur la fermeture de Skool au passe.
 //
 // Envoi : Resend (RESEND_API_KEY_LIVECLUB, sinon RESEND_API_KEY), depuis « AO Knowledge <support@aoknowledge.com> »
 // (INVITATIONS_FROM_EMAIL pour changer), reponse a support@. Cle d'idempotence par ligne et par etape : un
@@ -110,6 +111,19 @@ export function lireModeles(dossier, noms) {
     modeles.set(nom, m)
   }
   return { modeles, defauts }
+}
+
+// Skool ferme le 16/11/2026, et les invitations continuent apres (Brice, 09/11 et 11/11 : un lot par jour jusqu'a
+// ce que tout le monde soit contacte et relance). Des ce jour, « Skool ferme le 16 novembre » serait faux :
+// les modeles du sous-dossier apres-fermeture/ (memes noms, la phrase au passe) prennent le relais. Un fichier
+// absent de ce sous-dossier arrete le passage (« fichier manquant »), il ne retombe jamais sur le texte d'avant.
+/** Minuit le 16/11/2026 a Paris (heure d'hiver, UTC+1). */
+export const FERMETURE_SKOOL = new Date('2026-11-16T00:00:00+01:00')
+export const DOSSIER_APRES_FERMETURE = 'apres-fermeture'
+
+/** Le dossier des modeles d'un passage : apres-fermeture/ a partir du 16/11/2026 (heure de Paris), sinon le dossier. */
+export function dossierModeles(dossier, maintenant) {
+  return maintenant.getTime() >= FERMETURE_SKOOL.getTime() ? join(dossier, DOSSIER_APRES_FERMETURE) : dossier
 }
 
 // ---------------------------------------------------------------------------
@@ -320,7 +334,7 @@ async function principal(argv) {
     const noms = o.testVers
       ? versionsEssai.map(v => nomModele(mode, v))
       : [...new Set(Object.entries(bilan.a_envoyer).filter(([, n]) => n > 0).map(([v]) => nomModele(mode, v)))]
-    const { modeles, defauts } = lireModeles(resolve(o.modeles), noms)
+    const { modeles, defauts } = lireModeles(dossierModeles(resolve(o.modeles), maintenant), noms)
     if (defauts.length) {
       console.error('Modele(s) a corriger, rien n est envoye :')
       for (const d of defauts) console.error(`  ${d}`)

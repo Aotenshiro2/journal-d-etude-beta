@@ -1,5 +1,18 @@
 # ETAT du journal d etudes
 
+## INVITATIONS SKOOL APRES LA FERMETURE : LES MODELES PASSENT AU PASSE LE 16/11 (13/11/2026, correctif pousse sur master ; AUCUNE migration)
+
+- Brief : D:\7_Agents\briefs\2026-11-13-invitations-apres-fermeture.md. Les invitations continuent apres la fermeture
+  de Skool (Brice, 09/11 et 11/11) : des le passage du 16/11, « Skool ferme le 16 novembre » serait faux.
+- scripts/modeles-invitation-skool/apres-fermeture/ : les 10 memes fichiers, UNE ligne changee par fichier (la phrase
+  sur la fermeture, au passe). inviter-membres-skool.mjs lit ce sous-dossier a partir de FERMETURE_SKOOL (16/11/2026
+  minuit, heure de Paris) via dossierModeles ; un fichier absent arrete le passage, jamais de retour au texte d'avant.
+- Verifs : verifier-invitations-skool.mjs 24 blocs (cas du 15/11 et du 17/11, bords de minuit, une seule ligne changee
+  par fichier) ; eslint ; rendu a blanc des 10 modeles le 15/11 et le 17/11, sans base ni envoi.
+- La tache du soir (invitations-quotidiennes.sh, D:\6_Societe\Pilotage\Academie\passation) tourne depuis
+  ~/Projects/_worktrees/journal-passation (branche passation-integration, 18828c5, ancetre de master) : elle ne prend
+  les nouveaux modeles qu'apres un merge --ff-only de origin/master dans ce worktree, a faire avant le passage du 16/11.
+
 ## SALON DE L'ACADEMIE : LES NOMS ET LA SIGNATURE DE L'EQUIPE (13/11/2026, correctif, commite NON pousse, branche chat-noms depuis origin/master 4491b52 ; migration 20261113120000 ECRITE NON appliquee)
 
 - Brief : D:\7_Agents\briefs\2026-11-13-chat-noms-signature.md (cartes chat-academie-noms et chat-academie-signature : A, A).

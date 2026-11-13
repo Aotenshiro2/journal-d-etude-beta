@@ -1,0 +1,9 @@
+Salut {{prenom}},
+
+Je reviens vers toi, car ton compte sur l'Académie n'est pas encore créé, et notre Skool a fermé le 16 novembre.
+
+Ton lien est toujours là : {{lien}}
+
+Un clic, et tes formations sont ouvertes. Si tu préfères une autre adresse email, crée ton compte avec, puis ajoute celle-ci dans Mon espace > Paramètres > Comptes liés : tes accès suivront.
+
+Brice
