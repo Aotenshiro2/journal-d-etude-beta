@@ -58,6 +58,12 @@
 // fichier est refuse une fois le module renomme (il recreerait un module et ses lecons en double) ; le nouveau
 // (« remplace » : l'ancien slug) est refuse tant que la migration qui renomme n'est pas appliquee.
 //
+// Le quiz de fin de module (13/11/2026, migration 20261113231500, src/lib/academie/quiz-academie.ts) : le champ « quiz »
+// du fichier, verifie par lireQuiz AVANT toute ecriture, remplit academie_modules.quiz. Un fichier SANS champ
+// « quiz » ne touche pas a la colonne ; « quiz »: null la vide. Un fichier qui porte un quiz sur une base sans la
+// colonne : le module s'importe, le quiz non (avertissement « migration a appliquer »). Un quiz invalide arrete
+// l'import. Pour ne poser QUE le quiz : scripts/importer-quiz-academie.mjs.
+//
 // importerModule(tx, donnees, dossier, options) est exportee pour les scripts essayer-migration-*
 // (memes ordres, dans une transaction toujours annulee).
 import { readFileSync } from 'node:fs'
@@ -65,6 +71,7 @@ import { dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { PrismaClient } from '@prisma/client'
 import { fusionImport, lireOffresSections } from '../src/lib/academie/pur.ts'
+import { lireQuiz } from '../src/lib/academie/quiz-academie.ts'
 import { SQL_EDITION_HISTORIQUE_IMPORT } from '../src/lib/academie/requetes.ts'
 import { planImportLecon, planImportModule, planImportSection } from '../src/lib/academie/arbre.ts'
 
@@ -94,6 +101,35 @@ export function lireLive(brut, slug) {
     return l.map(x => x.trim())
   }
   return { le, type, organisations: liste(brut.organisations, 8, 'organisations'), intervenants: liste(brut.intervenants, 12, 'intervenants') }
+}
+
+/**
+ * Le champ « quiz » du fichier (13/11/2026) : { present: false } s'il est absent (la colonne n'est pas touchee),
+ * { present: true, quiz: null } pour le retirer, { present: true, quiz } verifie. Jette sur un quiz invalide.
+ */
+export function lireQuizDuFichier(donnees) {
+  if (!Object.prototype.hasOwnProperty.call(donnees, 'quiz')) return { present: false, quiz: null }
+  if (donnees.quiz === null) return { present: true, quiz: null }
+  const lu = lireQuiz(donnees.quiz)
+  if (!lu.ok) throw new Error(`module ${donnees.module?.slug} : ${lu.erreur}`)
+  const slugs = new Set((donnees.lecons ?? []).map(l => l.slug))
+  const inconnue = lu.quiz.questions.find(q => q.lecon && !slugs.has(q.lecon))
+  if (inconnue) throw new Error(`module ${donnees.module?.slug} : quiz, question ${inconnue.id} : lecon « ${inconnue.lecon} » absente du fichier`)
+  return { present: true, quiz: lu.quiz }
+}
+
+/** La colonne academie_modules.quiz existe-t-elle (migration 20261113231500) ? */
+export async function colonneQuizExiste(tx) {
+  const [{ n }] = await tx.$queryRawUnsafe(
+    `select count(*)::int as n from information_schema.columns
+      where table_schema = 'public' and table_name = 'academie_modules' and column_name = 'quiz'`)
+  return n === 1
+}
+
+/** Pose (ou retire) le quiz du module. Rend la ligne du bilan. */
+export async function poserQuiz(tx, moduleId, quiz) {
+  await tx.$executeRawUnsafe(`update public.academie_modules set quiz = $2::jsonb where id = $1::uuid`, moduleId, quiz ? JSON.stringify(quiz) : null)
+  return quiz ? `v${quiz.version} ${quiz.statut}, ${quiz.questions.length} questions` : 'retire'
 }
 
 /**
@@ -135,6 +171,14 @@ export async function importerModule(tx, donnees, dossier, { ecraserEditions = f
     throw new Error('le fichier porte des donnees de live : appliquer d\'abord la migration 20261111010000 (colonnes live_*)')
   }
 
+  // Le quiz de fin de module : verifie avant toute ecriture. Sans la colonne (migration pas appliquee), le reste du
+  // module s'importe et le quiz attend (avertissement) : un quiz manquant ne casse rien, une reprise du module oui.
+  const quizFichier = lireQuizDuFichier(donnees)
+  if (quizFichier.present && !(await colonneQuizExiste(tx))) {
+    if (quizFichier.quiz) bilan.avertissements.push('quiz NON pose : appliquer d\'abord la migration 20261113231500 (academie_modules.quiz), puis importer-quiz-academie.mjs')
+    quizFichier.present = false
+  }
+
   // Le module tel qu'il est en base (verrouille jusqu'a la fin de l'import) : une edition, un rangement dans l'app ?
   const [modBase] = await tx.$queryRawUnsafe(
     `select id::text as id, titre, resume, ordre, statut, edite_le is not null as edite, deplace_le is not null as deplace,
@@ -166,6 +210,7 @@ export async function importerModule(tx, donnees, dossier, { ecraserEditions = f
     m.auteur ?? null, m.image ?? null, m.prix_eur ?? null, fm.effacerEdition, pm.effacerPlace, pm.effacerStatut,
   )
   const moduleId = mod.id
+  if (quizFichier.present) bilan.quiz = await poserQuiz(tx, moduleId, quizFichier.quiz)
   if (fm.garde) bilan.gardees.push(`module ${m.slug} (titre et resume)`)
   if (fm.effacerEdition) {
     bilan.editions_ecrasees.push(`module ${m.slug}`)
