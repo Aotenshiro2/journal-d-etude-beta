@@ -1,6 +1,6 @@
 // EMAIL A TOUS LES MEMBRES DEPUIS LE COCKPIT (13/11/2026 ; brief
 // D:\7_Agents\briefs\2026-11-13-email-a-tous-cockpit.md ; migration du workspace
-// 20261113200000_academie_emails_annonces.sql, ECRITE NON appliquee).
+// 20261113210000_academie_emails_annonces.sql, ECRITE NON appliquee).
 //
 // Skool ferme le 16/11 et emporte son « email a tous les membres » (une fois par
 // 72 h au plus). Le cockpit le remplace : espace Annonces, onglet « Emails aux

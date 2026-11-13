@@ -12,7 +12,7 @@ import { messageErreur, relationAbsente } from '@/lib/liveclub/pur'
 /**
  * POST /api/cockpit/academie/emails : l'EMAIL A TOUS LES MEMBRES depuis le cockpit (13/11/2026,
  * espace Annonces, onglet « Emails aux membres » ; src/lib/academie/emails-annonces.ts ; migration
- * 20261113200000_academie_emails_annonces.sql). Remplace l'email a tous de Skool (ferme le 16/11).
+ * 20261113210000_academie_emails_annonces.sql). Remplace l'email a tous de Skool (ferme le 16/11).
  *
  * Reservee a cockpit_allowlist (verifiee serveur), jeton de session du cockpit en Bearer.
  * SIMULATION tant que ANNONCES_EMAIL_MODE ne vaut pas « reel » : rien ne part, meme l'essai.
@@ -144,7 +144,7 @@ export async function POST(req: NextRequest) {
     return repondre({ error: 'Action inconnue.' }, 400)
   } catch (err) {
     if (relationAbsente(err)) {
-      return repondre({ error: 'Migration des emails aux membres pas encore appliquée (20261113200000).' }, 503)
+      return repondre({ error: 'Migration des emails aux membres pas encore appliquée (20261113210000).' }, 503)
     }
     const m = messageErreur(err)
     if (/envoi introuvable/.test(m)) return repondre({ error: 'Envoi inconnu.' }, 404)

@@ -1,6 +1,6 @@
 # ETAT du journal d etudes
 
-## EMAIL A TOUS LES MEMBRES DEPUIS LE COCKPIT (13/11/2026, commite NON pousse, branche email-a-tous depuis origin/master 4491b52 ; migration 20261113200000 du workspace ECRITE, essayee en bloc annule, NON appliquee)
+## EMAIL A TOUS LES MEMBRES DEPUIS LE COCKPIT (13/11/2026, commite NON pousse, branche email-a-tous depuis origin/master 4491b52 ; migration 20261113210000 du workspace ECRITE, essayee en bloc annule, NON appliquee)
 
 - Brief D:\7_Agents\briefs\2026-11-13-email-a-tous-cockpit.md (inventaire H2, PASS B5) : Skool ferme le 16/11 et emporte son email a tous. Rapport : email-a-tous-rapport.md (notes de la conversation local_8f8ccb0c).
 - Code : src/lib/academie/emails-annonces.ts (PUR, n'importe que node:crypto : groupes, rendu, jeton, garde, droits, requetes, envoyeur de simulation), emails-annonces-serveur.ts (base, Resend batch), POST /api/cockpit/academie/emails (etat, apercu, essai, envoyer, reprendre, detail ; allowlist), GET/POST /api/academie/emails/desinscription (publique en chemin exact dans middleware.ts, jeton signe = id de la ligne, jamais l'adresse).

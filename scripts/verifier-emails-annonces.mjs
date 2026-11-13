@@ -27,7 +27,7 @@ async function blocAsync(nom, fn) {
 }
 const lire = (chemin) => readFileSync(new URL(chemin, import.meta.url), 'utf8')
 
-const MIGRATION = 'sites/Aoknowledgecom/supabase/migrations/20261113200000_academie_emails_annonces.sql'
+const MIGRATION = 'sites/Aoknowledgecom/supabase/migrations/20261113210000_academie_emails_annonces.sql'
 function texteMigration() {
   const candidats = [
     process.env.AOK_WORKSPACE ? new URL(`file://${process.env.AOK_WORKSPACE.replace(/\/$/, '')}/${MIGRATION}`) : null,

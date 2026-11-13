@@ -1,5 +1,5 @@
 /**
- * ESSAI de la migration 20261113200000_academie_emails_annonces.sql (email a tous les membres depuis le
+ * ESSAI de la migration 20261113210000_academie_emails_annonces.sql (email a tous les membres depuis le
  * cockpit, 13/11/2026) contre la vraie base, dans un bloc DO qui se termine TOUJOURS par une exception :
  * tout est annule, quel que soit le client (rien ne reste, meme si la connexion validait d'elle-meme).
  *
@@ -23,7 +23,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import * as E from '../src/lib/academie/emails-annonces.ts'
 
-const NOM = 'sites/Aoknowledgecom/supabase/migrations/20261113200000_academie_emails_annonces.sql'
+const NOM = 'sites/Aoknowledgecom/supabase/migrations/20261113210000_academie_emails_annonces.sql'
 const candidats = [
   process.env.AOK_WORKSPACE ? new URL(`file://${process.env.AOK_WORKSPACE.replace(/\/$/, '')}/${NOM}`) : null,
   new URL(`../../../${NOM}`, import.meta.url),
