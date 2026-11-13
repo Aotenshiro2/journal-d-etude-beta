@@ -119,6 +119,89 @@ export function texteAnnonceSkool(
 }
 
 // ---------------------------------------------------------------------------
+// Pur : completer le texte d'une annonce Skool deja importee (13/11/2026, correctif)
+// ---------------------------------------------------------------------------
+// 16 des 75 annonces ont ete importees coupees a environ 2 000 caracteres : cockpit_annonces_envoyees
+// porte le texte du FIL de l'export Skool (coupe), le texte entier est dans le brut du meme export, sur
+// la page de chaque post (details_brice[<id>].post.metadata.content). scripts/importer-annonces-skool.mjs
+// --maj <ids> remplace le texte de ces lecons seulement, par la meme chaine (texteAnnonceSkool).
+
+const ID_SKOOL_RE = /^(?:skool:)?([0-9a-f]{32})$/
+
+/** « id1,id2 » (avec ou sans « skool: ») -> les ids Skool, sans doublon. null si vide ou si un id est invalide. */
+export function lireIdsSkool(brut: string | null | undefined): string[] | null {
+  const morceaux = String(brut ?? '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
+  if (!morceaux.length) return null
+  const ids: string[] = []
+  for (const m of morceaux) {
+    const r = ID_SKOOL_RE.exec(m)
+    if (!r) return null
+    if (!ids.includes(r[1])) ids.push(r[1])
+  }
+  return ids
+}
+
+/** Le texte entier d'un post dans le brut de l'export Skool (page du post), ou null (absent, id different). */
+export function texteEntierSkool(brut: unknown, id: string): string | null {
+  const details = (brut && typeof brut === 'object' ? (brut as Record<string, unknown>).details_brice : null) as Record<string, unknown> | null
+  const post = (details?.[id] as { post?: { id?: unknown; metadata?: { content?: unknown } } } | undefined)?.post
+  if (!post || post.id !== id || typeof post.metadata?.content !== 'string') return null
+  return post.metadata.content
+}
+
+const sansFin = (s: string) => s.replace(/\r\n?/g, '\n').trim()
+
+/**
+ * Le nettoyage des 10 notes de version entrees dans cockpit_annonces_envoyees le 27/10 (migration
+ * 20261027101000, depuis l'export du 26/10) : echappements retires, balises de liste Skool ([ul] [li] [ol])
+ * retirees, lignes « --- » videes, mention [@Nom](obj://user/...) -> @Nom. Reconstitue le 13/11 : il redonne
+ * EXACTEMENT le texte du cockpit a partir du fil de l'export, pour les 10 notes.
+ */
+export function nettoyageNotes2710(texte: string): string {
+  return desechapper(texte.replace(/\r\n?/g, '\n'))
+    .replace(/\[\/?(?:ul|li|ol)\]/g, '')
+    .replace(/^---$/gm, '')
+    .replace(/\[(@[^\]\n]+)\]\(obj:\/\/user\/[0-9a-f]+\)/g, '$1')
+    .trim()
+}
+
+/**
+ * Comment le texte coupe est entre dans cockpit_annonces_envoyees : tel quel depuis le fil de l'export
+ * ('brut' : l'archive du 07/11, 65 annonces) ou nettoye comme les notes de version du 27/10 ('notes-27-10').
+ * Le texte entier doit passer par la MEME preparation. null : ni l'un ni l'autre, on ne devine pas.
+ */
+export function preparationSkool(cockpit: string, fil: string): 'brut' | 'notes-27-10' | null {
+  const c = sansFin(cockpit)
+  if (!c) return null
+  if (c === sansFin(fil)) return 'brut'
+  if (c === nettoyageNotes2710(fil)) return 'notes-27-10'
+  return null
+}
+
+/**
+ * Que faire du texte d'une lecon d'annonce Skool ?
+ * - 'a_jour' : elle porte deja le texte entier passe par la chaine (rejouable) ;
+ * - 'maj' : elle porte EXACTEMENT ce que l'import a ecrit depuis le texte coupe : on la complete ;
+ * - 'refus' : le texte entier ne prolonge pas le texte coupe (pas le meme post), ou la lecon a ete
+ *   modifiee depuis l'import : on n'y touche pas.
+ * actuel = le texte en base ; depuisCoupe / depuisEntier = texteAnnonceSkool du texte coupe / entier.
+ */
+export function planMajAnnonce(
+  actuel: string | null,
+  coupe: string,
+  entier: string,
+  depuisCoupe: string,
+  depuisEntier: string,
+): { action: 'a_jour' | 'maj' | 'refus'; raison?: string } {
+  const c = sansFin(coupe)
+  const e = sansFin(entier)
+  if (!c || e.length <= c.length || !e.startsWith(c)) return { action: 'refus', raison: 'le texte entier ne prolonge pas le texte coupe' }
+  if (actuel === depuisEntier) return { action: 'a_jour' }
+  if (actuel === depuisCoupe) return { action: 'maj' }
+  return { action: 'refus', raison: 'texte de la lecon modifie depuis l import' }
+}
+
+// ---------------------------------------------------------------------------
 // Pur : la reponse de la route
 // ---------------------------------------------------------------------------
 
