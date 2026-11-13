@@ -54,9 +54,11 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // Les variables de police vont sur <html> : globals.css y applique font-sans
+  // (base shadcn), la variable --font-geist-sans doit donc être définie à ce niveau.
   return (
-    <html lang="fr">
-      <body className={`${geistSans.variable} ${geistMono.variable} ${notoSerif.variable} ${spaceGrotesk.variable} ${inter.variable} antialiased`}>
+    <html lang="fr" className={`${geistSans.variable} ${geistMono.variable} ${notoSerif.variable} ${spaceGrotesk.variable} ${inter.variable}`}>
+      <body className="antialiased">
         <ThemeProvider>
           {children}
         </ThemeProvider>
