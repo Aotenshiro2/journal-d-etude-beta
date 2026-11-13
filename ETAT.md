@@ -1,5 +1,30 @@
 # ETAT du journal d etudes
 
+## CLOCHE ET RECHERCHE DANS LES LECONS : /api/academie/cloche ET /api/academie/recherche (13/11/2026, FEATURE, commite NON pousse, branche academie-cloche-recherche depuis academie-navigation 9b10de7 ; AUCUNE migration)
+
+- Brief : D:\7_Agents\briefs\2026-11-13-cloche-et-recherche.md. Rapport : cloche-recherche-rapport.md (notes de Yume
+  Orchestre). Le site : branche academie-cloche-recherche du workspace (ETAT du site). Pousser le journal AVANT le site.
+- CLOCHE (src/lib/academie/cloche.ts, pur, n'importe rien ; route src/app/api/academie/cloche/route.ts) : SANS TABLE.
+  Les notifications se calculent sur 30 jours : billets du cockpit (lecon et module publies), messages du salon qui
+  repondent a un message du compte (autre auteur, non masques, lus par aok_chat_vue au niveau du lecteur), questions
+  du compte sous une lecon repondues (publiee ou privee). Lu : annonce = academie_billets_vus (la table de la page
+  Annonces et du pop-up) ; reponse = user_metadata.aok_cloche = { lu_le, lues } du compte Supabase (comme
+  aok_accueil_vu_le du site), relue fraiche par getUser et ecrite avec le jeton du compte lui-meme (PUT /auth/v1/user,
+  jamais de cle de service) ; lues = 40 cles courtes au plus (c|q + 12 chiffres), gardees seulement si la reponse est
+  encore dans la fenetre. GET : { non_lues, notifications: [{ cle, type, le, titre, extrait, qui, lien, lue }] } ;
+  POST { lues: [...] } ou { tout: true }. Aucun email ni push.
+- RECHERCHE (src/lib/academie/recherche.ts, pur ; route src/app/api/academie/recherche/route.ts) : GET ?q=, jeton
+  facultatif (sans : droitsVisiteur). Lecons lisibles (lecon et module publies) : titre, titre et resume du module,
+  texte (Markdown en texte brut). Chaque mot (sans accents, sans mots vides) dans le titre, le texte ou le titre du
+  module, un au moins dans le titre ou le texte. Extrait SEULEMENT si ouvertureLecon dit 'ouvert' (visiteur : apercu
+  seulement) ; une lecon fermee sort avec son titre et acces 'ferme', sans extrait. 60 lecons, 8 par module au plus.
+  Caches par instance : droits 2 min, textes 5 min (965 lecons, 477 textes, 1 Mo, indexes en moins de 100 ms ; une
+  recherche en 1 a 6 ms). Les logs ne disent jamais la recherche.
+- Verifie : scripts/verifier-cloche-recherche.mjs (15 blocs, pur) ; scripts/essayer-cloche-recherche.mjs contre la
+  vraie base (18 etapes ok le 13/11 : requetes de la cloche en transaction ANNULEE avec messages, questions et billet de
+  test, aok_chat_diffuser neutralisee le temps de la transaction, rien n'est reste ; recherche en lecture seule, aucun
+  extrait quand tout est ferme). tsc et eslint ok.
+
 ## ANNONCES DE L'ACADEMIE : /api/academie/annonces ET L'IMPORT DES 75 ANNONCES SKOOL (13/11/2026, FEATURE, commite NON pousse, branche academie-navigation depuis origin/master 4491b52 ; migration 20261113160000 du workspace ECRITE NON appliquee)
 
 - Brief : D:\7_Agents\briefs\2026-11-13-academie-accueil-navigation.md (Brice, 13/11 : « Billets » devient « Annonces »,
