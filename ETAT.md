@@ -1,5 +1,26 @@
 # ETAT du journal d etudes
 
+## PAGE /versions DU JOURNAL (13/11/2026, FEATURE, commite NON pousse, branche journal-versions depuis origin/master 26b60cc ; AUCUNE migration)
+
+- Brief : D:\7_Agents\briefs\2026-11-13-journal-page-versions.md (tache du picker g-release-reste). Rapport :
+  journal-versions-rapport.md (notes de Yume Orchestre). Captures : D:\6_Societe\Pilotage\Academie\parametres-captures\journal-versions.
+- Code d'origine : ecrit le 20/09 et jamais commite, dans le checkout principal (src/app/versions/ non suivi, plus
+  CanvasShell.tsx et NoteMapCanvas.tsx modifies). Repris ici sur origin/master, contenu remis a jour au 13/11.
+- src/app/versions/versions.ts = TOUT le texte (VERSION_JOURNAL 0.2 inchange, MISE_A_JOUR, FEUILLE_DE_ROUTE reduite a
+  l'ordre des modules, APPS_LIEES : Carnet et Pilotage, HISTORIQUE). VersionsContenu.tsx = la mise en page, page.tsx =
+  la garde d'auth (comme /guide) et les metadonnees. Entree « Versions » (Milestone) dans la pilule bas-droite et le
+  menu « ... » du telephone de CanvasShell et de l'accueil (NoteMapCanvas), et dans OFF_MENU_PAGES (la pilule dit
+  « Versions »).
+- Regle : aucune date ni fonction a venir decrite. A chaque palier livre : une ligne datee en tete de l'entree en cours,
+  MISE_A_JOUR a la date du jour ; la version du Carnet se relit par publier_carnet_store.py --etat (1.10.0 PUBLISHED a
+  100 % le 13/11).
+- Verifs : tsc 0 erreur, eslint 0 erreur (6 avertissements anciens de NoteMapCanvas), next build OK (/versions 1.97 kB).
+  Captures par une route temporaire sans garde d'auth (retiree, jamais commitee) : ordinateur et telephone, clair et
+  sombre, aucun debordement horizontal. L'accueil (NoteMapCanvas) n'est pas capture (il faut une session).
+- Mise en ligne : push du journal seul sur master (deploiement automatique), au go de Brice. Puis, dans le checkout
+  principal, le travail du 20/09 (src/app/versions/ non suivi, CanvasShell.tsx et NoteMapCanvas.tsx, tete de TODO.md)
+  bloquera le pull : a jeter sur accord, il est remplace par cette branche.
+
 ## INVITATIONS SKOOL APRES LA FERMETURE : LES MODELES PASSENT AU PASSE LE 16/11 (13/11/2026, correctif pousse sur master ; AUCUNE migration)
 
 - Brief : D:\7_Agents\briefs\2026-11-13-invitations-apres-fermeture.md. Les invitations continuent apres la fermeture

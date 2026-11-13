@@ -26,7 +26,7 @@ import {
   Sun, Moon, Map as MapIcon, Grid3x3, ChevronDown, ChevronLeft, ChevronRight,
   BookOpen, Lightbulb, BookMarked, BarChart2, FileText, RefreshCw,
   Pencil, Star, FolderPlus, Compass, Sunrise, Layers, Eye, EyeOff, Hash,
-  MoreHorizontal, History, HelpCircle,
+  MoreHorizontal, History, HelpCircle, Milestone,
 } from 'lucide-react'
 import { NoteData, CanvasData, MessageData } from '@/types'
 import { GroupNode, GROUP_COLORS, sortParentsFirst, type GroupHandlers } from './StudyCanvas'
@@ -1730,6 +1730,11 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
                     >
                       <HelpCircle size={14} style={{ color: 'var(--node-meta)', flexShrink: 0 }} /> Guide
                     </Link>
+                    <Link href="/versions" onClick={() => setQuickOpen(false)}
+                      style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 14px', fontSize: 13, color: 'var(--node-preview)', textDecoration: 'none' }}
+                    >
+                      <Milestone size={14} style={{ color: 'var(--node-meta)', flexShrink: 0 }} /> Versions
+                    </Link>
                     <div style={{ height: 1, background: 'var(--float-border)', margin: '4px 0' }} />
                     <div style={{ display: 'flex', alignItems: 'center', padding: '4px 8px' }}>
                       <ThemeToggleInline />
@@ -1770,6 +1775,7 @@ function NoteMapCanvasInner({ notes, canvas, user, title, dueCount }: NoteMapCan
             {[
               { href: '/notes', label: 'Notes' },
               { href: '/guide', label: 'Guide' },
+              { href: '/versions', label: 'Versions' },
             ].map(({ href, label }) => (
               <Link key={href} href={href}
                 style={{ fontSize: 12, color: 'var(--node-meta)', padding: '4px 8px', borderRadius: 6, textDecoration: 'none', display: 'block' }}

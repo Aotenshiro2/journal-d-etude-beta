@@ -21,7 +21,7 @@ import Link from 'next/link'
 import { useRouter, usePathname } from 'next/navigation'
 import {
   BookOpen, Lightbulb, BarChart2, Compass, Layers, Sunrise, BookMarked,
-  ChevronDown, Sun, Moon, History, HelpCircle, Search, MoreHorizontal,
+  ChevronDown, Sun, Moon, History, HelpCircle, Search, MoreHorizontal, Milestone,
 } from 'lucide-react'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useIsMobile } from '@/hooks/useIsMobile'
@@ -51,6 +51,7 @@ const MODES: Espace[] = [
 const OFF_MENU_PAGES: Espace[] = [
   { label: 'Relecture',         href: '/review', Icon: History,     match: (p: string) => p.startsWith('/review') },
   { label: 'Guide',             href: '/guide',  Icon: HelpCircle,  match: (p: string) => p.startsWith('/guide') },
+  { label: 'Versions',          href: '/versions', Icon: Milestone, match: (p: string) => p.startsWith('/versions') },
   { label: 'Observer le marché', href: '/market', Icon: Search,     match: (p: string) => p === '/market' },
 ]
 
@@ -157,6 +158,7 @@ const DOT_BG = { backgroundSize: '24px 24px', backgroundPosition: '0px 0px' }
 const QUICK_LINKS = [
   { href: '/notes', label: 'Notes' },
   { href: '/guide', label: 'Guide' },
+  { href: '/versions', label: 'Versions' },
 ]
 
 export default function CanvasShell({ user, dueCount, extraActions, children }: CanvasShellProps) {
@@ -247,7 +249,11 @@ export default function CanvasShell({ user, dueCount, extraActions, children }: 
                     <Link key={href} href={href} onClick={() => setQuickOpen(false)}
                       style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 14px', fontSize: 13, color: 'var(--node-preview)', textDecoration: 'none' }}
                     >
-                      {label === 'Notes' ? <BookOpen size={14} style={{ color: 'var(--node-meta)', flexShrink: 0 }} /> : <HelpCircle size={14} style={{ color: 'var(--node-meta)', flexShrink: 0 }} />}
+                      {label === 'Notes'
+                        ? <BookOpen size={14} style={{ color: 'var(--node-meta)', flexShrink: 0 }} />
+                        : label === 'Versions'
+                          ? <Milestone size={14} style={{ color: 'var(--node-meta)', flexShrink: 0 }} />
+                          : <HelpCircle size={14} style={{ color: 'var(--node-meta)', flexShrink: 0 }} />}
                       {label}
                     </Link>
                   ))}
