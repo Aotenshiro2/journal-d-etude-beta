@@ -1,5 +1,22 @@
 # ETAT du journal d etudes
 
+## SALON DE L'ACADEMIE : LES NOMS ET LA SIGNATURE DE L'EQUIPE (13/11/2026, correctif, commite NON pousse, branche chat-noms depuis origin/master 4491b52 ; migration 20261113120000 ECRITE NON appliquee)
+
+- Brief : D:\7_Agents\briefs\2026-11-13-chat-noms-signature.md (cartes chat-academie-noms et chat-academie-signature : A, A).
+  Rapport : chat-noms-rapport.md (notes de Yume Orchestre).
+- Noms : « Hugo R. » (premier mot du prenom, initiale du nom) pour TOUT auteur et pour tout compte connecte, gratuit
+  compris ; « Membre 1204 » sans prenom utilisable (aucun, sans lettre, arobase, repli « Membre », prenom tire de l'email
+  par handle_new_user). Jamais le nom complet ni l'adresse mail. nom_affiche n'est pas lu. Le classement et l'annuaire
+  gardent leur regle.
+- Equipe : auteur.nom = le prenom du compte qui ecrit, numero null ; le site signe « Brice · Équipe AOK » (avatar AO
+  inchange) ; nomAffiche (alerte) suit la meme forme.
+- Le nom est fait EN BASE (aok_chat_nom_court, appelee par aok_chat_auteur) parce que le direct part de la base sans
+  repasser par le journal : sans la migration, rien ne change a l'ecran. Ici, seulement lireAuteur (l'equipe garde son
+  prenom) et nomAffiche. Ordre de mise en ligne indifferent (chaque cote lit l'ancienne et la nouvelle forme).
+- Essai : node --env-file=.env.local scripts/essayer-migration-chat-noms.mjs (transaction annulee ; AOK_WORKSPACE en
+  worktree) : PAS LANCE le 13/11 (lecture de la base de prod refusee au codeur). A lancer avant d'appliquer.
+- Liste « Comptes sans parole » de l'equipe (SQL_SANS_PAROLE) : inchangee (nom_affiche ou prenom et nom).
+
 ## SALON DE L'ACADEMIE : L'ALERTE A L'EQUIPE PAR AGENT AOK (12/11/2026 soir, commite NON pousse, branche chat-academie-alerte depuis origin/master 3830ac1 ; AUCUNE migration)
 
 - Brice, chat de l'orchestre : « Les questions remonte par les agent aok de moi et Mel ? ». Rapport : chat-academie-rapport.md,

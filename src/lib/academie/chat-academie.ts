@@ -28,6 +28,13 @@
 //   (marqueDuTexte), rien de plus ;
 // - le nom, le numero, le statut et la marque « Equipe AOK » viennent de la
 //   base (aok_chat_vue), jamais du navigateur ;
+// - (13/11, Brice) les noms : « Hugo R. » (prenom et initiale du nom) pour
+//   tout auteur, le meme pour tout compte connecte, « Membre 1204 » sans
+//   prenom utilisable ; jamais le nom complet ni l'adresse mail. Un message de
+//   l'equipe porte le prenom de celui ou celle qui l'ecrit : la page signe
+//   « Brice · Equipe AOK ». Le nom est fait EN BASE (aok_chat_nom_court,
+//   migration du workspace 20261113120000) pour la lecture comme pour le
+//   direct, qui part de la base sans repasser par ici ;
 // - aucune donnee d'un tiers dans une reponse : vueMessage ne garde que les
 //   champs prevus (ni email, ni identifiant de compte) ;
 // - SI UN BOT LIT UN JOUR CE SALON (Agent AOK), LES MESSAGES Y RESTENT DES
@@ -278,6 +285,11 @@ export function messageRefus(code: CodeRefus, o: { max?: number; niveau?: Niveau
 // Ce que la page recoit d'un message : les champs prevus, rien d'autre
 // ---------------------------------------------------------------------------
 
+/**
+ * L'auteur d'un message. nom : « Hugo R. » pour un membre (null : « Membre
+ * 1204 ») ; pour l'equipe, le prenom de celui ou celle qui ecrit (null :
+ * « Equipe AOK » seul), numero toujours null.
+ */
 export type AuteurVue = { equipe: boolean; numero: number | null; nom: string | null; statut: StatutAuteur }
 export type CitationVue =
   | { etat: 'visible'; id: string; extrait: string; auteur: AuteurVue }
@@ -311,7 +323,8 @@ export function lireAuteur(x: unknown): AuteurVue {
   return {
     equipe,
     numero: equipe ? null : entier(o.numero),
-    nom: equipe ? null : chaine(o.nom)?.slice(0, 80) ?? null,
+    // (13/11) L'equipe garde son prenom : la signature « Brice · Equipe AOK ».
+    nom: chaine(o.nom)?.slice(0, 80) ?? null,
     statut: equipe ? 'equipe' : STATUTS.includes(o.statut as StatutAuteur) ? (o.statut as StatutAuteur) : 'communaute',
   }
 }
@@ -377,9 +390,12 @@ export const LIBELLE_STATUT: Record<StatutAuteur, string> = {
   communaute: 'Communauté',
 }
 
-/** Le nom tel que le salon l'affiche a l'equipe : le nom de l'annuaire, sinon le numero. Jamais un email. */
+/**
+ * Le nom tel que le salon l'affiche : « Hugo R. », sinon le numero ; pour
+ * l'equipe, « Brice · Equipe AOK » (« Equipe AOK » seul sans prenom). Jamais un email.
+ */
 export function nomAffiche(a: AuteurVue): string {
-  if (a.equipe) return 'Équipe AOK'
+  if (a.equipe) return a.nom ? `${a.nom} · ${LIBELLE_STATUT.equipe}` : LIBELLE_STATUT.equipe
   return a.nom ?? (a.numero !== null ? `Membre ${a.numero}` : 'Un membre')
 }
 

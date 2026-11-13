@@ -25,13 +25,13 @@ const lire = chemin => readFileSync(new URL(chemin, import.meta.url), 'utf8')
 const c = (...cps) => String.fromCodePoint(...cps)
 
 const MIGRATION = 'sites/Aoknowledgecom/supabase/migrations/20261112210000_academie_chat.sql'
-function texteMigration() {
+function texteMigration(chemin = MIGRATION) {
   const candidats = [
-    process.env.AOK_WORKSPACE ? new URL(`file://${process.env.AOK_WORKSPACE.replace(/\/$/, '')}/${MIGRATION}`) : null,
-    new URL(`../../../${MIGRATION}`, import.meta.url),
+    process.env.AOK_WORKSPACE ? new URL(`file://${process.env.AOK_WORKSPACE.replace(/\/$/, '')}/${chemin}`) : null,
+    new URL(`../../../${chemin}`, import.meta.url),
   ].filter(Boolean)
   const trouve = candidats.find(u => existsSync(u))
-  if (!trouve) throw new Error(`migration introuvable : poser AOK_WORKSPACE (${MIGRATION})`)
+  if (!trouve) throw new Error(`migration introuvable : poser AOK_WORKSPACE (${chemin})`)
   return readFileSync(trouve, 'utf8')
 }
 
@@ -142,7 +142,7 @@ bloc('refus dits en clair, sans tiret long ni guillemet courbe', () => {
   assert.ok(!INTERDITS.test(marque))
 })
 
-bloc('ce que la page recoit : les champs prevus seulement (ni email ni identifiant de compte), equipe sans nom ni numero', () => {
+bloc('ce que la page recoit : les champs prevus seulement (ni email ni identifiant de compte), equipe sans numero avec son prenom (13/11)', () => {
   const ID = 'b0000000-0000-4000-8000-00000000000b'
   const R = 'c0000000-0000-4000-8000-00000000000c'
   const brut = {
@@ -154,7 +154,7 @@ bloc('ce que la page recoit : les champs prevus seulement (ni email ni identifia
   const v = C.vueMessage(brut)
   assert.deepEqual(Object.keys(v).sort(), ['auteur', 'cree_le', 'id', 'liens', 'pouces', 'reponse_a', 'texte'])
   assert.deepEqual(v.auteur, { equipe: false, numero: 1204, nom: 'Zoé', statut: 'communaute' })
-  assert.deepEqual(v.reponse_a, { etat: 'visible', id: R, extrait: 'Le message cite', auteur: { equipe: true, numero: null, nom: null, statut: 'equipe' } })
+  assert.deepEqual(v.reponse_a, { etat: 'visible', id: R, extrait: 'Le message cite', auteur: { equipe: true, numero: null, nom: 'Brice', statut: 'equipe' } })
   assert.ok(!JSON.stringify(v).includes('@') && !JSON.stringify(v).includes('secret'))
   assert.equal(v.cree_le, '2026-11-12T20:00:00.000Z')
   assert.deepEqual(C.vueMessage({ ...brut, reponse_a: { etat: 'masque', id: R, extrait: 'texte masque' } }).reponse_a, { etat: 'masque' }, 'jamais le texte d un masque')
@@ -298,6 +298,55 @@ bloc('alerte : garde contre les rafales (une par auteur et par 10 minutes), apre
   const delai = Number(/DELAI_ALERTE_MS = (\d+)/.exec(envois)?.[1])
   assert.ok(delai > 0 && delai <= 5000, `attente bornee (${delai} ms)`)
   assert.ok(!/setInterval/.test(envois))
+})
+
+// ---------------------------------------------------------------------------
+// (13/11) Les noms : « Hugo R. » pour tout auteur, l'equipe signe de son prenom
+// ---------------------------------------------------------------------------
+
+const MIGRATION_NOMS = 'sites/Aoknowledgecom/supabase/migrations/20261113120000_academie_chat_noms.sql'
+
+bloc('noms (13/11) : « Hugo R. » ou le numero, l equipe signe de son prenom (« Brice · Équipe AOK »), jamais d email', () => {
+  assert.equal(C.nomAffiche({ equipe: true, numero: null, nom: 'Brice', statut: 'equipe' }), 'Brice · Équipe AOK')
+  assert.equal(C.nomAffiche({ equipe: true, numero: null, nom: null, statut: 'equipe' }), 'Équipe AOK', 'sans prenom : la marque seule')
+  assert.equal(C.nomAffiche({ equipe: false, numero: 1204, nom: 'Hugo R.', statut: 'communaute' }), 'Hugo R.')
+  const a = C.lireAuteur({ equipe: true, numero: 1, nom: 'Mélanie', statut: 'live_club', email: 'x@y.fr' })
+  assert.deepEqual(a, { equipe: true, numero: null, nom: 'Mélanie', statut: 'equipe' }, 'l equipe garde son prenom, jamais de numero ni d email')
+  assert.equal(C.lireAuteur({ equipe: false, numero: 5, nom: 'x'.repeat(200), statut: 'eleve' }).nom.length, 80)
+  assert.equal(C.lireAuteur({ equipe: true, nom: '   ' }).nom, null)
+  const t = C.texteAlerteChat({ nom: C.nomAffiche({ equipe: false, numero: 9, nom: 'Hugo R.', statut: 'live_club' }), statut: 'live_club', extrait: 'Oui', reponse: false, marque: false })
+  assert.match(t, /^De : Hugo R\. \(Live Club\)$/m)
+})
+
+bloc('la migration des noms (13/11) : une seule fonction changee pour la lecture ET le direct, meme nom pour tout lecteur, fermee au navigateur', () => {
+  const m = texteMigration(MIGRATION_NOMS)
+  const auteur = m.slice(m.indexOf('create or replace function public.aok_chat_auteur'), m.indexOf('comment on function public.aok_chat_auteur'))
+  assert.equal((auteur.match(/public\.aok_chat_nom_court\(p\.first_name, p\.last_name, /g) ?? []).length, 2, 'membre et equipe passent par le nom court')
+  assert.match(auteur, /aok_chat_nom_court\(p\.first_name, p\.last_name, null, true\)/, 'equipe : le prenom seul')
+  assert.match(auteur, /'equipe', true,\s*'numero', null,/, 'equipe : jamais de numero')
+  assert.ok(!/profil_public|masquer_moteurs|nom_affiche|p_niveau =/.test(auteur), 'le nom ne depend plus du profil ni du lecteur : le meme sur les deux sujets du direct')
+  assert.ok(!/'email'/.test(auteur), 'l email ne sort jamais')
+  assert.match(auteur, /security definer\s+set search_path = ''/)
+  const court = m.slice(m.indexOf('create or replace function public.aok_chat_nom_court'), m.indexOf('comment on function public.aok_chat_nom_court'))
+  assert.match(court, /strpos\(premier, '@'\) > 0/, 'jamais une arobase')
+  assert.match(court, /lower\(premier\) = 'membre'/, 'le prenom de repli de handle_new_user')
+  assert.match(court, /regexp_replace\(regexp_replace\(split_part\(coalesce\(p_email, ''\), '@', 1\), '\[\._\+-\]\.\*\$', ''\), '\[0-9\]\+\$', ''\)/, 'le prenom tire de l email')
+  assert.match(court, /' ' \|\| upper\(substring\(reste from '\[\[:alpha:\]\]'\)\) \|\| '\.'/, 'l initiale, jamais le nom')
+  assert.match(court, /left\(case when premier/, 'prenom borne')
+  for (const f of ['aok_chat_nom_court(text, text, text, boolean)', 'aok_chat_auteur(uuid, text, text)']) {
+    assert.ok(m.includes(`revoke all on function public.${f} from public, anon, authenticated, service_role`), f)
+  }
+  const ordres = m.replace(/^\s*--.*$/gm, '')
+  assert.ok(!/^grant /m.test(ordres) && !/create policy|create table|alter table|drop /i.test(ordres), 'ni droit, ni policy, ni table')
+  for (const ligne of m.split('\n').filter(l => l.trim().startsWith('--'))) assert.ok(!ligne.includes(';'), `point-virgule dans un commentaire : ${ligne.trim()}`)
+  const commentaires = m.match(/comment on [^\n]* is\s*\n?\s*'[^']*'(\s*\n\s*'[^']*')*/g) ?? []
+  assert.equal(commentaires.length, 2)
+  for (const s of commentaires) assert.ok(!s.includes(';'), `point-virgule dans un comment on : ${s.slice(0, 80)}`)
+  assert.ok(!INTERDITS.test(m.replace(/[«»]/g, '')), 'ni tiret long, ni guillemet courbe')
+  // handle_new_user tire le prenom de l'email avec la MEME expression : si elle change, la garde doit suivre.
+  const h = texteMigration('sites/Aoknowledgecom/supabase/migrations/20261031200000_profile_emails_verified_a_la_confirmation.sql')
+  assert.match(h, /regexp_replace\(split_part\(coalesce\(NEW\.email, ''\), '@', 1\), '\[\._\+-\]\.\*\$', ''\),\s*'\[0-9\]\+\$', ''/)
+  assert.match(h, /'Membre'\s*\);/, 'le prenom de repli')
 })
 
 console.log(`\n${blocs} blocs ok`)
