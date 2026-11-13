@@ -157,7 +157,7 @@ try {
              count(nom)::int as nommes,
              count(*) filter (where nom ~ '@')::int as arobase,
              coalesce(max(char_length(nom)), 0)::int as plus_long,
-             count(*) filter (where nom is not null and char_length(btrim(last_name)) > 1
+             count(*) filter (where nom is not null and char_length(regexp_replace(btrim(last_name), '[^[:alpha:]]', '', 'g')) > 1
                                 and strpos(lower(nom), lower(btrim(last_name))) > 0
                                 and strpos(lower(split_part(btrim(first_name), ' ', 1)), lower(btrim(last_name))) = 0)::int as nom_entier,
              array_remove(array_agg(distinct case when nom is not null and nom !~ '^[^ @]{1,30}( [[:alpha:]]\\.)?$' then char_length(nom) end), null) as hors_forme
