@@ -1,5 +1,29 @@
 # ETAT du journal d etudes
 
+## QUIZ DE FIN DE MODULE : /api/academie/quiz ET LE CHAMP « quiz » DU CATALOGUE (13/11/2026, FEATURE, commite NON pousse, branche academie-quiz-suite depuis academie-navigation 9b10de7 ; migration 20261113231500 du workspace ECRITE NON appliquee)
+
+- Brief : D:\7_Agents\briefs\2026-11-13-quiz-et-module-suivant.md (inventaire B9). Rapport : quiz-module-suivant-rapport.md
+  (notes de Yume Orchestre). Le site : branche academie-quiz-suite du workspace (ecran « Fin du module », ETAT du site).
+- Les questions vivent dans le fichier du module (D:\6_Societe\Pilotage\Academie\catalogue\modules\<slug>.json, champ
+  « quiz » : version, statut brouillon|publie, note, questions { id, question, lecon, choix, bonne, explication }),
+  recopiees dans academie_modules.quiz. Deux quiz BROUILLONS (a relire par Brice) : novice-en-trading et
+  les-bases-smart-money, 7 questions chacun. Brouillon = montre a l'equipe seulement, jamais garde.
+- Code sans import : src/lib/academie/quiz-academie.ts (lireQuiz, vueQuiz sans la reponse, corriger, droitAuQuiz, et
+  les requetes : quizDuModule, dernierResultat, envoisSurUneHeure, noterResultat ; avant la migration : pas de quiz,
+  rien de garde, aucune erreur). Route GET ?module= et POST { module, version, reponses } : jeton, module publie, droit
+  sur le module (meme regle que /moi, pas seulement apercu ou billet du jour), correction au serveur, 30 envois par
+  heure, 409 si la version a change. Table academie_quiz_resultats (un membre lit les siens, l'equipe tout, aucune
+  ecriture directe).
+- Import : importer-catalogue-academie.mjs lit le champ « quiz » (verifie AVANT toute ecriture ; sans la colonne, le
+  module s'importe et le quiz attend, avertissement ; un fichier sans le champ ne touche pas a la colonne).
+  scripts/importer-quiz-academie.mjs pose SEULEMENT le quiz (essai a blanc par defaut, --ecrire sur le go de Brice).
+- ESSAYE le 13/11 en transaction annulee : scripts/essayer-migration-quiz-academie.mjs, 18 etapes ok (avant la
+  migration, migration jouee deux fois, import du vrai fichier Novice avec son quiz, resultats, lectures rejouees sous
+  authenticated et anon, contraintes, rien de reste). Test pur : scripts/verifier-quiz-academie.mjs (9 blocs).
+- Mise en ligne (chaque geste sur le go de Brice) : migration, verifier:rls, push du journal AVANT le site, puis
+  importer-quiz-academie.mjs --ecrire sur les deux fichiers ; publier = statut « publie » dans le fichier apres
+  relecture par Brice, puis relancer le script.
+
 ## ANNONCES DE L'ACADEMIE : /api/academie/annonces ET L'IMPORT DES 75 ANNONCES SKOOL (13/11/2026, FEATURE, commite NON pousse, branche academie-navigation depuis origin/master 4491b52 ; migration 20261113160000 du workspace ECRITE NON appliquee)
 
 - Brief : D:\7_Agents\briefs\2026-11-13-academie-accueil-navigation.md (Brice, 13/11 : « Billets » devient « Annonces »,
