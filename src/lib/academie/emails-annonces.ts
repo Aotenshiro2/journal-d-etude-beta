@@ -36,6 +36,14 @@
 // exactement « reel », rien ne part. Les essais et les envois passent par le meme
 // chemin, les lignes sont notees « simule » et l'email est ecrit dans les journaux
 // du serveur (texte seul, lien de desinscription remplace, aucune adresse).
+//
+// LA VOIE D'ENVOI (13/11/2026, Brice : « Ok B ») : l'envoi aux membres est un BROADCAST
+// de Resend (gratuit, hors quota transactionnel) vers le segment « tous » ou « comptes »,
+// limite au sujet « Annonces de l'academie » ; la desinscription est tenue par Resend
+// ({{{RESEND_UNSUBSCRIBE_URL}}}). Les essais restent des emails transactionnels (lien de
+// desinscription signe de notre route). Contacts, segments, sujet et sens des
+// desinscriptions : emails-broadcast.ts. Seuls « tous » et « comptes » s'envoient
+// (GROUPES_ENVOI) : le plan gratuit n'a que 3 segments.
 
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 
@@ -45,6 +53,10 @@ import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 
 export const GROUPES = ['tous', 'comptes', 'programmes', 'gratuits', 'sans_compte'] as const
 export type Groupe = (typeof GROUPES)[number]
+
+/** Les groupes qu'on peut ENVOYER : un segment Resend chacun (plan gratuit : 3 segments). Les autres restent des compteurs. */
+export const GROUPES_ENVOI = ['tous', 'comptes'] as const satisfies readonly Groupe[]
+export type GroupeEnvoi = (typeof GROUPES_ENVOI)[number]
 
 export const LIBELLE_GROUPE: Record<Groupe, string> = {
   tous: 'Tous les membres (comptes et adresses sans compte)',
@@ -59,7 +71,7 @@ export type Raison = (typeof RAISONS)[number]
 
 /** Garde : un envoi reel au plus par DELAI_GARDE_H heures (Skool : 72 h), sauf forcage de Brice. */
 export const DELAI_GARDE_H = 72
-/** Resend, API batch : 100 emails au plus par appel. */
+/** Resend, API batch (les ESSAIS seulement depuis le 13/11) : 100 emails au plus par appel. */
 export const TAILLE_LOT = 100
 export const LIMITES = { objet: 200, texte: 20_000 } as const
 
@@ -71,12 +83,24 @@ export const ROUTE_DESINSCRIPTION_DEFAUT = 'https://journal.aoknowledge.com/api/
 export const SOURCE_ANNONCE = 'email-academie:'
 export const CANAL_ANNONCE = 'email'
 
-export type Transport = 'simulation' | 'resend'
+/** simulation : rien ne part. resend : email transactionnel (les essais). broadcast : Broadcast Resend (l'envoi aux membres). */
+export type Transport = 'simulation' | 'resend' | 'broadcast'
 export type ModeEnvoi = 'essai' | 'reel'
 
-/** Le transport : « resend » SEULEMENT si la variable vaut exactement « reel ». Tout le reste = simulation. */
-export function transportDepuis(valeur: string | undefined | null): Transport {
+/** Le mode du serveur : « resend » SEULEMENT si la variable vaut exactement « reel ». Tout le reste = simulation. */
+export function transportDepuis(valeur: string | undefined | null): 'simulation' | 'resend' {
   return typeof valeur === 'string' && valeur.trim() === 'reel' ? 'resend' : 'simulation'
+}
+
+/** Le transport d'un envoi : l'essai en email transactionnel, l'envoi aux membres en Broadcast. Simulation reste simulation. */
+export function transportEnvoi(mode: ModeEnvoi, serveur: 'simulation' | 'resend'): Transport {
+  if (serveur === 'simulation') return 'simulation'
+  return mode === 'essai' ? 'resend' : 'broadcast'
+}
+
+/** Les transports que la garde de 72 h regarde : les envois reels (Broadcast, et l'ancien batch), ou ceux de la simulation. */
+export function transportsGarde(serveur: 'simulation' | 'resend'): string[] {
+  return serveur === 'simulation' ? ['simulation'] : ['resend', 'broadcast']
 }
 
 // ---------------------------------------------------------------------------
@@ -86,8 +110,12 @@ export function transportDepuis(valeur: string | undefined | null): Transport {
 export type SaisieEmail = {
   objet: string
   texte: string
-  groupe: Groupe
+  groupe: GroupeEnvoi
   billetId: string | null
+}
+
+export function estGroupeEnvoi(v: unknown): v is GroupeEnvoi {
+  return typeof v === 'string' && (GROUPES_ENVOI as readonly string[]).includes(v)
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -112,9 +140,9 @@ export function lireSaisieEmail(corps: unknown, avecGroupe: boolean): SaisieEmai
   if (objet.length > LIMITES.objet) return { erreur: `L'objet tient en ${LIMITES.objet} caractères au plus.` }
   if (!texte) return { erreur: 'Le texte est obligatoire.' }
   if (texte.length > LIMITES.texte) return { erreur: `Le texte tient en ${LIMITES.texte} caractères au plus.` }
-  let groupe: Groupe = 'tous'
+  let groupe: GroupeEnvoi = 'tous'
   if (avecGroupe) {
-    if (!estGroupe(c.groupe)) return { erreur: 'Choisis le groupe des destinataires.' }
+    if (!estGroupeEnvoi(c.groupe)) return { erreur: 'Choisis le groupe des destinataires : tous les membres, ou les comptes.' }
     groupe = c.groupe
   }
   let billetId: string | null = null
@@ -152,6 +180,15 @@ export function desamorcerLiens(t: string): string {
     .replace(/\b([a-z][a-z0-9+.-]{1,15}):\/\//gi, '$1[:]//')
     .replace(/\bwww\./gi, 'www[.]')
     .replace(RE_DOMAINE, '$1[.]$2')
+}
+
+/**
+ * Les variables de Resend ({{{RESEND_UNSUBSCRIBE_URL}}}, {{{contact.email}}}...) ne doivent
+ * venir que de NOTRE gabarit : dans le texte de l'equipe, deux accolades qui se suivent sont
+ * separees par une espace (« {{ » -> « { { »). Lisible, jamais remplace par Resend.
+ */
+export function neutraliserVariables(t: string): string {
+  return t.replace(/\{(?=\{)/g, '{ ').replace(/\}(?=\})/g, '} ')
 }
 
 /** [texte](adresse) -> « texte (adresse) » : le texte reste, l'adresse sera desamorcee ensuite. */
@@ -220,14 +257,16 @@ export function corpsTexte(texte: string): string {
 export type EmailPret = { sujet: string; html: string; texte: string }
 
 /**
- * L'email complet. `lienDesinscription` est le lien personnel du destinataire
- * (null dans l'apercu : un lien factice s'affiche). `essai` ajoute « [Essai] »
- * et un bandeau.
+ * L'email complet. `lienDesinscription` est le lien personnel du destinataire (essai),
+ * la variable {{{RESEND_UNSUBSCRIBE_URL}}} (Broadcast), ou null dans l'apercu (un lien
+ * factice s'affiche). `essai` ajoute « [Essai] » et un bandeau. Les variables de Resend
+ * ecrites dans l'objet ou le texte sont neutralisees (neutraliserVariables).
  */
 export function construireEmail(o: {
   objet: string; texte: string; lien: string | null; lienDesinscription: string | null; essai: boolean
 }): EmailPret {
-  const objet = o.objet.replace(/\s+/g, ' ').trim()
+  const objet = neutraliserVariables(o.objet.replace(/\s+/g, ' ').trim())
+  const texteSur = neutraliserVariables(o.texte)
   const sujet = o.essai ? `[Essai] ${objet}` : objet
   const bouton = lienBouton(o.lien)
   const desinscription = o.lienDesinscription ?? '#desinscription'
@@ -244,7 +283,7 @@ export function construireEmail(o: {
     bandeau,
     '<p style="margin:0 0 6px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:#6b7280">Annonce de l\'académie AO Knowledge</p>',
     `<h1 style="margin:0 0 20px;font-size:21px;line-height:1.3;color:#111827">${echapper(desamorcerLiens(objet))}</h1>`,
-    corpsHtml(o.texte),
+    corpsHtml(texteSur),
     `<p style="margin:24px 0 8px"><a href="${echapper(bouton)}" style="display:inline-block;background:#111827;color:#ffffff;text-decoration:none;padding:11px 18px;border-radius:6px;font-weight:bold">Ouvrir l'académie</a></p>`,
     '</div>',
     '<p style="margin:16px 4px 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.5;color:#6b7280">',
@@ -260,7 +299,7 @@ export function construireEmail(o: {
     '',
     desamorcerLiens(objet),
     '',
-    corpsTexte(o.texte),
+    corpsTexte(texteSur),
     '',
     `Ouvrir l'académie : ${bouton}`,
     '',
@@ -501,11 +540,11 @@ select distinct lower(btrim(coalesce(u.email, a.email))) as email, a.user_id::te
    and (case when $2::text = 'equipe' then p.role::text = 'admin' or a.user_id = $1::uuid else a.user_id = $1::uuid end)
  order by 1`
 
-/** Le dernier envoi reel qui compte pour la garde ($1 = transport) : parti en tout ou partie, ou en cours. */
+/** Le dernier envoi reel qui compte pour la garde ($1 = transports, transportsGarde) : parti en tout ou partie, ou en cours. */
 export const SQL_DERNIER_REEL = `
 select max(cree_le) as dernier
   from public.academie_emails_envois
- where mode = 'reel' and transport = $1 and (envoyes > 0 or statut = 'en_cours')`
+ where mode = 'reel' and transport = any($1::text[]) and (envoyes > 0 or statut = 'en_cours')`
 
 /** Un seul envoi reel a la fois (verrou de transaction). */
 export const SQL_VERROU_REEL = `select pg_advisory_xact_lock(hashtext('academie_emails_envoi_reel'))`
@@ -550,7 +589,7 @@ update public.academie_emails_destinataires d
 /** Recompte un envoi ($1) d'apres ses lignes. */
 export const SQL_COMPTES_ENVOI = `
 select count(*) filter (where statut = 'a_envoyer')::int as a_envoyer,
-       count(*) filter (where statut in ('envoye', 'simule'))::int as envoyes,
+       count(*) filter (where statut in ('envoye', 'simule', 'confie'))::int as envoyes,
        count(*) filter (where statut = 'echec')::int as echecs
   from public.academie_emails_destinataires
  where envoi_id = $1::uuid`
@@ -581,7 +620,7 @@ update public.academie_emails_envois set annonce_id = (select id from a)
 export const SQL_HISTORIQUE = `
 select e.id::text as id, e.mode, e.transport, e.groupe, e.objet, e.lien, e.billet_id::text as billet_id,
        e.destinataires, e.envoyes, e.echecs, e.exclus_desinscrits, e.force_72h, e.statut, e.erreur,
-       e.cree_le, e.fini_le, a.label as par
+       e.resend_broadcast_id, e.cree_le, e.fini_le, a.label as par
   from public.academie_emails_envois e
   left join public.cockpit_allowlist a on a.user_id = e.cree_par
  order by e.cree_le desc

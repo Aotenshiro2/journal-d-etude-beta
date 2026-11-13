@@ -11,7 +11,12 @@
  *      SQL_FINIR_ENVOI, SQL_INSCRIRE_ANNONCE (une seule ligne, meme rejoue), SQL_DERNIER_REEL (garde) ;
  *   4. SQL_DESINSCRIRE puis SQL_DESTINATAIRES : l'adresse sort du compte a envoyer, rejouable ;
  *   5. les contraintes (mode inconnu, adresse en majuscules, lien hors aoknowledge.com, doublon, raison inconnue) ;
- *   6. SQL_HISTORIQUE, SQL_DETAIL_ECHECS, SQL_DETAIL_RAISONS, SQL_ADRESSES_ESSAI, SQL_DROITS lisibles.
+ *   6. SQL_HISTORIQUE, SQL_DETAIL_ECHECS, SQL_DETAIL_RAISONS, SQL_ADRESSES_ESSAI, SQL_DROITS lisibles ;
+ *   7. (voie Broadcast, 13/11) un envoi reel « broadcast » au groupe comptes : SQL_NOTER_SYNCHRO,
+ *      SQL_NOTER_BROADCAST (pose une fois, jamais remplace), SQL_CONFIER, comptes, garde Resend ;
+ *      un Broadcast simule (SQL_SIMULER_TOUT) ; SQL_IMPORTER_DESINSCRITS (une reinscription de chez
+ *      nous est annulee par Resend), SQL_NOTER_RESEND_LE, SQL_DESINSCRITS_BASE, SQL_BROADCASTS_PASSES ;
+ *      contraintes (transport inconnu, id de Broadcast mal forme, source inconnue).
  * Le message de l'exception finale (« ESSAI_OK {...} ») porte des NOMBRES seulement, jamais une adresse.
  *
  * Deux usages :
@@ -22,6 +27,7 @@
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import * as E from '../src/lib/academie/emails-annonces.ts'
+import * as B from '../src/lib/academie/emails-broadcast.ts'
 
 const NOM = 'sites/Aoknowledgecom/supabase/migrations/20261113210000_academie_emails_annonces.sql'
 const candidats = [
@@ -57,6 +63,9 @@ declare
   v_refus int := 0;
   v_avant int;
   v_apres int;
+  v_bc uuid;
+  v_sim uuid;
+  v_mail2 text;
   v_dest text := ${q(E.SQL_DESTINATAIRES)};
 begin
   -- 1. la migration, deux fois
@@ -102,7 +111,7 @@ begin
     'annonce_liee', (select annonce_id is not null from public.academie_emails_envois where id = v_envoi),
     'statut', (select statut from public.academie_emails_envois where id = v_envoi),
     'fini_le_pose', (select fini_le is not null from public.academie_emails_envois where id = v_envoi));
-  execute ${q(E.SQL_DERNIER_REEL)} into v_dernier using 'simulation';
+  execute ${q(E.SQL_DERNIER_REEL)} into v_dernier using array['simulation']::text[];
   v_res := v_res || jsonb_build_object('garde_voit_envoi', v_dernier is not null, 'garde_resend_vide',
     (select max(cree_le) is null from public.academie_emails_envois where mode = 'reel' and transport = 'resend'));
 
@@ -141,6 +150,63 @@ begin
   v_res := v_res || jsonb_build_object('adresses_essai_moi', v_n);
   execute 'select count(*) from (' || ${q(E.SQL_DROITS)} || ') t' into v_n using (select user_id from public.cockpit_allowlist where label = 'Brice' limit 1);
   v_res := v_res || jsonb_build_object('droits_lus', v_n);
+
+  -- 7. voie Broadcast : envoi reel au groupe comptes
+  execute ${q(E.SQL_DERNIER_REEL)} into v_dernier using array['resend', 'broadcast']::text[];
+  v_res := v_res || jsonb_build_object('garde_resend_avant', v_dernier is null);
+  execute ${q(E.SQL_CREER_ENVOI)} into v_bc
+    using 'reel', 'broadcast', 'comptes', 'Essai Broadcast', 'Texte', null::text, null::uuid, (v_res ->> 'comptes')::int, 0, false, null::uuid;
+  execute 'select array_agg(email order by email) as e, array_agg(coalesce(user_id, '''') order by email) as u, array_agg(raison order by email) as r from ('
+          || v_dest || ') t where not desinscrit' into v_c using 'comptes';
+  execute ${q(E.SQL_INSERER_DESTINATAIRES)} using v_bc, v_c.e, v_c.u, v_c.r;
+  execute ${q(B.SQL_NOTER_SYNCHRO)} using v_bc, '{"mode":"reel","applique":true,"plan":{"creer":0}}'::text;
+  execute ${q(B.SQL_NOTER_BROADCAST)} using v_bc, 'bc-essai-0001';
+  execute ${q(B.SQL_NOTER_BROADCAST)} using v_bc, 'bc-essai-0002';
+  execute ${q(B.SQL_CONFIER)} using v_bc, 'bc-essai-0001';
+  execute ${q(E.SQL_COMPTES_ENVOI)} into v_c using v_bc;
+  execute ${q(E.SQL_FINIR_ENVOI)} using v_bc, v_c.envoyes, v_c.echecs, 'fini', null::text;
+  execute ${q(E.SQL_DERNIER_REEL)} into v_dernier using array['resend', 'broadcast']::text[];
+  v_res := v_res || jsonb_build_object('broadcast_confies', v_c.envoyes, 'broadcast_a_envoyer', v_c.a_envoyer,
+    'broadcast_id_garde', (select resend_broadcast_id = 'bc-essai-0001' from public.academie_emails_envois where id = v_bc),
+    'broadcast_synchro_lue', (select (synchro ->> 'applique')::boolean from public.academie_emails_envois where id = v_bc),
+    'garde_resend_voit_broadcast', v_dernier is not null);
+  execute 'select count(*) from (' || ${q(B.SQL_BROADCASTS_PASSES)} || ') t' into v_n;
+  v_res := v_res || jsonb_build_object('broadcasts_passes', v_n);
+
+  -- Broadcast simule
+  execute ${q(E.SQL_CREER_ENVOI)} into v_sim
+    using 'reel', 'simulation', 'tous', 'Essai Broadcast simule', 'Texte', null::text, null::uuid, 2, 0, true, null::uuid;
+  execute ${q(E.SQL_INSERER_DESTINATAIRES)} using v_sim, array['un@exemple.fr', 'deux@exemple.fr'], array['', ''], array['gratuit', 'gratuit'];
+  execute ${q(B.SQL_SIMULER_TOUT)} using v_sim;
+  execute ${q(E.SQL_COMPTES_ENVOI)} into v_c using v_sim;
+  v_res := v_res || jsonb_build_object('broadcast_simule', v_c.envoyes);
+
+  -- Desinscriptions lues chez Resend : jamais annulees par une reinscription de chez nous
+  select email into v_mail2 from public.academie_emails_destinataires where envoi_id = v_bc order by email desc limit 1;
+  execute 'select count(*) filter (where not desinscrit) from (' || v_dest || ') t' into v_avant using 'comptes';
+  execute ${q(B.SQL_IMPORTER_DESINSCRITS)} using array[v_mail2, 'Pas Une Adresse'];
+  execute ${q(B.SQL_IMPORTER_DESINSCRITS)} using array[v_mail2];
+  execute 'select count(*) filter (where not desinscrit) from (' || v_dest || ') t' into v_apres using 'comptes';
+  v_res := v_res || jsonb_build_object('resend_desinscription_retire', v_avant - v_apres,
+    'resend_source', (select source from public.academie_emails_desinscriptions where email = v_mail2),
+    'resend_le_pose', (select resend_le is not null from public.academie_emails_desinscriptions where email = v_mail2),
+    'adresse_invalide_ignoree', (select count(*) = 0 from public.academie_emails_desinscriptions where email = 'pas une adresse'));
+  update public.academie_emails_desinscriptions set reinscrit_le = now() where email = v_mail2;
+  execute ${q(B.SQL_IMPORTER_DESINSCRITS)} using array[v_mail2];
+  v_res := v_res || jsonb_build_object('resend_annule_reinscription', (select reinscrit_le is null from public.academie_emails_desinscriptions where email = v_mail2));
+  execute ${q(E.SQL_DESINSCRIRE)} using 'nous@exemple.fr', 'equipe', null::uuid;
+  execute 'select count(*) from (' || ${q(B.SQL_DESINSCRITS_BASE)} || ') t where resend_le is null' into v_n;
+  v_res := v_res || jsonb_build_object('desinscrits_a_pousser', v_n);
+  execute ${q(B.SQL_NOTER_RESEND_LE)} using array['nous@exemple.fr'];
+  execute 'select count(*) from (' || ${q(B.SQL_DESINSCRITS_BASE)} || ') t where resend_le is null' into v_n;
+  v_res := v_res || jsonb_build_object('desinscrits_a_pousser_apres', v_n);
+
+  -- Contraintes de la voie Broadcast
+  v_refus := 0;
+  begin insert into public.academie_emails_envois (mode, transport, groupe, objet, texte) values ('reel', 'kit', 'tous', 'o', 't'); exception when check_violation then v_refus := v_refus + 1; end;
+  begin update public.academie_emails_envois set resend_broadcast_id = 'x y z' where id = v_sim; exception when check_violation then v_refus := v_refus + 1; end;
+  begin insert into public.academie_emails_desinscriptions (email, source) values ('z@exemple.fr', 'kit'); exception when check_violation then v_refus := v_refus + 1; end;
+  v_res := v_res || jsonb_build_object('refus_contraintes_broadcast', v_refus);
 
   raise exception 'ESSAI_OK %', v_res::text;
 end
