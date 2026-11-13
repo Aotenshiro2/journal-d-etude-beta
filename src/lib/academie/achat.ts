@@ -5,7 +5,10 @@
 //   STRIPE_CHECKOUT_KEY_AOKNOWLEDGE   cle restreinte du compte Ao Knowledge,
 //                                     Checkout Sessions en ecriture et
 //                                     PaymentIntents en lecture. A defaut,
-//                                     STRIPE_AGENT_KEY_AOKNOWLEDGE est essayee
+//                                     STRIPE_PILOTAGE_KEY_AOKNOWLEDGE (Brice,
+//                                     13/11 : une cle Stripe par TYPE de produit,
+//                                     la meme que Pilotage pour les modules),
+//                                     puis STRIPE_AGENT_KEY_AOKNOWLEDGE
 //                                     (sans la permission, Stripe repond 403
 //                                     et la route rend 503 'config').
 //   STRIPE_PUBLISHABLE_KEY_AOKNOWLEDGE  cle publique (pk_live_...), rendue a la
@@ -34,7 +37,12 @@ const STRIPE_VERSION = '2025-09-30.clover'
 const DELAI_MS = 10_000
 
 export function cleAchat(): string | null {
-  return process.env.STRIPE_CHECKOUT_KEY_AOKNOWLEDGE?.trim() || process.env.STRIPE_AGENT_KEY_AOKNOWLEDGE?.trim() || null
+  return (
+    process.env.STRIPE_CHECKOUT_KEY_AOKNOWLEDGE?.trim() ||
+    process.env.STRIPE_PILOTAGE_KEY_AOKNOWLEDGE?.trim() ||
+    process.env.STRIPE_AGENT_KEY_AOKNOWLEDGE?.trim() ||
+    null
+  )
 }
 
 export function clePublique(): string | null {
