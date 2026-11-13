@@ -1,5 +1,24 @@
 # ETAT du journal d etudes
 
+## ANNONCES SKOOL COUPEES, MACRO BREAKER, GARDE-FOU DU PRIX A L'IMPORT (13/11/2026 nuit, correctifs commites NON pousses : push refuse par le classifieur, branche annonces-coupees depuis origin/master 9c22f5c ; AUCUNE migration ; les ecritures en base sont FAITES)
+
+- Brief : D:\7_Agents\briefs\2026-11-13-annonces-coupees-et-prix.md. Rapport : annonces-coupees-rapport.md (notes de Yume Orchestre).
+- PRIX : importer-catalogue-academie.mjs ne remet plus le prix d'un module a null. prixImport (pur.ts) : prix_eur null
+  ou absent dans le fichier = prix de la base garde ; seul un nombre positif explicite le change ; autre valeur = arret.
+  Bilan « prix du module : garde / change / inchange / aucun ». Bloc ajoute a verifier-academie.mjs. Essai a blanc sur
+  le Journaling (49 EUR en base) avec prix_eur null puis sans la cle : « garde 49 EUR ».
+- ANNONCES : l'import du 13/11 a pris le texte de cockpit_annonces_envoyees (le FIL de l'export, coupe a ~2 000
+  caracteres pour 16 annonces). importer-annonces-skool.mjs --maj <ids> [--ecrire] : texte entier du brut 07/11
+  (details_brice), meme preparation que le texte coupe (tel quel, ou nettoyageNotes2710 pour les 10 notes de version
+  du 27/10, reconnue sur le fil), meme chaine texteAnnonceSkool. Ecrit seulement si la lecon porte exactement le
+  texte de l'import ; rejouable. 16 annonces COMPLETEES en base le 13/11 (relu par lireAnnonces : 16/16, 2 249 a
+  16 379 caracteres) ; second essai : 16 « a_jour ». cockpit_annonces_envoyees garde le texte du fil (non touche).
+- MACRO BREAKER : niveaux 1, 2 et 4 de la Partie 4 du Plan de Trading 21 jours completes (md du catalogue, chaine du
+  27/10, texte entier du brut 07/11) et publies par l'importeur du catalogue (avec le garde-fou : prix « aucun » en
+  base, 5 offres deja la, 0 retiree, 0 texte garde).
+- A savoir : les marques Skool brutes ([ul][li], [@Nom](obj://user/...), liens skool.com) restent dans le texte des
+  annonces archive « brut », comme a l'import du 13/11 (la chaine ne les traite pas).
+
 ## PAGE /versions DU JOURNAL (13/11/2026, FEATURE, commite NON pousse, branche journal-versions depuis origin/master 26b60cc ; AUCUNE migration)
 
 - Brief : D:\7_Agents\briefs\2026-11-13-journal-page-versions.md (tache du picker g-release-reste). Rapport :
