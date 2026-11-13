@@ -17,6 +17,29 @@
   worktree) : PAS LANCE le 13/11 (lecture de la base de prod refusee au codeur). A lancer avant d'appliquer.
 - Liste « Comptes sans parole » de l'equipe (SQL_SANS_PAROLE) : inchangee (nom_affiche ou prenom et nom).
 
+## ANNONCES DE L'ACADEMIE : /api/academie/annonces ET L'IMPORT DES 75 ANNONCES SKOOL (13/11/2026, FEATURE, commite NON pousse, branche academie-navigation depuis origin/master 4491b52 ; migration 20261113160000 du workspace ECRITE NON appliquee)
+
+- Brief : D:\7_Agents\briefs\2026-11-13-academie-accueil-navigation.md (Brice, 13/11 : « Billets » devient « Annonces »,
+  une vraie page, « recuperer les annonces de School pour les mettre ici »). Rapport : academie-navigation-rapport.md
+  (notes de Yume Orchestre). Le site : branche academie-navigation du workspace (ETAT du site).
+- Le stockage ne change pas : une annonce EST un billet (billets.ts : lecon + academie_billets). La migration ajoute
+  origine ('cockpit' | 'skool'), source (unique, cle d'import), categorie, epingle_le, et le module d'archive
+  « annonces-skool » (statut archive, jamais dans le catalogue).
+- Route GET /api/academie/annonces (tout compte connecte) : billets du cockpit publies + annonces Skool, les plus
+  recentes d'abord ; non_lue = billet du cockpit de moins de 30 jours absent de academie_billets_vus (une annonce
+  Skool n'est jamais non lue) ; ?resume=1 = nombre de non lues et derniere annonce (barre et accueil). POST
+  { vues } = note vues (100 au plus ; le pop-up du billet du jour ne revient pas). Avant la migration : billets du
+  cockpit seulement (colonnes absentes, repli sans erreur). Code pur sans import : src/lib/academie/annonces.ts.
+- Import : scripts/importer-annonces-skool.mjs (cockpit_annonces_envoyees canal skool + export Skool pour slug et
+  pieces jointes ; categorie par categorieDe ; publication_faite_le = date Skool : ni pop-up ni ligne de plus dans
+  cockpit_annonces_envoyees). ESSAYE le 13/11 en transaction annulee : 15 etapes ok (migration jouee deux fois,
+  75 creees, 66 images, 2 PDF, rejouable, rien de reste). --ecrire seulement sur le go de Brice, APRES la migration
+  et la mise en ligne des images (--images-base). Test pur : scripts/verifier-annonces.mjs (6 blocs).
+- v2 du 13/11 (relecture de Brice) : ?resume=1 rend aussi dernieres (les 3 dernieres annonces, titres et dates),
+  montrees dans la barre de gauche du site sous ANNONCES.
+- Mise en ligne : migration, images, import --ecrire, push du journal, PUIS push du site (sans la route, la page
+  du site lit une 404 sans CORS et dit « reseau »).
+
 ## SALON DE L'ACADEMIE : L'ALERTE A L'EQUIPE PAR AGENT AOK (12/11/2026 soir, commite NON pousse, branche chat-academie-alerte depuis origin/master 3830ac1 ; AUCUNE migration)
 
 - Brice, chat de l'orchestre : « Les questions remonte par les agent aok de moi et Mel ? ». Rapport : chat-academie-rapport.md,
