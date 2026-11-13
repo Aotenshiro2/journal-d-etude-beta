@@ -17,6 +17,9 @@
  *   AOK_WORKSPACE=~/Projects/_worktrees/academie-lundi node --env-file=.env.local scripts/essayer-migrations-academie-lundi.mjs
  * Options : --export <brice-annonces.json>, --catalogue <dossier des modules>, --images-base <url>.
  * --etat : lecture seule, dit seulement quelles migrations sont deja appliquees (rien n'est joue).
+ * --bloc-email <fichier> : le bloc d'essai de l'email (voie Resend Broadcasts), ecrit SANS connexion par
+ *   `node scripts/essayer-migration-emails-annonces.mjs --imprimer <fichier>` ; il est joue dans la meme
+ *   transaction, apres les imports, sous un point de sauvegarde (il finit toujours par ESSAI_OK, nombres seuls).
  * N'ecrit rien. N'affiche ni email, ni cle, ni texte d'annonce.
  */
 
@@ -39,6 +42,7 @@ const EXPORT = option('--export', '/mnt/d/6_Societe/Pilotage/Data-Performance/pl
 const CATALOGUE = option('--catalogue', '/mnt/d/6_Societe/Pilotage/Academie/catalogue/modules')
 const BASE_IMAGES = option('--images-base', '/media/academie/annonces')
 const QUIZ = ['novice-en-trading', 'les-bases-smart-money']
+const BLOC_EMAIL = option('--bloc-email', null)
 
 const DOSSIER = 'sites/Aoknowledgecom/supabase/migrations'
 const MIGRATIONS = [
@@ -209,6 +213,12 @@ async function main() {
       const e = await q(SQL_ETAT)
       assert.deepEqual(Object.values(appliquees(e[0])), [true, true, true, true])
       ok('apres les 4 : colonnes des annonces, module d archive, tables des lives et des emails, colonne et table du quiz')
+      // La voie Resend Broadcasts (migration de l'email completee le 13/11) : ses 3 colonnes.
+      const [cb] = await q(`select count(*)::int as n from information_schema.columns where table_schema = 'public'
+        and ((table_name = 'academie_emails_envois' and column_name in ('resend_broadcast_id', 'synchro'))
+          or (table_name = 'academie_emails_desinscriptions' and column_name = 'resend_le'))`)
+      assert.equal(cb.n, 3, 'colonnes de la voie Broadcast')
+      ok('email, voie Broadcast : resend_broadcast_id, synchro, resend_le presentes')
 
       // 2. RLS et droits des tables nouvelles.
       const rls = await q(`
@@ -270,6 +280,22 @@ async function main() {
       const anon = await comme('anon', null, `select count(*)::int as n from public.academie_lives_series`)
       assert.ok(!anon.ok)
       ok(`droits : un membre lit 0 resultat et pas le quiz en base (${quizLu.ok ? '0 ligne' : quizLu.motif}) ; anon refuse sur les lives (${anon.motif})`)
+
+      // 6. Le bloc d'essai de l'email (voie Broadcast), dans la meme transaction, sous un point de sauvegarde.
+      if (BLOC_EMAIL) {
+        const bloc = readFileSync(BLOC_EMAIL, 'utf8')
+        await tx.$executeRawUnsafe(`set local statement_timeout = '120s'`)
+        await tx.$executeRawUnsafe('savepoint sp_email')
+        let res = null, autre = null
+        try { await tx.$executeRawUnsafe(bloc) } catch (e) {
+          const m = String(e?.message ?? e)
+          const r = /ESSAI_OK (\{.*\})/.exec(m)
+          if (r) res = JSON.parse(r[1]); else autre = m.replace(/[^\s@]+@[^\s@]+/g, '[email]').split('\n').slice(0, 4).join(' ').slice(0, 400)
+        }
+        await tx.$executeRawUnsafe('rollback to savepoint sp_email')
+        assert.ok(res, `bloc de l'email : ${autre ?? 'ESSAI_OK attendu'}`)
+        ok(`email : bloc de essayer-migration-emails-annonces.mjs joue dans la meme transaction, ESSAI_OK ${JSON.stringify(res)}`)
+      }
 
       throw new Annulation()
     }, { timeout: 180_000, maxWait: 20_000 })
