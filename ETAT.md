@@ -89,6 +89,25 @@
 - Mise en ligne : migration, images, import --ecrire, push du journal, PUIS push du site (sans la route, la page
   du site lit une 404 sans CORS et dit « reseau »).
 
+## CALENDRIER DES LIVES : POST /api/academie/lives ET /api/cockpit/lives (13/11/2026, FEATURE commitee NON poussee, branche academie-lives depuis origin/master 4491b52 ; migration du workspace 20261113200000 ECRITE NON appliquee)
+
+- Brief : D:\7_Agents\briefs\2026-11-13-calendrier-des-lives.md ; rapport : calendrier-des-lives-rapport.md (notes de
+  Yume Orchestre). Skool ferme le 16/11 et son calendrier avec lui (inventaire A5).
+- Logique pure et requetes : src/lib/academie/lives.ts. Les series (lives de Brice, mardi et jeudi 20 h de Paris) sont
+  depliees par la base (aok_lives_entre, heure de Paris, changement d'heure juste) ; une date annulee, deplacee, son lien
+  ou son titre = une exception (serie_id + date_serie), la serie n'est jamais cassee. Ponctuels = lives partenaires.
+- REGLE DU LIEN (reco a Brice, construite dessus) : liste lisible par tous, connecte ou non ; le lien ne part qu'a un
+  compte qui y a droit selon le niveau du live (tous, programme, live_club = Live Club actif, ETM, VIP, equipe :
+  lecteurDe, depuis droitsAcademie et aok_annuaire_acces) et seulement de 30 min avant le debut jusqu'a la fin
+  (etatLien). Stripe illisible : etat 'inconnu', jamais un faux non.
+- /api/academie/lives : chemin public EXACT dans middleware.ts (sans jeton : la liste, aucun lien ; jeton refuse : 401).
+  /api/cockpit/lives : cockpit_allowlist, gestes lister, creer/modifier/arreter/supprimer_serie, creer/modifier/
+  supprimer_live, et sur une date lien, annuler, retablir, deplacer (null = horaire de la serie), texte_date.
+- Verifs : scripts/verifier-lives.mjs (12 blocs), scripts/essayer-migration-lives.mjs (46 etapes, transaction annulee,
+  rien n'est reste), tsc, eslint, build ; verifier:rls = les 2 alertes connues.
+- Ordre de mise en ligne : migration (appliquer-migration.sh 20261113200000_academie_lives.sql), verifier:rls, journal,
+  puis site et cockpit. Avant la migration, la page dit « le calendrier arrive bientot » et l'onglet du cockpit « a brancher ».
+
 ## SALON DE L'ACADEMIE : L'ALERTE A L'EQUIPE PAR AGENT AOK (12/11/2026 soir, commite NON pousse, branche chat-academie-alerte depuis origin/master 3830ac1 ; AUCUNE migration)
 
 - Brice, chat de l'orchestre : « Les questions remonte par les agent aok de moi et Mel ? ». Rapport : chat-academie-rapport.md,
