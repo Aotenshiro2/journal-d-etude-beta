@@ -1,5 +1,31 @@
 # ETAT du journal d etudes
 
+## CONNEXION PAR ADRESSE : /api/connexion/adresse ET /api/connexion/envoi POUR LA PAGE DE CONNEXION DU SITE (14/11/2026 soir, FEATURE, go de Brice, commite NON pousse, branche connexion-adresse depuis origin/master 7b5ca76 ; migration 20261114200000 du workspace appliquee par l orchestre, annonce non verifie ici)
+
+- Brief : D:\7_Agents\briefs\2026-11-14-connexion-reconnait-adresse.md et les complements de l'orchestre (envoi par Resend, puis
+  routes dans le journal pour ne copier aucune cle sur le projet du site). Site : branche connexion-adresse du workspace.
+  Rapport : connexion-adresse-rapport.md (notes de Yume Orchestre).
+- Deux routes PUBLIQUES (middleware, chemins exacts), CORS en liste blanche (ORIGINES de src/lib/connexion-adresse-pur.ts :
+  aoknowledge.com, www, academie.melaniechart.com ; masterclass, pilotage et journal a ajouter quand leur formulaire
+  branchera, chacun avec sa page /auth/lien). Toute autre origine, ou pas d'origine : 403 sans en-tete, preflight compris.
+  Toujours 200 sinon, meme delai minimal (700 ms).
+  - adresse { email } -> { reponse } : google | connue | inconnue | rattachee | simple (aok_connexion_reconnaitre).
+  - envoi { email, creer?, newsletter?, retour?, origine? } -> { envoi, secondes? } : ok | delai | plafond | limite |
+    rattachee | inconnue | invalide | indisponible. aok_connexion_envoi decide (adresse rattachee en secondaire refusee :
+    jamais de second compte ; inconnue sans creer refusee ; 60 s, limites, plafond de 90 emails sur 24 h partage avec les
+    invitations Skool et les codes d'adresse), puis generateLink magiclink (cree le compte d'une adresse sans compte, jeton
+    signup), puis Resend (support@, objet « Ton code de connexion AO Knowledge », code a 6 chiffres et bouton vers
+    <origine>/auth/lien?retour=...#token_hash=...&type=..., verifyOtp sans PKCE cote site). Refus de la base : ni
+    generateLink ni email. indisponible : le site retombe sur signInWithOtp.
+- Fonctions SQL appelees par PostgREST avec SUPABASE_SERVICE_ROLE_KEY (elles sont reservees a service_role) ; HMAC de
+  l'IP (x-forwarded-for puis x-real-ip, ipDuClient) et de l'adresse, cles derivees de la meme cle ; Resend :
+  RESEND_API_KEY_LIVECLUB sinon RESEND_API_KEY. Rien de neuf a poser. CONNEXION_ADRESSE=off coupe les deux routes.
+  Logs : 8 caracteres du HMAC de l'adresse et l'issue, jamais l'adresse, l'IP, le code ni le jeton.
+- Fichiers : src/lib/connexion-adresse-pur.ts (pur, aucun import relatif), src/lib/connexion-adresse.ts,
+  src/app/api/connexion/{adresse,envoi}/route.ts, middleware.ts. Verif : node scripts/verifier-connexion-adresse.mjs
+  (13 blocs, faux Supabase et faux Resend), tsc, eslint, next build.
+- Ordre de mise en ligne : la migration (faite par l'orchestre), puis ce push du journal, puis le site.
+
 ## ANNONCES SKOOL COUPEES, MACRO BREAKER, GARDE-FOU DU PRIX A L'IMPORT (13/11/2026 nuit, correctifs commites NON pousses : push refuse par le classifieur, branche annonces-coupees depuis origin/master 9c22f5c ; AUCUNE migration ; les ecritures en base sont FAITES)
 
 - Brief : D:\7_Agents\briefs\2026-11-13-annonces-coupees-et-prix.md. Rapport : annonces-coupees-rapport.md (notes de Yume Orchestre).
