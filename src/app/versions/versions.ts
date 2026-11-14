@@ -68,6 +68,7 @@ export const HISTORIQUE: EntreeVersion[] = [
     titre: 'Observer les concepts',
     quand: 'en cours depuis le 31 août 2026',
     items: [
+      '13 novembre : le Journal retrouve sa police. Depuis mars, hors de l\'accueil, il s\'affichait dans la police de secours du navigateur au lieu de la sienne.',
       '6 novembre : la bouée du support s\'appelle désormais « Aide et idées ». Dedans, « Il me manque quelque chose » : dis-nous ce qui te manque ou ce qui coince, avec une capture si tu veux, et ajoute un « Moi aussi » à ce qui est déjà prévu.',
       '6 novembre : quand l\'import d\'un fichier de trades échoue, ou que ton fichier n\'est pas reconnu, le Journal te propose de le dire à l\'équipe. La phrase est déjà écrite, tu la complètes, et rien ne part sans ton « Envoyer ».',
       '5 novembre : « Mes trades », dans « Documenter mes trades ». Tes trades notés dans le Carnet, croisés avec ceux de ton broker : un calendrier du mois, les trades du jour que tu choisis, et pour chacun le chemin de ton stop à ton TP en R, avec ton entrée et tes sorties réelles. Les écarts se lisent en mots : « mieux que prévu », « avant ton TP », « stop dépassé ».',
